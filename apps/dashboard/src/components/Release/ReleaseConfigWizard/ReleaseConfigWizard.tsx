@@ -82,7 +82,6 @@ const SelectionCard = ({
     onClick={onClick}
     data-track-category='Release'
     data-track-name='WIZARD_STEP_CLICK'
-    data-track-kind='passive'
     disabled={isDisabled}
     aria-disabled={isDisabled}
     className={cn(
@@ -165,7 +164,6 @@ const PathChipsInput = ({
             onClick={() => remove(p)}
             data-track-category='Release'
             data-track-name='REMOVE_PATH_CHIP'
-            data-track-kind='active'
             className='text-muted-foreground hover:text-destructive shrink-0'
             aria-label={`Remove ${p}`}
           >
@@ -180,7 +178,6 @@ const PathChipsInput = ({
         placeholder={paths.length === 0 ? placeholder : ''}
         data-track-category='Release'
         data-track-name='PATH_DRAFT_INPUT'
-        data-track-kind='passive'
         onChange={e => {
           const v = e.target.value;
           // Pasting or typing a comma commits everything up to the last comma
@@ -289,7 +286,6 @@ const ApplicationRow = ({
           onClick={() => onRemove(app.id)}
           data-track-category='Release'
           data-track-name='REMOVE_WIZARD_APP'
-          data-track-kind='active'
           className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
           aria-label={isLocked ? 'Delete on save' : 'Remove'}
           title={isLocked ? 'This service will be deleted on Save' : 'Remove'}
@@ -312,7 +308,6 @@ const ApplicationRow = ({
           onChange={e => onUpdate(app.id, 'name', e.target.value)}
           data-track-category='Release'
           data-track-name='APPLICATION_NAME_INPUT'
-          data-track-kind='passive'
           placeholder='e.g., backend'
           className={INPUT_CLASS}
         />
@@ -329,7 +324,6 @@ const ApplicationRow = ({
           onChange={e => onUpdate(app.id, 'regex', e.target.value)}
           data-track-category='Release'
           data-track-name='APPLICATION_REGEX_INPUT'
-          data-track-kind='passive'
           placeholder='e.g., ^backend/'
           className={INPUT_CLASS}
         />
@@ -433,7 +427,6 @@ const Step3Applications = ({
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
                   data-track-category='Release'
                   data-track-name='REPOSITORY_URL_INPUT'
-                  data-track-kind='passive'
                   placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
                   className={INPUT_CLASS}
                 />
@@ -443,7 +436,6 @@ const Step3Applications = ({
                   onClick={() => void onTestConnection()}
                   data-track-category='Release'
                   data-track-name='TEST_REPO_CONNECTION'
-                  data-track-kind='passive'
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
                   title='Verify the repo URL and token before configuring services'
                   trackId='test_release_repo_connection'
@@ -543,7 +535,6 @@ const Step3Applications = ({
           onClick={onAddApplication}
           data-track-category='Release'
           data-track-name='ADD_APPLICATION'
-          data-track-kind='active'
           className='w-full'
           size='sm'
         >
@@ -744,7 +735,6 @@ const ReleaseConfigWizardForm = ({
             onClick={showCancelOnLeft ? onClose : form.handleBack}
             data-track-category='Release'
             data-track-name='WIZARD_BACK_OR_CANCEL'
-            data-track-kind='passive'
             disabled={form.isSaving}
           >
             {showCancelOnLeft ? (
@@ -762,7 +752,6 @@ const ReleaseConfigWizardForm = ({
               onClick={form.handleNext}
               data-track-category='Release'
               data-track-name='WIZARD_NEXT'
-              data-track-kind='passive'
               disabled={!canProceed}
             >
               Next <ChevronRight size={16} />
@@ -773,7 +762,6 @@ const ReleaseConfigWizardForm = ({
               onClick={() => void form.handleSave()}
               data-track-category='Release'
               data-track-name='SAVE_RELEASE_CONFIG'
-              data-track-kind='active'
               trackId='save_release_config'
               disabled={!canSave || form.isSaving}
             >

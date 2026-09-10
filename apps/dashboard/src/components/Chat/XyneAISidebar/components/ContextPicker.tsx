@@ -328,7 +328,6 @@ export const ContextPicker = ({
               }`}
               data-track-category='XyneAI'
               data-track-name='CONTEXT_PICKER_TAB'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ tab: item.tab })}
             >
               {/* Rendered as a member expression so the component binding never
@@ -379,7 +378,6 @@ export const ContextPicker = ({
             className="w-full bg-transparent outline-none border-none text-sm font-['Inter'] text-foreground placeholder:text-muted-foreground px-2 py-1.5"
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_SEARCH'
-            data-track-kind='passive'
           />
         </div>
 
@@ -439,7 +437,6 @@ export const ContextPicker = ({
                         className='w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-sm text-left transition-colors hover:text-foreground hover:bg-accent'
                         data-track-category='XyneAI'
                         data-track-name='CONTEXT_PICKER_SHOW_MORE'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ category })}
                       >
                         {isExpanded ? 'Show less' : `Show ${hiddenCount} more`}

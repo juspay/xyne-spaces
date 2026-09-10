@@ -130,7 +130,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
             className='absolute right-4 top-4 z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskSettings'
             data-track-name='CloseButton'
-            data-track-kind='passive'
           >
             <X size={16} />
           </button>
@@ -157,7 +156,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                           )}
                           data-track-category='DeskSettings'
                           data-track-name={`Tab_${tab.id}`}
-                          data-track-kind='passive'
                         >
                           <Icon size={16} />
                           <span>{tab.label}</span>
@@ -181,7 +179,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                                   )}
                                   data-track-category='DeskSettings'
                                   data-track-name={`AIFeaturesSubTab_${subTab.id}`}
-                                  data-track-kind='passive'
                                 >
                                   {subTab.label}
                                 </button>
@@ -228,7 +225,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='CancelAll'
-                    data-track-kind='passive'
                   >
                     Cancel
                   </button>
@@ -240,7 +236,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='SaveAll'
-                    data-track-kind='active'
                     data-ph-capture-attribute-track-id='desk_settings_save'
                   >
                     {saving ? 'Saving…' : 'Save changes'}
@@ -273,7 +268,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
               className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent'
               data-track-category='DeskSettings'
               data-track-name='KeepEditing'
-              data-track-kind='passive'
             >
               Keep editing
             </button>
@@ -286,7 +280,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
               className='rounded-[10px] border border-red-500 bg-red-500 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-red-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-500'
               data-track-category='DeskSettings'
               data-track-name='DiscardChanges'
-              data-track-kind='active'
             >
               Discard changes
             </button>

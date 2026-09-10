@@ -73,7 +73,6 @@ export function SlackCommandDialog({
             onClick={() => onRegisterCommand(commandName.trim())}
             data-track-category='Claw Admin'
             data-track-name='Register Slack command'
-            data-track-kind='active'
           >
             {registering ? 'Registering…' : 'Register command'}
           </Button>
@@ -98,7 +97,6 @@ export function SlackCommandDialog({
             onClick={onCreateApp}
             data-track-category='Claw Admin'
             data-track-name='Create dedicated Slack app'
-            data-track-kind='active'
           >
             Create dedicated app
           </Button>

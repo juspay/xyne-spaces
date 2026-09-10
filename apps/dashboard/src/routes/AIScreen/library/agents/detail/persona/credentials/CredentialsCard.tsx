@@ -52,7 +52,6 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
               onClick={() => setKeysOpen(true)}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: open agent keys'
-              data-track-kind='passive'
               className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm font-normal leading-5 text-foreground transition-colors hover:bg-muted'
             >
               {configured > 0 ? `${configured} configured` : 'Configure'}

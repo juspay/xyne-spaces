@@ -35,7 +35,6 @@ export const BoardSubmenu = ({
           onClick={() => startTransition(() => onChange([]))}
           data-track-category='TicketFilters'
           data-track-name='SelectAllBoards'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ filterType: 'board', selectedBoards })}
           className={`w-full justify-between px-3 py-2 h-auto text-foreground ${
             isAllBoardsSelected ? 'bg-accent' : ''
@@ -56,7 +55,6 @@ export const BoardSubmenu = ({
               onClick={() => handleBoardToggle(board.id)}
               data-track-category='TicketFilters'
               data-track-name='ToggleBoard'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 filterType: 'board',
                 boardId: board.id,

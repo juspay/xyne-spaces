@@ -73,7 +73,6 @@ export function SearchCompareDialog({
             onClick={onClose}
             data-track-category='SEARCH_COMPARE'
             data-track-name='CLOSE_COMPARE_BACKDROP'
-            data-track-kind='passive'
             aria-hidden
           />
 
@@ -107,7 +106,6 @@ export function SearchCompareDialog({
                 onClick={onClose}
                 data-track-category='SEARCH_COMPARE'
                 data-track-name='CLOSE_COMPARE_DIALOG'
-                data-track-kind='passive'
                 title='Close'
                 className='ml-auto shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted active:scale-[0.96] transition'
               >
@@ -170,7 +168,6 @@ export function SearchCompareDialog({
                             onClick={() => onToggleRelevant(r.id)}
                             data-track-category='SEARCH_COMPARE'
                             data-track-name='TOGGLE_RESULT_RELEVANT'
-                            data-track-kind='passive'
                             title={
                               isRelevant ? 'Unmark relevant' : 'Mark as a correct / relevant result'
                             }
@@ -189,7 +186,6 @@ export function SearchCompareDialog({
                             onClick={() => onRemove(r.id)}
                             data-track-category='SEARCH_COMPARE'
                             data-track-name='REMOVE_FROM_COMPARISON'
-                            data-track-kind='active'
                             title='Remove from comparison'
                             className='ml-auto shrink-0 p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96] transition'
                           >

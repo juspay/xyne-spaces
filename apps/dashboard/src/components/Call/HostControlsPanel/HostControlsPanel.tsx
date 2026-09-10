@@ -91,7 +91,6 @@ export function HostControlsPanel({ callId, onClose }: HostControlsPanelProps): 
           title='Close'
           data-track-category='CALLS'
           data-track-name='CLOSE_HOST_CONTROLS'
-          data-track-kind='passive'
         >
           <X size={20} className='text-muted-foreground' />
         </button>

@@ -81,7 +81,6 @@ export const RemoveMemberDialog = ({
             disabled={isRemoving}
             data-track-category='UserGroups'
             data-track-name='CancelRemoveUserFromGroup'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -92,7 +91,6 @@ export const RemoveMemberDialog = ({
             onClick={() => onConfirm(reassignTickets)}
             data-track-category='UserGroups'
             data-track-name='ConfirmRemoveUserFromGroup'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ userGroupId, reassignTickets })}
           >
             Remove

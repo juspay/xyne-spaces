@@ -89,7 +89,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
                 autoFocus
                 data-track-category='Claw Agents'
                 data-track-name='Skill name input'
-                data-track-kind='passive'
                 className='w-full rounded-lg border border-border bg-card px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30'
               />
             </div>
@@ -104,7 +103,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
                   onClick={() => setSlugManual(!slugManual)}
                   data-track-category='Claw Agents'
                   data-track-name='Toggle skill slug edit'
-                  data-track-kind='passive'
                   className='text-[11px] font-normal text-muted-foreground transition hover:text-foreground'
                 >
                   {slugManual ? 'auto' : 'edit'}
@@ -120,7 +118,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
                 disabled={!slugManual}
                 data-track-category='Claw Agents'
                 data-track-name='Skill slug input'
-                data-track-kind='passive'
                 className='w-full rounded-lg border border-border bg-muted px-3 py-2 font-mono text-[13px] text-foreground/80 transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-60'
               />
             </div>
@@ -140,7 +137,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
               placeholder='What this skill does and when agents should use it'
               data-track-category='Claw Agents'
               data-track-name='Skill description input'
-              data-track-kind='passive'
               className='w-full rounded-lg border border-border bg-card px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30'
             />
           </div>
@@ -163,7 +159,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
               rows={14}
               data-track-category='Claw Agents'
               data-track-name='Skill content input'
-              data-track-kind='passive'
               className={cn(codeField, 'min-h-[280px]')}
             />
           </div>
@@ -194,7 +189,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
                 onClick={() => dirInputRef.current?.click()}
                 data-track-category='Claw Agents'
                 data-track-name='PICK_SKILL_DIRECTORY'
-                data-track-kind='passive'
               >
                 <FolderOpen className='size-3.5' />
                 Upload folder
@@ -205,7 +199,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
                 onClick={() => fileInputRef.current?.click()}
                 data-track-category='Claw Agents'
                 data-track-name='PICK_SKILL_FILES'
-                data-track-kind='passive'
               >
                 <Upload className='size-3.5' />
                 Upload files
@@ -239,7 +232,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
             onClick={cancel}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_CREATE_SKILL'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -247,7 +239,6 @@ const ClawSkillCreateScreen = (): ReactElement => {
             onClick={handleCreate}
             data-track-category='Claw Agents'
             data-track-name='CREATE_SKILL'
-            data-track-kind='active'
             loading={createMutation.isPending}
             disabled={!canCreate}
           >

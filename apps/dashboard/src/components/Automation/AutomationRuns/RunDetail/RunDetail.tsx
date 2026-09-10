@@ -57,7 +57,6 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
           aria-label='Back'
           data-track-category='automation-runs'
           data-track-name='run-detail-back'
-          data-track-kind='passive'
           className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/40'
         >
           <ArrowLeft className='size-4' />

@@ -53,7 +53,6 @@ export function AutoWidthInput({
       <input
         data-track-category='Claw Agents'
         data-track-name='Auto-width input'
-        data-track-kind='passive'
         type={type}
         size={size}
         value={value}

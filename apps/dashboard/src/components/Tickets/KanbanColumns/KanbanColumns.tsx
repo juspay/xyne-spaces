@@ -116,7 +116,6 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
       {...listeners}
       data-track-category='Tickets'
       data-track-name='DragTicketCard'
-      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
     >
       <TicketCard
@@ -262,7 +261,6 @@ const VirtualizedStageList: React.FC<{
           onClick={onAddTicket}
           data-track-category='Tickets'
           data-track-name='AddTicketInColumn'
-          data-track-kind='active'
           className='hidden group-hover/kanbancol:flex items-center gap-2 w-full mb-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-accent/40 hover:text-foreground'
         >
           <Plus className='h-3.5 w-3.5' />
@@ -713,7 +711,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         className='!p-0 !bg-transparent'
                         data-track-category='Tickets'
                         data-track-name='CollapseKanbanColumn'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({
                           stageId: stage.id,
                           stageName: stage.name,
@@ -738,7 +735,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     tabIndex={0}
                     data-track-category='Tickets'
                     data-track-name='ExpandKanbanColumn'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       stageId: stage.id,
                       stageName: stage.name,
@@ -777,7 +773,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       className='!p-0 !bg-transparent'
                       data-track-category='Tickets'
                       data-track-name='CollapseKanbanColumn'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         stageId: stage.id,
                         stageName: stage.name,

@@ -96,7 +96,6 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
             }
             data-track-category='AskAI'
             data-track-name='ArtifactAppPaneVersionMenu'
-            data-track-kind='passive'
           >
             v{viewing.versionNumber}
             <ChevronDown className='h-3 w-3' aria-hidden='true' />
@@ -129,7 +128,6 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
                     title={`Make version ${v.versionNumber} current — the agent's next update builds on it`}
                     data-track-category='AskAI'
                     data-track-name='ArtifactAppRestoreVersion'
-                    data-track-kind='active'
                   >
                     <RotateLeft size={12} aria-hidden='true' />
                     Restore

@@ -142,7 +142,6 @@ const UserSelectEditor: React.FC<{
                 className='w-4 h-4'
                 data-track-category='QueryBuilder'
                 data-track-name='ToggleUserSelection'
-                data-track-kind='passive'
               />
               <Avatar userId={user.id} size='sm' showActiveStatus={false} />
               <span className={isDeactivated ? 'text-gray-400' : ''}>
@@ -250,7 +249,6 @@ const UserGroupSelectEditor: React.FC<{
                 className='w-4 h-4'
                 data-track-category='QueryBuilder'
                 data-track-name='ToggleUserGroupSelection'
-                data-track-kind='passive'
               />
               <Users className='w-4 h-4 text-gray-500' />
               <span>{group.name}</span>
@@ -362,7 +360,6 @@ const BoardSelectEditor: React.FC<{
                 className='w-4 h-4'
                 data-track-category='QueryBuilder'
                 data-track-name='ToggleBoardSelection'
-                data-track-kind='passive'
               />
               <LayoutGrid className='w-4 h-4 text-gray-500' />
               <span>{board.name}</span>
@@ -475,7 +472,6 @@ const ProjectSelectEditor: React.FC<{
                 className='w-4 h-4'
                 data-track-category='QueryBuilder'
                 data-track-name='ToggleProjectSelection'
-                data-track-kind='passive'
               />
               <Folder className='w-4 h-4 text-gray-500' />
               <span>{project.name}</span>
@@ -588,7 +584,6 @@ const ChannelSelectEditor: React.FC<{
                 className='w-4 h-4'
                 data-track-category='QueryBuilder'
                 data-track-name='ToggleChannelSelection'
-                data-track-kind='passive'
               />
               <Hash className='w-4 h-4 text-gray-500' />
               <span>{channel.name}</span>
@@ -710,7 +705,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           className='flex-1 px-2 py-1 text-sm border rounded'
           data-track-category='QueryBuilder'
           data-track-name='EnterValue'
-          data-track-kind='passive'
         />
       );
     }
@@ -801,7 +795,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
                   }}
                   data-track-category='QueryBuilder'
                   data-track-name='SelectEnumValue'
-                  data-track-kind='passive'
                   className='w-4 h-4'
                 />
                 <span className='text-foreground whitespace-nowrap'>{v.label || v.name}</span>
@@ -822,7 +815,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           className='flex-1 px-3 py-2 text-sm border rounded bg-white text-foreground'
           data-track-category='QueryBuilder'
           data-track-name='SelectEnumValue'
-          data-track-kind='passive'
         >
           <option value=''>Select value</option>
           {fieldConfig.values.map(v => (
@@ -916,7 +908,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
         className='flex-1 px-2 py-1 text-sm border rounded'
         data-track-category='QueryBuilder'
         data-track-name='EnterValue'
-        data-track-kind='passive'
       />
     );
   };
@@ -982,7 +973,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           onClick={() => removeCondition(condition.id)}
           data-track-category='QueryBuilder'
           data-track-name='REMOVE_FILTER_CONDITION'
-          data-track-kind='active'
           className='text-red-600 hover:bg-red-50'
         >
           <X className='w-4 h-4' />
@@ -1004,7 +994,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           }`}
           data-track-category='QueryBuilder'
           data-track-name='SetCombinatorAND'
-          data-track-kind='passive'
         >
           AND
         </button>
@@ -1017,7 +1006,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           }`}
           data-track-category='QueryBuilder'
           data-track-name='SetCombinatorOR'
-          data-track-kind='passive'
         >
           OR
         </button>
@@ -1037,7 +1025,6 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
         onClick={addCondition}
         data-track-category='QueryBuilder'
         data-track-name='ADD_FILTER_CONDITION'
-        data-track-kind='active'
         className='w-full'
       >
         <Plus className='w-4 h-4 mr-2' />

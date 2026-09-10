@@ -293,7 +293,6 @@ export function SearchQueryInput({
             className='text-muted-foreground hover:text-foreground'
             data-track-category='SEARCH_RESULTS'
             data-track-name='REMOVE_QUERY_TOKEN'
-            data-track-kind='active'
           >
             <X size={11} />
           </button>
@@ -315,7 +314,6 @@ export function SearchQueryInput({
         )}
         data-track-category='SEARCH_RESULTS'
         data-track-name='EDIT_QUERY'
-        data-track-kind='active'
       />
       {value.length > 0 && (
         <button
@@ -326,7 +324,6 @@ export function SearchQueryInput({
           className='shrink-0 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition'
           data-track-category='SEARCH_RESULTS'
           data-track-name='CLEAR_QUERY'
-          data-track-kind='passive'
         >
           <X size={14} />
         </button>
@@ -352,7 +349,6 @@ export function SearchQueryInput({
               )}
               data-track-category='SEARCH_RESULTS'
               data-track-name='PICK_QUERY_SUGGESTION'
-              data-track-kind='passive'
             >
               <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
                 {s.icon.kind === 'user' ? (

@@ -314,7 +314,6 @@ export const ResourceAccessModal = ({
             aria-label='Close'
             data-track-category='RESOURCE_ACCESS'
             data-track-name='CloseResourceAccessModal'
-            data-track-kind='passive'
           >
             <X className='w-5 h-5 text-muted-foreground' />
           </button>
@@ -339,7 +338,6 @@ export const ResourceAccessModal = ({
                 className='gap-1.5'
                 data-track-category='USER_ACTIVATION'
                 data-track-name='ActivateUserButton'
-                data-track-kind='active'
               >
                 <UserCheck className='w-4 h-4' />
                 Activate
@@ -353,7 +351,6 @@ export const ResourceAccessModal = ({
                 className='gap-1.5'
                 data-track-category='USER_ACTIVATION'
                 data-track-name='DeactivateUserButton'
-                data-track-kind='active'
               >
                 <UserX className='w-4 h-4' />
                 Deactivate
@@ -430,7 +427,6 @@ export const ResourceAccessModal = ({
                               }
                               data-track-category='RESOURCE_ACCESS'
                               data-track-name='SET_RESOURCE_ACCESS'
-                              data-track-kind='active'
                               className='text-xs'
                             >
                               <span className='flex-1'>{option.label}</span>
@@ -462,7 +458,6 @@ export const ResourceAccessModal = ({
             onClick={onClose}
             data-track-category='RESOURCE_ACCESS'
             data-track-name='CANCEL_RESOURCE_ACCESS'
-            data-track-kind='passive'
             disabled={loading}
           >
             Cancel
@@ -471,7 +466,6 @@ export const ResourceAccessModal = ({
             onClick={() => void handleSave()}
             data-track-category='RESOURCE_ACCESS'
             data-track-name='SAVE_RESOURCE_ACCESS'
-            data-track-kind='active'
             trackId='save_resource_access'
             disabled={loading}
           >
@@ -496,7 +490,6 @@ export const ResourceAccessModal = ({
                   onClick={handleCancelAction}
                   data-track-category='USER_ACTIVATION'
                   data-track-name='CANCEL_ACTIVATION_ACTION'
-                  data-track-kind='passive'
                   disabled={activationLoading}
                 >
                   Cancel
@@ -506,7 +499,6 @@ export const ResourceAccessModal = ({
                   onClick={() => void handleConfirmAction()}
                   data-track-category='USER_ACTIVATION'
                   data-track-name='CONFIRM_ACTIVATION_ACTION'
-                  data-track-kind='active'
                   trackId={pendingAction === 'activate' ? 'activate_user' : 'deactivate_user'}
                   disabled={activationLoading}
                 >

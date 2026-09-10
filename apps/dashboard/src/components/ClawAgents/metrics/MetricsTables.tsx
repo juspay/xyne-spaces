@@ -49,7 +49,6 @@ export const AgentLeaderboard = ({
               onClick={() => onAgentClick(row.agentSlug)}
               data-track-category='Claw Agents'
               data-track-name='Open agent metrics from leaderboard'
-              data-track-kind='passive'
             >
               <td className={td}>
                 <p className='font-medium'>{row.agentSlug}</p>
@@ -118,7 +117,6 @@ export const ProviderLatencyTable = ({
       onClick={() => changeSort(value)}
       data-track-category='Claw Agents'
       data-track-name='Sort provider metrics'
-      data-track-kind='passive'
       className='inline-flex items-center gap-1 hover:text-foreground'
     >
       {label}{' '}
@@ -285,7 +283,6 @@ export const SlowSessionsTable = ({
                   onClick={() => setExpanded(open ? null : row.sessionId)}
                   data-track-category='Claw Agents'
                   data-track-name='Expand slow session'
-                  data-track-kind='passive'
                 >
                   <td className={td}>
                     {open ? (

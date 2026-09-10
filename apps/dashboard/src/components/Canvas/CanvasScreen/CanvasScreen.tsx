@@ -1307,7 +1307,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       style={APP_NO_DRAG_STYLE}
                       data-track-category='CANVAS'
                       data-track-name='Go_Back_From_Canvas'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
                     >
                       <ArrowLeft size={16} />
@@ -1356,7 +1355,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             disabled={isApproving}
                             data-track-category='CANVAS'
                             data-track-name='APPROVE_KNOWLEDGE'
-                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
                           >
                             {isApproving ? (
@@ -1384,7 +1382,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               data-testid='canvas-details-button'
                               data-track-category='CANVAS'
                               data-track-name='SHOW_PARTICIPANTS_TRAY'
-                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({
                                 canvasId: selectedCanvas.id,
                                 isCollaborative: selectedCanvas.isCollaborative,
@@ -1426,7 +1423,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           data-testid='canvas-comments-button'
                           data-track-category='CANVAS'
                           data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
                         >
                           <MessageSquare size={16} className='shrink-0 opacity-60' />
@@ -1447,7 +1443,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           data-testid='canvas-share-button'
                           data-track-category='CANVAS'
                           data-track-name='Open_Share_Modal'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
                         >
                           <Share01 size={16} className='shrink-0 opacity-60' />
@@ -1462,7 +1457,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             aria-label='Open recording notes'
                             data-track-category='CANVAS'
                             data-track-name='Open_Recording_Notes_From_Canvas'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({
                               canvasId: selectedCanvas.id,
                               recordingId: recordingCallId,
@@ -1483,7 +1477,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               aria-label='Ask AI'
                               data-track-category='CANVAS'
                               data-track-name='Ask_AI_From_Canvas'
-                              data-track-kind='active'
                               data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
                             >
                               <img
@@ -1505,7 +1498,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 data-testid='canvas-more-menu-button'
                                 data-track-category='CANVAS'
                                 data-track-name='Open_Canvas_Menu'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({
                                   canvasId: selectedCanvas.id,
                                 })}
@@ -1520,7 +1512,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 data-testid='canvas-version-history-item'
                                 data-track-category='CANVAS'
                                 data-track-name='Open_Version_History'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({
                                   canvasId: selectedCanvas.id,
                                 })}
@@ -1535,7 +1526,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                   data-testid='canvas-export-button'
                                   data-track-category='CANVAS'
                                   data-track-name='Open_Export_Menu'
-                                  data-track-kind='passive'
                                   data-track-metadata={JSON.stringify({
                                     canvasId: selectedCanvas.id,
                                   })}
@@ -1549,7 +1539,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                     onClick={handleExportMarkdown}
                                     data-track-category='CANVAS'
                                     data-track-name='EXPORT_MARKDOWN'
-                                    data-track-kind='passive'
                                     data-testid='canvas-export-markdown'
                                   >
                                     <Markdown size={16} className='shrink-0' />
@@ -1560,7 +1549,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                     onClick={handleExportPdf}
                                     data-track-category='CANVAS'
                                     data-track-name='EXPORT_PDF'
-                                    data-track-kind='passive'
                                     data-testid='canvas-export-pdf'
                                   >
                                     <File02PdfFormat size={16} className='shrink-0' />
@@ -1576,7 +1564,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                 }}
                                 data-track-category='CANVAS'
                                 data-track-name='PRESENT_CANVAS'
-                                data-track-kind='passive'
                                 data-testid='canvas-present-item'
                               >
                                 <PlaySquare size={16} className='shrink-0' />
@@ -1599,7 +1586,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                                       }}
                                       data-track-category='CANVAS'
                                       data-track-name='SELECT_CANVAS_THEME'
-                                      data-track-kind='passive'
                                     >
                                       <span className='flex-1 truncate'>{theme.label}</span>
                                       {selectedTheme === theme.value && (
@@ -1646,7 +1632,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         onClick={() => void handleDone()}
                         data-track-category='CANVAS'
                         data-track-name='Done_Editing_Canvas'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
                       >
                         Done
@@ -1683,7 +1668,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     onClick={handleUnarchiveSelectedCanvas}
                     data-track-category='CANVAS'
                     data-track-name='UNARCHIVE_CANVAS_FROM_BANNER'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ canvasId: selectedCanvas.id })}
                   >
                     Unarchive
@@ -1705,7 +1689,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     onClick={handleBackToCurrentVersion}
                     data-track-category='CANVAS'
                     data-track-name='BACK_TO_CURRENT_VERSION'
-                    data-track-kind='passive'
                   >
                     Back to current
                   </Button>
@@ -1716,7 +1699,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       onClick={() => setShowVersionDiff(prev => !prev)}
                       data-track-category='CANVAS'
                       data-track-name='TOGGLE_VERSION_DIFF'
-                      data-track-kind='passive'
                       aria-pressed={showVersionDiff}
                     >
                       <GitCompare size={14} />
@@ -1730,7 +1712,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       onClick={() => void handleRestoreVersion(previewVersion)}
                       data-track-category='CANVAS'
                       data-track-name='RESTORE_CANVAS_VERSION'
-                      data-track-kind='active'
                       loading={restoringVersionId === previewVersion.id}
                     >
                       <RotateCcw size={14} />
@@ -1855,7 +1836,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                 onClick={handleCreateCanvas}
                 data-track-category='CANVAS'
                 data-track-name='Create_Canvas'
-                data-track-kind='active'
               >
                 New Canvas
               </Button>
@@ -1929,7 +1909,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   onClick={() => void navigate(-1)}
                   data-track-category='CANVAS'
                   data-track-name='Go_Back_Not_Found'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ canvasId })}
                 >
                   <ArrowLeft size={16} />
@@ -1945,7 +1924,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                   }}
                   data-track-category='CANVAS'
                   data-track-name='Go_To_Canvases'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ canvasId })}
                 >
                   Go to Canvases
@@ -1981,7 +1959,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               onClick={() => setShowSendConfirmation(false)}
               data-track-category='CANVAS'
               data-track-name='Cancel_Send_To_Channel'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
             >
               Cancel
@@ -1991,7 +1968,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               onClick={() => void handleConfirmSend()}
               data-track-category='CANVAS'
               data-track-name='Confirm_Send_To_Channel'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
             >
               Send

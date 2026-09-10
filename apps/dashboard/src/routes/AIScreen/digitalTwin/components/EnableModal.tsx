@@ -62,7 +62,6 @@ export const EnableModal = ({
             disabled={enabling}
             data-track-category='Claw Agents'
             data-track-name={`Digital Twin: cancel ${mode}`}
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -72,7 +71,6 @@ export const EnableModal = ({
             loading={enabling}
             data-track-category='Claw Agents'
             data-track-name={`Digital Twin: confirm ${mode}`}
-            data-track-kind='active'
           >
             {ctaLabel}
             {!enabling && <ArrowRight className='size-3.5' />}

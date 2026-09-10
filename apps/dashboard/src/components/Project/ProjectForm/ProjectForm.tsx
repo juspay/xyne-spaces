@@ -171,7 +171,6 @@ export const ProjectForm = ({
           disabled={isLoading}
           data-track-category='Projects'
           data-track-name='CancelProjectForm'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
         >
           Cancel
@@ -183,7 +182,6 @@ export const ProjectForm = ({
           disabled={isLoading || !name.trim()}
           data-track-category='Projects'
           data-track-name='SubmitProjectForm'
-          data-track-kind='active'
           data-track-metadata={JSON.stringify({ projectId: project?.id, isEdit })}
         >
           {isEdit ? 'Update project' : 'Create project'}

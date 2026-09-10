@@ -92,7 +92,6 @@ export function OrganizationSurfacesSection({
               onClick={() => void surfaces.refetch()}
               data-track-category='Claw Organization'
               data-track-name='Organization: retry surfaces'
-              data-track-kind='passive'
             >
               Retry
             </Button>
@@ -118,7 +117,6 @@ export function OrganizationSurfacesSection({
                   variant='flat'
                   data-track-category='Claw Organization'
                   data-track-name='Organization: enter Slack access token'
-                  data-track-kind='passive'
                 />
               </label>
               <label
@@ -137,7 +135,6 @@ export function OrganizationSurfacesSection({
                   variant='flat'
                   data-track-category='Claw Organization'
                   data-track-name='Organization: enter Slack refresh token'
-                  data-track-kind='passive'
                 />
               </label>
             </div>
@@ -160,7 +157,6 @@ export function OrganizationSurfacesSection({
                     onClick={() => void connectSlack()}
                     data-track-category='Claw Organization'
                     data-track-name='Organization: connect Slack surface'
-                    data-track-kind='active'
                   >
                     {tokenStatus ? 'Replace token' : 'Connect Slack'}
                   </Button>

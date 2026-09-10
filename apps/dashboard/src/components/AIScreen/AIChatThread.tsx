@@ -240,7 +240,6 @@ function ChatTopbar({
         className='grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:hidden'
         data-track-category='XyneAI'
         data-track-name='OPEN_MOBILE_SIDEBAR'
-        data-track-kind='passive'
       >
         <Menu className='h-4 w-4' aria-hidden strokeWidth={1.75} />
       </button>
@@ -254,7 +253,6 @@ function ChatTopbar({
           className='hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:grid'
           data-track-category='XyneAI'
           data-track-name='TOGGLE_DESKTOP_SIDEBAR'
-          data-track-kind='passive'
         >
           {sidebarCollapsed ? (
             <SidebarLeftOpen size={16} aria-hidden='true' />
@@ -369,7 +367,6 @@ function ReasoningSection({
             )}
             data-track-category='XyneAI'
             data-track-name='TOGGLE_REASONING'
-            data-track-kind='passive'
           >
             <ChevronRight
               className={cn(
@@ -563,7 +560,6 @@ function ClawCitationChip({
         onClick={openInPanel}
         data-track-category='AskAI'
         data-track-name='citation-open-doc-panel'
-        data-track-kind='passive'
       >
         {chipInner}
       </button>
@@ -586,7 +582,6 @@ function ClawCitationChip({
       onClick={() => onOpenToolDebug(toolCallId)}
       data-track-category='XyneAI'
       data-track-name='DEBUG_CITATION_OPEN'
-      data-track-kind='passive'
     >
       {chipInner}
     </button>
@@ -683,7 +678,6 @@ function BranchNavigator({
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
         data-track-name='BRANCH_NAVIGATE_PREV'
-        data-track-kind='passive'
       >
         <ChevronLeft size={14} />
       </button>
@@ -696,7 +690,6 @@ function BranchNavigator({
         className='rounded p-0.5 transition-colors hover:bg-muted'
         data-track-category='XyneAI'
         data-track-name='BRANCH_NAVIGATE_NEXT'
-        data-track-kind='passive'
       >
         <ChevronRight size={14} />
       </button>
@@ -1111,7 +1104,6 @@ function ChatMessageBubble({
                 title='Edit message'
                 data-track-category='XyneAI'
                 data-track-name='EDIT_MESSAGE'
-                data-track-kind='active'
               >
                 <Pencil size={14} className='text-muted-foreground' />
               </button>
@@ -1144,7 +1136,6 @@ function ChatMessageBubble({
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
-                    data-track-kind='passive'
                   />
                   <div className='flex justify-end gap-2'>
                     <button
@@ -1153,7 +1144,6 @@ function ChatMessageBubble({
                       className='rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent'
                       data-track-category='XyneAI'
                       data-track-name='EDIT_CANCEL'
-                      data-track-kind='passive'
                     >
                       Cancel
                     </button>
@@ -1170,7 +1160,6 @@ function ChatMessageBubble({
                       className='rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50'
                       data-track-category='XyneAI'
                       data-track-name='EDIT_SUBMIT'
-                      data-track-kind='active'
                     >
                       Send
                     </button>
@@ -1282,7 +1271,6 @@ function ChatMessageBubble({
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ suggestion })}
                 >
                   {suggestion}
@@ -1299,7 +1287,6 @@ function ChatMessageBubble({
               title='Debug this response'
               data-track-category='XyneAI'
               data-track-name='DEBUG_RESPONSE'
-              data-track-kind='passive'
             >
               <Bug size={12} /> Debug this response
             </button>
@@ -1315,7 +1302,6 @@ function ChatMessageBubble({
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
-                data-track-kind='passive'
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
@@ -1340,7 +1326,6 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='LIKE_MESSAGE'
-                    data-track-kind='active'
                   >
                     <ThumbsUp
                       className='h-3.5 w-3.5'
@@ -1360,7 +1345,6 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='DISLIKE_MESSAGE'
-                    data-track-kind='active'
                   >
                     <ThumbsDown
                       className='h-3.5 w-3.5'
@@ -1383,7 +1367,6 @@ function ChatMessageBubble({
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                   data-track-category='XyneAI'
                   data-track-name='REGENERATE_MESSAGE'
-                  data-track-kind='active'
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
                 </button>
@@ -2441,7 +2424,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               className='absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full pb-2'
               data-track-category='XyneAI'
               data-track-name='JUMP_TO_LATEST'
-              data-track-kind='passive'
             >
               <span className='inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-[11.5px] font-medium text-foreground shadow-md transition hover:bg-secondary'>
                 <ArrowDown className='h-3 w-3' aria-hidden strokeWidth={2} />

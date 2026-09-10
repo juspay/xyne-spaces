@@ -204,7 +204,6 @@ export const InvitationScreen = (): ReactElement => {
                       className='gap-2 bg-foreground text-background hover:bg-foreground/90'
                       data-track-category='Invitations'
                       data-track-name='SendInvitation'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ email: member.email })}
                     >
                       {isSubmitting === member.email ? (
@@ -261,7 +260,6 @@ export const InvitationScreen = (): ReactElement => {
                         className='text-destructive hover:text-destructive hover:bg-destructive/10'
                         data-track-category='Invitations'
                         data-track-name='RevokeInvitation'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({ invitationId: invitation.id })}
                       >
                         Revoke

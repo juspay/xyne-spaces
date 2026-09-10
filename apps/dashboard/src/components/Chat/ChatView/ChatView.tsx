@@ -100,16 +100,10 @@ const ChatView = (): ReactElement => {
     if (viewedChannelIdRef.current === channelId) return;
     viewedChannelIdRef.current = channelId;
 
-    globalClickTracker.trackManualEvent(
-      'CHANNEL',
-      'CHANNEL_VIEWED',
-      channelDisplayName,
-      {
-        ...channelTrackingMetadata(channel),
-        openedInThread: !!conversationId,
-      },
-      'passive',
-    );
+    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', channelDisplayName, {
+      ...channelTrackingMetadata(channel),
+      openedInThread: !!conversationId,
+    });
   }, [channel, channelId, channelDisplayName, conversationId]);
 
   // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.

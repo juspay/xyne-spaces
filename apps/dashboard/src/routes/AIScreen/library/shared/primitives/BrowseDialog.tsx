@@ -3,7 +3,6 @@ import { ChevronBigLeft, FilterLines, MultipleCrossCancelDefault, SearchBig } fr
 import { cn } from '@/utils/classNames';
 import { Dialog } from '@/components/ui/Dialog/index';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { InteractionKind } from '@xyne/shared';
 
 export interface FilterOption {
   id: string | null;
@@ -15,13 +14,11 @@ const FilterMenu = ({
   active,
   onChange,
   trackName,
-  trackKind,
 }: {
   options: readonly FilterOption[];
   active: string | null;
   onChange: (next: string | null) => void;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,7 +51,6 @@ const FilterMenu = ({
         aria-expanded={open}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className={cn(
           'flex size-7 items-center justify-center rounded-[10px] transition-colors hover:bg-background/60',
           active || open ? 'text-foreground' : 'text-muted-foreground',
@@ -74,7 +70,6 @@ const FilterMenu = ({
               }}
               data-track-category='Claw Agents'
               data-track-name={trackName}
-              data-track-kind={trackKind}
               data-track-metadata={JSON.stringify({ option: option.label })}
               className={cn(
                 'rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted',
@@ -174,7 +169,6 @@ export function BrowseDialog({
             aria-label={`Back to ${title}`}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: browse back'
-            data-track-kind='active'
             className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
@@ -193,7 +187,6 @@ export function BrowseDialog({
           aria-label='Close'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: close browse dialog'
-          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -216,7 +209,6 @@ export function BrowseDialog({
                     aria-label={`Search ${title}`}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: browse search'
-                    data-track-kind='active'
                     className='min-w-0 flex-1 bg-transparent text-sm font-medium leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground focus:outline-none'
                   />
                 </div>
@@ -226,7 +218,6 @@ export function BrowseDialog({
                     active={activeFilter}
                     onChange={onFilterChange}
                     trackName='Create agent v2: browse filter'
-                    trackKind='active'
                   />
                 )}
               </div>
@@ -254,7 +245,6 @@ export function BrowseDialog({
                   onClick={onRetry}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: browse retry'
-                  data-track-kind='active'
                   className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
                 >
                   Retry

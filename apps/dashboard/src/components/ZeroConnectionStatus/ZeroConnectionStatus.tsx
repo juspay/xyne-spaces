@@ -111,7 +111,6 @@ export const ZeroConnectionStatus = ({
           data-connection-state={connectionState.name}
           data-track-category='ZERO_CONNECTION'
           data-track-name='REFRESH_CONNECTION_STATUS'
-          data-track-kind='passive'
           className={cn(shell, 'cursor-pointer hover:bg-sidebar-accent')}
         >
           {icon}

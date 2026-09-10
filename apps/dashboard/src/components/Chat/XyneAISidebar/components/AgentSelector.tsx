@@ -88,7 +88,6 @@ export const AgentSelector = ({
       )}
       data-track-category='XyneAI'
       data-track-name='OPEN_AGENT_SELECTOR'
-      data-track-kind='passive'
     >
       {/* The frame shows label + chevron only, so the generic Bot fallback is
           gone. The colour dot stays for a selected agent — that's the only cue
@@ -142,7 +141,6 @@ export const AgentSelector = ({
               autoFocus
               data-track-category='XyneAI'
               data-track-name='SearchAgentSelector'
-              data-track-kind='passive'
             />
             {query && (
               <button
@@ -151,7 +149,6 @@ export const AgentSelector = ({
                 className='text-muted-foreground hover:text-foreground text-xs shrink-0'
                 data-track-category='XyneAI'
                 data-track-name='ClearAgentSearch'
-                data-track-kind='passive'
               >
                 Clear
               </button>
@@ -176,7 +173,6 @@ export const AgentSelector = ({
             )}
             data-track-category='XyneAI'
             data-track-name='SELECT_AGENT'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
           >
             <Bot className='w-4 h-4 shrink-0' />
@@ -208,7 +204,6 @@ export const AgentSelector = ({
                 )}
                 data-track-category='XyneAI'
                 data-track-name='SELECT_AGENT'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
               >
                 <span

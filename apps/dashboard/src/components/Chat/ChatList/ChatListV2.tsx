@@ -592,7 +592,6 @@ const ChatListV2: React.FC<ChatListProps> = ({
           aria-label='Scroll to bottom'
           data-track-category='CHAT_LIST'
           data-track-name='SCROLL_TO_BOTTOM'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({
             channelId,
             currentLatestConversationId: latestConversation.conversationId,

@@ -89,7 +89,6 @@ export function MemoryManageDialog({
           className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: close memory dialog'
-          data-track-kind='passive'
         >
           Done
         </Button>
@@ -111,7 +110,6 @@ export function MemoryManageDialog({
             disabled={busy}
             label='Memory enabled'
             trackName='Agent detail v2: toggle memory'
-            trackKind='passive'
             onChange={next => void toggleEnabled(next)}
           />
         </BehaviourRow>
@@ -145,7 +143,6 @@ export function MemoryManageDialog({
                 className='h-auto rounded-xl px-3 py-2 text-sm'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: cancel clear memories'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -155,7 +152,6 @@ export function MemoryManageDialog({
                 className='h-auto rounded-xl bg-destructive px-3 py-2 text-sm text-destructive-foreground hover:bg-destructive/90'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: confirm clear memories'
-                data-track-kind='active'
               >
                 Yes, clear everything
               </Button>
@@ -168,7 +164,6 @@ export function MemoryManageDialog({
               className='h-auto w-fit rounded-xl px-3 py-2 text-sm text-destructive hover:bg-destructive/10'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: clear memories'
-              data-track-kind='passive'
             >
               Clear all memories
             </Button>

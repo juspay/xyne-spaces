@@ -107,7 +107,6 @@ export function PresentationModeOverlay({
           onClick={fullscreenFailed ? onExit : undefined}
           data-track-category='CALLS'
           data-track-name='EXIT_PRESENTATION_MODE'
-          data-track-kind='passive'
         >
           {participant ? (
             <ParticipantTile
@@ -142,7 +141,6 @@ export function PresentationModeOverlay({
               aria-label='Enable Xyne Telepresence'
               data-track-category='CALLS'
               data-track-name='TOGGLE_XYNE_TELEPRESENCE'
-              data-track-kind='passive'
             >
               <XyneTelepresenceIcon className='w-5 h-5' />
             </button>
@@ -160,7 +158,6 @@ export function PresentationModeOverlay({
               aria-label='Exit presentation mode'
               data-track-category='CALLS'
               data-track-name='EXIT_PRESENTATION_MODE_FALLBACK'
-              data-track-kind='passive'
             >
               <X className='w-5 h-5' />
             </button>

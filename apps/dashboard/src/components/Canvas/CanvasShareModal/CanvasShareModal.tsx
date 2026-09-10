@@ -501,7 +501,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             className='shrink-0 w-8 h-8 grid place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground'
             data-track-category='CANVAS'
             data-track-name='CLOSE_SHARE_MODAL'
-            data-track-kind='passive'
           >
             <X className='w-4 h-4' />
           </button>
@@ -532,7 +531,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                     className='opacity-70 hover:opacity-100'
                     data-track-category='CANVAS'
                     data-track-name='REMOVE_PENDING_SHARE_ADD'
-                    data-track-kind='active'
                   >
                     <X className='w-3 h-3' />
                   </button>
@@ -556,7 +554,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 data-testid='canvas-user-search-input'
                 data-track-category='CANVAS'
                 data-track-name='SHARE_SEARCH_INPUT'
-                data-track-kind='passive'
                 className='flex-1 min-w-[120px] bg-transparent outline-none text-sm py-1'
               />
             </div>
@@ -631,7 +628,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 onClick={() => void guestInvite.sendInvite()}
                 data-track-category='CANVAS'
                 data-track-name='SEND_CANVAS_GUEST_INVITE'
-                data-track-kind='active'
                 className='gap-2'
               >
                 {guestInvite.isLoading ? (
@@ -735,7 +731,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
           data-testid='canvas-copy-link-button'
           data-track-category='CANVAS'
           data-track-name='COPY_CANVAS_LINK'
-          data-track-kind='passive'
         >
           <Link2 className='w-4 h-4' />
           Copy link
@@ -749,7 +744,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             onClick={handleDone}
             data-track-category='CANVAS'
             data-track-name='DONE_CANVAS_SHARE'
-            data-track-kind='passive'
           >
             {hasPendingChanges ? 'Share' : 'Done'}
           </Button>

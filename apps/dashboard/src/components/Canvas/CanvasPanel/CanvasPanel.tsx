@@ -314,7 +314,6 @@ const CanvasPanel = (): ReactElement => {
             aria-label='Show canvases panel'
             data-track-category='CANVAS'
             data-track-name='EXPAND_CANVAS_SIDEBAR'
-            data-track-kind='passive'
           >
             <PanelLeftOpenIcon className='size-4' strokeWidth={2.1} />
           </button>
@@ -347,7 +346,6 @@ const CanvasPanel = (): ReactElement => {
                   aria-label='Hide canvases panel'
                   data-track-category='CANVAS'
                   data-track-name='COLLAPSE_CANVAS_SIDEBAR'
-                  data-track-kind='passive'
                 >
                   <PanelLeftCloseIcon className='size-4' strokeWidth={2.1} />
                 </button>
@@ -361,7 +359,6 @@ const CanvasPanel = (): ReactElement => {
                   aria-label='New Canvas'
                   data-track-category='CANVAS'
                   data-track-name='Create_Canvas'
-                  data-track-kind='active'
                 >
                   {isCreatingCanvas ? (
                     <Spinner size={16} className='animate-spin' />
@@ -378,7 +375,6 @@ const CanvasPanel = (): ReactElement => {
                     aria-label='Canvas list options'
                     data-track-category='CANVAS'
                     data-track-name='CANVAS_LIST_OPTIONS_MENU'
-                    data-track-kind='passive'
                     data-testid='canvas-list-options'
                   >
                     <ThreeDotsMenuHorizontal size={16} />
@@ -393,7 +389,6 @@ const CanvasPanel = (): ReactElement => {
                     onSelect={event => event.preventDefault()}
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_BOT_GENERATED_CANVASES'
-                    data-track-kind='passive'
                   >
                     <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
                     <span className='min-w-0 flex-1'>
@@ -418,7 +413,6 @@ const CanvasPanel = (): ReactElement => {
                     onSelect={event => event.preventDefault()}
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_RECORDING_GENERATED_CANVASES'
-                    data-track-kind='passive'
                   >
                     <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
                     <span className='min-w-0 flex-1'>
@@ -443,7 +437,6 @@ const CanvasPanel = (): ReactElement => {
                     onSelect={event => event.preventDefault()}
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
-                    data-track-kind='passive'
                   >
                     <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
                     <span className='min-w-0 flex-1'>

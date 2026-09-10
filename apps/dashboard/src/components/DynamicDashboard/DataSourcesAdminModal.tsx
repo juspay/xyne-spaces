@@ -215,7 +215,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
             onClick={onClose}
             data-track-category='DATA_SOURCE'
             data-track-name='Close_Modal_Click'
-            data-track-kind='passive'
             className='inline-flex items-center justify-center w-7 h-7 rounded-lg border border-xyne-gray-200 text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
             aria-label='Close'
           >
@@ -237,7 +236,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                   aria-pressed={active}
                   data-track-category='DATA_SOURCE'
                   data-track-name={`Source_Type_${st.id}_Click`}
-                  data-track-kind='passive'
                   className={`w-full flex items-center gap-2.5 px-3 h-10 rounded-lg text-[14px] leading-[20px] transition-colors ${
                     active
                       ? 'bg-white border border-xyne-gray-200 shadow-[0px_1px_2px_0px_rgba(0,0,0,0.06)] text-xyne-gray-900 font-semibold'
@@ -371,7 +369,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                 onChange={e => setField('ssl', e.target.checked)}
                 data-track-category='DATA_SOURCE'
                 data-track-name='Ssl_Toggle_Change'
-                data-track-kind='passive'
                 className='sr-only peer'
               />
               <span
@@ -434,7 +431,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           onClick={onClose}
           data-track-category='DATA_SOURCE'
           data-track-name='Close_Modal_Click'
-          data-track-kind='passive'
           className='inline-flex items-center justify-center w-7 h-7 rounded-lg border border-xyne-gray-200 text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
           aria-label='Close'
         >
@@ -464,7 +460,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
               className='inline-flex items-center gap-1 h-7 px-2 rounded-md border border-rose-300 bg-white text-rose-700 text-[11px] font-medium hover:bg-rose-100 transition-colors shrink-0'
               data-track-category='DATA_SOURCE'
               data-track-name='Discovery_Retry'
-              data-track-kind='passive'
             >
               <RefreshCw size={11} />
               Retry
@@ -489,7 +484,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                   disabled={tables.length === 0}
                   data-track-category='DATA_SOURCE'
                   data-track-name='Wizard_Tables_Select_All'
-                  data-track-kind='passive'
                   className='inline-flex items-center h-9 px-5 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 hover:bg-xyne-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                 >
                   Select all
@@ -500,7 +494,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                   disabled={selected.size === 0}
                   data-track-category='DATA_SOURCE'
                   data-track-name='Wizard_Tables_Clear'
-                  data-track-kind='passive'
                   className='inline-flex items-center h-9 px-5 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 hover:bg-xyne-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                 >
                   Clear
@@ -542,7 +535,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                             onChange={() => toggleTable(key)}
                             data-track-category='DATA_SOURCE'
                             data-track-name='Wizard_Tables_Toggle'
-                            data-track-kind='passive'
                             className='sr-only peer'
                           />
                           <span
@@ -581,7 +573,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           onClick={handlePrevious}
           data-track-category='DATA_SOURCE'
           data-track-name='Wizard_Back_Step_1'
-          data-track-kind='passive'
           className='inline-flex items-center h-9 px-5 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 hover:bg-xyne-gray-50 transition-colors'
         >
           Previous
@@ -593,7 +584,6 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
           data-ph-capture-attribute-track-id='create_data_source'
           data-track-category='DATA_SOURCE'
           data-track-name='Wizard_Save_Ingest'
-          data-track-kind='active'
           className={`inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-[13px] leading-[18px] font-medium text-white transition-colors ${
             canSave
               ? 'bg-xyne-primary-500 hover:bg-xyne-primary-600'

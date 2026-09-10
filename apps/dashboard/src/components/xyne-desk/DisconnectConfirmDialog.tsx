@@ -56,7 +56,6 @@ export const DisconnectConfirmDialog = ({
           disabled={isPending}
           data-track-category='desk-integration'
           data-track-name='CANCEL_DISCONNECT'
-          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -68,7 +67,6 @@ export const DisconnectConfirmDialog = ({
           disabled={isPending}
           data-track-category={trackCategory}
           data-track-name='confirm-disconnect'
-          data-track-kind='active'
         >
           {isPending ? 'Disconnecting…' : 'Disconnect'}
         </Button>

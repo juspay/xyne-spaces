@@ -147,7 +147,6 @@ export function MinimizedTranscriptView({
           title='Expand transcript'
           data-track-category='MinimizedTranscriptView'
           data-track-name='maximize_transcript'
-          data-track-kind='passive'
         >
           <ChevronUp className='size-4' strokeWidth={2.5} />
           <span>Expand</span>

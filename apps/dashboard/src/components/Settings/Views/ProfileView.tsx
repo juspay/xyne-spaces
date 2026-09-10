@@ -217,7 +217,6 @@ const ProfileView = ({
             tabIndex={0}
             data-track-category='PROFILE'
             data-track-name='ChangePicture'
-            data-track-kind='active'
           >
             <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
             <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-full flex items-center justify-center transition-opacity'>
@@ -245,7 +244,6 @@ const ProfileView = ({
               className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
               data-track-category='PROFILE'
               data-track-name='TogglePresenceDropdown'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ isOpen: !isPresenceDropdownOpen })}
             >
               {livePresenceStatus === 'ONLINE' ? (
@@ -278,7 +276,6 @@ const ProfileView = ({
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceOnline'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ newStatus: 'ONLINE' })}
                   >
                     <div className='w-2 h-2 rounded-full bg-green-500' />
@@ -296,7 +293,6 @@ const ProfileView = ({
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceAway'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ newStatus: 'AWAY' })}
                   >
                     <div className='w-2 h-2 rounded-full border border-muted-foreground' />
@@ -357,7 +353,6 @@ const ProfileView = ({
                 trackId='clear_user_status'
                 data-track-category='PROFILE'
                 data-track-name='CLEAR_STATUS'
-                data-track-kind='active'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
               >
@@ -398,7 +393,6 @@ const ProfileView = ({
                 trackId='resume_notifications'
                 data-track-category='PROFILE'
                 data-track-name='ResumeNotifications'
-                data-track-kind='active'
               >
                 <X className='size-3 text-muted-foreground' />
               </Button>
@@ -416,7 +410,6 @@ const ProfileView = ({
                 className='w-full px-2 py-1 rounded-lg border border-border bg-muted/50 hover:bg-secondary transition-colors flex items-center justify-between gap-2'
                 data-track-category='PROFILE'
                 data-track-name='OpenPauseNotificationsMenu'
-                data-track-kind='passive'
               >
                 <div className='flex items-center p-1 gap-2 text-muted-foreground'>
                   <Bell className='size-4 flex-shrink-0' />
@@ -448,7 +441,6 @@ const ProfileView = ({
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='PauseNotifications'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
@@ -462,7 +454,6 @@ const ProfileView = ({
                   className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                   data-track-category='PROFILE'
                   data-track-name='PauseNotificationsCustom'
-                  data-track-kind='active'
                 >
                   <span>Custom</span>
                   <Calendar className='size-4 text-muted-foreground' />
@@ -490,7 +481,6 @@ const ProfileView = ({
           className='w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left'
           data-track-category='PROFILE'
           data-track-name='OpenProfile'
-          data-track-kind='passive'
         >
           <User className='size-4 text-muted-foreground flex-shrink-0' />
           <span className='text-sm text-foreground'>Profile</span>
@@ -505,7 +495,6 @@ const ProfileView = ({
           className='w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted transition-colors text-left'
           data-track-category='PROFILE'
           data-track-name='OpenPreferences'
-          data-track-kind='passive'
         >
           <Settings2 className='size-4 text-muted-foreground flex-shrink-0' />
           <span className='text-sm text-foreground'>Preferences</span>
@@ -522,7 +511,6 @@ const ProfileView = ({
           trackId='logout'
           data-track-category='PROFILE'
           data-track-name='Logout'
-          data-track-kind='passive'
         >
           Sign out
         </Button>

@@ -55,7 +55,6 @@ export const DelayedMessageDropdown = ({
         aria-label='Edit scheduled message'
         data-track-category='delayed-messages'
         data-track-name='edit-scheduled-message'
-        data-track-kind='active'
       >
         <Pencil size={14} />
       </button>
@@ -71,7 +70,6 @@ export const DelayedMessageDropdown = ({
         aria-label='Reschedule message'
         data-track-category='delayed-messages'
         data-track-name='reschedule-scheduled-message'
-        data-track-kind='active'
       >
         <Clock size={14} />
       </button>
@@ -87,7 +85,6 @@ export const DelayedMessageDropdown = ({
         aria-label='Send message now'
         data-track-category='delayed-messages'
         data-track-name='send-now-scheduled-message'
-        data-track-kind='active'
       >
         {loading ? <Loader2 size={14} className='animate-spin' /> : <Send size={14} />}
       </button>
@@ -104,7 +101,6 @@ export const DelayedMessageDropdown = ({
             aria-label='More scheduled message actions'
             data-track-category='delayed-messages'
             data-track-name='more-options-scheduled-message'
-            data-track-kind='passive'
           >
             <MoreVertical size={14} />
           </button>
@@ -129,7 +125,6 @@ export const DelayedMessageDropdown = ({
             )}
             data-track-category='delayed-messages'
             data-track-name='saveToDrafts-scheduled-message'
-            data-track-kind='active'
           >
             Cancel schedule and save to drafts
           </button>
@@ -146,7 +141,6 @@ export const DelayedMessageDropdown = ({
             )}
             data-track-category='delayed-messages'
             data-track-name='delete-scheduled-message'
-            data-track-kind='active'
           >
             Delete message
           </button>

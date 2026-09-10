@@ -68,7 +68,6 @@ const MultiSelectDropdown = ({
         className='text-[11px] border border-border rounded-md p-1.5 bg-muted/20 flex items-center gap-1 min-w-[100px]'
         data-track-category='UserGroups'
         data-track-name='ToggleUserSets'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ userId })}
       >
         <span className='flex-1 text-left'>{displayText}</span>
@@ -86,7 +85,6 @@ const MultiSelectDropdown = ({
                 className='w-full px-3 py-2 text-[11px] text-left hover:bg-muted/50 flex items-center gap-2'
                 data-track-category='UserGroups'
                 data-track-name='ToggleUserSet'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ setNumber, userId })}
               >
                 <div
@@ -243,7 +241,6 @@ export const OnCallRotationModal = ({
               onClick={onClose}
               data-track-category='UserGroups'
               data-track-name='CANCEL_ON_CALL_ROTATION'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -253,7 +250,6 @@ export const OnCallRotationModal = ({
               onClick={handleDone}
               data-track-category='UserGroups'
               data-track-name='SAVE_ON_CALL_ROTATION'
-              data-track-kind='active'
               disabled={hasEmptySet}
               className='bg-[#6276BE] hover:bg-[#5060A0]'
             >
@@ -270,7 +266,6 @@ export const OnCallRotationModal = ({
             onClick={handleCreateSet}
             data-track-category='UserGroups'
             data-track-name='CREATE_ON_CALL_SET'
-            data-track-kind='active'
           >
             <Plus className='w-4 h-4' />
             Create New Set
@@ -304,7 +299,6 @@ export const OnCallRotationModal = ({
                       title='Delete empty set'
                       data-track-category='UserGroups'
                       data-track-name='DeleteEmptySet'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ setNumber: set.setNumber })}
                     >
                       <Trash2 className='w-4 h-4' />

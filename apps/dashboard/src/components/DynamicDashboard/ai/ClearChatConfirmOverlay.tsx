@@ -18,7 +18,6 @@ export const ClearChatConfirmOverlay = ({
       onClick={onCancel}
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Clear_Chat_Dismiss'
-      data-track-kind='passive'
       className='absolute inset-0 bg-black/50'
     />
     <div className='relative w-[min(420px,92vw)] bg-popover rounded-lg shadow-lg border border-border p-5'>
@@ -40,7 +39,6 @@ export const ClearChatConfirmOverlay = ({
           onClick={onCancel}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CANCEL_CLEAR_AI_CHAT'
-          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -50,7 +48,6 @@ export const ClearChatConfirmOverlay = ({
           trackId='clear_ai_chat_history'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='CONFIRM_CLEAR_AI_CHAT'
-          data-track-kind='active'
         >
           Clear history
         </Button>

@@ -60,7 +60,6 @@ export const CaCertificateField = ({ value, onChange }: CaCertificateFieldProps)
             accept='.pem,.crt,.cer,.txt,application/x-pem-file'
             data-track-category='DATA_SOURCE'
             data-track-name='Ca_Certificate_Upload'
-            data-track-kind='active'
             className='sr-only'
             onChange={e => {
               void handleFile(e.target.files?.[0]);
@@ -83,7 +82,6 @@ export const CaCertificateField = ({ value, onChange }: CaCertificateFieldProps)
         placeholder={PLACEHOLDER}
         data-track-category='DATA_SOURCE'
         data-track-name='Ca_Certificate_Paste'
-        data-track-kind='passive'
         className={TEXTAREA_CLASS}
       />
 

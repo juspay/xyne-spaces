@@ -76,7 +76,6 @@ const SelectDropdown = ({
             onClick={() => onChange(option.value)}
             data-track-category='board_config'
             data-track-name='SELECT_FORM_OPTION'
-            data-track-kind='passive'
             className={value === option.value ? 'bg-muted font-medium' : ''}
           >
             {option.label}
@@ -241,7 +240,6 @@ const FieldEditor = ({
           }}
           data-track-category='board_config'
           data-track-name='expand_field_header'
-          data-track-kind='passive'
         >
           {!isExpanded && (
             <>
@@ -287,7 +285,6 @@ const FieldEditor = ({
                 }`}
                 data-track-category='board_config'
                 data-track-name='toggle_required'
-                data-track-kind='active'
               >
                 <span
                   className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
@@ -306,7 +303,6 @@ const FieldEditor = ({
               className='text-muted-foreground hover:text-red-500'
               data-track-category='board_config'
               data-track-name='delete_field'
-              data-track-kind='passive'
             >
               <Trash2 size={18} />
             </Button>
@@ -320,7 +316,6 @@ const FieldEditor = ({
               className='flex items-center justify-center'
               data-track-category='board_config'
               data-track-name='toggle_field_expand'
-              data-track-kind='passive'
             >
               <ChevronDown
                 size={16}
@@ -345,7 +340,6 @@ const FieldEditor = ({
               className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
               data-track-category='board_config'
               data-track-name='field_name_input'
-              data-track-kind='passive'
               selectedField={selectedGlobalField}
               onCreateNew={selectedGlobalField ? () => onCreateAsNewField(field.id) : undefined}
               onSelectExisting={suggestion => onSelectExistingGlobalField(field.id, suggestion)}
@@ -399,7 +393,6 @@ const FieldEditor = ({
                       className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
                       data-track-category='board_config'
                       data-track-name='bulk_options_textarea'
-                      data-track-kind='passive'
                     />
                     <div className='flex flex-col gap-[2px]'>
                       <span className='text-[11px] text-muted-foreground'>
@@ -438,7 +431,6 @@ const FieldEditor = ({
                               className='flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
                               data-track-category='board_config'
                               data-track-name='edit_option'
-                              data-track-kind='active'
                             />
                             {supportsBranching && (
                               <button
@@ -451,7 +443,6 @@ const FieldEditor = ({
                                 }`}
                                 data-track-category='board_config'
                                 data-track-name='toggle_option_branch_panel'
-                                data-track-kind='passive'
                               >
                                 {branchFields.length > 0
                                   ? `${branchFields.length} field${branchFields.length === 1 ? '' : 's'}`
@@ -465,7 +456,6 @@ const FieldEditor = ({
                               className='text-muted-foreground hover:text-red-500'
                               data-track-category='board_config'
                               data-track-name='delete_form_field_option'
-                              data-track-kind='active'
                             >
                               <X size={14} />
                             </Button>
@@ -505,7 +495,6 @@ const FieldEditor = ({
                                 className='w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] text-[#6276be] hover:bg-[#6276be]/10 rounded-[6px]'
                                 data-track-category='board_config'
                                 data-track-name='add_branch_field'
-                                data-track-kind='passive'
                               >
                                 <Plus size={13} />
                                 Add field
@@ -530,7 +519,6 @@ const FieldEditor = ({
                           onPaste={bulkOptionInputHandlers.onPaste}
                           data-track-category='board_config'
                           data-track-name='add_option'
-                          data-track-kind='active'
                         />
                         <span className='text-[14px] text-muted-foreground font-medium'>⏎</span>
                       </div>
@@ -937,7 +925,6 @@ export const CreateFormSlideOut = ({
             className='text-muted-foreground hover:text-foreground'
             data-track-category='board_config'
             data-track-name='close_create_form'
-            data-track-kind='passive'
           >
             <X size={16} />
           </Button>
@@ -961,7 +948,6 @@ export const CreateFormSlideOut = ({
               className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
               data-track-category='board_config'
               data-track-name='form_title_input'
-              data-track-kind='passive'
             />
             <textarea
               value={formDescription}
@@ -971,7 +957,6 @@ export const CreateFormSlideOut = ({
               className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
               data-track-category='board_config'
               data-track-name='form_description_input'
-              data-track-kind='passive'
             />
           </div>
 
@@ -1016,7 +1001,6 @@ export const CreateFormSlideOut = ({
               className='text-[#6276be] font-medium hover:bg-blue-50 w-fit'
               data-track-category='board_config'
               data-track-name='add_question'
-              data-track-kind='active'
             >
               <Plus size={16} />
               Add field
@@ -1034,7 +1018,6 @@ export const CreateFormSlideOut = ({
             trackAction={handleSave}
             data-track-category='board_config'
             data-track-name='SAVE_FORM'
-            data-track-kind='active'
             disabled={!isValid || isSubmitting}
             className='w-full bg-[#6276be] hover:bg-[#5060a0] disabled:bg-[#c9cccf] disabled:cursor-not-allowed text-white rounded-[8px] py-[6px] text-[13px] font-medium'
           >

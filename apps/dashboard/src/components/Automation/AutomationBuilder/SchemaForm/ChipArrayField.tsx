@@ -59,7 +59,6 @@ export function ChipArrayField({
             }}
             data-track-category='automation-builder'
             data-track-name='chip-array-remove'
-            data-track-kind='active'
             className='rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60'
             aria-label={`Remove ${item}`}
           >
@@ -89,7 +88,6 @@ export function ChipArrayField({
         placeholder={value.length === 0 ? (placeholder ?? 'Type and press Enter') : ''}
         data-track-category='automation-builder'
         data-track-name='chip-array-input'
-        data-track-kind='passive'
         className='flex-1 min-w-[120px] bg-transparent text-sm outline-none placeholder:text-muted-foreground'
       />
     </div>

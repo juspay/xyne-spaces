@@ -20,7 +20,6 @@ import {
 import { useAgentChainWorkflows } from './chainWorkflowsService';
 import { createScheduledJob, type NewScheduledJob } from './createScheduledJob';
 import { CreateScheduleDialog } from './CreateScheduleDialog';
-import type { InteractionKind } from '@xyne/shared';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -167,7 +166,6 @@ export function AgentActivityTabV2({
     onClick: () => void,
     label: string,
     trackName: string,
-    trackKind?: InteractionKind,
   ): ReactElement => (
     <button
       type='button'
@@ -176,7 +174,6 @@ export function AgentActivityTabV2({
       aria-expanded={open}
       data-track-category='Claw Agents'
       data-track-name={trackName}
-      data-track-kind={trackKind}
       className={ICON_BUTTON}
     >
       <SearchDefault className='size-4' aria-hidden />
@@ -216,7 +213,6 @@ export function AgentActivityTabV2({
                   aria-label='Filter schedules'
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: filter schedules'
-                  data-track-kind='passive'
                   className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                 />
               </div>
@@ -235,7 +231,6 @@ export function AgentActivityTabV2({
                     onClick={() => setScheduleOpen(true)}
                     data-track-category='Claw Agents'
                     data-track-name='Agent detail v2: open create schedule'
-                    data-track-kind='passive'
                     className='flex items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
                   >
                     <PlusDefault className='size-4' aria-hidden />
@@ -286,7 +281,6 @@ export function AgentActivityTabV2({
               editable
               label='Filter runs by status'
               trackName='Agent detail v2: filter runs'
-              trackKind='passive'
               onChange={next => setRunStatus(next as AgentRunStatusFilter)}
             />
           </span>
@@ -304,7 +298,6 @@ export function AgentActivityTabV2({
                 aria-label='Filter runs'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: filter runs input'
-                data-track-kind='passive'
                 className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
             </div>

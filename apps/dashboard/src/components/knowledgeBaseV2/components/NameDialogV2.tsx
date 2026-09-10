@@ -88,7 +88,6 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
             disabled={submitting}
             data-track-category='knowledge-base'
             data-track-name='name-dialog-input'
-            data-track-kind='passive'
           />
           {helper ? <p className='mt-1 text-xs text-muted-foreground'>{helper}</p> : null}
 
@@ -100,7 +99,6 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
               className='rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition hover:bg-secondary disabled:opacity-50'
               data-track-category='knowledge-base'
               data-track-name='name-dialog-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -110,7 +108,6 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
               className='rounded-lg bg-muted-foreground px-4 py-2 text-sm font-medium text-background transition hover:bg-muted-foreground/90 disabled:opacity-50'
               data-track-category='knowledge-base'
               data-track-name='name-dialog-submit'
-              data-track-kind='active'
               data-ph-capture-attribute-track-id='kb_name_dialog_submit'
             >
               {submitting ? (submittingLabel ?? 'Creating...') : submitLabel}

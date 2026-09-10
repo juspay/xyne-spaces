@@ -96,7 +96,6 @@ export const ButtonNode: React.FC<ButtonNodeProps> = ({ node }) => {
         onClick={handleClick}
         data-track-category='flowUI'
         data-track-name='CLICK_FLOW_BUTTON'
-        data-track-kind='passive'
         disabled={isDisabled()}
         variant={getVariant()}
         size={getSize()}

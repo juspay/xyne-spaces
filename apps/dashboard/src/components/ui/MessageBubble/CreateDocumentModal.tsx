@@ -124,7 +124,6 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({
               onClick={onClose}
               data-track-category='MESSAGE'
               data-track-name='CANCEL_CREATE_DOCUMENT'
-              data-track-kind='passive'
               disabled={isLoading}
             >
               Cancel
@@ -133,7 +132,6 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({
               onClick={handleGenerate}
               data-track-category='MESSAGE'
               data-track-name='GENERATE_DOCUMENT'
-              data-track-kind='active'
               loading={isLoading}
               disabled={isGenerateDisabled}
             >

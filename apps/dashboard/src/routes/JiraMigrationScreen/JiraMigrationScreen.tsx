@@ -1483,7 +1483,6 @@ const JiraMigrationScreen = (): ReactElement => {
                   type='button'
                   data-track-category='jira_migration'
                   data-track-name='use_case_issues'
-                  data-track-kind='passive'
                   onClick={() => setUseCase('issues')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     useCase === 'issues'
@@ -1497,7 +1496,6 @@ const JiraMigrationScreen = (): ReactElement => {
                   type='button'
                   data-track-category='jira_migration'
                   data-track-name='use_case_channel_only'
-                  data-track-kind='passive'
                   onClick={() => setUseCase('channel-only')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     useCase === 'channel-only'
@@ -1511,7 +1509,6 @@ const JiraMigrationScreen = (): ReactElement => {
                   type='button'
                   data-track-category='jira_migration'
                   data-track-name='use_case_purge_project'
-                  data-track-kind='active'
                   onClick={() => setUseCase('purge-project')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     useCase === 'purge-project'
@@ -1525,7 +1522,6 @@ const JiraMigrationScreen = (): ReactElement => {
                   type='button'
                   data-track-category='jira_migration'
                   data-track-name='use_case_move_jira_project_channel'
-                  data-track-kind='active'
                   onClick={() => setUseCase('move-jira-project-channel')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     useCase === 'move-jira-project-channel'
@@ -1539,7 +1535,6 @@ const JiraMigrationScreen = (): ReactElement => {
                   type='button'
                   data-track-category='jira_migration'
                   data-track-name='use_case_move_jira_project_board'
-                  data-track-kind='active'
                   onClick={() => setUseCase('move-jira-project-board')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     useCase === 'move-jira-project-board'
@@ -1680,7 +1675,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() => void handleMoveChannelProject()}
                       data-track-category='jira_migration'
                       data-track-name='MOVE_CHANNEL_PROJECT'
-                      data-track-kind='active'
                       disabled={isChannelMoveLoading}
                     >
                       {isChannelMoveLoading ? 'Moving…' : 'Move Channel'}
@@ -1797,7 +1791,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='purge_mode_dry_run'
-                        data-track-kind='active'
                         onClick={() => setPurgeDryRun(true)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -1812,7 +1805,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='purge_mode_delete'
-                        data-track-kind='active'
                         onClick={() => setPurgeDryRun(false)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -1836,7 +1828,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => void handlePurgeProjectMigration()}
                     data-track-category='jira_migration'
                     data-track-name='PURGE_PROJECT_MIGRATION'
-                    data-track-kind='active'
                     disabled={isPurgeLoading}
                   >
                     {isPurgeLoading
@@ -2067,7 +2058,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='move_jira_project_channel_set_dry_run'
-                        data-track-kind='active'
                         onClick={() => setMoveChannelDryRun(true)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -2082,7 +2072,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='move_jira_project_channel_set_move'
-                        data-track-kind='active'
                         onClick={() => setMoveChannelDryRun(false)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -2123,7 +2112,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => void handleMoveJiraProjectChannel()}
                     data-track-category='jira_migration'
                     data-track-name='MOVE_JIRA_PROJECT_CHANNEL'
-                    data-track-kind='active'
                     disabled={isMoveChannelLoading}
                   >
                     {isMoveChannelLoading
@@ -2325,7 +2313,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='move_jira_project_board_set_dry_run'
-                        data-track-kind='active'
                         onClick={() => setMoveDryRun(true)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -2340,7 +2327,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name='move_jira_project_board_set_move'
-                        data-track-kind='active'
                         onClick={() => setMoveDryRun(false)}
                         className={cn(
                           'rounded-lg px-3 py-1.5 text-xs font-medium border transition',
@@ -2381,7 +2367,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => void handleMoveJiraProjectBoard()}
                     data-track-category='jira_migration'
                     data-track-name='MOVE_JIRA_PROJECT_BOARD'
-                    data-track-kind='active'
                     disabled={isMoveBoardLoading}
                   >
                     {isMoveBoardLoading ? 'Running…' : moveDryRun ? 'Run Dry Run' : 'Move Tickets'}
@@ -2513,7 +2498,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         onClick={() => void handleFetchBoards()}
                         data-track-category='jira_migration'
                         data-track-name='FETCH_BOARDS'
-                        data-track-kind='passive'
                         disabled={isFetchingBoards || !jiraProjectKey.trim()}
                       >
                         {isFetchingBoards ? 'Fetching boards…' : 'Fetch Boards'}
@@ -2652,7 +2636,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           type='button'
                           data-track-category='jira_migration'
                           data-track-name='migration_mode_all_to_one'
-                          data-track-kind='passive'
                           onClick={() => {
                             setMigrationMode('all-to-one');
                             setPerBoardMappings([]);
@@ -2666,7 +2649,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           type='button'
                           data-track-category='jira_migration'
                           data-track-name='migration_mode_per_board'
-                          data-track-kind='passive'
                           onClick={() => {
                             setMigrationMode('per-board');
                             setPerBoardMappings(
@@ -2790,7 +2772,6 @@ const JiraMigrationScreen = (): ReactElement => {
                                 onClick={() => void handlePerBoardImport()}
                                 data-track-category='jira_migration'
                                 data-track-name='START_PER_BOARD_IMPORT'
-                                data-track-kind='active'
                                 disabled={
                                   isPerBoardImportLoading ||
                                   normalizedIssueKeys.length > 0 ||
@@ -2858,7 +2839,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       id='jira-ticket-range'
                       data-track-category='jira_migration'
                       data-track-name='select_ticket_range'
-                      data-track-kind='passive'
                       value={ticketRange}
                       onChange={e => {
                         setTicketRange(e.target.value as TicketRange);
@@ -2938,7 +2918,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           type='checkbox'
                           data-track-category='jira_migration'
                           data-track-name='toggle_filters'
-                          data-track-kind='passive'
                           checked={isFilterEnabled}
                           onChange={event => {
                             const checked = event.target.checked;
@@ -3098,7 +3077,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         }}
                         data-track-category='jira_migration'
                         data-track-name='RESET_PAGINATION'
-                        data-track-kind='passive'
                         disabled={isPreviewLoading || isImportLoading || !canPreview}
                       >
                         {isPreviewLoading
@@ -3112,7 +3090,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         onClick={() => setIsHistoryModalOpen(true)}
                         data-track-category='jira_migration'
                         data-track-name='OPEN_MIGRATION_HISTORY'
-                        data-track-kind='passive'
                         disabled={migrationHistory.length === 0}
                       >
                         View Migrated Projects
@@ -3195,7 +3172,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         }}
                         data-track-category='jira_migration'
                         data-track-name='jira_board_select'
-                        data-track-kind='passive'
                         className='w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                       >
                         <option value=''>Select Jira board</option>
@@ -3211,7 +3187,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         onClick={() => void handlePreview()}
                         data-track-category='jira_migration'
                         data-track-name='PREVIEW_MIGRATION'
-                        data-track-kind='passive'
                         disabled={isPreviewLoading || isImportLoading}
                       >
                         Refresh Preview
@@ -3288,7 +3263,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           id={`status-v2-${mapping.jiraStatus}`}
                           data-track-category='jira_migration'
                           data-track-name='select_status_v2_mapping'
-                          data-track-kind='active'
                           value={statusV2Mappings[mapping.jiraStatus] || ''}
                           onChange={event => {
                             const selectedStatusV2 = event.target.value;
@@ -3330,7 +3304,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       }
                       data-track-category='jira_migration'
                       data-track-name='APPLY_STATUS_SEQUENCE'
-                      data-track-kind='active'
                       disabled={preview.jiraStatusSequence.length === 0}
                     >
                       Sort A→Z
@@ -3455,7 +3428,6 @@ const JiraMigrationScreen = (): ReactElement => {
                                     }}
                                     data-track-category='jira_migration'
                                     data-track-name={`jira_stage_sequence_set_position:${status}`}
-                                    data-track-kind='active'
                                     className='w-20 rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground shadow-sm'
                                     disabled={excluded}
                                   />
@@ -3474,7 +3446,6 @@ const JiraMigrationScreen = (): ReactElement => {
                                       }}
                                       data-track-category='jira_migration'
                                       data-track-name={`jira_stage_exclude_toggle:${status}`}
-                                      data-track-kind='passive'
                                       disabled={!isBoardStage}
                                     />
                                     {isBoardStage ? 'Exclude' : '—'}
@@ -3498,7 +3469,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => setMigrationPhase('setup')}
                     data-track-category='jira_migration'
                     data-track-name='GO_TO_SETUP_PHASE'
-                    data-track-kind='passive'
                   >
                     ← Back to Configure
                   </Button>
@@ -3506,7 +3476,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => setMigrationPhase('migrate')}
                     data-track-category='jira_migration'
                     data-track-name='GO_TO_MIGRATE_PHASE'
-                    data-track-kind='passive'
                     disabled={!hasCompleteStatusV2Mappings}
                   >
                     Proceed to Migration →
@@ -3543,7 +3512,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     disabled={isImportLoading}
                     data-track-category='jira_migration'
                     data-track-name='edit_status_mappings'
-                    data-track-kind='active'
                   >
                     ← Edit Status Mappings
                   </Button>
@@ -3556,7 +3524,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         disabled={isResolveUsersLoading || isImportLoading}
                         data-track-category='jira_migration'
                         data-track-name='scan_toggle_include_commenters'
-                        data-track-kind='passive'
                       />
                       Include commenters
                     </label>
@@ -3568,7 +3535,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         disabled={isResolveUsersLoading || isImportLoading}
                         data-track-category='jira_migration'
                         data-track-name='scan_toggle_include_attachments'
-                        data-track-kind='passive'
                       />
                       Include attachments
                     </label>
@@ -3579,7 +3545,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     disabled={isImportLoading || isResolveUsersLoading}
                     data-track-category='jira_migration'
                     data-track-name='scan_users'
-                    data-track-kind='passive'
                   >
                     {isResolveUsersLoading ? 'Scanning Users...' : 'Scan Users'}
                   </Button>
@@ -3587,7 +3552,6 @@ const JiraMigrationScreen = (): ReactElement => {
                     onClick={() => void handleImport()}
                     data-track-category='jira_migration'
                     data-track-name='START_IMPORT'
-                    data-track-kind='active'
                     disabled={isImportLoading || !hasCompleteStatusV2Mappings}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Tickets'}
@@ -3641,7 +3605,6 @@ const JiraMigrationScreen = (): ReactElement => {
                             }}
                             data-track-category='jira_migration'
                             data-track-name='UPDATE_USER_EMAIL_MAPPINGS'
-                            data-track-kind='active'
                           >
                             Clear
                           </Button>
@@ -3681,7 +3644,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         onClick={() => setResolvedUsersPage(p => Math.max(0, p - 1))}
                         data-track-category='jira_migration'
                         data-track-name='RESOLVED_USERS_PREV_PAGE'
-                        data-track-kind='active'
                         disabled={resolvedUsersPage === 0}
                       >
                         Prev
@@ -3702,7 +3664,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         }
                         data-track-category='jira_migration'
                         data-track-name='RESOLVED_USERS_NEXT_PAGE'
-                        data-track-kind='active'
                         disabled={
                           resolvedUsersPage >=
                           Math.max(
@@ -3888,7 +3849,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           onClick={() => void handleResumeMigration()}
                           data-track-category='jira_migration'
                           data-track-name='RESUME_MIGRATION'
-                          data-track-kind='active'
                         >
                           Resume
                         </Button>
@@ -3898,7 +3858,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           onClick={() => void handlePauseMigration()}
                           data-track-category='jira_migration'
                           data-track-name='PAUSE_MIGRATION'
-                          data-track-kind='active'
                         >
                           Pause
                         </Button>
@@ -3908,7 +3867,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         onClick={() => void handleStopMigration()}
                         data-track-category='jira_migration'
                         data-track-name='STOP_MIGRATION'
-                        data-track-kind='active'
                       >
                         Stop
                       </Button>
@@ -4181,7 +4139,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() => setIssueResultPage(page => Math.max(0, page - 1))}
                       data-track-category='jira_migration'
                       data-track-name='ISSUE_RESULTS_PREV_PAGE'
-                      data-track-kind='passive'
                       disabled={issueResultPage === 0}
                     >
                       Previous
@@ -4194,7 +4151,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       }
                       data-track-category='jira_migration'
                       data-track-name='ISSUE_RESULTS_NEXT_PAGE'
-                      data-track-kind='passive'
                       disabled={issueResultPage >= issueResultPageCount - 1}
                     >
                       Next
@@ -4392,7 +4348,6 @@ const JiraMigrationScreen = (): ReactElement => {
                         type='button'
                         data-track-category='jira_migration'
                         data-track-name={`preview_section_${sectionKey}`}
-                        data-track-kind='passive'
                         onClick={() => setPreviewSection(sectionKey)}
                         className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                           previewSection === sectionKey
@@ -4421,7 +4376,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() => void handlePreviousPage()}
                       data-track-category='jira_migration'
                       data-track-name='PREVIEW_PREV_PAGE'
-                      data-track-kind='passive'
                       disabled={isPreviewLoading || pageIndex === 0}
                     >
                       Previous Page
@@ -4432,7 +4386,6 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() => void handleNextPage()}
                       data-track-category='jira_migration'
                       data-track-name='PREVIEW_NEXT_PAGE'
-                      data-track-kind='passive'
                       disabled={isPreviewLoading || !preview.pagination.hasNextPage}
                     >
                       Next Page
@@ -4533,7 +4486,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           type='button'
                           data-track-category='jira_migration'
                           data-track-name='click_edit_status_mappings'
-                          data-track-kind='active'
                           onClick={() => setMigrationPhase('map-statuses')}
                           className='text-xs font-medium text-sky-700 hover:underline'
                         >
@@ -4583,7 +4535,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           onClick={() => setCustomFieldPage(page => Math.max(0, page - 1))}
                           data-track-category='jira_migration'
                           data-track-name='CUSTOM_FIELDS_PREV_PAGE'
-                          data-track-kind='passive'
                           disabled={customFieldPage === 0}
                         >
                           Previous
@@ -4598,7 +4549,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           }
                           data-track-category='jira_migration'
                           data-track-name='CUSTOM_FIELDS_NEXT_PAGE'
-                          data-track-kind='passive'
                           disabled={customFieldPage >= previewActionCounts.fieldsPageCount - 1}
                         >
                           Next
@@ -4632,7 +4582,6 @@ const JiraMigrationScreen = (): ReactElement => {
                                     type='checkbox'
                                     data-track-category='jira_migration'
                                     data-track-name='toggle_skip_custom_field'
-                                    data-track-kind='passive'
                                     checked={Boolean(skippedCustomFieldIds[mapping.jiraFieldId])}
                                     onChange={event => {
                                       const checked = event.target.checked;
@@ -4713,7 +4662,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           onClick={() => setIssueSamplePage(page => Math.max(0, page - 1))}
                           data-track-category='jira_migration'
                           data-track-name='ISSUE_SAMPLES_PREV_PAGE'
-                          data-track-kind='passive'
                           disabled={issueSamplePage === 0}
                         >
                           Previous
@@ -4728,7 +4676,6 @@ const JiraMigrationScreen = (): ReactElement => {
                           }
                           data-track-category='jira_migration'
                           data-track-name='ISSUE_SAMPLES_NEXT_PAGE'
-                          data-track-kind='passive'
                           disabled={issueSamplePage >= previewActionCounts.issuePageCount - 1}
                         >
                           Next

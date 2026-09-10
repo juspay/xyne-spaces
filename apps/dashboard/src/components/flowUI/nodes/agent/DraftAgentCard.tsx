@@ -153,7 +153,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
-        data-track-kind='active'
         data-ph-capture-attribute-track-id='agent_draft_decline'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
@@ -172,7 +171,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           className={cn(ghostButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_EDIT'
-          data-track-kind='active'
         >
           Edit
         </button>
@@ -183,7 +181,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
-          data-track-kind='active'
           data-ph-capture-attribute-track-id='agent_draft_approve'
         >
           {pending === 'approve' && <Spinner size={14} className='animate-spin' />}
@@ -220,7 +217,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
               data-track-category='AGENT_ARTIFACT'
               data-track-name='EXPAND_ARTIFACT'
-              data-track-kind='passive'
             >
               <MaximizeTwoArrow size={16} className='shrink-0' />
             </button>

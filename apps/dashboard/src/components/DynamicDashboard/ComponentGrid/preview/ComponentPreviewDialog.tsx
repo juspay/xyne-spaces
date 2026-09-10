@@ -123,7 +123,6 @@ const ComponentPreviewDialog = ({
             className='shrink-0 grid place-items-center w-8 h-8 rounded-lg text-xyne-gray-400 hover:text-xyne-gray-700 hover:bg-xyne-gray-100 transition-colors'
             data-track-category='DYNAMIC_DASHBOARD'
             data-track-name='Close_Component_Preview'
-            data-track-kind='passive'
           >
             <X size={16} />
           </button>
@@ -160,7 +159,6 @@ const ComponentPreviewDialog = ({
                         }`}
                         data-track-category='DYNAMIC_DASHBOARD'
                         data-track-name='Preview_Select_Table'
-                        data-track-kind='passive'
                       >
                         <Database size={12} />
                         {t.model}

@@ -353,7 +353,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
             className='mt-[48px] inline-flex h-[56px] shrink-0 items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60 md:mt-[120px]'
             data-track-category='Questionnaire'
             data-track-name='EnterWorkspace'
-            data-track-kind='passive'
           >
             {isCompleting ? 'Entering...' : 'Enter Workspace'}
             <ArrowRight className='h-5 w-5' />
@@ -392,7 +391,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
               className='mt-[24px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
               data-track-category='Questionnaire'
               data-track-name='DisplayNameInput'
-              data-track-kind='passive'
             />
 
             <div className='mt-[52px] h-px w-full bg-[#ECEFF3]' />
@@ -410,7 +408,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='mt-[10px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='RoleInput'
-                data-track-kind='passive'
               />
             </div>
 
@@ -426,7 +423,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='inline-flex h-[32px] min-w-[78px] shrink-0 items-center justify-center px-3 border border-[#DDE3EC] rounded-[8px] bg-white text-[14px] leading-none text-[#272B35] hover:bg-[#F8FAFC] transition-colors disabled:opacity-50'
                 data-track-category='Questionnaire'
                 data-track-name='UploadPhoto'
-                data-track-kind='active'
               >
                 {isUploadingPhoto ? <Loader2 className='w-4 h-4 animate-spin' /> : null}
                 {photoFileName ? 'Change' : 'Upload'}
@@ -456,7 +452,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
               className='mt-auto mb-4 md:mb-0 self-start inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
               data-track-category='Questionnaire'
               data-track-name='Step1Next'
-              data-track-kind='passive'
             >
               Next
               <ArrowRight className='w-4 h-4' />
@@ -488,7 +483,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='mt-[12px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='CompanyNameInput'
-                data-track-kind='passive'
               />
             </div>
 
@@ -517,7 +511,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                       }`}
                       data-track-category='Questionnaire'
                       data-track-name='CompanySizeSelect'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ size })}
                     >
                       {size}
@@ -534,7 +527,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='text-[14px] text-[#8E939D] hover:text-[#272B35] transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='Step2Back'
-                data-track-kind='passive'
               >
                 Back
               </button>
@@ -545,7 +537,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:bg-[#B9B9B9] disabled:opacity-100 disabled:cursor-not-allowed transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='Step2Next'
-                data-track-kind='passive'
               >
                 Next
                 <ArrowRight className='w-4 h-4' />

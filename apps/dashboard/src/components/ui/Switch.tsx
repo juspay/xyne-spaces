@@ -1,6 +1,5 @@
 import React from 'react';
 import { cn } from '../../utils/classNames';
-import type { InteractionKind } from '@xyne/shared';
 
 export type SwitchVariant = 'default' | 'desk';
 
@@ -17,7 +16,6 @@ interface SwitchProps {
   /** Override the built-in SWITCH tracking with a caller-specific event. */
   'data-track-category'?: string;
   'data-track-name'?: string;
-  'data-track-kind'?: InteractionKind;
 }
 
 export const Switch: React.FC<SwitchProps> = ({
@@ -31,7 +29,6 @@ export const Switch: React.FC<SwitchProps> = ({
   className,
   'data-track-category': trackCategory,
   'data-track-name': trackName,
-  'data-track-kind': trackKind,
 }) => {
   const isDesk = variant === 'desk';
 
@@ -50,7 +47,6 @@ export const Switch: React.FC<SwitchProps> = ({
         // label are fallbacks for the callers that omit it.
         data-track-category={trackCategory ?? 'SWITCH'}
         data-track-name={trackName ?? id ?? ariaLabel ?? label ?? 'TOGGLE'}
-        data-track-kind={trackKind}
         data-track-metadata={JSON.stringify({ toChecked: !checked })}
         className={cn(
           'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',

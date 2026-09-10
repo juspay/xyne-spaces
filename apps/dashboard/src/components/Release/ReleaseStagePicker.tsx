@@ -107,7 +107,6 @@ export function ReleaseStagePicker({
       aria-label='Change stage'
       data-track-category='Release'
       data-track-name='ToggleRowStage'
-      data-track-kind='passive'
     >
       <span
         className='inline-block w-1.5 h-1.5 rounded-full'
@@ -148,7 +147,6 @@ export function ReleaseStagePicker({
               )}
               data-track-category='Release'
               data-track-name='SelectRowStage'
-              data-track-kind='active'
               data-ph-capture-attribute-track-id='select_release_stage'
             >
               <span

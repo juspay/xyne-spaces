@@ -179,7 +179,6 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
                 onClick={() => void handleAddToChannel()}
                 data-track-category='MESSAGE'
                 data-track-name='ADD_USER_TO_CHANNEL'
-                data-track-kind='active'
                 disabled={isLoading}
               >
                 {isLoading ? 'Adding...' : 'Add Them'}
@@ -191,7 +190,6 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
               onClick={() => void handleIgnore()}
               data-track-category='MESSAGE'
               data-track-name='IGNORE_NON_PARTICIPANT'
-              data-track-kind='passive'
               disabled={isLoading}
             >
               {canAddMembers ? 'Do Nothing' : 'Got it'}

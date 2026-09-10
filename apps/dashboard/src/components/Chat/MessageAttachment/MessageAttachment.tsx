@@ -484,7 +484,6 @@ const ActionTray: React.FC<{
               title='Copy Image'
               data-track-category='MESSAGE_ATTACHMENT'
               data-track-name='CopyImage'
-              data-track-kind='passive'
             >
               {copied ? (
                 <CopyCopied size={18} className='text-status-success' />
@@ -638,7 +637,6 @@ const InlineTextFile: React.FC<{
             className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
             data-track-category='MESSAGE'
             data-track-name='OPEN_TEXT_FILE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
             <FileText className='h-4 w-4' />
@@ -656,7 +654,6 @@ const InlineTextFile: React.FC<{
             title='Download file'
             data-track-category='MESSAGE'
             data-track-name='DOWNLOAD_TEXT_FILE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fileName, attachmentId })}
           >
             <Download className='h-4 w-4 text-muted-foreground' />
@@ -677,7 +674,6 @@ const InlineTextFile: React.FC<{
           className='flex items-center gap-1 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
           data-track-category='MESSAGE'
           data-track-name='TOGGLE_TEXT_PREVIEW'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fileName, attachmentId, isExpanded })}
         >
           <FileText className='h-4 w-4' />
@@ -697,7 +693,6 @@ const InlineTextFile: React.FC<{
           title='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_TEXT_FILE_INLINE'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
@@ -806,7 +801,6 @@ const InlineCodeFile: React.FC<{
           className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
           data-track-category='MESSAGE'
           data-track-name='OPEN_CODE_FILE'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <FileCode className='h-4 w-4' />
@@ -824,7 +818,6 @@ const InlineCodeFile: React.FC<{
           title='Download file'
           data-track-category='MESSAGE'
           data-track-name='DOWNLOAD_CODE_FILE'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ fileName, attachmentId })}
         >
           <Download className='h-4 w-4 text-muted-foreground' />
@@ -1133,7 +1126,6 @@ const InlineVideoPlayer: React.FC<{
               aria-label={`Open ${fileName} preview`}
               data-track-category='MESSAGE'
               data-track-name='OPEN_ATTACHMENT_PREVIEW'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ fileName, attachmentId })}
               onClick={handleThumbnailOpen}
               onKeyDown={e => {
@@ -1175,7 +1167,6 @@ const InlineVideoPlayer: React.FC<{
                   aria-label='Play video'
                   data-track-category='MESSAGE_ATTACHMENT'
                   data-track-name='PlayVideoAttachment'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ attachmentId, fileName })}
                 >
                   <Play className='h-4 w-4 fill-white' />
@@ -1197,7 +1188,6 @@ const InlineVideoPlayer: React.FC<{
                     aria-label='Expand video'
                     data-track-category='MESSAGE_ATTACHMENT'
                     data-track-name='ExpandVideoAttachment'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ attachmentId, fileName })}
                   >
                     <Maximize2 className='h-4 w-4' />
@@ -1398,7 +1388,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         aria-label={`Open ${attachment.originalFilename} preview`}
         data-track-category='MESSAGE'
         data-track-name='OPEN_ATTACHMENT_PREVIEW'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           fileName: attachment.originalFilename,
           attachmentId: attachment.id,

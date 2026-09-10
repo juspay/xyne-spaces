@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { isInteractionKind, type UserActivityResponse, type Platform } from '@xyne/shared';
+import type { UserActivityResponse, Platform } from '@xyne/shared';
 import { userActivityService } from '@/services/userActivityService';
 
 /**
@@ -75,7 +75,6 @@ export async function getUserActivities(req: Request, res: Response): Promise<vo
         contextMetadata: activity.contextMetadata
           ? (activity.contextMetadata as Record<string, unknown>)
           : null,
-        interactionKind: isInteractionKind(activity.interactionKind) ? activity.interactionKind : null,
         platform: activity.platform as Platform,
         relatedData: activity.relatedData,
         timestamp: activity.timestamp.toISOString(),

@@ -32,7 +32,6 @@ const DigitalTwinHotTab = (): ReactElement => {
               onClick={() => setRange(r)}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin hot range'
-              data-track-kind='passive'
               className={cn(
                 'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
                 range === r
@@ -90,7 +89,6 @@ const DigitalTwinHotTab = (): ReactElement => {
                     onClick={() => setPendingDelete(m.hindsightMemoryId)}
                     data-track-category='Claw Agents'
                     data-track-name='Digital Twin delete hot memory'
-                    data-track-kind='active'
                     className='shrink-0 text-muted-foreground transition-colors hover:text-destructive'
                     title='Delete memory'
                     aria-label='Delete memory'

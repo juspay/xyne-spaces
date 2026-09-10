@@ -220,7 +220,6 @@ export const CallCard = ({
       }}
       data-track-category='CALLS'
       data-track-name='view-call-detail'
-      data-track-kind='passive'
       className={cn(
         'relative flex items-center justify-between p-1.5',
         isRecentCall && onDetailClick && 'cursor-pointer',
@@ -340,7 +339,6 @@ export const CallCard = ({
               className='flex items-center gap-1'
               data-track-category='CALLS'
               data-track-name='view-past-participants'
-              data-track-kind='passive'
             >
               <div className='flex items-center -space-x-1.5'>
                 {userIds.length > 0 &&
@@ -373,7 +371,6 @@ export const CallCard = ({
                         onClick={e => e.stopPropagation()}
                         data-track-category='CALLS'
                         data-track-name='call-more-options'
-                        data-track-kind='passive'
                       >
                         <MoreVertical className='size-4' />
                       </button>
@@ -386,7 +383,6 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='GOTO_TRANSCRIPT'
-                        data-track-kind='passive'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -400,7 +396,6 @@ export const CallCard = ({
                           }}
                           data-track-category='CALLS'
                           data-track-name='VIEW_EXTERNAL_CHAT'
-                          data-track-kind='passive'
                           className='text-sm font-medium rounded-lg'
                         >
                           View External Chat
@@ -413,7 +408,6 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='DOWNLOAD_TRANSCRIPT'
-                        data-track-kind='passive'
                         disabled={!hasTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -426,7 +420,6 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='OPEN_CALL'
-                        data-track-kind='passive'
                         className='text-sm font-medium rounded-lg'
                       >
                         Start Call
@@ -449,7 +442,6 @@ export const CallCard = ({
                           disabled={!isUserChannelMember || !handleGotoTranscript}
                           data-track-category='CALLS'
                           data-track-name='goto-call-message'
-                          data-track-kind='passive'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
                           <MessageSquare className='size-4' />
@@ -469,7 +461,6 @@ export const CallCard = ({
                           disabled={!hasTranscript}
                           data-track-category='CALLS'
                           data-track-name='download-transcript'
-                          data-track-kind='passive'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
                           <Download className='size-4' />
@@ -485,7 +476,6 @@ export const CallCard = ({
                           }}
                           data-track-category='CALLS'
                           data-track-name='view-external-chat'
-                          data-track-kind='passive'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         >
                           <ArrowUpRight className='size-4' />
@@ -500,7 +490,6 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='join-call'
-                        data-track-kind='active'
                         className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                       >
                         <HuddleIcon size={16} />
@@ -518,7 +507,6 @@ export const CallCard = ({
                       onClick={e => e.stopPropagation()}
                       data-track-category='CALLS'
                       data-track-name='call-more-options'
-                      data-track-kind='passive'
                     >
                       <MoreVertical className='size-4' />
                     </Button>
@@ -531,7 +519,6 @@ export const CallCard = ({
                       }}
                       data-track-category='CALLS'
                       data-track-name='GOTO_TRANSCRIPT'
-                      data-track-kind='passive'
                       disabled={!isUserChannelMember || !handleGotoTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -545,7 +532,6 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='VIEW_EXTERNAL_CHAT'
-                        data-track-kind='passive'
                         className='text-sm font-medium rounded-lg'
                       >
                         External Huddle
@@ -558,7 +544,6 @@ export const CallCard = ({
                       }}
                       data-track-category='CALLS'
                       data-track-name='DOWNLOAD_TRANSCRIPT'
-                      data-track-kind='passive'
                       disabled={!hasTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -578,7 +563,6 @@ export const CallCard = ({
                         onClick={handleGotoTranscript}
                         data-track-category='CALLS'
                         data-track-name='GOTO_TRANSCRIPT'
-                        data-track-kind='passive'
                         variant='outline'
                         size='icon'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
@@ -597,7 +581,6 @@ export const CallCard = ({
                         onClick={handleDownloadTranscript}
                         data-track-category='CALLS'
                         data-track-name='DOWNLOAD_TRANSCRIPT'
-                        data-track-kind='passive'
                         variant='outline'
                         size='icon'
                         disabled={!hasTranscript}
@@ -616,7 +599,6 @@ export const CallCard = ({
                         className='size-7'
                         data-track-category='CALLS'
                         data-track-name='view-external-chat'
-                        data-track-kind='passive'
                       >
                         <ScrollText className='size-3.5 text-muted-foreground' />
                       </Button>
@@ -634,7 +616,6 @@ export const CallCard = ({
                   }}
                   data-track-category='CALLS'
                   data-track-name='OPEN_CALL'
-                  data-track-kind='passive'
                   variant='outline'
                   data-testid='call-join-button'
                   className={cn(

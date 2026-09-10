@@ -21,7 +21,6 @@ import {
   revokeCollection,
   revokeFile,
 } from './knowledgeTree';
-import type { InteractionKind } from '@xyne/shared';
 
 const SELECTED_FILES_HINT =
   'Everything listed here is readable by the agent. Granting a folder grants everything inside it.';
@@ -130,7 +129,6 @@ export function KnowledgeCollectionBrowser({
           disabled={mine.length === 0}
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: add KB selection'
-          data-track-kind='active'
           className='flex h-7 shrink-0 items-center rounded-[10px] border-[0.8px] border-transparent bg-primary px-2 text-sm font-medium leading-[1.2] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40'
         >
           Add Selected
@@ -165,7 +163,6 @@ export function KnowledgeCollectionBrowser({
                   aria-label={`Remove ${chip.name}`}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: remove KB grant'
-                  data-track-kind='active'
                   className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-1 pr-2 transition-colors hover:bg-muted/70'
                 >
                   {chip.tile}
@@ -184,7 +181,6 @@ export function KnowledgeCollectionBrowser({
               onClick={clearMine}
               data-track-category='Claw Agents'
               data-track-name='Create agent v2: remove selected KB grants'
-              data-track-kind='active'
               className='self-end text-xs leading-4 tracking-[-0.24px] text-foreground underline underline-offset-2 transition-opacity hover:opacity-70'
             >
               Remove Selected
@@ -205,7 +201,6 @@ export function KnowledgeCollectionBrowser({
                 onClick={() => setPath(path.slice(0, index + 1))}
                 data-track-category='Claw Agents'
                 data-track-name='Create agent v2: KB breadcrumb'
-                data-track-kind='active'
                 className={cn(
                   'max-w-[180px] truncate rounded px-1 text-sm leading-5 transition-colors',
                   last
@@ -310,7 +305,6 @@ function TreeNode({
         expanded={isOpen}
         onToggleExpanded={() => onToggleExpanded(node.id)}
         trackName='Create agent v2: open KB folder'
-        trackKind='active'
       />
 
       {isOpen && (children.length > 0 || items.length > 0) && (
@@ -345,7 +339,6 @@ function TreeNode({
               expanded={false}
               onToggleExpanded={() => undefined}
               trackName='Create agent v2: toggle KB file'
-              trackKind='active'
             />
           ))}
         </div>
@@ -367,7 +360,6 @@ function TreeRow({
   expanded,
   onToggleExpanded,
   trackName,
-  trackKind,
 }: {
   active: boolean;
   label: string;
@@ -381,7 +373,6 @@ function TreeRow({
   expanded: boolean;
   onToggleExpanded: () => void;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement {
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
@@ -399,7 +390,6 @@ function TreeRow({
           aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: expand KB folder'
-          data-track-kind='active'
           className='flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground'
         >
           <Chevron className='size-3.5' aria-hidden />
@@ -416,7 +406,6 @@ function TreeRow({
         title={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='min-w-0 flex-1 truncate text-left text-sm leading-5 text-foreground'
       >
         {label}
@@ -491,7 +480,6 @@ function FolderContents({
             onToggle={() => onToggleFolder(child, covered)}
             onOpen={() => onOpenFolder(child)}
             trackName='Create agent v2: open KB folder card'
-            trackKind='active'
           />
         );
       })}
@@ -505,7 +493,6 @@ function FolderContents({
           disabled={covered}
           onToggle={() => onToggleFile(node, file, covered)}
           trackName='Create agent v2: toggle KB file card'
-          trackKind='active'
         />
       ))}
     </div>
@@ -521,7 +508,6 @@ function ContentCard({
   onToggle,
   onOpen,
   trackName,
-  trackKind,
 }: {
   tile: ReactElement;
   name: string;
@@ -532,7 +518,6 @@ function ContentCard({
   /** Folders drill in on click; files have nothing below them, so they toggle. */
   onOpen?: () => void;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement {
   return (
     <div
@@ -548,7 +533,6 @@ function ContentCard({
         title={name}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left'
       >
         <span className='w-full truncate text-sm font-medium leading-5 text-foreground'>

@@ -155,7 +155,6 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
               data-track-category='XyneAI'
               data-track-name='PDF_PREVIEW'
-              data-track-kind='passive'
             >
               <Maximize2 size={12} />
               Preview
@@ -166,7 +165,6 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
               data-track-category='XyneAI'
               data-track-name='PDF_DOWNLOAD'
-              data-track-kind='passive'
             >
               <Download size={12} />
               Download
@@ -215,7 +213,6 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
           }}
           data-track-category='XyneAI'
           data-track-name='PDF_FULLSCREEN_VIEWER'
-          data-track-kind='passive'
         >
           {/* Header */}
           <div
@@ -261,7 +258,6 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
                 }}
                 data-track-category='XyneAI'
                 data-track-name='PDF_FS_DOWNLOAD'
-                data-track-kind='passive'
               >
                 <Download size={14} />
                 Download
@@ -281,7 +277,6 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
                 }}
                 data-track-category='XyneAI'
                 data-track-name='PDF_FS_CLOSE'
-                data-track-kind='passive'
               >
                 <X size={16} />
               </button>

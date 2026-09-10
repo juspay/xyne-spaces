@@ -2,7 +2,6 @@ import React from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import HuddleIcon from '../../icons/HuddleIcon';
-import type { InteractionKind } from '@xyne/shared';
 
 interface ActionButton {
   label: string;
@@ -13,7 +12,6 @@ interface ActionButton {
   disabled?: boolean;
   /** Distinct analytics event name; falls back to the generic Action_Modal_Button. */
   trackName?: string;
-  trackKind?: InteractionKind;
 }
 
 interface ActionModalProps {
@@ -91,7 +89,6 @@ export const ActionModal: React.FC<ActionModalProps> = ({
               data-testid={button.testId}
               data-track-category='CALLS'
               data-track-name={button.trackName ?? 'Action_Modal_Button'}
-              data-track-kind={button.trackKind}
               data-track-metadata={JSON.stringify({ buttonLabel: button.label, modalTitle: title })}
             >
               {button.label}

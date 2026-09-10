@@ -91,7 +91,6 @@ export const SocialMediaReplyComposer = ({
           className='block min-h-20 max-h-48 w-full resize-y bg-transparent px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
           data-track-category={trackingCategory}
           data-track-name='compose-reply'
-          data-track-kind='passive'
         />
         <div className='flex items-center justify-end gap-2 border-t border-border/50 p-2'>
           {maxLength !== undefined && (
@@ -114,7 +113,6 @@ export const SocialMediaReplyComposer = ({
             }`}
             data-track-category={trackingCategory}
             data-track-name='send-reply'
-            data-track-kind='active'
             aria-label='Send reply'
             data-ph-capture-attribute-track-id='desk_send_social_reply'
           >

@@ -319,7 +319,6 @@ const OrgMembersSection = ({
               className='px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary min-w-[120px]'
               data-track-category='Organisations'
               data-track-name='SelectOrgMemberRole'
-              data-track-kind='active'
             >
               <option value={OrgRole.MEMBER}>Member</option>
               <option value={OrgRole.GUEST}>Guest</option>
@@ -330,7 +329,6 @@ const OrgMembersSection = ({
               className='gap-2 bg-foreground text-background hover:bg-foreground/90'
               data-track-category='Organisations'
               data-track-name='AddOrgMember'
-              data-track-kind='active'
             >
               {isAdding ? (
                 <Loader2 className='w-4 h-4 animate-spin' />
@@ -381,7 +379,6 @@ const OrgMembersSection = ({
                         className='gap-1'
                         data-track-category='Organisations'
                         data-track-name='OpenOrgMemberRoleMenu'
-                        data-track-kind='passive'
                       >
                         {updatingRoleId === member.memberId ? (
                           <Loader2 className='w-3 h-3 animate-spin' />
@@ -399,7 +396,6 @@ const OrgMembersSection = ({
                           onClick={() => void handleUpdateRole(member.memberId, OrgRole.ADMIN)}
                           data-track-category='Organisations'
                           data-track-name='SetOrgMemberAdmin'
-                          data-track-kind='active'
                         >
                           <Shield className='w-4 h-4 mr-2' />
                           Admin
@@ -411,7 +407,6 @@ const OrgMembersSection = ({
                           disabled={!canDemote(member)}
                           data-track-category='Organisations'
                           data-track-name='SetOrgMemberMember'
-                          data-track-kind='active'
                         >
                           <User className='w-4 h-4 mr-2' />
                           Member
@@ -431,7 +426,6 @@ const OrgMembersSection = ({
                     className='text-destructive hover:text-destructive hover:bg-destructive/10'
                     data-track-category='Organisations'
                     data-track-name='RemoveOrgMember'
-                    data-track-kind='active'
                   >
                     {removingId === member.memberId ? (
                       <Loader2 className='w-4 h-4 animate-spin' />
@@ -647,7 +641,6 @@ export const OrganisationsScreen = (): ReactElement => {
                     className='gap-2'
                     data-track-category='Organisations'
                     data-track-name='ProvisionOrgEncryption'
-                    data-track-kind='active'
                   >
                     {isProvisioningEncryption ? (
                       <Loader2 className='w-4 h-4 animate-spin' />
@@ -664,7 +657,6 @@ export const OrganisationsScreen = (): ReactElement => {
                     onClick={() => setShowCreateDialog(true)}
                     data-track-category='Organisations'
                     data-track-name='OpenCreateOrgDialog'
-                    data-track-kind='passive'
                   >
                     <Plus className='w-4 h-4' />
                     Create New Org
@@ -730,7 +722,6 @@ export const OrganisationsScreen = (): ReactElement => {
                               )}
                               data-track-category='Organisations'
                               data-track-name='SelectCommunityJoinPolicy'
-                              data-track-kind='active'
                               data-track-metadata={JSON.stringify({ joinPolicy: option.value })}
                             >
                               <span
@@ -760,7 +751,6 @@ export const OrganisationsScreen = (): ReactElement => {
                         className='gap-2'
                         data-track-category='Organisations'
                         data-track-name='CreateCommunityWorkspace'
-                        data-track-kind='active'
                       >
                         {isCreatingCommunityWorkspace ? (
                           <Loader2 className='h-4 w-4 animate-spin' />
@@ -802,7 +792,6 @@ export const OrganisationsScreen = (): ReactElement => {
                             onClick={() => handleToggleExpand(org.orgId)}
                             data-track-category='Organisations'
                             data-track-name='ToggleOrgExpand'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ orgId: org.orgId })}
                           >
                             <div className='flex items-center gap-3'>
@@ -887,7 +876,6 @@ export const OrganisationsScreen = (): ReactElement => {
                   disabled={isCreatingOrg}
                   data-track-category='Organisations'
                   data-track-name='CloseCreateOrgDialog'
-                  data-track-kind='passive'
                 >
                   <X className='size-4' />
                 </Button>
@@ -948,7 +936,6 @@ export const OrganisationsScreen = (): ReactElement => {
                   size='sm'
                   data-track-category='Organisations'
                   data-track-name='CancelCreateOrg'
-                  data-track-kind='passive'
                 >
                   Cancel
                 </Button>
@@ -964,7 +951,6 @@ export const OrganisationsScreen = (): ReactElement => {
                   size='sm'
                   data-track-category='Organisations'
                   data-track-name='ConfirmCreateOrg'
-                  data-track-kind='active'
                 >
                   {isCreatingOrg ? (
                     <>

@@ -1,22 +1,5 @@
-/**
- * Global activity tracker.
- *
- * Any element carrying `data-track-category` + `data-track-name` is reported
- * on click / change / blur. Optional attributes:
- *  - `data-track-label`     explicit label (defaults to the element's text)
- *  - `data-track-metadata`  JSON object merged into `context_metadata`
- *  - `data-track-kind`      `active` (persists a write) | `passive` (read /
- *                           navigation). Declared per element; an element
- *                           without it is sent unclassified (`null`).
- */
 import { logger, Event as LogEvent } from '../../utils/logger';
-import {
-  Platform,
-  TriggerType,
-  ActivityEventPayload,
-  InteractionKind,
-  isInteractionKind,
-} from '@xyne/shared';
+import { Platform, TriggerType, ActivityEventPayload } from '@xyne/shared';
 import { websocketService } from '../clients/socketClient';
 import { authActor } from '../../machines/authMachine';
 import { isElectronApp } from '../../utils/electronApp';
@@ -30,29 +13,6 @@ interface ParsedTrackingData {
   eventName: string;
   eventLabel?: string;
   contextMetadata?: Record<string, unknown>;
-  interactionKind: InteractionKind | null;
-}
-
-const invalidKindWarned = new Set<string>();
-
-/** Validates a declared `data-track-kind`; anything else is sent as unclassified. */
-function resolveInteractionKind(
-  eventCategory: string,
-  eventName: string,
-  explicit: string | null | undefined,
-): InteractionKind | null {
-  if (explicit !== null && explicit !== undefined) {
-    if (isInteractionKind(explicit)) return explicit;
-    const key = `${eventCategory}/${eventName}`;
-    if (!invalidKindWarned.has(key)) {
-      invalidKindWarned.add(key);
-      logger.warn(LogEvent.FRONTEND_ERROR, {
-        type: 'invalid_track_kind',
-        message: `[ActivityTracking] Ignoring invalid data-track-kind "${explicit}" on ${key}`,
-      });
-    }
-  }
-  return null;
 }
 
 class GlobalClickTracker {
@@ -270,11 +230,6 @@ class GlobalClickTracker {
     const result: ParsedTrackingData = {
       eventCategory,
       eventName,
-      interactionKind: resolveInteractionKind(
-        eventCategory,
-        eventName,
-        element.getAttribute('data-track-kind'),
-      ),
     };
 
     if (eventLabel !== undefined) {
@@ -294,13 +249,8 @@ class GlobalClickTracker {
     eventName: string,
     eventLabel?: string,
     contextMetadata?: Record<string, unknown>,
-    interactionKind?: InteractionKind,
   ): void {
-    const data: ParsedTrackingData = {
-      eventCategory,
-      eventName,
-      interactionKind: resolveInteractionKind(eventCategory, eventName, interactionKind),
-    };
+    const data: ParsedTrackingData = { eventCategory, eventName };
     if (eventLabel !== undefined) {
       data.eventLabel = eventLabel;
     }
@@ -329,7 +279,6 @@ class GlobalClickTracker {
         event_name: data.eventName,
         url: window.location.pathname + window.location.hash,
         trigger_type: triggerType,
-        interaction_kind: data.interactionKind,
         platform: this.platform,
         timestamp: Date.now(),
       };

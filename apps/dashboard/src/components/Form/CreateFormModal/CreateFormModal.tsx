@@ -634,7 +634,6 @@ export const CreateFormModal = ({
                 className='flex h-7 items-center justify-center gap-2 rounded-[10px] p-2 text-base leading-[1.2] tracking-[-0.16px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
                 data-track-category='Forms'
                 data-track-name='EditForm'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ formId: form.id })}
               >
                 <PencilEditBox className='size-4' />
@@ -648,7 +647,6 @@ export const CreateFormModal = ({
               className='flex h-7 w-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='Forms'
               data-track-name='CloseFormModal'
-              data-track-kind='passive'
             >
               <MultipleCrossCancelDefault className='size-4' />
             </button>
@@ -802,7 +800,6 @@ export const CreateFormModal = ({
                       className='w-full'
                       data-track-category='Forms'
                       data-track-name='SelectContextType'
-                      data-track-kind='passive'
                     >
                       <SelectValue placeholder='Select a context type' />
                     </SelectTrigger>
@@ -847,7 +844,6 @@ export const CreateFormModal = ({
                       className='w-full'
                       data-track-category='Forms'
                       data-track-name='SelectEntityType'
-                      data-track-kind='passive'
                     >
                       <SelectValue placeholder='Select an entity type' />
                     </SelectTrigger>
@@ -958,7 +954,6 @@ export const CreateFormModal = ({
                               className='h-11 w-full rounded-[12px] px-2 py-3'
                               data-track-category='Forms'
                               data-track-name='SelectFieldType'
-                              data-track-kind='passive'
                             >
                               <SelectValue placeholder='Select a field type' />
                             </SelectTrigger>
@@ -998,7 +993,6 @@ export const CreateFormModal = ({
                             className='flex size-4 shrink-0 items-center justify-center text-destructive outline-none transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
                             data-track-category='Forms'
                             data-track-name='RemoveFormField'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ fieldIndex: index })}
                           >
                             <DeleteDustbin02 className='size-4' />
@@ -1055,7 +1049,6 @@ export const CreateFormModal = ({
                     className='flex w-full items-center justify-center gap-2 rounded-[12px] border border-dashed border-border bg-card px-2 py-3 text-sm font-[450] leading-[1.2] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring'
                     data-track-category='Forms'
                     data-track-name='AddFormField'
-                    data-track-kind='passive'
                   >
                     <PlusDefault className='size-4' />
                     Add new form field
@@ -1076,7 +1069,6 @@ export const CreateFormModal = ({
               type='button'
               data-track-category='Forms'
               data-track-name='CancelFormCreation'
-              data-track-kind='passive'
             >
               Cancel
             </Button>

@@ -1395,7 +1395,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
         <button
           data-track-category='CHAT_LIST'
           data-track-name='CLICK_NEW_MESSAGES_PILL'
-          data-track-kind='passive'
           onClick={handleNewMessagesScroll}
           className='cursor-pointer absolute top-6 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
         >
@@ -1411,7 +1410,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
         <button
           data-track-category='CHAT_LIST'
           data-track-name='CLICK_LATEST_MESSAGES_PILL'
-          data-track-kind='passive'
           onClick={() => handleLatestMessagesScroll()}
           className='cursor-pointer absolute bottom-6 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
         >
@@ -1428,7 +1426,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
           aria-label='Scroll to bottom'
           data-track-category='CHAT_LIST'
           data-track-name='SCROLL_TO_BOTTOM'
-          data-track-kind='passive'
         >
           <ArrowDown className='w-5 h-5 text-foreground' />
         </button>

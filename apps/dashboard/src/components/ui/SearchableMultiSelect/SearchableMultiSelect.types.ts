@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import type { InteractionKind } from '@xyne/shared';
 
 export interface SearchableMultiSelectOption {
   /** Stable identifier reported back through `onSelectedValuesChange`. */
@@ -53,5 +52,4 @@ export interface SearchableMultiSelectProps {
   /** Analytics attributes stamped on every option row. */
   trackCategory?: string;
   trackName?: string;
-  trackKind?: InteractionKind;
 }

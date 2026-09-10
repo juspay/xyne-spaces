@@ -93,7 +93,6 @@ export const AIComposerPanel = ({
               title='Open Ask AI sidebar'
               data-track-category='Support'
               data-track-name='OpenAskAISidebarFromComposer'
-              data-track-kind='passive'
             >
               <svg
                 width='14'
@@ -117,7 +116,6 @@ export const AIComposerPanel = ({
             aria-label='Close'
             data-track-category='Support'
             data-track-name='CloseAIComposerPanel'
-            data-track-kind='passive'
           >
             <X size={14} />
           </button>
@@ -154,7 +152,6 @@ export const AIComposerPanel = ({
               className='flex-1 bg-transparent text-sm outline-none resize-none leading-snug placeholder:text-muted-foreground/50 min-h-[20px] max-h-[120px] py-0.5'
               data-track-category='Support'
               data-track-name='AIComposerTextareaKeydown'
-              data-track-kind='passive'
             />
             <button
               type='button'
@@ -165,7 +162,6 @@ export const AIComposerPanel = ({
               aria-label='Submit'
               data-track-category='Support'
               data-track-name='SubmitAskAIInstruction'
-              data-track-kind='active'
             >
               <ArrowRight size={14} />
             </button>
@@ -231,7 +227,6 @@ export const AIRefineDropdown = ({
         aria-expanded={open}
         data-track-category='Support'
         data-track-name='ToggleAIRefineDropdown'
-        data-track-kind='passive'
       >
         <Wand2 size={14} />
       </button>
@@ -266,7 +261,6 @@ export const AIRefineDropdown = ({
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='Support'
                     data-track-name='QuickRewrite'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ action: action.id })}
                   >
                     <span className='text-muted-foreground'>{action.icon}</span>
@@ -293,7 +287,6 @@ export const AIRefineDropdown = ({
               className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
               data-track-category='Support'
               data-track-name='OpenAskAIFromDropdown'
-              data-track-kind='passive'
             >
               <span className='text-[#6276be]'>
                 <XyneAIStar size={14} />
@@ -313,7 +306,6 @@ export const AIRefineDropdown = ({
                 title={agentName ? `Rerun draft with ${agentName}` : 'Rerun draft'}
                 data-track-category='Support'
                 data-track-name='RerunDraftFromDropdown'
-                data-track-kind='active'
               >
                 <span className='text-muted-foreground'>
                   <RefreshCw size={14} />
@@ -333,7 +325,6 @@ export const AIRefineDropdown = ({
                 title='View sources in the AI sidebar'
                 data-track-category='Support'
                 data-track-name='SeeSourcesFromDropdown'
-                data-track-kind='passive'
               >
                 <span className='text-muted-foreground'>
                   <ExternalLink size={14} />

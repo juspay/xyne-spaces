@@ -149,7 +149,6 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
           aria-label='Close desk report'
           data-track-category='DeskReport'
           data-track-name='CloseButton'
-          data-track-kind='passive'
         >
           <X size={16} />
         </button>
@@ -186,7 +185,6 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   className='flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-60'
                   data-track-category='DeskReport'
                   data-track-name='DownloadReport'
-                  data-track-kind='passive'
                 >
                   <Download size={14} />
                   {downloading ? 'Downloading…' : 'Download'}
@@ -200,7 +198,6 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   className='flex items-center gap-1.5 rounded-[8px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60'
                   data-track-category='DeskReport'
                   data-track-name='GenerateNow'
-                  data-track-kind='active'
                   data-ph-capture-attribute-track-id='desk_report_generate'
                 >
                   <RefreshCw

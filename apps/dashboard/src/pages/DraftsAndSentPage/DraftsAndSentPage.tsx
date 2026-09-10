@@ -52,7 +52,6 @@ const DraftsAndSentPage = (): ReactElement => {
               onClick={() => handleTabChange(tab.value)}
               data-track-category='DRAFTS_AND_SENT_PAGE'
               data-track-name={`switch-tab-${tab.value}`}
-              data-track-kind='passive'
               className={cn(
                 'relative py-3 text-sm font-medium transition-colors',
                 activeTab === tab.value

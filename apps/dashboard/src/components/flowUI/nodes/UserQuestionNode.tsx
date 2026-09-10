@@ -248,7 +248,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                   value={typeof selectedAnswer === 'string' ? selectedAnswer : ''}
                   data-track-category='USER_QUESTION_ARTIFACT'
                   data-track-name='EDIT_OPEN_ENDED_ANSWER'
-                  data-track-kind='active'
                   onChange={event => updateAnswer(activeQuestion.id, event.target.value)}
                   placeholder={activeQuestion.placeholder ?? 'Type your answer…'}
                   disabled={disabled}
@@ -267,7 +266,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                     type='button'
                     data-track-category='USER_QUESTION_ARTIFACT'
                     data-track-name='SELECT_QUESTION_OPTION'
-                    data-track-kind='passive'
                     onClick={() => chooseOption(label)}
                     disabled={disabled}
                     className={cn(
@@ -301,7 +299,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                       value={customValue}
                       data-track-category='USER_QUESTION_ARTIFACT'
                       data-track-name='EDIT_CUSTOM_ANSWER'
-                      data-track-kind='active'
                       onChange={event => {
                         event.target.style.height = 'auto';
                         event.target.style.height = `${event.target.scrollHeight}px`;
@@ -323,7 +320,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                     type='button'
                     data-track-category='USER_QUESTION_ARTIFACT'
                     data-track-name='OPEN_CUSTOM_ANSWER'
-                    data-track-kind='passive'
                     onClick={() => {
                       setCustomOpen({ ...customOpen, [activeQuestion.id]: true });
                       window.requestAnimationFrame(() => customInputRef.current?.focus());
@@ -349,7 +345,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
           type='button'
           data-track-category='USER_QUESTION_ARTIFACT'
           data-track-name='SKIP_QUESTION'
-          data-track-kind='passive'
           onClick={skip}
           disabled={disabled}
           className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.06] disabled:cursor-not-allowed disabled:opacity-60'
@@ -362,7 +357,6 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
               type='button'
               data-track-category='USER_QUESTION_ARTIFACT'
               data-track-name='PREVIOUS_QUESTION'
-              data-track-kind='passive'
               onClick={() => setActiveIndex(activeIndex - 1)}
               disabled={disabled}
               className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.06] disabled:cursor-not-allowed disabled:opacity-60'

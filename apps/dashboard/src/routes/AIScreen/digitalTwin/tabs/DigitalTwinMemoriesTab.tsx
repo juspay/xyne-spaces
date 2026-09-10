@@ -45,7 +45,6 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
           ariaLabel='Search memories'
           trackCategory='Claw Agents'
           trackName='Digital Twin: search memories'
-          trackKind='passive'
           className='w-full'
         />
       </div>
@@ -57,7 +56,6 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
             onClick={() => setLegendOpen(o => !o)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin category legend toggle'
-            data-track-kind='passive'
             className='flex w-full items-center justify-between px-2.5 py-1.5 text-left'
           >
             <span className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>

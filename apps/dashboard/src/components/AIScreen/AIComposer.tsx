@@ -50,7 +50,6 @@ import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext'
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import useMeasure from '../../hooks/useMeasure';
-import type { InteractionKind } from '@xyne/shared';
 
 export interface AIComposerAttachment {
   id: string;
@@ -170,7 +169,6 @@ function ContextPill({
         className='ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground transition hover:bg-secondary hover:text-foreground'
         data-track-category='XyneAI'
         data-track-name='REMOVE_CONTEXT_PILL'
-        data-track-kind='active'
       >
         <X className='h-3 w-3' aria-hidden strokeWidth={2} />
       </button>
@@ -185,14 +183,12 @@ function ToolbarButton({
   onClick,
   active,
   trackName,
-  trackKind,
 }: {
   icon: ReactElement;
   label: string;
   onClick: () => void;
   active?: boolean;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement {
   return (
     <button
@@ -209,7 +205,6 @@ function ToolbarButton({
       )}
       data-track-category='XyneAI'
       data-track-name={trackName}
-      data-track-kind={trackKind}
     >
       {icon}
     </button>
@@ -700,7 +695,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             aria-label='Close context modal'
             data-track-category='XyneAI'
             data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
-            data-track-kind='passive'
           />
           <div className='absolute bottom-full left-0 right-0 z-20 px-2 pb-2'>
             <ContextPickerPanel
@@ -842,7 +836,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               )}
               data-track-category='XyneAI'
               data-track-name='ComposerInput'
-              data-track-kind='passive'
             />
             {isVoiceRecording && !value && (
               <div className='pointer-events-none absolute inset-0 flex select-none items-center gap-3 px-2 py-1'>
@@ -909,7 +902,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                     )}
                     data-track-category='XyneAI'
                     data-track-name='OPEN_PLUS_MENU'
-                    data-track-kind='passive'
                   >
                     <PlusDefault className='h-4 w-4' aria-hidden />
                   </button>
@@ -935,7 +927,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
                 trackName='OPEN_CONTEXT_MODAL'
-                trackKind='passive'
               />
               {/* Locked indicator, not a toggle — only rendered when the
                   selected agent is configured as an "Instant Agent"
@@ -975,7 +966,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'
                   data-track-category='XyneAI'
                   data-track-name='STOP_GENERATION'
-                  data-track-kind='active'
                 >
                   <Square className='h-2.5 w-2.5 fill-current' aria-hidden strokeWidth={0} />
                 </button>
@@ -988,7 +978,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   title='Send'
                   data-track-category='XyneAI'
                   data-track-name='SEND_MESSAGE'
-                  data-track-kind='active'
                   className={cn(
                     'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}

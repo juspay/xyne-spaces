@@ -27,7 +27,6 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
         onClick={onClose}
         data-track-category='Tickets'
         data-track-name='CloseMappedTicketModal'
-        data-track-kind='passive'
         onKeyDown={(e): void => {
           if (e.key === 'Escape') onClose();
         }}

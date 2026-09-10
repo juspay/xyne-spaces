@@ -70,7 +70,6 @@ export const AddSectionForm = ({
           aria-label='Close'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CLOSE_RENAME_SECTION'
-          data-track-kind='passive'
           className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <X className='size-5' />
@@ -88,12 +87,7 @@ export const AddSectionForm = ({
               : 'border-border focus-within:ring-2 focus-within:ring-ring',
           )}
         >
-          <SectionEmojiPicker
-            value={emoji}
-            onChange={setEmoji}
-            trackName='RENAME_SECTION_EMOJI'
-            trackKind='active'
-          />
+          <SectionEmojiPicker value={emoji} onChange={setEmoji} trackName='RENAME_SECTION_EMOJI' />
           <input
             id='section-name'
             value={name}
@@ -119,7 +113,6 @@ export const AddSectionForm = ({
             aria-invalid={showError}
             data-track-category='CHAT_SIDEBAR'
             data-track-name='RENAME_SECTION_NAME'
-            data-track-kind='active'
             className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
           />
         </div>
@@ -133,7 +126,6 @@ export const AddSectionForm = ({
           onClick={onCancel}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CANCEL_ADD_SECTION'
-          data-track-kind='passive'
         >
           Cancel
         </Button>

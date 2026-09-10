@@ -205,7 +205,6 @@ export const BoardsTable = ({
                   onClick={onBoardClick ? () => onBoardClick(mainBoard) : undefined}
                   data-track-category='Board'
                   data-track-name='Open_Release_Group_Board_Row'
-                  data-track-kind='passive'
                 >
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='flex items-center gap-2'>
@@ -241,7 +240,6 @@ export const BoardsTable = ({
                         onClick={e => handleCopyId(e, mainBoard.id)}
                         data-track-category='Board'
                         data-track-name='COPY_BOARD_ID'
-                        data-track-kind='passive'
                         title='Copy board ID'
                       >
                         {copiedBoardId === mainBoard.id ? <Check size={12} /> : <Copy size={12} />}
@@ -258,7 +256,6 @@ export const BoardsTable = ({
                     onClick={e => e.stopPropagation()}
                     data-track-category='Board'
                     data-track-name='Board_Actions_Container'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ boardId: mainBoard.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
@@ -268,7 +265,6 @@ export const BoardsTable = ({
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           boardId: mainBoard.id,
                           boardName: mainBoard.name,
@@ -307,7 +303,6 @@ export const BoardsTable = ({
                   onClick={onBoardClick ? () => onBoardClick(board) : undefined}
                   data-track-category='Board'
                   data-track-name='Open_App_Board_Row'
-                  data-track-kind='passive'
                 >
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='flex items-center gap-2 pl-6'>
@@ -343,7 +338,6 @@ export const BoardsTable = ({
                         onClick={e => handleCopyId(e, board.id)}
                         data-track-category='Board'
                         data-track-name='COPY_BOARD_ID'
-                        data-track-kind='passive'
                         title='Copy board ID'
                       >
                         {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
@@ -360,7 +354,6 @@ export const BoardsTable = ({
                     onClick={e => e.stopPropagation()}
                     data-track-category='Board'
                     data-track-name='Board_Actions_Container'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
@@ -370,7 +363,6 @@ export const BoardsTable = ({
                         data-testid='edit-board-button'
                         data-track-category='Board'
                         data-track-name='Edit_Board_Table'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           boardId: board.id,
                           boardName: board.name,
@@ -394,7 +386,6 @@ export const BoardsTable = ({
                 onClick={onBoardClick ? () => onBoardClick(board) : undefined}
                 data-track-category='Board'
                 data-track-name='Open_Board_Row'
-                data-track-kind='passive'
               >
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
@@ -422,7 +413,6 @@ export const BoardsTable = ({
                       onClick={e => handleCopyId(e, board.id)}
                       data-track-category='Board'
                       data-track-name='COPY_BOARD_ID'
-                      data-track-kind='passive'
                       title='Copy board ID'
                     >
                       {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
@@ -447,7 +437,6 @@ export const BoardsTable = ({
                     }}
                     data-track-category='Board'
                     data-track-name='Board_Actions_Container'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
                     {board.boardType === BoardType.FLOW && onClone && (
@@ -456,7 +445,6 @@ export const BoardsTable = ({
                         onClick={() => onClone(board)}
                         data-track-category='Board'
                         data-track-name='Clone_Flow_Board_Table'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           boardId: board.id,
                           boardName: board.name,
@@ -472,7 +460,6 @@ export const BoardsTable = ({
                       data-testid='edit-board-button'
                       data-track-category='Board'
                       data-track-name='Edit_Board_Table'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         boardId: board.id,
                         boardName: board.name,
@@ -488,7 +475,6 @@ export const BoardsTable = ({
                         data-testid='copy-board-config-button'
                         data-track-category='Board'
                         data-track-name='Copy_Board_Config_Table'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({
                           boardId: board.id,
                           boardName: board.name,

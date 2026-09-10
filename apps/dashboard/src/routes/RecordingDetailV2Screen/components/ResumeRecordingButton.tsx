@@ -36,7 +36,6 @@ export const ResumeRecordingButton = ({
               aria-label='Resume recording'
               data-track-category='RecordingDetailV2'
               data-track-name='resume_recording_floating'
-              data-track-kind='active'
             >
               <PlaySmall size={14} variant='Solid' />
               Resume recording

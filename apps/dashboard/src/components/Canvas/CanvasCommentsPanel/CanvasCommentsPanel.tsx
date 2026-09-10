@@ -416,7 +416,6 @@ function CanvasCommentThreadSection({
                       size='iconSm'
                       data-track-category='CANVAS'
                       data-track-name='open_comment_actions_menu'
-                      data-track-kind='passive'
                       className='size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100'
                       aria-label='Comment actions'
                     >
@@ -428,7 +427,6 @@ function CanvasCommentThreadSection({
                       onClick={() => onSetEditingCommentId(comment.id)}
                       data-track-category='CANVAS'
                       data-track-name='edit_comment'
-                      data-track-kind='active'
                     >
                       <Pencil className='size-4' />
                       Edit
@@ -438,7 +436,6 @@ function CanvasCommentThreadSection({
                       onClick={() => onDeleteComment(comment.id)}
                       data-track-category='CANVAS'
                       data-track-name='delete_comment'
-                      data-track-kind='active'
                     >
                       <Trash2 className='size-4' />
                       Delete
@@ -493,7 +490,6 @@ function CanvasCommentThreadSection({
                     onClick={() => onSetEditingCommentId(null)}
                     data-track-category='CANVAS'
                     data-track-name='cancel_edit_comment'
-                    data-track-kind='passive'
                   >
                     Cancel
                   </Button>
@@ -529,7 +525,6 @@ function CanvasCommentThreadSection({
           onClick={() => onSelectBlock(thread.blockId)}
           data-track-category='CANVAS'
           data-track-name='go_to_comment_anchor'
-          data-track-kind='passive'
           className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium'
         >
           <ArrowRight className='size-3.5' />
@@ -543,7 +538,6 @@ function CanvasCommentThreadSection({
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.RESOLVED)}
             data-track-category='CANVAS'
             data-track-name='resolve_comment_thread'
-            data-track-kind='active'
             className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <Check className='size-3.5' />
@@ -557,7 +551,6 @@ function CanvasCommentThreadSection({
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.OPEN)}
             data-track-category='CANVAS'
             data-track-name='reopen_comment_thread'
-            data-track-kind='active'
             className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <RotateCcw className='size-3.5' />
@@ -793,7 +786,6 @@ export function CanvasCommentsPanel({
             onClick={onClose}
             data-track-category='CANVAS'
             data-track-name='close_comments_panel'
-            data-track-kind='passive'
             aria-label='Close comments'
             className='size-7 shrink-0 text-muted-foreground'
           >
@@ -814,7 +806,6 @@ export function CanvasCommentsPanel({
             type='button'
             data-track-category='CANVAS'
             data-track-name='comment_panel_status_filter'
-            data-track-kind='passive'
             onClick={() => setThreadStatusFilter(tab.value)}
             aria-pressed={threadStatusFilter === tab.value}
             className={cn(

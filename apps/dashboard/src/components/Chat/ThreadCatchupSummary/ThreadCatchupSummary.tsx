@@ -42,7 +42,6 @@ export function ThreadCatchupSummaryButton({
         aria-label='Show thread summary'
         data-track-category='THREAD_PANEL'
         data-track-name='TOGGLE_CATCHUP_SUMMARY'
-        data-track-kind='passive'
         className={cn(
           'relative flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-border',
           isRecommended && 'ring-2 ring-pink-400',
@@ -100,7 +99,6 @@ export function ThreadCatchupSummaryPanel({
           onClick={onClose}
           data-track-category='THREAD_PANEL'
           data-track-name='DISMISS_CATCHUP_SUMMARY'
-          data-track-kind='passive'
           aria-label='Dismiss summary'
         >
           <X size={14} />

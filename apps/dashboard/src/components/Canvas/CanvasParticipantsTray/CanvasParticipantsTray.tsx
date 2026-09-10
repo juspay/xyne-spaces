@@ -108,7 +108,6 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
             className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
             data-track-category='CANVAS'
             data-track-name='Close_Participants_Tray'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId })}
           >
             <X className='h-4 w-4 text-foreground' />
@@ -137,7 +136,6 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                 className='relative w-12 h-6 rounded-full transition-all duration-200 bg-muted cursor-pointer'
                 data-track-category='CANVAS'
                 data-track-name='Open_Collaborative_Mode_Warning'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId })}
               >
                 <span
@@ -240,7 +238,6 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                 onClick={() => setShowCollaborativeWarning(false)}
                 data-track-category='CANVAS'
                 data-track-name='Cancel_Enable_Collaborative_Mode'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId })}
               >
                 Cancel
@@ -253,7 +250,6 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
                 }}
                 data-track-category='CANVAS'
                 data-track-name='Enable_Collaborative_Mode'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId })}
               >
                 Enable Collaborative Mode

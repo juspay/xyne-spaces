@@ -235,7 +235,6 @@ export function AutomationsList({
             onClick={onCreate}
             data-track-category='automations-list'
             data-track-name='CREATE_AUTOMATION'
-            data-track-kind='active'
             className='shrink-0 font-semibold'
           >
             <PlusDefault className='size-4' />
@@ -357,7 +356,6 @@ export function AutomationsList({
               onClick={() => setPendingDisable(null)}
               data-track-category='automations-list'
               data-track-name='disable-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -374,7 +372,6 @@ export function AutomationsList({
               }}
               data-track-category='automations-list'
               data-track-name='disable-keep-queued'
-              data-track-kind='passive'
             >
               Let them finish
             </Button>
@@ -392,7 +389,6 @@ export function AutomationsList({
               }}
               data-track-category='automations-list'
               data-track-name='disable-cancel-queued'
-              data-track-kind='passive'
             >
               Stop them
             </Button>
@@ -420,7 +416,6 @@ export function AutomationsList({
               onClick={() => setPendingDelete(null)}
               data-track-category='automations-list'
               data-track-name='delete-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -438,7 +433,6 @@ export function AutomationsList({
               }}
               data-track-category='automations-list'
               data-track-name='delete-confirm'
-              data-track-kind='active'
             >
               Delete
             </Button>
@@ -489,7 +483,6 @@ function SortDropdown({
         size='sm'
         data-track-category='automations-list'
         data-track-name='open-sort-menu'
-        data-track-kind='passive'
         className='h-8 flex-shrink-0 gap-1.5 text-xs'
         aria-label='Sort automations'
       >
@@ -503,7 +496,6 @@ function SortDropdown({
             value={opt.value}
             data-track-category='automations-list'
             data-track-name='select-sort-option'
-            data-track-kind='passive'
           >
             {opt.label}
           </SelectItem>
@@ -537,7 +529,6 @@ function PaginationBar({
             size='sm'
             data-track-category='automations-list'
             data-track-name='open-page-size-menu'
-            data-track-kind='passive'
             className='h-8 w-[68px] text-xs'
             aria-label='Rows per page'
           >
@@ -550,7 +541,6 @@ function PaginationBar({
                 value={String(size)}
                 data-track-category='automations-list'
                 data-track-name='select-page-size'
-                data-track-kind='passive'
               >
                 {size}
               </SelectItem>
@@ -570,7 +560,6 @@ function PaginationBar({
           onClick={() => onPageChange(page - 1)}
           data-track-category='automations-list'
           data-track-name='page-prev'
-          data-track-kind='passive'
         >
           <ChevronLeft className='size-4' />
         </Button>
@@ -582,7 +571,6 @@ function PaginationBar({
           onClick={() => onPageChange(page + 1)}
           data-track-category='automations-list'
           data-track-name='page-next'
-          data-track-kind='passive'
         >
           <ChevronRight className='size-4' />
         </Button>
@@ -620,7 +608,6 @@ function EmptyState({
         onClick={onCreate}
         data-track-category='automations-list'
         data-track-name='CREATE_AUTOMATION'
-        data-track-kind='active'
       >
         <PlusDefault className='size-4' />
         Create your first automation
@@ -705,7 +692,6 @@ function AutomationRow({
         onKeyDown={handleCardKeyDown}
         data-track-category='automations-list'
         data-track-name='row-open'
-        data-track-kind='passive'
         className={cn(
           'group flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-background px-4 py-3 transition-colors',
           'hover:border-foreground/20 hover:bg-muted/40',
@@ -728,7 +714,6 @@ function AutomationRow({
             aria-label={`${automation.name}, ${automation.status.toLowerCase()}. ${summary}. Press Enter to edit.`}
             data-track-category='automations-list'
             data-track-name='row-title-open'
-            data-track-kind='passive'
             className={cn(
               'flex flex-1 flex-col gap-1 min-w-0 cursor-pointer text-left',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 rounded-md',
@@ -777,7 +762,6 @@ function AutomationRow({
                   onCheckedChange={onToggleActive}
                   data-track-category='automations-list'
                   data-track-name='row-toggle-active'
-                  data-track-kind='active'
                 />
               </Tooltip>
             ) : null}
@@ -797,7 +781,6 @@ function AutomationRow({
                   title='More actions'
                   data-track-category='automations-list'
                   data-track-name='row-menu-open'
-                  data-track-kind='passive'
                   className={cn(
                     'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                     'hover:text-foreground hover:bg-accent/40',

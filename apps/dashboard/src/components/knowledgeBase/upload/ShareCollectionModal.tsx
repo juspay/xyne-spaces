@@ -492,7 +492,6 @@ export const ShareCollectionModal = ({
             disabled={isLoading}
             data-track-category='knowledge-base'
             data-track-name='close-modal'
-            data-track-kind='passive'
           >
             <X size={20} className='text-muted-foreground' />
           </button>
@@ -552,7 +551,6 @@ export const ShareCollectionModal = ({
                   }
                   data-track-category='knowledge-base'
                   data-track-name='share-collection-search-input'
-                  data-track-kind='passive'
                   className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
                 />
               </div>
@@ -569,7 +567,6 @@ export const ShareCollectionModal = ({
                         }}
                         data-track-category='knowledge-base'
                         data-track-name='share-collection-add-candidate'
-                        data-track-kind='active'
                         className='w-full flex items-center gap-3 px-2 py-1.5 rounded-md text-left hover:bg-muted'
                       >
                         {c.kind === 'user' ? (
@@ -640,7 +637,6 @@ export const ShareCollectionModal = ({
                             disabled={isLoading}
                             data-track-category='knowledge-base'
                             data-track-name='set-viewer-permission'
-                            data-track-kind='active'
                             className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
@@ -661,7 +657,6 @@ export const ShareCollectionModal = ({
                             disabled={isLoading}
                             data-track-category='knowledge-base'
                             data-track-name='set-editor-permission'
-                            data-track-kind='active'
                             className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
@@ -682,7 +677,6 @@ export const ShareCollectionModal = ({
                             disabled={isLoading}
                             data-track-category='knowledge-base'
                             data-track-name='set-owner-permission'
-                            data-track-kind='active'
                             className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
@@ -703,7 +697,6 @@ export const ShareCollectionModal = ({
                           aria-label={`Remove ${user.name || user.email || 'user'}`}
                           data-track-category='knowledge-base'
                           data-track-name='remove-pending-user'
-                          data-track-kind='active'
                           className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
                         >
                           <X size={14} />
@@ -737,7 +730,6 @@ export const ShareCollectionModal = ({
                             disabled={isLoading}
                             data-track-category='knowledge-base'
                             data-track-name='set-group-viewer-permission'
-                            data-track-kind='active'
                             className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
@@ -758,7 +750,6 @@ export const ShareCollectionModal = ({
                             disabled={isLoading}
                             data-track-category='knowledge-base'
                             data-track-name='set-group-editor-permission'
-                            data-track-kind='active'
                             className={`
                           px-3 py-1.5 text-xs font-medium rounded-md transition-colors
                           ${
@@ -779,7 +770,6 @@ export const ShareCollectionModal = ({
                           aria-label={`Remove ${group.name}`}
                           data-track-category='knowledge-base'
                           data-track-name='remove-pending-group'
-                          data-track-kind='active'
                           className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
                         >
                           <X size={14} />
@@ -816,7 +806,6 @@ export const ShareCollectionModal = ({
                           aria-label={`Remove ${channel.name}`}
                           data-track-category='knowledge-base'
                           data-track-name='remove-pending-channel'
-                          data-track-kind='active'
                           className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
                         >
                           <X size={14} />
@@ -909,7 +898,6 @@ export const ShareCollectionModal = ({
                               aria-label={`Remove ${row.channel?.name || 'channel'} access`}
                               data-track-category='knowledge-base'
                               data-track-name='access-remove-channel'
-                              data-track-kind='active'
                               className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-red-600'
                             >
                               <X size={14} />
@@ -934,7 +922,6 @@ export const ShareCollectionModal = ({
                               aria-label={`Change role for ${row.userGroupId ? row.userGroup?.name || 'group' : row.user?.name || 'user'}`}
                               data-track-category='knowledge-base'
                               data-track-name='access-change-role'
-                              data-track-kind='active'
                               className='inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-foreground transition hover:bg-muted'
                             >
                               {roleLabel}
@@ -1016,7 +1003,6 @@ export const ShareCollectionModal = ({
                       aria-label='Collection visibility'
                       data-track-category='knowledge-base'
                       data-track-name='change-collection-visibility'
-                      data-track-kind='active'
                       className='inline-flex items-center gap-1 rounded-md px-2 py-1 -ml-2 text-sm font-medium text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent'
                     >
                       {visibility === 'public' ? 'Public' : 'Private'}
@@ -1030,7 +1016,6 @@ export const ShareCollectionModal = ({
                       onClick={() => pickVisibility('public')}
                       data-track-category='knowledge-base'
                       data-track-name='SET_COLLECTION_PUBLIC'
-                      data-track-kind='active'
                       className='flex items-start gap-2 cursor-pointer'
                     >
                       <Globe size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
@@ -1048,7 +1033,6 @@ export const ShareCollectionModal = ({
                       onClick={() => pickVisibility('private')}
                       data-track-category='knowledge-base'
                       data-track-name='SET_COLLECTION_PRIVATE'
-                      data-track-kind='active'
                       className='flex items-start gap-2 cursor-pointer'
                     >
                       <Lock size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
@@ -1096,7 +1080,6 @@ export const ShareCollectionModal = ({
               onClick={handleCopyLink}
               data-track-category='knowledge-base'
               data-track-name='share-collection-copy-link'
-              data-track-kind='passive'
               className='inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 -ml-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-primary'
             >
               <Link2 size={16} />
@@ -1119,7 +1102,6 @@ export const ShareCollectionModal = ({
                 trackId='share_collection'
                 data-track-category='knowledge-base'
                 data-track-name='SHARE_COLLECTION'
-                data-track-kind='active'
                 className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               >
                 <Share2 size={16} />
@@ -1131,7 +1113,6 @@ export const ShareCollectionModal = ({
               onClick={handleClose}
               data-track-category='knowledge-base'
               data-track-name='CANCEL_SHARE_COLLECTION'
-              data-track-kind='passive'
             >
               Done
             </Button>

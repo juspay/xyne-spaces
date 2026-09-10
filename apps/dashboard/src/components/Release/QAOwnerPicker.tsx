@@ -54,7 +54,6 @@ export const QAOwnerPicker = ({
       onClick={e => e.stopPropagation()}
       data-track-category='Release'
       data-track-name='OPEN_QA_OWNER_PICKER'
-      data-track-kind='passive'
       onKeyDown={e => e.stopPropagation()}
       className='text-xs px-2 py-1 rounded border border-border hover:bg-muted transition-colors truncate max-w-[120px]'
       title={currentUserName ?? 'Unassigned'}
@@ -92,7 +91,6 @@ export const QAOwnerPicker = ({
             onClick={() => handleSelect(null)}
             data-track-category='Release'
             data-track-name='CLEAR_QA_OWNER'
-            data-track-kind='passive'
             data-ph-capture-attribute-track-id='clear_qa_owner'
           >
             Clear
@@ -109,7 +107,6 @@ export const QAOwnerPicker = ({
             onClick={() => handleSelect(u.id)}
             data-track-category='Release'
             data-track-name='SELECT_QA_OWNER'
-            data-track-kind='active'
             data-ph-capture-attribute-track-id='select_qa_owner'
           >
             {u.name ?? u.email}

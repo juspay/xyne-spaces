@@ -274,7 +274,6 @@ const SlackComposer = ({
                 className='text-xs text-muted-foreground underline hover:text-foreground cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='disconnect-slack-user'
-                data-track-kind='active'
                 data-ph-capture-attribute-track-id='disconnect_slack_user'
               >
                 Disconnect
@@ -290,7 +289,6 @@ const SlackComposer = ({
                 className='text-xs text-primary underline hover:text-primary/80 cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='connect-slack-user'
-                data-track-kind='active'
                 data-ph-capture-attribute-track-id='connect_slack_user'
               >
                 Connect your Slack
@@ -311,7 +309,6 @@ const SlackComposer = ({
         }`}
         data-track-category='slack-composer'
         data-track-name='compose-reply'
-        data-track-kind='passive'
         {...dragHandlers}
       >
         {isDraggingFiles && (
@@ -374,7 +371,6 @@ const SlackComposer = ({
                   aria-label={`Remove ${a.name}`}
                   data-track-category='slack-composer'
                   data-track-name='remove-attachment'
-                  data-track-kind='active'
                 >
                   <X size={12} />
                 </button>
@@ -400,7 +396,6 @@ const SlackComposer = ({
               className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category='slack-composer'
               data-track-name='attach-file'
-              data-track-kind='active'
               aria-label='Attach files'
             >
               {uploading ? <Loader2 size={16} className='animate-spin' /> : <Paperclip size={16} />}
@@ -421,7 +416,6 @@ const SlackComposer = ({
                 }`}
                 data-track-category='slack-composer'
                 data-track-name='send-reply'
-                data-track-kind='active'
                 aria-label='Send reply'
                 data-ph-capture-attribute-track-id='send_slack_reply'
               >

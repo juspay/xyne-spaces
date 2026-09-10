@@ -71,7 +71,6 @@ export const DeskConnectionCard = ({
             )}
             data-track-category={trackCategory}
             data-track-name='open-disconnect-confirm'
-            data-track-kind='passive'
           >
             <Unplug size={14} className='shrink-0' />
             Disconnect
@@ -90,7 +89,6 @@ export const DeskConnectionCard = ({
               )}
               data-track-category={trackCategory}
               data-track-name='reconnect'
-              data-track-kind='passive'
             >
               <Plug size={14} className='shrink-0' />
               {isReconnecting ? 'Reconnecting…' : 'Reconnect'}

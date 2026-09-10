@@ -696,7 +696,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           onClick={onCancel}
           data-track-category='FORWARD_MESSAGE_MODAL'
           data-track-name='CLOSE_FORWARD_MODAL'
-          data-track-kind='passive'
         >
           <X className='h-4 w-4' />
           <span className='sr-only'>Close</span>
@@ -737,7 +736,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                     aria-label={`Remove ${target.name}`}
                     data-track-category='FORWARD_MESSAGE_MODAL'
                     data-track-name='REMOVE_FORWARD_TARGET'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       targetId: target.id,
                       targetName: target.name,
@@ -901,7 +899,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             disabled={form.state.isSubmitting}
             data-track-category='FORWARD_MESSAGE_MODAL'
             data-track-name='CANCEL_FORWARD'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -911,7 +908,6 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             disabled={selectedTargets.length === 0 || form.state.isSubmitting}
             data-track-category='FORWARD_MESSAGE_MODAL'
             data-track-name='FORWARD_MESSAGE'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ targetCount: selectedTargets })}
             trackId='forward_message'
           >

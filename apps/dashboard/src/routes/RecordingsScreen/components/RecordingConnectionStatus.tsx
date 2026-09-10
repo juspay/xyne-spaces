@@ -92,7 +92,6 @@ export function RecordingConnectionWarningModal({
             className='px-4 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors'
             data-track-category='RecordingsScreen'
             data-track-name='dismiss_connection_warning'
-            data-track-kind='passive'
           >
             Dismiss
           </button>

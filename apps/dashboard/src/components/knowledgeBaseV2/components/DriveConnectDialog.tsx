@@ -45,7 +45,6 @@ export const DriveConnectDialog = (): ReactElement => {
             onClick={close}
             data-track-category='knowledge-base'
             data-track-name='drive-connect-cancel'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -55,7 +54,6 @@ export const DriveConnectDialog = (): ReactElement => {
             disabled={!pending}
             data-track-category='knowledge-base'
             data-track-name='drive-connect'
-            data-track-kind='active'
           >
             <HardDriveDownload size={16} />
             Grant access to Drive

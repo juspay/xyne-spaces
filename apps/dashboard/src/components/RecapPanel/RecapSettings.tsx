@@ -98,7 +98,6 @@ const ChannelListItem = ({
           }}
           data-track-category='RECAP_SETTINGS'
           data-track-name='TOGGLE_CHANNEL'
-          data-track-kind='passive'
         >
           <div
             className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
@@ -135,7 +134,6 @@ const ChannelListItem = ({
                 title={customPrompt ? 'Edit custom recap prompt' : 'Add custom recap prompt'}
                 data-track-category='RECAP_SETTINGS'
                 data-track-name='OPEN_CUSTOM_PROMPT_POPOVER'
-                data-track-kind='passive'
               >
                 <Pencil size={14} className={customPrompt ? 'text-blue-500' : ''} />
               </button>
@@ -161,7 +159,6 @@ const ChannelListItem = ({
                 className='w-full bg-muted/50 border border-input rounded-md px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed'
                 data-track-category='RECAP_SETTINGS'
                 data-track-name='CUSTOM_PROMPT_INPUT'
-                data-track-kind='passive'
               />
               <div className='flex justify-end mt-1'>
                 <span
@@ -182,7 +179,6 @@ const ChannelListItem = ({
                     className='px-2.5 py-1 text-xs rounded border border-input text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='CLEAR_CUSTOM_PROMPT'
-                    data-track-kind='active'
                   >
                     Clear
                   </button>
@@ -195,7 +191,6 @@ const ChannelListItem = ({
                     className='px-2.5 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 transition-colors font-medium'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='SAVE_CUSTOM_PROMPT'
-                    data-track-kind='active'
                   >
                     Save
                   </button>
@@ -383,7 +378,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
             title='Close'
             data-track-category='RECAP_SETTINGS'
             data-track-name='CLOSE_MODAL'
-            data-track-kind='passive'
           >
             <X size={20} />
           </button>
@@ -410,7 +404,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
               className='pl-10'
               data-track-category='RECAP_SETTINGS'
               data-track-name='SEARCH_INPUT'
-              data-track-kind='passive'
             />
           </div>
 
@@ -446,7 +439,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
                     className='w-full px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-md text-left transition-colors'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='TOGGLE_CHANNEL_EXPANSION'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ isExpanded })}
                   >
                     {isExpanded ? 'See less' : `See ${hiddenCount} more`}
@@ -464,7 +456,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
             onClick={handleCancel}
             data-track-category='RECAP_SETTINGS'
             data-track-name='CANCEL_SELECTION'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -472,7 +463,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
             onClick={() => void handleSave()}
             data-track-category='RECAP_SETTINGS'
             data-track-name='SAVE_SUBSCRIPTIONS'
-            data-track-kind='active'
             trackId='save_recap_subscriptions'
           >
             {hasExistingChannels

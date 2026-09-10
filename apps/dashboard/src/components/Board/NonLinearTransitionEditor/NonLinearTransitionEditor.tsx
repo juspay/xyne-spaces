@@ -436,7 +436,6 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
         onClick={() => data?.onSelectEdge(id)}
         data-track-category='board_stage_config'
         data-track-name='select_transition_edge'
-        data-track-kind='passive'
       />
       <EdgeLabelRenderer>
         <div
@@ -453,7 +452,6 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
             onClick={() => data?.onSelectEdge(id)}
             data-track-category='board_stage_config'
             data-track-name='open_transition_config'
-            data-track-kind='passive'
             className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm transition-all ${
               isHighlighted
                 ? 'bg-[#6276be] border-[#6276be] text-white'
@@ -529,7 +527,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
           onClick={onClose}
           data-track-category='board_stage_config'
           data-track-name='close_stage_actions'
-          data-track-kind='passive'
           className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0'
         >
           <X size={13} />
@@ -549,7 +546,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
             placeholder='Stage name...'
             data-track-category='board_stage_config'
             data-track-name='input_stage_name'
-            data-track-kind='passive'
             className='w-full text-[12px] font-medium text-foreground bg-background border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#6276be]'
           />
         </div>
@@ -605,7 +601,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
                 placeholder='Hours'
                 data-track-category='board_stage_config'
                 data-track-name='input_stage_eta'
-                data-track-kind='passive'
                 className='flex-1 text-[12px] text-foreground bg-transparent border-none focus:outline-none p-0'
               />
               <span className='text-[12px] text-muted-foreground'>hrs</span>
@@ -616,7 +611,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
               onClick={onStartEditEta}
               data-track-category='board_stage_config'
               data-track-name='edit_stage_eta'
-              data-track-kind='active'
               className='w-full flex items-center gap-2 text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground hover:border-[#6276be] transition-colors text-left'
             >
               <Timer size={13} className='text-muted-foreground shrink-0' />
@@ -637,7 +631,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
             onClick={() => (hasAllIncoming ? onDisallowAllIncoming() : onAllowAllIncoming())}
             data-track-category='board_stage_config'
             data-track-name='toggle_allow_all_incoming'
-            data-track-kind='passive'
             className='flex items-start gap-2.5 cursor-pointer select-none group text-left w-full'
           >
             <span
@@ -662,7 +655,6 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
           onClick={onDelete}
           data-track-category='board_stage_config'
           data-track-name='delete_stage'
-          data-track-kind='active'
           className='w-full flex items-center justify-center gap-[6px] text-[12px] font-medium text-red-500 hover:bg-red-50 rounded-lg py-1.5 transition-colors'
         >
           <Trash2 size={13} />
@@ -752,7 +744,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
             onClick={() => (props.isAllEdge ? setShowDeleteChecklist(true) : props.onRemoveEdge())}
             data-track-category='board_stage_config'
             data-track-name='remove_transition'
-            data-track-kind='active'
             className='p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
             title='Remove'
           >
@@ -763,7 +754,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
             onClick={onClose}
             data-track-category='board_stage_config'
             data-track-name='close_transition_config'
-            data-track-kind='passive'
             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors'
           >
             <Save size={13} />
@@ -793,7 +783,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   }}
                   data-track-category='board_stage_config'
                   data-track-name='toggle_all_edge_delete_source'
-                  data-track-kind='passive'
                 />
                 {source.name}
               </label>
@@ -805,7 +794,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
               onClick={() => setShowDeleteChecklist(false)}
               data-track-category='board_stage_config'
               data-track-name='cancel_all_edge_delete'
-              data-track-kind='passive'
               className='flex-1 py-1.5 rounded-lg border border-border text-[12px] text-muted-foreground hover:bg-muted transition-colors'
             >
               Cancel
@@ -818,7 +806,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
               disabled={checkedSources.size === 0}
               data-track-category='board_stage_config'
               data-track-name='confirm_all_edge_delete'
-              data-track-kind='active'
               className='flex-1 py-1.5 rounded-lg bg-red-500 text-white text-[12px] font-medium hover:bg-red-600 disabled:opacity-50 transition-colors'
             >
               Remove selected
@@ -843,7 +830,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     onClick={onOpenEdgeForm}
                     data-track-category='board_stage_config'
                     data-track-name='edit_transition_form'
-                    data-track-kind='active'
                     className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                   >
                     <Pencil size={11} />
@@ -853,7 +839,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     onClick={() => onUpdateMeta({ formId: null })}
                     data-track-category='board_stage_config'
                     data-track-name='remove_transition_form'
-                    data-track-kind='active'
                     className='p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
                   >
                     <X size={11} />
@@ -894,7 +879,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     }
                     data-track-category='transition_config'
                     data-track-name='toggle_requires_approval'
-                    data-track-kind='passive'
                     className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer border-none p-0 ${meta.requiresApproval ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
                   >
                     <div
@@ -930,7 +914,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                             }
                             data-track-category='transition_config'
                             data-track-name='toggle_request_approval_on_entry'
-                            data-track-kind='passive'
                             title={
                               formAttached
                                 ? 'Not available when a form is attached — the form must be filled manually.'
@@ -967,7 +950,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                 onClick={props.onAddCondition}
                 data-track-category='board_stage_config'
                 data-track-name='add_condition_for_edge'
-                data-track-kind='active'
                 className='flex items-center gap-[6px] text-[13px] font-medium text-[#6276be] hover:text-[#5060a0] p-[4px] rounded-[6px] w-full'
               >
                 <GitBranch size={13} className='text-[#6276be]' />
@@ -983,7 +965,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
                   data-track-category='transition_config'
                   data-track-name='select_visit_sla'
-                  data-track-kind='passive'
                   value={meta.visitSlaMode}
                   onChange={e => {
                     const next = SLA_OPTIONS.find(o => String(o.value) === e.target.value);
@@ -1003,7 +984,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     placeholder='Hours'
                     data-track-category='transition_config'
                     data-track-name='input_fixed_eta_hours'
-                    data-track-kind='passive'
                     className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
                     value={meta.fixedEtaHours ?? ''}
                     onChange={e =>
@@ -1031,7 +1011,6 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                       onClick={() => onUpdateMeta({ onReenter: opt.value })}
                       data-track-category='transition_config'
                       data-track-name={`select_on_reenter_${opt.value.toLowerCase()}`}
-                      data-track-kind='passive'
                       className={`py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${meta.onReenter === opt.value ? 'bg-[#6276be] border-[#6276be] text-white' : 'bg-background border-border text-muted-foreground hover:bg-muted'}`}
                     >
                       {opt.label}
@@ -1617,7 +1596,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               }}
               data-track-category='board_stage_config'
               data-track-name='rearrange_stages'
-              data-track-kind='active'
               className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
               title='Auto-arrange stages'
             >
@@ -1655,7 +1633,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               onClick={onAddStage}
               data-track-category='board_stage_config'
               data-track-name='add_stage'
-              data-track-kind='active'
               className='flex items-center gap-1.5 bg-background border border-dashed border-[#6276be]/50 hover:border-[#6276be] rounded-lg px-3 py-1.5 shadow text-[12px] text-[#6276be] hover:text-[#4f61a8] transition-colors font-medium'
             >
               <Plus size={13} />

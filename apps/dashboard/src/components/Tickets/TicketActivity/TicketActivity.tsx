@@ -856,7 +856,6 @@ export const TicketActivity = ({
             title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
             data-track-category='Tickets'
             data-track-name='ToggleActivitySort'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ sortOrder })}
           >
             <ArrowUpDown size={13} />

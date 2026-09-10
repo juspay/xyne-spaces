@@ -45,7 +45,6 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
             onClick={onClose}
             data-track-category='CALLS'
             data-track-name='close-delete-modal'
-            data-track-kind='passive'
             className='w-7 h-7 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
           >
             <X className='size-3.5 text-primary' />
@@ -83,7 +82,6 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
               onClick={onClose}
               data-track-category='CALLS'
               data-track-name='CANCEL_DELETE_CALL'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -92,7 +90,6 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
               onClick={handleConfirm}
               data-track-category='CALLS'
               data-track-name='CONFIRM_DELETE_CALL'
-              data-track-kind='active'
             >
               Delete
             </Button>

@@ -351,7 +351,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             title='Font Family'
             data-track-category='email-editor'
             data-track-name='open-font-family-dropdown'
-            data-track-kind='passive'
           >
             <Type className='h-3.5 w-3.5 shrink-0' />
             <span className='flex-1 min-w-0 truncate'>
@@ -381,7 +380,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                 style={font.value ? { fontFamily: font.value } : undefined}
                 data-track-category='email-editor'
                 data-track-name='select-font-family'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ font: font.label })}
               >
                 {font.label}
@@ -400,7 +398,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             title='Font Size'
             data-track-category='email-editor'
             data-track-name='open-font-size-dropdown'
-            data-track-kind='passive'
           >
             <span className='flex-1 min-w-0 truncate'>
               {currentFontSize
@@ -429,7 +426,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                 style={{ fontSize: size.value }}
                 data-track-category='email-editor'
                 data-track-name='select-font-size'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ size: size.label })}
               >
                 {size.label}
@@ -451,7 +447,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.bold}
           data-track-category='email-editor'
           data-track-name='toggle-bold'
-          data-track-kind='passive'
         >
           <Bold className='h-3.5 w-3.5' />
         </button>
@@ -466,7 +461,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.italic}
           data-track-category='email-editor'
           data-track-name='toggle-italic'
-          data-track-kind='passive'
         >
           <Italic className='h-3.5 w-3.5' />
         </button>
@@ -481,7 +475,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.underline}
           data-track-category='email-editor'
           data-track-name='toggle-underline'
-          data-track-kind='passive'
         >
           <Underline className='h-3.5 w-3.5' />
         </button>
@@ -496,7 +489,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.strike}
           data-track-category='email-editor'
           data-track-name='toggle-strikethrough'
-          data-track-kind='passive'
         >
           <Strikethrough className='h-3.5 w-3.5' />
         </button>
@@ -513,7 +505,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             title='Text Color'
             data-track-category='email-editor'
             data-track-name='open-text-color-picker'
-            data-track-kind='passive'
           >
             <Palette className='h-3.5 w-3.5' />
           </button>
@@ -535,7 +526,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                   title={color}
                   data-track-category='email-editor'
                   data-track-name='select-text-color'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ color })}
                 />
               ))}
@@ -553,7 +543,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
             title='Highlight Color'
             data-track-category='email-editor'
             data-track-name='open-highlight-color-picker'
-            data-track-kind='passive'
           >
             <Highlighter className='h-3.5 w-3.5' />
           </button>
@@ -575,7 +564,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                   title={color}
                   data-track-category='email-editor'
                   data-track-name='select-highlight-color'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ color })}
                 />
               ))}
@@ -586,7 +574,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               className='mt-3 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t border-border'
               data-track-category='email-editor'
               data-track-name='remove-highlight'
-              data-track-kind='active'
             >
               Remove highlight
             </button>
@@ -605,7 +592,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-label='Align left'
           data-track-category='email-editor'
           data-track-name='align-left'
-          data-track-kind='passive'
         >
           <AlignLeft className='h-3.5 w-3.5' />
         </button>
@@ -619,7 +605,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-label='Align center'
           data-track-category='email-editor'
           data-track-name='align-center'
-          data-track-kind='passive'
         >
           <AlignCenter className='h-3.5 w-3.5' />
         </button>
@@ -633,7 +618,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-label='Align right'
           data-track-category='email-editor'
           data-track-name='align-right'
-          data-track-kind='passive'
         >
           <AlignRight className='h-3.5 w-3.5' />
         </button>
@@ -651,7 +635,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.bulletList}
           data-track-category='email-editor'
           data-track-name='toggle-bullet-list'
-          data-track-kind='passive'
         >
           <List className='h-3.5 w-3.5' />
         </button>
@@ -667,7 +650,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.orderedList}
           data-track-category='email-editor'
           data-track-name='toggle-ordered-list'
-          data-track-kind='passive'
         >
           <ListOrdered className='h-3.5 w-3.5' />
         </button>
@@ -683,7 +665,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-pressed={isActive.blockquote}
           data-track-category='email-editor'
           data-track-name='toggle-blockquote'
-          data-track-kind='passive'
         >
           <TextQuote className='h-3.5 w-3.5' />
         </button>
@@ -705,7 +686,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               aria-pressed={isActive.link}
               data-track-category='email-editor'
               data-track-name='open-link-dialog'
-              data-track-kind='passive'
             >
               <Link className='h-3.5 w-3.5' />
             </button>
@@ -724,7 +704,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
               data-track-category='email-editor'
               data-track-name='close-link-dialog'
-              data-track-kind='passive'
             >
               <X className='h-4 w-4' />
             </button>
@@ -740,7 +719,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
               data-track-name='edit-link-text'
-              data-track-kind='active'
             />
           </div>
 
@@ -754,7 +732,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
               data-track-name='edit-link-url'
-              data-track-kind='active'
             />
           </div>
 
@@ -764,7 +741,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                 onClick={removeLink}
                 data-track-category='email-editor'
                 data-track-name='REMOVE_LINK'
-                data-track-kind='active'
                 className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
                 variant='ghost'
               >
@@ -776,7 +752,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                 onClick={() => setLinkDialogOpen(false)}
                 data-track-category='email-editor'
                 data-track-name='CANCEL_LINK'
-                data-track-kind='passive'
                 variant='secondary'
                 className='rounded px-3 py-1.5 text-xs text-foreground'
               >
@@ -786,7 +761,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
                 onClick={applyLink}
                 data-track-category='email-editor'
                 data-track-name='APPLY_LINK'
-                data-track-kind='active'
                 disabled={!linkUrl.trim()}
                 className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
               >
@@ -808,7 +782,6 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
           aria-label='Clear formatting'
           data-track-category='email-editor'
           data-track-name='clear-formatting'
-          data-track-kind='passive'
         >
           <RemoveFormatting className='h-3.5 w-3.5' />
         </button>

@@ -52,7 +52,6 @@ export const Section = ({
           disabled={addDisabled}
           data-track-category='COMPONENT_EDITOR'
           data-track-name='Section_Add_Click'
-          data-track-kind='active'
           className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40'
         >
           <Plus size={11} />
@@ -76,7 +75,6 @@ export const IconBtn = ({
     onClick={onClick}
     data-track-category='COMPONENT_EDITOR'
     data-track-name='Icon_Btn_Click'
-    data-track-kind='passive'
     className='p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0'
   >
     {children}

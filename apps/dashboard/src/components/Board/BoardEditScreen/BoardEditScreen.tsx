@@ -1454,7 +1454,6 @@ const BoardEditScreen = ({
             onClick={onClose}
             data-track-category='form'
             data-track-name='CLOSE_BOARD_NOT_FOUND'
-            data-track-kind='passive'
           >
             Close
           </Button>
@@ -1472,7 +1471,6 @@ const BoardEditScreen = ({
             onClick={onClose}
             data-track-category='form'
             data-track-name='CLOSE_PROJECT_NOT_FOUND'
-            data-track-kind='passive'
           >
             Close
           </Button>
@@ -1493,7 +1491,6 @@ const BoardEditScreen = ({
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='board_edit'
               data-track-name='NAVIGATE_BACK'
-              data-track-kind='passive'
             >
               <ChevronLeft size={16} />
             </Button>
@@ -1507,7 +1504,6 @@ const BoardEditScreen = ({
               onClick={onClose}
               data-track-category='form'
               data-track-name='CANCEL_BOARD_EDIT'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1516,7 +1512,6 @@ const BoardEditScreen = ({
               onClick={() => void handleSave()}
               data-track-category='form'
               data-track-name='SAVE_BOARD_EDIT'
-              data-track-kind='active'
               disabled={hasPendingOptionDecision}
               title={
                 hasPendingOptionDecision
@@ -1551,7 +1546,6 @@ const BoardEditScreen = ({
                   placeholder='Enter Board Name'
                   data-track-category='form'
                   data-track-name='board-name-input'
-                  data-track-kind='passive'
                 />
               </div>
               <div className='bg-background rounded-lg'>
@@ -1612,7 +1606,6 @@ const BoardEditScreen = ({
                             } ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer' : 'cursor-move'}`}
                             data-track-category='form'
                             data-track-name='field-row'
-                            data-track-kind='passive'
                           >
                             {/* Grip icon - visible only on hover, but space is reserved */}
                             <div className='w-4 flex-shrink-0'>
@@ -1640,7 +1633,6 @@ const BoardEditScreen = ({
                                     className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
                                     data-track-category='board_edit'
                                     data-track-name='edit_label_input'
-                                    data-track-kind='passive'
                                   />
                                   {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
                                 </div>
@@ -1657,7 +1649,6 @@ const BoardEditScreen = ({
                                   disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
                                   data-track-category='board_edit'
                                   data-track-name='edit_field_label'
-                                  data-track-kind='active'
                                 >
                                   {field.label}
                                   {field.required && <span className='text-[#ff4f4f] ml-1'>*</span>}
@@ -1692,7 +1683,6 @@ const BoardEditScreen = ({
                                 }
                                 data-track-category='board_edit'
                                 data-track-name='edit_field_type'
-                                data-track-kind='active'
                               >
                                 {field.name === 'assignedTo' ? (
                                   <div className='relative' ref={assigneeTypeDropdownRef}>
@@ -1713,7 +1703,6 @@ const BoardEditScreen = ({
                                           className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
                                           data-track-category='board_edit'
                                           data-track-name='select_assignee_type_user'
-                                          data-track-kind='active'
                                         >
                                           <span>User</span>
                                           {assigneeType === 'user' && (
@@ -1731,7 +1720,6 @@ const BoardEditScreen = ({
                                           className='w-full justify-start px-3 py-2 text-[13px] hover:bg-muted'
                                           data-track-category='board_edit'
                                           data-track-name='select_assignee_type_user_group'
-                                          data-track-kind='active'
                                         >
                                           <span>User Group</span>
                                           {assigneeType === 'userGroup' && (
@@ -1771,7 +1759,6 @@ const BoardEditScreen = ({
                                       className='absolute left-0 text-[11px] font-mono px-2 py-[3px] rounded-full bg-[#6276be]/10 text-[#6276be] whitespace-nowrap'
                                       data-track-category='form'
                                       data-track-name='conditional-fields-badge'
-                                      data-track-kind='passive'
                                     >
                                       {branchCount} nested field{branchCount === 1 ? '' : 's'}
                                     </span>
@@ -1800,7 +1787,6 @@ const BoardEditScreen = ({
                                         onClick={e => handleCopyFieldId(e, field.id)}
                                         data-track-category='board_edit'
                                         data-track-name='copy_field_id'
-                                        data-track-kind='passive'
                                       >
                                         {copiedFieldId === field.id ? (
                                           <Check size={14} />
@@ -1818,7 +1804,6 @@ const BoardEditScreen = ({
                                       tabIndex={-1}
                                       data-track-category='board_edit'
                                       data-track-name='copy_field_id'
-                                      data-track-kind='passive'
                                     >
                                       <Copy size={14} />
                                     </Button>
@@ -1859,7 +1844,6 @@ const BoardEditScreen = ({
                                       }`}
                                       data-track-category='form'
                                       data-track-name='required-toggle-hover'
-                                      data-track-kind='active'
                                     >
                                       <span
                                         className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
@@ -1905,7 +1889,6 @@ const BoardEditScreen = ({
                                       }`}
                                       data-track-category='form'
                                       data-track-name='show-in-create-toggle'
-                                      data-track-kind='passive'
                                     >
                                       <span
                                         className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
@@ -1947,7 +1930,6 @@ const BoardEditScreen = ({
                                       }`}
                                       data-track-category='form'
                                       data-track-name='show-in-create-toggle'
-                                      data-track-kind='passive'
                                     >
                                       <span
                                         className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
@@ -2003,7 +1985,6 @@ const BoardEditScreen = ({
                                       className='w-6 h-6 text-muted-foreground hover:text-red-500'
                                       data-track-category='form'
                                       data-track-name='delete-field-hover'
-                                      data-track-kind='active'
                                     >
                                       <Trash2 size={16} />
                                     </Button>
@@ -2054,7 +2035,6 @@ const BoardEditScreen = ({
                         className='flex items-center gap-2 text-xyne-primary-600 hover:text-xyne-primary-700 font-medium'
                         data-track-category='form'
                         data-track-name='add-custom-field'
-                        data-track-kind='passive'
                       >
                         <Plus size={16} />
                         Custom Field
@@ -2136,7 +2116,6 @@ const BoardEditScreen = ({
                     onClick={() => setPendingCascadeDecision(null)}
                     data-track-category='form'
                     data-track-name='cancel-delete-dependent-fields'
-                    data-track-kind='passive'
                   >
                     Cancel
                   </Button>
@@ -2145,7 +2124,6 @@ const BoardEditScreen = ({
                     onClick={() => pendingCascadeDecision.onConfirm()}
                     data-track-category='form'
                     data-track-name='delete-dependent-fields'
-                    data-track-kind='active'
                   >
                     Delete
                   </Button>

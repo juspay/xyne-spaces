@@ -124,7 +124,6 @@ export function RecordingPeopleFilter({
           aria-label='Clear people filter'
           data-track-category='RecordingsV2'
           data-track-name='clear_people_filter'
-          data-track-kind='passive'
         >
           <MultipleCrossCancelDefault className='size-3' />
         </Button>

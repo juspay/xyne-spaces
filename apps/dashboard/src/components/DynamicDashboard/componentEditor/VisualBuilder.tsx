@@ -138,7 +138,6 @@ export const VisualBuilder = ({
             onChange={e => setTitle(e.target.value)}
             data-track-category='COMPONENT_EDITOR'
             data-track-name='Title_Input'
-            data-track-kind='passive'
             placeholder='e.g: Revenue by Status'
           />
         </Field>
@@ -146,7 +145,6 @@ export const VisualBuilder = ({
         <Field label='Data source'>
           <Select
             trackName='Data_Source_Picker'
-            trackKind='passive'
             value={dataSourceId}
             onChange={setDataSourceId}
             options={dataSources
@@ -160,7 +158,6 @@ export const VisualBuilder = ({
           {!dataSourceId ? (
             <Select
               trackName='Table_Picker'
-              trackKind='passive'
               value=''
               onChange={() => undefined}
               options={[]}
@@ -172,7 +169,6 @@ export const VisualBuilder = ({
           ) : (
             <Select
               trackName='Table_Picker'
-              trackKind='passive'
               value={tableName}
               onChange={setTableName}
               options={tables.map(t => ({
@@ -239,7 +235,6 @@ export const VisualBuilder = ({
                 >
                   <Select
                     trackName='Join_Type'
-                    trackKind='active'
                     value={j.type}
                     onChange={v =>
                       patchById(setJoins, j.id, x => ({ ...x, type: v as 'inner' | 'left' }))
@@ -256,7 +251,6 @@ export const VisualBuilder = ({
                       <span className='text-muted-foreground text-[11px]'>on</span>
                       <Select
                         trackName='Join_From_Column'
-                        trackKind='active'
                         value={j.on.from}
                         onChange={v =>
                           patchById(setJoins, j.id, x => ({ ...x, on: { ...x.on, from: v } }))
@@ -267,7 +261,6 @@ export const VisualBuilder = ({
                       <span className='text-muted-foreground text-[11px]'>=</span>
                       <Select
                         trackName='Join_To_Column'
-                        trackKind='active'
                         value={j.on.to}
                         onChange={v =>
                           patchById(setJoins, j.id, x => ({ ...x, on: { ...x.on, to: v } }))
@@ -310,7 +303,6 @@ export const VisualBuilder = ({
                     className='text-left text-xs px-2 py-1 rounded border border-border hover:bg-accent hover:border-foreground/30 text-foreground/80'
                     data-track-category='COMPONENT_EDITOR'
                     data-track-name='Add_Join'
-                    data-track-kind='active'
                   >
                     <span className='font-medium'>+ Join {edge.target}</span>
                     <span className='ml-1.5 text-muted-foreground text-[10px]'>({edge.label})</span>
@@ -353,7 +345,6 @@ export const VisualBuilder = ({
                 <div key={g.id} className='flex items-center gap-1.5'>
                   <Select
                     trackName='GroupBy_Column'
-                    trackKind='passive'
                     value={g.column}
                     onChange={v =>
                       patchById(setGroupBy, g.id, x => {
@@ -383,7 +374,6 @@ export const VisualBuilder = ({
                       !!g.bucket) && (
                       <Select
                         trackName='GroupBy_Bucket'
-                        trackKind='passive'
                         value={g.bucket ?? ''}
                         onChange={v =>
                           patchById(setGroupBy, g.id, x => ({ ...x, bucket: v as TimeBucket }))
@@ -423,7 +413,6 @@ export const VisualBuilder = ({
                 <div key={m.id} className='flex items-center gap-1.5'>
                   <Select
                     trackName='Measure_Op'
-                    trackKind='passive'
                     value={m.op}
                     onChange={v => {
                       const nextOp = v as AggregationOp;
@@ -450,7 +439,6 @@ export const VisualBuilder = ({
                   />
                   <Select
                     trackName='Measure_Column'
-                    trackKind='passive'
                     value={m.column}
                     onChange={v => patchById(setMeasures, m.id, x => ({ ...x, column: v }))}
                     options={[
@@ -505,7 +493,6 @@ export const VisualBuilder = ({
                 <div key={f.id} className='flex items-center gap-1.5'>
                   <Select
                     trackName='Filter_Column'
-                    trackKind='passive'
                     value={f.column}
                     onChange={v =>
                       patchById(setFilters, f.id, x => {
@@ -527,7 +514,6 @@ export const VisualBuilder = ({
                   />
                   <Select
                     trackName='Filter_Op'
-                    trackKind='passive'
                     value={f.op}
                     onChange={v => patchById(setFilters, f.id, x => ({ ...x, op: v as FilterOp }))}
                     options={allowedOps.map(op => ({ value: op, label: FILTER_OP_LABEL[op] }))}
@@ -541,7 +527,6 @@ export const VisualBuilder = ({
                       }
                       data-track-category='COMPONENT_EDITOR'
                       data-track-name='Filter_Value_Input'
-                      data-track-kind='passive'
                       placeholder={f.op === 'in' || f.op === 'notIn' ? 'a, b, c' : 'value'}
                       className='w-28 text-xs'
                     />
@@ -596,7 +581,6 @@ export const VisualBuilder = ({
                 <div key={o.id} className='flex items-center gap-1.5'>
                   <Select
                     trackName='OrderBy_Column'
-                    trackKind='passive'
                     value={o.column}
                     onChange={v => patchById(setOrderBy, o.id, x => ({ ...x, column: v }))}
                     options={columnOptions.map(c => ({ value: c, label: c }))}
@@ -607,7 +591,6 @@ export const VisualBuilder = ({
                   />
                   <Select
                     trackName='OrderBy_Direction'
-                    trackKind='passive'
                     value={o.dir}
                     onChange={v =>
                       patchById(setOrderBy, o.id, x => ({ ...x, dir: v as 'asc' | 'desc' }))
@@ -642,7 +625,6 @@ export const VisualBuilder = ({
               }}
               data-track-category='COMPONENT_EDITOR'
               data-track-name='Take_Limit_Input'
-              data-track-kind='passive'
               placeholder='no limit'
               min={1}
               max={10000}
@@ -664,7 +646,6 @@ export const VisualBuilder = ({
                 <>
                   <Select
                     trackName='Time_Column'
-                    trackKind='passive'
                     value={timeColumn}
                     onChange={setTimeColumn}
                     options={[

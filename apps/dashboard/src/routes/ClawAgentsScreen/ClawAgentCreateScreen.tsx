@@ -120,7 +120,6 @@ const ClawAgentCreateScreen = (): ReactElement => {
             onClick={cancel}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_CREATE_AGENT'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -131,7 +130,6 @@ const ClawAgentCreateScreen = (): ReactElement => {
                 onClick={goBack}
                 data-track-category='Claw Agents'
                 data-track-name='AGENT_WIZARD_BACK'
-                data-track-kind='passive'
               >
                 <ChevronLeft className='size-4' />
                 Back
@@ -142,7 +140,6 @@ const ClawAgentCreateScreen = (): ReactElement => {
                 onClick={goNext}
                 data-track-category='Claw Agents'
                 data-track-name='AGENT_WIZARD_NEXT'
-                data-track-kind='passive'
                 disabled={!canNext}
               >
                 Next
@@ -153,7 +150,6 @@ const ClawAgentCreateScreen = (): ReactElement => {
                 onClick={handleCreate}
                 data-track-category='Claw Agents'
                 data-track-name='CREATE_AGENT'
-                data-track-kind='active'
                 loading={createMutation.isPending}
                 disabled={!canNext}
               >

@@ -47,7 +47,6 @@ export const CrumbsV2: React.FC<CrumbsV2Props> = ({
         className='inline-flex items-center rounded-md px-1.5 py-0.5 transition hover:bg-secondary hover:text-foreground'
         data-track-category='knowledge-base'
         data-track-name='breadcrumb-root'
-        data-track-kind='passive'
       >
         Knowledge
       </button>
@@ -68,7 +67,6 @@ export const CrumbsV2: React.FC<CrumbsV2Props> = ({
           title={collectionName}
           data-track-category='knowledge-base'
           data-track-name='breadcrumb-collection'
-          data-track-kind='passive'
         >
           {collectionName}
         </button>
@@ -94,7 +92,6 @@ export const CrumbsV2: React.FC<CrumbsV2Props> = ({
                 title={seg.name}
                 data-track-category='knowledge-base'
                 data-track-name='breadcrumb-folder'
-                data-track-kind='passive'
               >
                 {seg.name}
               </button>

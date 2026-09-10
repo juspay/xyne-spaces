@@ -115,7 +115,6 @@ const ConversationHeaderMobile = ({
           }}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='Back_To_Directory_Mobile'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <svg
@@ -145,7 +144,6 @@ const ConversationHeaderMobile = ({
           transition={{ type: 'spring', bounce: 0.1, duration: 0.4 }}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='EXPAND_HEADER_MOBILE'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <motion.div className='flex items-center gap-2 px-2' style={{ height: ROOT_SIZE }}>
@@ -185,7 +183,6 @@ const ConversationHeaderMobile = ({
                 className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='ADD_PEOPLE_MOBILE'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <UserPlus size={16} />
@@ -200,7 +197,6 @@ const ConversationHeaderMobile = ({
                 )}
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='TOGGLE_STAR_MOBILE'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   channelId: channel.id,
                   isStarred: channelUserStatus?.isStarred,
@@ -221,7 +217,6 @@ const ConversationHeaderMobile = ({
                 className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='SEARCH_MOBILE'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <SearchDefault size={16} />
@@ -239,7 +234,6 @@ const ConversationHeaderMobile = ({
                   onClick={() => setActiveTab(tab.label.toLowerCase())}
                   data-track-category='CHANNELS_MOBILE_VIEW'
                   data-track-name='SELECT_HEADER_TAB_MOBILE'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ tab: tab.label })}
                 >
                   {cloneElement(tab.icon, {
@@ -259,7 +253,6 @@ const ConversationHeaderMobile = ({
                 className='w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='VIEW_MEMBERS_MOBILE'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
@@ -283,7 +276,6 @@ const ConversationHeaderMobile = ({
                 className='w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100'
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='OPEN_SETTINGS_MOBILE'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ channelId: channel.id })}
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
@@ -325,7 +317,6 @@ const ConversationHeaderMobile = ({
           )}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='OPEN_XYNE_AI_MOBILE'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           <XyneAIStar size={17} />

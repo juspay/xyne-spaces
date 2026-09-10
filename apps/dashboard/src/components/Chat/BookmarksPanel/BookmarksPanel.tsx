@@ -27,7 +27,6 @@ import {
 } from './bookmarksSidebarWidth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import AppNavigator from '../../AppNavigator/AppNavigator';
-import type { InteractionKind } from '@xyne/shared';
 
 type BookmarksTab = 'all' | 'reminder' | 'complete';
 
@@ -36,7 +35,6 @@ const TAB_CONFIG: Array<{
   label: string;
   testId: string;
   trackName: string;
-  trackKind?: InteractionKind;
 }> = [
   { id: 'all', label: 'All', testId: 'bookmarks-tab-all', trackName: 'Switch_Bookmarks_Tab_All' },
   {
@@ -44,14 +42,12 @@ const TAB_CONFIG: Array<{
     label: 'Reminder',
     testId: 'bookmarks-tab-reminder',
     trackName: 'Switch_Bookmarks_Tab_Reminder',
-    trackKind: 'passive',
   },
   {
     id: 'complete',
     label: 'Complete',
     testId: 'bookmarks-tab-complete',
     trackName: 'Switch_Bookmarks_Tab_Complete',
-    trackKind: 'active',
   },
 ];
 
@@ -309,7 +305,6 @@ const BookmarksPanel = (): ReactElement => {
                     data-testid={tab.testId}
                     data-track-category='CHAT_BOOKMARK'
                     data-track-name={tab.trackName}
-                    data-track-kind={tab.trackKind}
                   >
                     <span className='relative z-10 text-xs sm:text-sm font-medium truncate'>
                       {tab.label}

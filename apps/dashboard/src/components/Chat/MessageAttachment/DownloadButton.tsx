@@ -78,7 +78,6 @@ export const DownloadButton = memo<DownloadButtonProps>(
         aria-busy={isDownloading}
         data-track-category='MESSAGE_ATTACHMENT'
         data-track-name='DownloadAttachment'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ fileName, attachmentId })}
       >
         {isDownloading ? (

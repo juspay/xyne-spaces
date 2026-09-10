@@ -26,7 +26,6 @@ export const TicketPreviewPanel = ({
           className='w-[24px] h-[24px] border border-border rounded-[4px] hover:bg-muted'
           data-track-category={trackCategory}
           data-track-name='CLOSE_PREVIEW'
-          data-track-kind='passive'
         >
           <X size={12} className='text-muted-foreground' />
         </Button>
@@ -54,7 +53,6 @@ export const TicketPreviewPanel = ({
             }`}
             data-track-category={trackCategory}
             data-track-name='SWITCH_TICKET_PREVIEW'
-            data-track-kind='passive'
           >
             Ticket Preview
           </Button>
@@ -69,7 +67,6 @@ export const TicketPreviewPanel = ({
             }`}
             data-track-category={trackCategory}
             data-track-name='SWITCH_CREATE_TICKET'
-            data-track-kind='active'
           >
             Create Ticket
           </Button>

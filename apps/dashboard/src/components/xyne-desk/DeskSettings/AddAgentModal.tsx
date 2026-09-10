@@ -72,7 +72,6 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
               className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
               data-track-category='DeskSettings'
               data-track-name='SearchAddAgent'
-              data-track-kind='passive'
             />
           </div>
         </div>
@@ -93,7 +92,6 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
                 className='flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent'
                 data-track-category='DeskSettings'
                 data-track-name='SelectAddAgent'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
               >
                 <span
@@ -113,7 +111,6 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
             className='flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium text-desk-accent transition-colors hover:bg-accent'
             data-track-category='DeskSettings'
             data-track-name='CreateNewAgentFromModal'
-            data-track-kind='active'
           >
             <Plus size={14} className='shrink-0' />
             Create new agent

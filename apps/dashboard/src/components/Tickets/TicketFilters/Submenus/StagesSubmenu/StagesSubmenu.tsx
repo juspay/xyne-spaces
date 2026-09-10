@@ -125,7 +125,6 @@ export const StagesSubmenu = ({
               `}
               data-track-category='TICKETS'
               data-track-name='ToggleSelectAllStages'
-              data-track-kind='passive'
             >
               <span className='flex-1 text-left text-sm font-medium text-primary'>
                 {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -148,7 +147,6 @@ export const StagesSubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleStageFilter'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     stageName: stage.name,
                     selected: !isSelected,

@@ -558,7 +558,6 @@ export const ContextPickerPanel = ({
             className='px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent rounded-lg transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CANCEL'
-            data-track-kind='passive'
           >
             Cancel
           </button>
@@ -568,7 +567,6 @@ export const ContextPickerPanel = ({
             className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CONFIRM'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ itemCount: totalSelected })}
           >
             Add to context

@@ -117,7 +117,6 @@ export const ArrayObjectField: React.FC<ArrayObjectFieldProps> = ({
               onClick={() => handleRemove(index)}
               data-track-category='form'
               data-track-name='REMOVE_ARRAY_ITEM'
-              data-track-kind='active'
               className='h-8 w-8 text-muted-foreground hover:text-destructive transition-colors shrink-0'
               title='Remove item'
             >
@@ -134,7 +133,6 @@ export const ArrayObjectField: React.FC<ArrayObjectFieldProps> = ({
         onClick={handleCreateNew}
         data-track-category='form'
         data-track-name='ADD_ARRAY_ITEM'
-        data-track-kind='active'
         className={cn(
           'flex items-center self-start gap-1.5 text-[10px] h-7 px-2 font-semibold uppercase tracking-wider transition-all',
           error &&

@@ -32,7 +32,6 @@ import {
   SUBAGENT_OPTIONS,
   type ModelCardDraft,
 } from './modelConfig';
-import type { InteractionKind } from '@xyne/shared';
 
 const RowSelect = <T extends string>({
   value,
@@ -41,7 +40,6 @@ const RowSelect = <T extends string>({
   onChange,
   label,
   trackName,
-  trackKind,
 }: {
   value: T;
   options: ReadonlyArray<{ value: string; label: string }>;
@@ -49,7 +47,6 @@ const RowSelect = <T extends string>({
   onChange: (next: T) => void;
   label: string;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement =>
   !editable ? (
     <DetailValue>{options.find(o => o.value === value)?.label ?? value}</DetailValue>
@@ -60,7 +57,6 @@ const RowSelect = <T extends string>({
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='h-9 w-auto min-w-0 gap-2 rounded-[10px]'
       >
         <SelectValue />
@@ -129,7 +125,6 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
               aria-label='Edit provider order'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: edit provider order'
-              data-track-kind='active'
               className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
             >
               <PencilEditLine className='size-4' aria-hidden />
@@ -144,7 +139,6 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
             editable={canEdit && !saving}
             label="When to use the agent's premium provider"
             trackName='Agent detail v2: set provider applies-to'
-            trackKind='active'
             onChange={next =>
               void persist({ ...draft, alwaysOn: next === 'always' }, 'Provider policy updated')
             }
@@ -158,7 +152,6 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
             editable={canEdit && !saving}
             label='Which provider subagents run on'
             trackName='Agent detail v2: set subagent provider'
-            trackKind='active'
             onChange={next =>
               void persist(
                 { ...draft, subagentMode: next === 'parent' ? 'parent' : 'spaces' },
@@ -179,7 +172,6 @@ export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }
             editable={canEdit && !saving}
             label='Which provider automation and scheduled runs use'
             trackName='Agent detail v2: set automation provider'
-            trackKind='active'
             onChange={next =>
               void persist(
                 { ...draft, automationMode: next === 'platform' ? 'platform' : 'chat' },

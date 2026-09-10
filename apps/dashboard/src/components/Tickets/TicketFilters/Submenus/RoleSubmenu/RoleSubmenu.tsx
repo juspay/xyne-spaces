@@ -153,7 +153,6 @@ export const RoleSubmenu = ({
                     className='w-full flex items-center justify-between px-3 py-2 bg-muted/40 hover:bg-muted transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md'
                     data-track-category='Tickets'
                     data-track-name='ToggleRoleFilterSection'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       roleId: role.id,
                       roleName: role.name,
@@ -207,7 +206,6 @@ export const RoleSubmenu = ({
                                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all outline-none ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'} focus-visible:ring-2 focus-visible:ring-ring`}
                                 data-track-category='Tickets'
                                 data-track-name='ToggleRoleUserFilter'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({
                                   roleId: role.id,
                                   roleName: role.name,

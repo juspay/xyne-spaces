@@ -243,7 +243,6 @@ export const UserActivityPanel = ({
             onClick={handleClose}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CLOSE_ACTIVITY_PANEL'
-            data-track-kind='passive'
             className={
               isMobile ? mobileActionButtonClass : 'p-1 hover:bg-accent rounded transition-colors'
             }
@@ -262,7 +261,6 @@ export const UserActivityPanel = ({
               onClick={() => setAliasManagerOpen(true)}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='OPEN_ALIAS_MANAGER'
-              data-track-kind='passive'
               className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
               title='Manage activity aliases'
               type='button'
@@ -275,7 +273,6 @@ export const UserActivityPanel = ({
               onClick={handleXyneAIClose}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='CLOSE_XYNE_AI'
-              data-track-kind='passive'
               className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             >
               <X className='w-4 h-4 text-muted-foreground' />
@@ -345,7 +342,6 @@ export const UserActivityPanel = ({
             onClick={handleAddToChat}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='ADD_ACTIVITY_TO_CHAT'
-            data-track-kind='active'
             className='w-full py-2.5 px-4 bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground text-sm font-medium rounded-lg transition-colors'
           >
             Add {selectedCount} {selectedCount === 1 ? 'activity' : 'activities'} to chat

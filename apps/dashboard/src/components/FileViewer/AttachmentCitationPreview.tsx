@@ -343,7 +343,6 @@ const AttachmentCitationPreviewInner: React.FC = () => {
                 title='Download'
                 data-track-category='CitationPreview'
                 data-track-name='DOWNLOAD_FILE'
-                data-track-kind='passive'
               >
                 <Download className='h-4 w-4' />
               </button>

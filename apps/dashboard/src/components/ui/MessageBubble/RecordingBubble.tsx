@@ -88,7 +88,6 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
       data-testid='recording-active-card'
       data-track-category='RECORDING'
       data-track-name='OPEN_LIVE_RECORDING_FROM_THREAD'
-      data-track-kind='passive'
     >
       <span className='flex size-5 shrink-0 items-center justify-center rounded-md bg-muted'>
         <AudioLines size={12} strokeWidth={2.5} className='text-muted-foreground' />

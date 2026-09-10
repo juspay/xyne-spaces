@@ -110,7 +110,6 @@ const FencedCodeBlock = ({
               className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_CODE_BLOCK'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
             >
               <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
@@ -128,7 +127,6 @@ const FencedCodeBlock = ({
         title='Copy code snippet'
         data-track-category='MESSAGE'
         data-track-name='COPY_CODE_SNIPPET'
-        data-track-kind='passive'
       >
         <span className='flex items-center justify-center p-1'>
           {copied ? (
@@ -330,7 +328,6 @@ export const createMarkdownComponents = (
           onClick={handleClick}
           data-track-category='MESSAGE'
           data-track-name='OPEN_EXTERNAL_LINK'
-          data-track-kind='passive'
           {...props}
           className={props.className ?? 'text-primary hover:underline'}
         >

@@ -162,7 +162,6 @@ export const TicketListRow = ({
       onClick={handleRowClick}
       data-track-category='Tickets'
       data-track-name='ClickTicketListRow'
-      data-track-kind='passive'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -189,7 +188,6 @@ export const TicketListRow = ({
             className='inline-flex shrink-0 items-center'
             data-track-category='Tickets'
             data-track-name='ToggleTicketSelection'
-            data-track-kind='passive'
           >
             <Checkbox checked={isSelected} onChange={() => onToggleSelect()} label='' />
           </span>

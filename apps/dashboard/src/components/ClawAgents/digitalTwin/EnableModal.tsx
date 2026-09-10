@@ -57,7 +57,6 @@ export const EnableModal = ({
             onClick={onClose}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_ENABLE_DIGITAL_TWIN'
-            data-track-kind='passive'
             disabled={enabling}
           >
             Cancel
@@ -67,7 +66,6 @@ export const EnableModal = ({
             onClick={submit}
             data-track-category='Claw Agents'
             data-track-name='ENABLE_DIGITAL_TWIN'
-            data-track-kind='active'
             loading={enabling}
           >
             {ctaLabel}

@@ -190,7 +190,6 @@ export default function IntentPlaygroundScreen(): React.ReactElement {
               onClick={() => void run(text)}
               data-track-category='intent-playground'
               data-track-name='run-classify'
-              data-track-kind='active'
               disabled={running || !text.trim()}
             >
               {running ? <Loader2 className='animate-spin' /> : <Play />}
@@ -211,7 +210,6 @@ export default function IntentPlaygroundScreen(): React.ReactElement {
                 type='button'
                 data-track-category='intent-playground'
                 data-track-name='sample-phrase'
-                data-track-kind='passive'
                 onClick={() => {
                   setText(sample);
                   void run(sample);

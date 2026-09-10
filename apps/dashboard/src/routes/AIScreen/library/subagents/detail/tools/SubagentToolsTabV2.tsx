@@ -37,7 +37,6 @@ function ManageButton({ label, onClick }: { label: string; onClick: () => void }
       aria-label={label}
       data-track-category='Claw Agents'
       data-track-name='Subagent detail v2: manage tools'
-      data-track-kind='passive'
       className='flex h-6 shrink-0 items-center rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground'
     >
       Manage

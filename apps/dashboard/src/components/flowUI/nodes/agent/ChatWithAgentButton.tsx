@@ -28,7 +28,6 @@ export const ChatWithAgentButton: React.FC<{
       )}
       data-track-category='AGENT_ARTIFACT'
       data-track-name='CLICK_CHAT_WITH_AGENT'
-      data-track-kind='passive'
     >
       <MessageSquare size={14} className='shrink-0' aria-hidden />
       {label}

@@ -131,7 +131,6 @@ export const TagReviewView = (): JSX.Element => {
               loading={isDeciding}
               data-track-category='TagReview'
               data-track-name='SeedVocabulary'
-              data-track-kind='active'
             >
               Add the standard types
             </Button>
@@ -220,7 +219,6 @@ export const TagReviewView = (): JSX.Element => {
               onClick={() => setOffset(current => Math.max(current - PAGE_SIZE, 0))}
               data-track-category='TagReview'
               data-track-name='PrevPage'
-              data-track-kind='passive'
             >
               <ChevronLeft className='size-3.5' />
               Previous
@@ -232,7 +230,6 @@ export const TagReviewView = (): JSX.Element => {
               onClick={() => setOffset(current => current + PAGE_SIZE)}
               data-track-category='TagReview'
               data-track-name='NextPage'
-              data-track-kind='passive'
             >
               Next
               <ChevronRight className='size-3.5' />

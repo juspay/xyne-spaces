@@ -61,7 +61,6 @@ export function UpcomingCallActionsMenuItems({
         onClick={handleCopyLink}
         data-track-category='CALLS'
         data-track-name='COPY_UPCOMING_CALL_LINK'
-        data-track-kind='passive'
         className='flex items-center gap-2 text-sm font-medium rounded-lg'
       >
         <Copy className='size-4' />
@@ -75,7 +74,6 @@ export function UpcomingCallActionsMenuItems({
           }}
           data-track-category='CALLS'
           data-track-name='EDIT_UPCOMING_CALL'
-          data-track-kind='active'
           className='flex items-center gap-2 text-sm font-medium rounded-lg'
         >
           <Pencil className='size-4' strokeWidth={2.2} />
@@ -90,7 +88,6 @@ export function UpcomingCallActionsMenuItems({
           }}
           data-track-category='CALLS'
           data-track-name='CANCEL_UPCOMING_CALL'
-          data-track-kind='passive'
           className='flex items-center gap-2 text-sm font-medium text-destructive focus:text-destructive rounded-lg'
         >
           <Trash2 className='size-4' strokeWidth={2.2} />

@@ -77,7 +77,6 @@ export const WorkspaceChannelEmailCard = (): ReactElement => {
                 onClick={() => handleConnect(provider)}
                 data-track-category='workspace-channel-email'
                 data-track-name='reconnect'
-                data-track-kind='passive'
               >
                 Reconnect
               </Button>
@@ -89,7 +88,6 @@ export const WorkspaceChannelEmailCard = (): ReactElement => {
                   onClick={() => handleConnect('google')}
                   data-track-category='workspace-channel-email'
                   data-track-name='setup-google'
-                  data-track-kind='active'
                   className='gap-1.5'
                 >
                   <svg className='w-4 h-4' viewBox='0 0 24 24' fill='currentColor'>
@@ -106,7 +104,6 @@ export const WorkspaceChannelEmailCard = (): ReactElement => {
                   onClick={() => handleConnect('microsoft')}
                   data-track-category='workspace-channel-email'
                   data-track-name='setup-microsoft'
-                  data-track-kind='active'
                   className='gap-1.5'
                 >
                   <svg className='w-4 h-4' viewBox='0 0 21 21' fill='currentColor'>

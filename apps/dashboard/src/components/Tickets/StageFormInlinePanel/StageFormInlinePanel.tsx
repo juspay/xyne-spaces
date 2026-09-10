@@ -181,7 +181,6 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
           disabled={!canSave || isMoving || conflict.isConfirming}
           data-track-category='Tickets'
           data-track-name='SaveInlineStageForm'
-          data-track-kind='active'
         >
           {isBusy && !isMoving ? (
             <Loader2 size={16} className='animate-spin' />
@@ -234,7 +233,6 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
         aria-label='Edit submitted form'
         data-track-category='Tickets'
         data-track-name='EditSubmittedInlineStageForm'
-        data-track-kind='active'
       >
         <Pencil size={15} />
       </button>

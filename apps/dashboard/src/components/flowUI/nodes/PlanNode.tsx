@@ -180,7 +180,6 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_APPROVE'
-        data-track-kind='active'
         data-ph-capture-attribute-track-id='plan_approve'
       >
         {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
@@ -198,7 +197,6 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_REJECT'
-        data-track-kind='active'
         data-ph-capture-attribute-track-id='plan_reject'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
@@ -233,7 +231,6 @@ const ProposedPlan: React.FC<{
             )}
             data-track-category='PLAN_ARTIFACT'
             data-track-name='TOGGLE_TODO_MAX'
-            data-track-kind='passive'
           >
             <DotSlot>{includedIds.has(todo.id) ? <FilledDot /> : <EmptyCircle />}</DotSlot>
             <span className='text-sm leading-[1.4] text-foreground/90'>{todo.text}</span>
@@ -275,7 +272,6 @@ const ProposedPlan: React.FC<{
               )}
               data-track-category='PLAN_ARTIFACT'
               data-track-name='TOGGLE_TODO'
-              data-track-kind='passive'
             >
               <DotSlot>{includedIds.has(todo.id) ? <FilledDot /> : <EmptyCircle />}</DotSlot>
               <TodoText text={todo.text} />
@@ -481,7 +477,6 @@ const Header: React.FC<{ chip?: React.ReactNode; onExpand?: (() => void) | undef
         className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         data-track-category='PLAN_ARTIFACT'
         data-track-name='EXPAND_PLAN'
-        data-track-kind='passive'
       >
         <MaximizeFourArrow size={16} className='shrink-0' />
       </button>

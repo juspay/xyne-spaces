@@ -123,7 +123,6 @@ export function SubagentDetailPanel({
           }
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: toggle subagent from detail'
-          data-track-kind='active'
           className={cn(
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             selected

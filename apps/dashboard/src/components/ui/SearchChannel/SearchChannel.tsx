@@ -175,7 +175,6 @@ export const SearchChannel: React.FC<SearchChannelProps> = ({
                   onClick={() => handleTagRemove(c)}
                   data-track-category='ENTITY_PICKER'
                   data-track-name='REMOVE_CHANNEL_CHIP'
-                  data-track-kind='active'
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${c.name}`}
                 >
@@ -252,7 +251,6 @@ export const SearchChannel: React.FC<SearchChannelProps> = ({
                     tabIndex={-1}
                     data-track-category='CANVAS'
                     data-track-name={trackName}
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       ...trackMetadata,
                       channelId: ch.id,

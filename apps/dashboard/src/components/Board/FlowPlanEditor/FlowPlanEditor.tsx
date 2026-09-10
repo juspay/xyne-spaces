@@ -1423,7 +1423,6 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                   onClick={handleRearrange}
                   data-track-category='flow_plan_editor'
                   data-track-name='rearrange_steps'
-                  data-track-kind='active'
                   className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
                   title='Auto-arrange steps'
                 >
@@ -1469,7 +1468,6 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                         className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors outline-none'
                         data-track-category='flow_plan_editor'
                         data-track-name='add_detached_node'
-                        data-track-kind='active'
                       >
                         <Plus size={13} />
                         <span className='font-medium'>Add node</span>

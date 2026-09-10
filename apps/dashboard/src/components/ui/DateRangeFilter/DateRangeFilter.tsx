@@ -189,7 +189,6 @@ export const CalendarView: React.FC<{
           onClick={prevMonth}
           data-track-category='DATE_RANGE_FILTER'
           data-track-name='PREV_MONTH'
-          data-track-kind='passive'
           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
         >
           <ChevronLeft className='size-4' />
@@ -200,7 +199,6 @@ export const CalendarView: React.FC<{
           onClick={nextMonth}
           data-track-category='DATE_RANGE_FILTER'
           data-track-name='NEXT_MONTH'
-          data-track-kind='passive'
           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
         >
           <ChevronRight className='size-4' />
@@ -227,7 +225,6 @@ export const CalendarView: React.FC<{
               onClick={() => handleDayClick(day)}
               data-track-category='DATE_RANGE_FILTER'
               data-track-name='SELECT_DAY'
-              data-track-kind='passive'
               onMouseEnter={() => setHoverDate(new Date(year, month, day))}
               onMouseLeave={() => setHoverDate(null)}
               className={cn(
@@ -366,7 +363,6 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 onClick={() => handlePresetSelect(preset)}
                 data-track-category='DATE_RANGE_FILTER'
                 data-track-name='SELECT_PRESET'
-                data-track-kind='passive'
                 className={cn(
                   'flex w-full items-center rounded-sm px-2 py-1.5 text-sm select-none',
                   activePreset === preset.label
@@ -400,7 +396,6 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 onClick={handleClear}
                 data-track-category='DATE_RANGE_FILTER'
                 data-track-name='CLEAR_RANGE'
-                data-track-kind='passive'
                 className='p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted'
               >
                 <X className='size-3' />

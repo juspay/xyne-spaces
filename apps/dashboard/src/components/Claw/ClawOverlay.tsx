@@ -350,7 +350,6 @@ export function ClawOverlay(): React.ReactElement {
                 onPointerCancel={handleResizePointerUp}
                 data-track-category='CLAW_OVERLAY'
                 data-track-name='RESIZE_PANEL'
-                data-track-kind='passive'
                 className='absolute inset-x-0 top-0 z-30 h-2 cursor-ns-resize'
                 style={{ touchAction: 'none' }}
               />

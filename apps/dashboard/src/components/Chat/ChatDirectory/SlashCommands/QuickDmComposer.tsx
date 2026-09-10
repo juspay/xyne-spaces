@@ -146,7 +146,6 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
           aria-label='Change target'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='QUICK_DM_CHANGE_RECIPIENT'
-          data-track-kind='passive'
         >
           <X className='size-4' />
         </button>

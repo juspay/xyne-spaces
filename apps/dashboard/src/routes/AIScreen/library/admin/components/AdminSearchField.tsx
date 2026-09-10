@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { MultipleCrossCancelDefault, SearchDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
-import type { InteractionKind } from '@xyne/shared';
 
 export function AdminSearchField({
   value,
@@ -9,7 +8,6 @@ export function AdminSearchField({
   placeholder,
   ariaLabel,
   trackName,
-  trackKind,
   trackCategory = 'Claw Admin',
   className,
 }: {
@@ -18,7 +16,6 @@ export function AdminSearchField({
   placeholder: string;
   ariaLabel: string;
   trackName: string;
-  trackKind?: InteractionKind;
   trackCategory?: string;
   className?: string;
 }): ReactElement {
@@ -47,7 +44,6 @@ export function AdminSearchField({
         data-bwignore='true'
         data-track-category={trackCategory}
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'
       />
       {value && (

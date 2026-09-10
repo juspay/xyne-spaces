@@ -80,7 +80,6 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
             activeId={activeId}
             onSelect={setActive}
             trackName='Filter MCP by category'
-            trackKind='passive'
           />
         </LibraryToolbarPortal>
       }

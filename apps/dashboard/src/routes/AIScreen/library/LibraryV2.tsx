@@ -140,7 +140,6 @@ const LibraryV2 = (): ReactElement => {
                   aria-current={tab.id === activeTab.id ? 'page' : undefined}
                   data-track-category='Claw Agents'
                   data-track-name={`Library tab: ${tab.label}`}
-                  data-track-kind='passive'
                   className={cn(
                     'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
                     tab.id === activeTab.id
@@ -165,7 +164,6 @@ const LibraryV2 = (): ReactElement => {
                 )}
                 data-track-category='Claw Agents'
                 data-track-name='Toggle library search'
-                data-track-kind='passive'
               >
                 <SearchDefault className='size-4' />
               </button>
@@ -189,7 +187,6 @@ const LibraryV2 = (): ReactElement => {
                 }}
                 data-track-category='Claw Agents'
                 data-track-name='Search library'
-                data-track-kind='passive'
                 placeholder={activeTab.searchPlaceholder}
                 className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />

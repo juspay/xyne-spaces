@@ -57,7 +57,6 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps): ReactEl
                   data-ph-capture-attribute-track-id='claw_retry_message'
                   data-track-category='CLAW_CHAT'
                   data-track-name='RETRY_MESSAGE'
-                  data-track-kind='active'
                   className='self-start text-xs font-medium underline underline-offset-2 hover:opacity-80'
                 >
                   Try again

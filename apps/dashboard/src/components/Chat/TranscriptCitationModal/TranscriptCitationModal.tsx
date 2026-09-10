@@ -127,7 +127,6 @@ export function TranscriptCitationModal(): ReactElement | null {
         onClick={close}
         data-track-category='TranscriptPanel'
         data-track-name='close_transcript_backdrop'
-        data-track-kind='passive'
       />
       <TranscriptSidePanel
         transcript={text ?? ''}

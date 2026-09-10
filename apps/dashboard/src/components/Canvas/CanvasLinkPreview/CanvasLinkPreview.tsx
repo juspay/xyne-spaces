@@ -46,7 +46,6 @@ export const CanvasLinkPreview: React.FC<CanvasLinkPreviewProps> = ({ canvas, on
         data-testid='canvas-link-preview-remove'
         data-track-category='CANVAS'
         data-track-name='Remove_Attached_Canvas'
-        data-track-kind='active'
       >
         <X className='w-4 h-4' />
       </button>

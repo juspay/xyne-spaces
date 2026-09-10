@@ -100,7 +100,6 @@ function Section({
         aria-expanded={open}
         data-track-category='knowledge-base'
         data-track-name='vespa-doc-section-toggle'
-        data-track-kind='passive'
         className='flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-secondary/50'
       >
         <ChevronRight
@@ -430,7 +429,6 @@ export const VespaDocView: React.FC<{ itemId: string; name: string }> = ({ itemI
             onClick={() => setRawOpen(value => !value)}
             data-track-category='knowledge-base'
             data-track-name='vespa-doc-raw-fields-toggle'
-            data-track-kind='passive'
             className='inline-flex h-6 items-center rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition hover:text-foreground'
           >
             {rawOpen ? 'Hide raw Vespa fields' : 'Show raw Vespa fields'}

@@ -256,7 +256,6 @@ export const TagDecisionPane = ({
                     onClick={() => setColor(swatch)}
                     data-track-category='TagReview'
                     data-track-name='SetColour'
-                    data-track-kind='passive'
                     className={cn(
                       'size-6 rounded-full transition-transform',
                       color.toLowerCase() === swatch
@@ -289,7 +288,6 @@ export const TagDecisionPane = ({
                 onChange={event => setDescription(event.target.value)}
                 data-track-category='TagReview'
                 data-track-name='EditDefinition'
-                data-track-kind='active'
                 rows={5}
                 placeholder='Describe when this type applies, as if instructing someone who has never seen the thread.'
                 className={cn(

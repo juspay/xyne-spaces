@@ -102,7 +102,6 @@ export const TagsSubmenu = ({
               `}
               data-track-category='Tickets'
               data-track-name='ToggleSelectAllTags'
-              data-track-kind='passive'
             >
               <span className='flex-1 text-left text-sm font-medium text-primary'>
                 {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -125,7 +124,6 @@ export const TagsSubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleTagFilter'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ tag, selected: !isSelected })}
                 >
                   <div className='flex items-center justify-center w-5 h-5 shrink-0'>

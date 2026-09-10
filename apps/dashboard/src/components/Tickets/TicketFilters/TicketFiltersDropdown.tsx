@@ -746,7 +746,6 @@ export const TicketFiltersDropdown = ({
                   className={cn('rounded-[10px]')}
                   data-track-category='Tickets'
                   data-track-name='ToggleBoardDropdown'
-                  data-track-kind='passive'
                 >
                   {/* Keep the label stable while tickets sync — swapping it for
                       "Loading tickets" resizes the button and shoves the filter
@@ -898,7 +897,6 @@ export const TicketFiltersDropdown = ({
                         )}
                         data-track-category='Tickets'
                         data-track-name='OpenFilterSubmenu'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({
                           filterId: item.id,
                           filterLabel: item.label,
@@ -944,7 +942,6 @@ export const TicketFiltersDropdown = ({
               onClick={() => void navigate('/analytics-dashboard')}
               data-track-category='Tickets'
               data-track-name='OpenAnalyticsDashboard'
-              data-track-kind='passive'
             >
               <BarChart3 className='w-4 h-4' />
               <span>Analytics</span>
@@ -959,7 +956,6 @@ export const TicketFiltersDropdown = ({
               onClick={handleClearAllFilters}
               data-track-category='Tickets'
               data-track-name='ClearAllFiltersDropdown'
-              data-track-kind='passive'
               data-testid='clear-filters-btn'
             >
               <X className='w-4 h-4' />
@@ -989,7 +985,6 @@ export const TicketFiltersDropdown = ({
                     className='bg-background border border-border rounded-[10px] h-8'
                     data-track-category='Tickets'
                     data-track-name='OpenSaveViewPopover'
-                    data-track-kind='passive'
                   >
                     <span className='text-foreground'>Save view</span>
                   </Button>
@@ -1006,7 +1001,6 @@ export const TicketFiltersDropdown = ({
                     value={viewName}
                     data-track-category='saved-views'
                     data-track-name='view-name-input'
-                    data-track-kind='passive'
                     onChange={e => setViewName(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && viewName.trim()) handleSaveView();
@@ -1024,7 +1018,6 @@ export const TicketFiltersDropdown = ({
                       <button
                         data-track-category='saved-views'
                         data-track-name='cancel-save-view'
-                        data-track-kind='passive'
                         onClick={() => setShowSavePopover(false)}
                         className='text-sm font-medium text-foreground px-2 h-8'
                       >
@@ -1033,7 +1026,6 @@ export const TicketFiltersDropdown = ({
                       <button
                         data-track-category='saved-views'
                         data-track-name='confirm-save-view'
-                        data-track-kind='active'
                         data-ph-capture-attribute-track-id='save_ticket_view'
                         onClick={handleSaveView}
                         disabled={!viewName.trim() || isSaving}
@@ -1066,7 +1058,6 @@ export const TicketFiltersDropdown = ({
               aria-label='Search Tickets'
               data-track-category='Tickets'
               data-track-name='SearchTickets'
-              data-track-kind='passive'
             />
             <Tooltip content={isExactSearch ? TURN_OFF_EXACT_SEARCH : TURN_ON_EXACT_SEARCH}>
               <button
@@ -1090,7 +1081,6 @@ export const TicketFiltersDropdown = ({
                 )}
                 data-track-category='Tickets'
                 data-track-name='ToggleExactTicketSearch'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ exact: !isExactSearch })}
               >
                 &quot;ab&quot;

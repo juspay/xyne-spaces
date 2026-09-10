@@ -355,7 +355,6 @@ const ProjectDetailScreen = (): ReactElement => {
             onClick={() => void navigate(backTo.path)}
             data-track-category='ProjectDetail'
             data-track-name='BackToProjectsInvalidId'
-            data-track-kind='passive'
           >
             {backTo.label}
           </Button>
@@ -454,7 +453,6 @@ const ProjectDetailScreen = (): ReactElement => {
             onClick={() => void navigate(backTo.path)}
             data-track-category='ProjectDetail'
             data-track-name='BackToProjectsNotFound'
-            data-track-kind='passive'
           >
             {backTo.label}
           </Button>
@@ -474,7 +472,6 @@ const ProjectDetailScreen = (): ReactElement => {
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
             data-track-category='ProjectDetail'
             data-track-name='BackToProjects'
-            data-track-kind='passive'
           >
             <ArrowLeft size={20} />
             <span>{backTo.label}</span>
@@ -498,7 +495,6 @@ const ProjectDetailScreen = (): ReactElement => {
                   onClick={() => setShowEditProjectModal(true)}
                   data-track-category='ProjectDetail'
                   data-track-name='EditProject'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ projectId: project.id })}
                 >
                   <Edit2 size={16} />
@@ -549,7 +545,6 @@ const ProjectDetailScreen = (): ReactElement => {
                     onClick={() => setShowBoardTypeChooser(true)}
                     data-track-category='ProjectDetail'
                     data-track-name='CreateBoard'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ projectId })}
                   >
                     Create Board
@@ -561,7 +556,6 @@ const ProjectDetailScreen = (): ReactElement => {
                     onClick={openConnectRepository}
                     data-track-category='ProjectDetail'
                     data-track-name='ConnectRepository'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ projectId })}
                   >
                     Connect Repository
@@ -575,7 +569,6 @@ const ProjectDetailScreen = (): ReactElement => {
                     onClick={() => setCreatingRelease(true)}
                     data-track-category='ProjectDetail'
                     data-track-name='CreateRelease'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ projectId })}
                   >
                     Create Release
@@ -638,7 +631,6 @@ const ProjectDetailScreen = (): ReactElement => {
                                 }}
                                 data-track-category='ProjectDetail'
                                 data-track-name='ToggleRepositoryServices'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({
                                   mainBoardId: repo.mainBoardId,
                                 })}
@@ -674,7 +666,6 @@ const ProjectDetailScreen = (): ReactElement => {
                                   }}
                                   data-track-category='ProjectDetail'
                                   data-track-name='EditRepository'
-                                  data-track-kind='active'
                                   data-track-metadata={JSON.stringify({
                                     mainBoardId: repo.mainBoardId,
                                   })}
@@ -727,7 +718,6 @@ const ProjectDetailScreen = (): ReactElement => {
                                           onClick={() => openServiceConfig(service.boardId)}
                                           data-track-category='ProjectDetail'
                                           data-track-name='EditServiceConfig'
-                                          data-track-kind='active'
                                           data-track-metadata={JSON.stringify({
                                             applicationBoardId: service.boardId,
                                           })}
@@ -744,7 +734,6 @@ const ProjectDetailScreen = (): ReactElement => {
                                     onClick={() => openAddService(repo.mainBoardId)}
                                     data-track-category='ProjectDetail'
                                     data-track-name='AddService'
-                                    data-track-kind='active'
                                     data-track-metadata={JSON.stringify({
                                       mainBoardId: repo.mainBoardId,
                                     })}
@@ -1160,7 +1149,6 @@ const ProjectDetailScreen = (): ReactElement => {
             placeholder='https://github.com/org/repository.git'
             data-track-category='ProjectDetail'
             data-track-name='RepositoryUrlChanged'
-            data-track-kind='active'
           />
           <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
             Repository name
@@ -1179,7 +1167,6 @@ const ProjectDetailScreen = (): ReactElement => {
             )}
             data-track-category='ProjectDetail'
             data-track-name='RepositoryNameChanged'
-            data-track-kind='passive'
           />
           <p
             className={cn(
@@ -1200,7 +1187,6 @@ const ProjectDetailScreen = (): ReactElement => {
               className='mt-2 h-10 w-full rounded-md border bg-background px-3'
               data-track-category='ProjectDetail'
               data-track-name='RepositoryBranchChanged'
-              data-track-kind='active'
             />
           </div>
           <div className='mt-6 flex justify-end gap-2'>

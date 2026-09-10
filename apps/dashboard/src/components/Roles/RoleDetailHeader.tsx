@@ -88,7 +88,6 @@ const RoleDetailHeader = ({
             onClick={onSaveEdit}
             data-track-category='ROLES'
             data-track-name='SAVE_ROLE_EDIT'
-            data-track-kind='active'
             disabled={!canSaveEdit}
             loading={saving}
           >
@@ -100,7 +99,6 @@ const RoleDetailHeader = ({
             onClick={onCancelEdit}
             data-track-category='ROLES'
             data-track-name='CANCEL_ROLE_EDIT'
-            data-track-kind='passive'
             disabled={saving}
           >
             <X size={14} /> Cancel
@@ -156,7 +154,6 @@ const RoleDetailHeader = ({
             className='rounded-lg text-muted-foreground hover:text-foreground'
             data-track-category='ROLES'
             data-track-name='StartEditRole'
-            data-track-kind='passive'
           >
             <Pencil size={15} />
           </Button>
@@ -166,7 +163,6 @@ const RoleDetailHeader = ({
           onClick={onAddUsers}
           data-track-category='ROLES'
           data-track-name='OpenAddMembers'
-          data-track-kind='passive'
         >
           <UserPlus size={14} /> Add users
         </Button>

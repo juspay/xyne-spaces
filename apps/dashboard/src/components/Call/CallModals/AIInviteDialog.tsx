@@ -166,7 +166,6 @@ export function AIInviteDialog({
                   className='w-full flex items-center gap-3 p-3 hover:bg-accent/50 transition-colors text-left'
                   data-track-category='CALLS'
                   data-track-name='Toggle_Invite_User'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     userId: user.id,
                     userName: getUserDisplayName(user),
@@ -209,7 +208,6 @@ export function AIInviteDialog({
             data-track-event='change'
             data-track-category='CALLS'
             data-track-name='Set_Invite_Message'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ callId })}
           />
 
@@ -233,7 +231,6 @@ export function AIInviteDialog({
             disabled={isInviting}
             data-track-category='CALLS'
             data-track-name='Cancel_AI_Invite'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId })}
           >
             Cancel
@@ -246,7 +243,6 @@ export function AIInviteDialog({
             loading={isInviting}
             data-track-category='CALLS'
             data-track-name='Send_AI_Invite'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ userCount: selectedUserIds.size, callId })}
           >
             {isInviting

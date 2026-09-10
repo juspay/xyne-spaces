@@ -133,7 +133,6 @@ export const ApproverSelector = ({
                     className='flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors cursor-pointer text-left'
                     data-track-category='board_config'
                     data-track-name='select_approver'
-                    data-track-kind='passive'
                   >
                     <Avatar userId={user.id} size='sm' />
                     <div className='flex flex-col flex-1 min-w-0'>
@@ -170,7 +169,6 @@ export const ApproverSelector = ({
                     className='flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors cursor-pointer text-left'
                     data-track-category='board_config'
                     data-track-name='select_approver_role'
-                    data-track-kind='active'
                   >
                     <div className='flex items-center justify-center w-8 h-8 rounded-full bg-action-primary/10 text-action-primary shrink-0'>
                       <ShieldCheck className='w-4 h-4' />

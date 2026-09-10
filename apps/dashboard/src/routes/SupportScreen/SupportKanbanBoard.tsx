@@ -471,7 +471,6 @@ export const SupportKanbanBoard = ({
               onClick={() => {}}
               data-track-category='Support'
               data-track-name='DragOverlayTicketClick'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ ticketId: activeTicket?.id })}
               slaPolicies={slaPolicies}
             />
@@ -513,7 +512,6 @@ export const SupportKanbanBoard = ({
                 onClick={() => setShowBackwardConfirmDialog(false)}
                 data-track-category='Support'
                 data-track-name='CancelBackwardStageChange'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -542,7 +540,6 @@ export const SupportKanbanBoard = ({
                 }}
                 data-track-category='Support'
                 data-track-name='ConfirmBackwardStageChange'
-                data-track-kind='active'
               >
                 Continue
               </Button>

@@ -148,7 +148,6 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           onClick={() => setView('default')}
           data-track-category='STATUS'
           data-track-name='BACK_TO_STATUS_DEFAULT'
-          data-track-kind='passive'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <ChevronLeft className='size-4' />
@@ -219,7 +218,6 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                 className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='STATUS'
                 data-track-name='SelectRecentStatus'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ emoji: status.emoji, text: status.text })}
               >
                 <span className='text-lg'>{renderEmoji(status.emoji)}</span>
@@ -250,7 +248,6 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
               className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
               data-track-category='STATUS'
               data-track-name='SelectStatusSuggestion'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 emoji: suggestion.emoji,
                 text: suggestion.text,
@@ -433,7 +430,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           onClick={() => setView('default')}
           data-track-category='STATUS'
           data-track-name='BACK_TO_STATUS_DEFAULT'
-          data-track-kind='passive'
           className='size-7 p-0 text-muted-foreground hover:text-foreground rounded-lg border border-border hover:bg-muted'
         >
           <X className='size-4' />
@@ -447,7 +443,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
               className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
               data-track-category='STATUS'
               data-track-name='OpenEmojiPicker'
-              data-track-kind='passive'
             >
               {selectedEmoji ? (
                 <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
@@ -493,7 +488,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           maxLength={100}
           data-track-category='STATUS'
           data-track-name='EditStatusText'
-          data-track-kind='active'
           autoFocus={!isMobile}
         />
 
@@ -503,7 +497,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
             className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
             data-track-category='STATUS'
             data-track-name='ClearStatus'
-            data-track-kind='active'
           >
             <X className='size-4' />
           </button>
@@ -518,7 +511,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
             className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
             data-track-category='STATUS'
             data-track-name='SelectExpiryOption'
-            data-track-kind='passive'
           >
             <Select.Value />
             <Select.Icon>
@@ -579,7 +571,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           onClick={() => setView('default')}
           data-track-category='STATUS'
           data-track-name='CANCEL_SET_STATUS'
-          data-track-kind='passive'
           className='text-foreground hover:bg-muted'
         >
           Cancel
@@ -591,7 +582,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           trackId='save_user_status'
           data-track-category='STATUS'
           data-track-name='SAVE_STATUS'
-          data-track-kind='active'
           disabled={!selectedEmoji && !statusText.trim()}
           className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
           style={{ backgroundColor: '#6276BE' }}

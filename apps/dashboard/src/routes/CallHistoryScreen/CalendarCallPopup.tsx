@@ -378,7 +378,6 @@ const CalendarCallPopup = ({
               onClick={onClose}
               data-track-category='CALLS'
               data-track-name='calendar-popup-close'
-              data-track-kind='passive'
               className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
             >
               <X className='size-4' />
@@ -495,7 +494,6 @@ const CalendarCallPopup = ({
             onClick={() => void submitRsvp(seriesPrompt, false)}
             data-track-category='CALLS'
             data-track-name='rsvp-this-call'
-            data-track-kind='active'
             className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer disabled:opacity-50 text-foreground'
           >
             This Call
@@ -505,7 +503,6 @@ const CalendarCallPopup = ({
             onClick={() => void submitRsvp(seriesPrompt, true)}
             data-track-category='CALLS'
             data-track-name='rsvp-all-calls'
-            data-track-kind='active'
             className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50'
           >
             All Calls
@@ -536,7 +533,6 @@ const CalendarCallPopup = ({
             }}
             data-track-category='CALLS'
             data-track-name='hide-this-call'
-            data-track-kind='passive'
             className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer text-foreground'
           >
             This Call
@@ -548,7 +544,6 @@ const CalendarCallPopup = ({
             }}
             data-track-category='CALLS'
             data-track-name='hide-all-calls'
-            data-track-kind='passive'
             className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer'
           >
             All Calls
@@ -631,7 +626,6 @@ const CalendarCallPopup = ({
             size='iconSm'
             data-track-category='CALLS'
             data-track-name='popup-edit-call'
-            data-track-kind='active'
             className='text-muted-foreground'
           >
             <Pencil className='size-4' />
@@ -646,7 +640,6 @@ const CalendarCallPopup = ({
             size='iconSm'
             data-track-category='CALLS'
             data-track-name='popup-delete-call'
-            data-track-kind='active'
             className='text-destructive hover:bg-destructive/10 hover:text-destructive'
           >
             <Trash2 className='size-4' />
@@ -661,7 +654,6 @@ const CalendarCallPopup = ({
             size='iconSm'
             data-track-category='CALLS'
             data-track-name='popup-hide-call'
-            data-track-kind='passive'
             className='text-destructive hover:bg-destructive/10 hover:text-destructive'
           >
             <Trash2 className='size-4' />
@@ -676,7 +668,6 @@ const CalendarCallPopup = ({
             size='iconSm'
             data-track-category='CALLS'
             data-track-name='popup-goto-message'
-            data-track-kind='passive'
             className='text-muted-foreground'
           >
             <MessageSquare className='size-4' />
@@ -690,7 +681,6 @@ const CalendarCallPopup = ({
           size='iconSm'
           data-track-category='CALLS'
           data-track-name='popup-close'
-          data-track-kind='passive'
           className='text-muted-foreground'
         >
           <X className='size-4' />
@@ -771,7 +761,6 @@ const CalendarCallPopup = ({
             onClick={() => setIsGuestsExpanded(prev => !prev)}
             data-track-category='CALLS'
             data-track-name='toggle-guests-list'
-            data-track-kind='passive'
             className='w-full flex items-center gap-3 px-3 py-3 cursor-pointer hover:bg-muted/50 transition-colors'
           >
             {/* Avatar stack using AvatarStackItem - rounded square style */}
@@ -882,7 +871,6 @@ const CalendarCallPopup = ({
               onClick={onDownloadTranscript}
               data-track-category='CALLS'
               data-track-name='popup-download-transcript'
-              data-track-kind='passive'
               className='w-full mt-3 h-8 flex items-center justify-center gap-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors cursor-pointer'
             >
               <Download className='size-3.5' />
@@ -896,7 +884,6 @@ const CalendarCallPopup = ({
               disabled={isJoinDisabled}
               data-track-category='CALLS'
               data-track-name='popup-join-call'
-              data-track-kind='active'
               className={cn(
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
                 isJoinDisabled
@@ -935,7 +922,6 @@ const CalendarCallPopup = ({
                 onClick={() => handleRsvpClick(RSVP_CHOICE.ACCEPTED)}
                 data-track-category='CALLS'
                 data-track-name='rsvp-accepted'
-                data-track-kind='active'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.ACCEPTED
@@ -950,7 +936,6 @@ const CalendarCallPopup = ({
                 onClick={() => handleRsvpClick(RSVP_CHOICE.DECLINED)}
                 data-track-category='CALLS'
                 data-track-name='rsvp-declined'
-                data-track-kind='active'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.DECLINED
@@ -965,7 +950,6 @@ const CalendarCallPopup = ({
                 onClick={() => handleRsvpClick(RSVP_CHOICE.MAYBE)}
                 data-track-category='CALLS'
                 data-track-name='rsvp-maybe'
-                data-track-kind='active'
                 className={cn(
                   'text-xs px-3 py-1 rounded-full border font-medium transition-colors cursor-pointer disabled:opacity-50',
                   currentMeetingStatus === MeetingStatus.MAYBE

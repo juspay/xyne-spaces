@@ -793,7 +793,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='ADD_CHANNEL_FORM'
                 data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
-                data-track-kind='active'
               >
                 <Plus className='size-4' />
                 Add application
@@ -832,7 +831,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                         aria-label={`Remove application ${index + 1}`}
                         data-track-category='ADD_CHANNEL_FORM'
                         data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
-                        data-track-kind='active'
                       >
                         <Trash2 className='size-4' />
                       </button>
@@ -921,7 +919,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               )}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='SELECT_GOOGLE_PROVIDER'
-              data-track-kind='passive'
             >
               <svg className='w-5 h-5' viewBox='0 0 24 24' fill='currentColor'>
                 <path d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z' />
@@ -943,7 +940,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 )}
                 data-track-category='ADD_CHANNEL_FORM'
                 data-track-name='SELECT_MICROSOFT_PROVIDER'
-                data-track-kind='passive'
               >
                 <svg className='w-5 h-5' viewBox='0 0 21 21' fill='currentColor'>
                   <path d='M10 0H0v10h10V0zM21 0H11v10h10V0zM10 11H0v10h10V11zM21 11H11v10h10V11z' />
@@ -993,7 +989,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 data-testid='channel-name-input'
                 data-track-category='ADD_CHANNEL_FORM'
                 data-track-name='EDIT_CHANNEL_NAME'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ mode, channelName: field.state.value })}
                 autoFocus={!isMobile}
               />
@@ -1146,7 +1141,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               rows={4}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='Edit_Channel_Description'
-              data-track-kind='active'
             />
           </div>
         )}
@@ -1192,7 +1186,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     onClick={() => handleTagRemove(tag)}
                     data-track-category='ADD_CHANNEL_FORM'
                     data-track-name='Remove_Topic_Tag'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ tag })}
                   >
                     {tag}
@@ -1211,7 +1204,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               placeholder='Type a tag and press Enter or add comma'
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='Edit_Topic_Tag'
-              data-track-kind='active'
             />
             <p className='text-xs text-muted-foreground'>
               Add tags to help organize and discover this channel
@@ -1232,7 +1224,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             }}
             data-track-category='ADD_CHANNEL_FORM'
             data-track-name='Cancel_Create_Channel'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -1257,7 +1248,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               trackId={mode === 'promote' ? 'promote_group_dm_to_channel' : 'create_channel'}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='CREATE_CHANNEL_SUBMIT'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({ mode, channelName })}
             >
               {mode === 'promote' ? 'Promote to Channel' : 'Create Channel'}

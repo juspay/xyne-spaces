@@ -43,7 +43,6 @@ export function ControlRequestDialog({
             data-ph-capture-attribute-track-id='approve_control_request'
             data-track-category='CALLS'
             data-track-name='APPROVE_CONTROL_REQUEST'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ requesterName })}
           >
             <Check className='w-5 h-5' />
@@ -56,7 +55,6 @@ export function ControlRequestDialog({
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='DENY_CONTROL_REQUEST'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ requesterName })}
           >
             <XCircle className='w-5 h-5' />

@@ -247,7 +247,6 @@ export function SdlcHubDialog({
             onClick={() => onOpenChange(false)}
             data-track-category='SdlcHub'
             data-track-name='HubDialogCancelled'
-            data-track-kind='passive'
           >
             Cancel
           </Button>

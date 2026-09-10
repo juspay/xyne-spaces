@@ -929,7 +929,6 @@ const ActivityListView = (): ReactElement => {
                 onCheckedChange={handleUnreadToggle}
                 data-track-category='ACTIVITY'
                 data-track-name='UNREAD_FILTER_TOGGLE'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ filter_value: !showUnreadOnly })}
                 data-testid='activity-unread-toggle'
                 className={cn(
@@ -978,7 +977,6 @@ const ActivityListView = (): ReactElement => {
                     )}
                     data-track-category='ACTIVITY'
                     data-track-name='ACTOR_FILTER_TOGGLE'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ filter_value: option.value })}
                     data-testid={`activity-actor-filter-${option.value}`}
                   >
@@ -1009,7 +1007,6 @@ const ActivityListView = (): ReactElement => {
                 aria-label='More options'
                 data-track-category='ACTIVITY'
                 data-track-name='TOGGLE_MOBILE_MENU'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ menuState: !showMobileMenu })}
                 data-testid='activity-more-options-btn'
               >
@@ -1029,7 +1026,6 @@ const ActivityListView = (): ReactElement => {
                     className='w-full px-4 py-2 flex items-center justify-start gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors h-auto'
                     data-track-category='ACTIVITY'
                     data-track-name={`MARK_TAB_READ`}
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       tab: activeTab,
                       action: 'mark_all_as_read',
@@ -1051,7 +1047,6 @@ const ActivityListView = (): ReactElement => {
                       onCheckedChange={handleActionableToggle}
                       data-track-category='ACTIVITY'
                       data-track-name='ACTIONABLE_FILTER_TOGGLE'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         filter_value: !actionableToggle,
                       })}
@@ -1088,7 +1083,6 @@ const ActivityListView = (): ReactElement => {
                     )}
                     data-track-category='ACTIVITY'
                     data-track-name='CHANGE_VIEW_CONDENSED'
-                    data-track-kind='passive'
                     data-testid='activity-view-condensed-btn'
                   >
                     <AlignVerticalCenter className='h-4 w-4' />
@@ -1107,7 +1101,6 @@ const ActivityListView = (): ReactElement => {
                     )}
                     data-track-category='ACTIVITY'
                     data-track-name='CHANGE_VIEW_DETAILED'
-                    data-track-kind='passive'
                     data-testid='activity-view-detailed-btn'
                   >
                     <SpatialScreen className='h-4 w-4' />
@@ -1153,7 +1146,6 @@ const ActivityListView = (): ReactElement => {
                         aria-label={tab.label}
                         data-track-category='ACTIVITY'
                         data-track-name={`TAB_CHANGE`}
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ tab: tab.value })}
                         className={cn(
                           'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',

@@ -232,7 +232,6 @@ export function RecordingOverlay(): React.ReactElement | null {
             aria-label='Drag overlay'
             data-track-category='RecordingOverlay'
             data-track-name='drag_handle'
-            data-track-kind='passive'
           >
             <div className='w-10 h-1 bg-muted-foreground/40 rounded-full' />
           </button>
@@ -286,7 +285,6 @@ export function RecordingOverlay(): React.ReactElement | null {
                 className='flex items-center justify-center w-10 h-10 rounded-full bg-destructive hover:bg-destructive/85 transition-colors'
                 data-track-category='RecordingOverlay'
                 data-track-name='stop_recording'
-                data-track-kind='active'
                 data-ph-capture-attribute-track-id='stop_recording'
               >
                 <Square className='w-4 h-4 text-destructive-foreground fill-current' />
@@ -326,7 +324,6 @@ export function RecordingOverlay(): React.ReactElement | null {
               onClick={() => setShowTranscript(prev => !prev)}
               data-track-category='RecordingOverlay'
               data-track-name='toggle_live_transcript'
-              data-track-kind='passive'
             >
               <Mic className='size-3.5' />
               {showTranscript ? 'Hide Live Transcript' : 'View Live Transcript'}
@@ -338,7 +335,6 @@ export function RecordingOverlay(): React.ReactElement | null {
               onClick={() => void navigate('/recordings')}
               data-track-category='RecordingOverlay'
               data-track-name='go_to_recordings'
-              data-track-kind='passive'
             >
               <ArrowUpRight />
             </Button>

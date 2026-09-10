@@ -103,7 +103,6 @@ function ModelStatusRow({
             data-ph-capture-attribute-track-id='retry_intent_model_download'
             data-track-category='Settings'
             data-track-name='Intent suggestions: retry model download'
-            data-track-kind='passive'
             className='shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted'
           >
             Retry

@@ -154,7 +154,6 @@ export const ResultActionsMenu: React.FC<ResultActionsMenuProps> = ({
                 ref={index === 0 ? firstItemRef : undefined}
                 data-track-category='CMDK_ACTIONS'
                 data-track-name={`cmdk_action_${action.id}`}
-                data-track-kind='passive'
                 onSelect={() => {
                   justSelectedRef.current = true;
                   onRun(action.kind);

@@ -67,7 +67,6 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
       }}
       data-track-category='Tags'
       data-track-name='ToggleThreadTag'
-      data-track-kind='active'
     >
       <span
         className='size-2 rounded-full shrink-0'
@@ -98,7 +97,6 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
         placeholder='Search or add a tag'
         data-track-category='Tags'
         data-track-name='ThreadTagSearch'
-        data-track-kind='passive'
         aria-label='Search or add a thread tag'
         className='w-full px-2 py-1.5 mb-1 text-sm bg-transparent border-b border-border outline-none placeholder:text-muted-foreground'
       />
@@ -118,7 +116,6 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
             }}
             data-track-category='Tags'
             data-track-name='CreateThreadTag'
-            data-track-kind='active'
           >
             <Plus size={14} className='shrink-0 text-muted-foreground' />
             {/* The NORMALISED name, not what was typed: this is the string that lands on the

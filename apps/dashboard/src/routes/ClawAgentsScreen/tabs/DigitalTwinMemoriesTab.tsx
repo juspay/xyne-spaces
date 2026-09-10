@@ -66,7 +66,6 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
             onChange={e => setSearch(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin search memories'
-            data-track-kind='passive'
             placeholder='Search memories…'
             className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
           />
@@ -85,7 +84,6 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
             onClick={() => setLegendOpen(o => !o)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin category legend toggle'
-            data-track-kind='passive'
             className='flex w-full items-center justify-between px-2.5 py-1.5 text-left'
           >
             <span className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>

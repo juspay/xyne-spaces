@@ -113,7 +113,6 @@ export const ReplyPill: React.FC<ReplyPillProps> = ({
       data-slot='reply-pill'
       data-track-category='Support'
       data-track-name='OpenReplyPill'
-      data-track-kind='passive'
     >
       <div className='flex items-center pl-0.5 pr-2.5 py-1.5 min-w-0 flex-1'>
         <div className='flex items-center min-w-0 flex-1'>
@@ -131,7 +130,6 @@ export const ReplyPill: React.FC<ReplyPillProps> = ({
                 aria-label={`Switch reply mode. Current: ${label}`}
                 data-track-category='Support'
                 data-track-name='ReplyPillModeDropdown'
-                data-track-kind='active'
               >
                 <div className='flex items-center gap-1'>
                   {replyMode === 'replyAll' ? (

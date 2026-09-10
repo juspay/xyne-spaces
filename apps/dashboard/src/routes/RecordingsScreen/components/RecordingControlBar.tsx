@@ -121,7 +121,6 @@ export function RecordingControlBar({
               title='Stop recording'
               data-track-category='RecordingControlBar'
               data-track-name='stop_recording'
-              data-track-kind='active'
             >
               {/* Square stop icon */}
               <div className='w-5 h-5 rounded-sm bg-destructive' />
@@ -136,7 +135,6 @@ export function RecordingControlBar({
               aria-label='Start recording'
               data-track-category='RecordingControlBar'
               data-track-name='start_recording'
-              data-track-kind='active'
             >
               {isStarting ? (
                 <Loader2 className='w-6 h-6 text-white animate-spin' />

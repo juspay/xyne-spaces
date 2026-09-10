@@ -163,7 +163,6 @@ const BarChart1D: React.FC<BarChart1DProps> = ({
             className='text-xs border border-border rounded px-2 py-1 bg-background text-foreground'
             data-track-category='Charts'
             data-track-name='BAR_CHART_GRANULARITY_CHANGE'
-            data-track-kind='passive'
           >
             <option value='top5'>Top 5</option>
             <option value='top10'>Top 10</option>

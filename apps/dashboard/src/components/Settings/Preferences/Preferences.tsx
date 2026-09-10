@@ -205,7 +205,6 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
           className='flex flex-col items-center gap-1.5'
           data-track-category='PREFERENCES'
           data-track-name='SelectTheme'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ themeId: themeOption.id })}
           data-testid={`theme-btn-${themeOption.id}`}
         >
@@ -284,7 +283,6 @@ const NotificationKeywordsCard: FC = () => {
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
                 data-track-name='RemoveNotificationKeyword'
-                data-track-kind='active'
               >
                 <X className='h-3 w-3' />
               </button>
@@ -310,7 +308,6 @@ const NotificationKeywordsCard: FC = () => {
         className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
         data-track-category='PREFERENCES'
         data-track-name='AddNotificationKeyword'
-        data-track-kind='active'
       />
       {error && <p className='text-xs text-destructive'>{error}</p>}
     </div>
@@ -345,7 +342,6 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
-                data-track-kind='active'
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors',
                   settings.globalDesktopNotificationLevel === level.value
@@ -374,7 +370,6 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
                 data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
-                data-track-kind='active'
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors',
                   settings.globalMobileNotificationLevel === level.value
@@ -455,7 +450,6 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
           }}
           data-track-category='PREFERENCES'
           data-track-name='OpenAssignmentModal'
-          data-track-kind='passive'
         >
           {state.isCurrentlyUnavailable ? (
             <div className='flex items-center gap-2 min-w-0 flex-1'>
@@ -479,7 +473,6 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
               onClick={state.resumeAssignment}
               data-track-category='PREFERENCES'
               data-track-name='ResumeAssignment'
-              data-track-kind='active'
             >
               <X className='size-3 text-muted-foreground' />
             </Button>
@@ -526,7 +519,6 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
         className='text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-foreground hover:bg-border transition-colors'
         data-track-category='PREFERENCES'
         data-track-name='OpenVoiceSignatureModal'
-        data-track-kind='passive'
       >
         {state.hasVoiceSignature ? 'Update' : 'Set up'}
       </button>
@@ -617,7 +609,6 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
                   aria-label='Detect camera quality'
                   data-track-category='PREFERENCES'
                   data-track-name='DetectCameraQuality'
-                  data-track-kind='passive'
                 >
                   {isDetecting ? (
                     <Spinner className='size-3.5 animate-spin' />
@@ -681,7 +672,6 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
-          data-track-kind='passive'
         >
           {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
         </Button>
@@ -915,7 +905,6 @@ const PasswordSection: FC = () => {
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='CurrentPasswordInput'
-              data-track-kind='passive'
             />
             <button
               type='button'
@@ -923,7 +912,6 @@ const PasswordSection: FC = () => {
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
               data-track-name='ToggleShowCurrentPassword'
-              data-track-kind='passive'
             >
               {showCurrent ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
             </button>
@@ -938,7 +926,6 @@ const PasswordSection: FC = () => {
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='NewPasswordInput'
-              data-track-kind='passive'
             />
             <button
               type='button'
@@ -946,7 +933,6 @@ const PasswordSection: FC = () => {
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
               data-track-name='ToggleShowNewPassword'
-              data-track-kind='passive'
             >
               {showNew ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
             </button>
@@ -961,7 +947,6 @@ const PasswordSection: FC = () => {
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='ConfirmPasswordInput'
-              data-track-kind='passive'
             />
             <button
               type='button'
@@ -969,7 +954,6 @@ const PasswordSection: FC = () => {
               className='absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground'
               data-track-category='PREFERENCES'
               data-track-name='ToggleShowConfirmPassword'
-              data-track-kind='passive'
             >
               {showConfirm ? <EyeOff className='size-4' /> : <Eye className='size-4' />}
             </button>
@@ -986,7 +970,6 @@ const PasswordSection: FC = () => {
           trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
-          data-track-kind='active'
         >
           {isSubmitting ? 'Updating...' : 'Update Password'}
         </Button>
@@ -1037,7 +1020,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
             onClick={() => reactNativeBridge.requestNativeShell('profile_menu')}
             data-track-category='PREFERENCES'
             data-track-name='RequestNativeShell'
-            data-track-kind='active'
           >
             Switch to native app
           </Button>
@@ -1048,7 +1030,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-border bg-muted/30 hover:bg-muted transition-colors'
           data-track-category='PREFERENCES'
           data-track-name='OpenChangelog'
-          data-track-kind='passive'
         >
           <span className='text-sm font-medium text-foreground'>Changelog</span>
           <span className='inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400'>
@@ -1064,7 +1045,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
               className='flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer text-left'
               data-track-category='PREFERENCES'
               data-track-name='CopyClientId'
-              data-track-kind='passive'
             >
               <span>Client ID: {logger.zeroClientId}</span>
               <Copy className='size-3' />
@@ -1076,7 +1056,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
               className='flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer text-left'
               data-track-category='PREFERENCES'
               data-track-name='CopyClientGroupId'
-              data-track-kind='passive'
             >
               <span>Client Group ID: {logger.zeroClientGroupId}</span>
               <Copy className='size-3' />
@@ -1210,7 +1189,6 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                   aria-label='Back to preferences list'
                   data-track-category='PREFERENCES'
                   data-track-name='BackToList'
-                  data-track-kind='passive'
                 >
                   <ChevronLeft className='size-5 text-muted-foreground' />
                 </button>
@@ -1225,7 +1203,6 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 title='Close'
                 data-track-category='PREFERENCES'
                 data-track-name='Close'
-                data-track-kind='passive'
               >
                 <X className='size-4' />
               </Button>
@@ -1240,7 +1217,6 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                     className='flex items-center gap-3 px-6 py-3 hover:bg-muted transition-colors text-left w-full'
                     data-track-category='PREFERENCES'
                     data-track-name={`Open_${item.id}`}
-                    data-track-kind='passive'
                   >
                     <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
                       {item.icon}
@@ -1269,7 +1245,6 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 aria-label='Close preferences'
                 data-track-category='PREFERENCES'
                 data-track-name='Close'
-                data-track-kind='passive'
               >
                 <X className='size-4 text-muted-foreground' />
               </button>
@@ -1297,7 +1272,6 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                       )}
                       data-track-category='PREFERENCES'
                       data-track-name={`Open_${item.id}`}
-                      data-track-kind='passive'
                     >
                       {item.icon}
                       {item.label}

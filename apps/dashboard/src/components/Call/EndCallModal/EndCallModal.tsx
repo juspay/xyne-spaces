@@ -62,7 +62,6 @@ export function EndCallModal({
           variant: 'outline',
           disabled: submitting,
           trackName: 'END_CALL_FOR_EVERYONE',
-          trackKind: 'active',
         },
         {
           label: submitting ? 'Ending…' : 'Just leave the call',
@@ -70,7 +69,6 @@ export function EndCallModal({
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
           disabled: submitting,
           trackName: 'END_CALL_LEAVE_SELF',
-          trackKind: 'active',
         },
       ]}
     />

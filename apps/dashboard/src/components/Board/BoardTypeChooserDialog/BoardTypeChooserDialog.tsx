@@ -37,7 +37,6 @@ export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
           onClick={onChooseStandard}
           data-track-category='board_type_chooser'
           data-track-name='choose_standard_board'
-          data-track-kind='passive'
           className='flex flex-col items-start gap-2 rounded-xl border border-border hover:border-[#6276be] bg-background p-4 text-left transition-colors'
         >
           <span className='flex items-center justify-center w-9 h-9 rounded-lg bg-muted'>
@@ -53,7 +52,6 @@ export const BoardTypeChooserDialog: React.FC<BoardTypeChooserDialogProps> = ({
           onClick={onChooseFlow}
           data-track-category='board_type_chooser'
           data-track-name='choose_flow_board'
-          data-track-kind='passive'
           className='flex flex-col items-start gap-2 rounded-xl border border-border hover:border-[#6276be] bg-background p-4 text-left transition-colors'
         >
           <span className='flex items-center justify-center w-9 h-9 rounded-lg bg-muted'>

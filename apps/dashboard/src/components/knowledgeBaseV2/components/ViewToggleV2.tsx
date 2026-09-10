@@ -29,7 +29,6 @@ export const ViewToggleV2: React.FC<ViewToggleV2Props> = ({ value, onChange }) =
         }
         data-track-category='knowledge-base'
         data-track-name='view-mode-grid'
-        data-track-kind='passive'
       >
         <LayoutGrid className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
       </button>
@@ -47,7 +46,6 @@ export const ViewToggleV2: React.FC<ViewToggleV2Props> = ({ value, onChange }) =
         }
         data-track-category='knowledge-base'
         data-track-name='view-mode-list'
-        data-track-kind='passive'
       >
         <List className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
       </button>

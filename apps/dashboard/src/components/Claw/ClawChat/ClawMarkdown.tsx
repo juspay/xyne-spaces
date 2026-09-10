@@ -41,7 +41,6 @@ function ClawMarkdownLink({
       onClick={handleClick}
       data-track-category='CLAW_CHAT'
       data-track-name='MARKDOWN_LINK_CLICK'
-      data-track-kind='passive'
       className='underline underline-offset-2 opacity-90 hover:opacity-100'
     >
       {children}

@@ -39,9 +39,7 @@ export function Tabs({
             aria-current={isActive ? 'page' : undefined}
             onClick={() => onSelect(tab.id)}
             {...(trackCategory ? { 'data-track-category': trackCategory } : {})}
-            {...(trackPrefix
-              ? { 'data-track-name': `${trackPrefix}: ${tab.label}`, 'data-track-kind': 'passive' }
-              : {})}
+            {...(trackPrefix ? { 'data-track-name': `${trackPrefix}: ${tab.label}` } : {})}
             className={cn(
               'flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3 py-1 text-sm transition-colors',
               isActive

@@ -172,7 +172,6 @@ export const XyneAIPlusMenu = ({
             onSelect={handoff(onOpenAgentSelector)}
             data-track-category='XyneAI'
             data-track-name='OPEN_AGENT_SELECTOR'
-            data-track-kind='passive'
           >
             <SplitRow trailing={<ValueChevron value={agentLabel} />}>
               <Bot className={ICON_CLASS} />
@@ -188,7 +187,6 @@ export const XyneAIPlusMenu = ({
             onSelect={handoff(onOpenModelSelector)}
             data-track-category='XyneAI'
             data-track-name='OPEN_MODEL_SELECTOR'
-            data-track-kind='passive'
           >
             <SplitRow trailing={<ValueChevron value={modelLabel} />}>
               <SparkleAi01 className={ICON_CLASS} />
@@ -204,7 +202,6 @@ export const XyneAIPlusMenu = ({
           onSelect={onAttachFiles}
           data-track-category='XyneAI'
           data-track-name='ATTACH_FILES'
-          data-track-kind='active'
         >
           <PaperclipSlant className={ICON_CLASS} />
           Attach files
@@ -217,7 +214,6 @@ export const XyneAIPlusMenu = ({
           onSelect={handoff(onOpenCollections)}
           data-track-category='XyneAI'
           data-track-name='OPEN_COLLECTION_SELECTOR'
-          data-track-kind='passive'
         >
           <SplitRow trailing={<ChevronRight className={ICON_CLASS} />}>
             <Notebook className={ICON_CLASS} />
@@ -231,7 +227,6 @@ export const XyneAIPlusMenu = ({
             onSelect={onCreateCanvasToggle}
             data-track-category='XyneAI'
             data-track-name='TOGGLE_CREATE_CANVAS'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ enabled: createCanvasEnabled })}
           >
             <FilePlus className={`${ICON_CLASS} ${createCanvasEnabled ? 'text-primary' : ''}`} />
@@ -261,7 +256,6 @@ export const XyneAIPlusMenu = ({
             {...(!webSearchAccessible && { title: "You don't have access to web search." })}
             data-track-category='XyneAI'
             data-track-name='TOGGLE_WEB_SEARCH'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
           >
             <SplitRow trailing={<ReadonlySwitch checked={webSearchEnabled} />}>
@@ -289,7 +283,6 @@ export const XyneAIPlusMenu = ({
             {...(!deepResearchAccessible && { title: "You don't have access to deep research." })}
             data-track-category='XyneAI'
             data-track-name='TOGGLE_DEEP_RESEARCH'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ enabled: deepResearchEnabled })}
           >
             <SplitRow trailing={<ReadonlySwitch checked={deepResearchEnabled} />}>

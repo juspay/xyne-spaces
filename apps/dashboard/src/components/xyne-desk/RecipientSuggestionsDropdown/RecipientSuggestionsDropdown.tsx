@@ -97,7 +97,6 @@ export const RecipientSuggestionsDropdown = ({
             }`}
             data-track-category='Support'
             data-track-name='SelectRecipientSuggestion'
-            data-track-kind='passive'
           >
             <span className='flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>
               {initial}

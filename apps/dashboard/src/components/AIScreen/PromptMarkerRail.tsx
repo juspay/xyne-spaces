@@ -127,7 +127,6 @@ export const PromptMarkerRail = ({
               className='pointer-events-auto flex h-2 w-full items-center pl-1 focus:outline-none'
               data-track-category='AskAI'
               data-track-name='PromptMarkerJump'
-              data-track-kind='passive'
             >
               <span
                 className={`block h-[2px] rounded-full transition-all ${

@@ -80,7 +80,6 @@ const ClawSubagentDetailV2 = (): ReactElement => {
                 aria-current={entry.id === tab ? 'page' : undefined}
                 data-track-category='Claw Agents'
                 data-track-name={`Subagent detail v2 tab: ${entry.label}`}
-                data-track-kind='passive'
                 className={cn(
                   'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
                   entry.id === tab

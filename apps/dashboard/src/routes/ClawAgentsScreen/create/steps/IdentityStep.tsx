@@ -42,7 +42,6 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
               autoFocus
               data-track-category='Claw Agents'
               data-track-name='Agent name input'
-              data-track-kind='passive'
               className={cn(
                 'w-full rounded-lg border bg-card px-3 py-2 pr-8 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:outline-none focus:ring-2 focus:ring-ring/30',
                 nameError
@@ -77,7 +76,6 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
               onClick={() => update({ slugManual: !slugManual })}
               data-track-category='Claw Agents'
               data-track-name='Toggle agent handle edit'
-              data-track-kind='passive'
               className='text-[11px] font-normal text-muted-foreground transition hover:text-foreground'
             >
               {slugManual ? 'auto' : 'edit'}
@@ -90,7 +88,6 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
             disabled={!slugManual}
             data-track-category='Claw Agents'
             data-track-name='Agent handle input'
-            data-track-kind='passive'
             className={cn(
               'w-full rounded-lg border bg-muted px-3 py-2 font-mono text-[13px] text-foreground/80 transition focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-60',
               slugError ? 'border-destructive' : 'border-border focus:border-ring',
@@ -114,7 +111,6 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
           placeholder='What does this agent do?'
           data-track-category='Claw Agents'
           data-track-name='Agent description input'
-          data-track-kind='passive'
           className='w-full rounded-lg border border-border bg-card px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30'
         />
       </div>
@@ -130,7 +126,6 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
               aria-label={`Select color ${c}`}
               data-track-category='Claw Agents'
               data-track-name='Select agent color'
-              data-track-kind='passive'
               className={cn(
                 'h-7 w-7 rounded-full transition',
                 color === c

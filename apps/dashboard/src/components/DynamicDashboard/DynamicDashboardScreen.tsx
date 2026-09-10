@@ -261,7 +261,6 @@ const DynamicDashboardScreen = (): ReactElement => {
                   className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-xyne-gray-900 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-gray-1000'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Open_Add_Component'
-                  data-track-kind='passive'
                 >
                   <Plus size={14} />
                   Add Component
@@ -274,7 +273,6 @@ const DynamicDashboardScreen = (): ReactElement => {
                   className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50'
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Open_Share_Modal'
-                  data-track-kind='passive'
                 >
                   <Share size={14} className='text-xyne-gray-600' />
                   Share
@@ -292,7 +290,6 @@ const DynamicDashboardScreen = (): ReactElement => {
                   }`}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Toggle_Edit_Chat'
-                  data-track-kind='passive'
                 >
                   <Sparkles size={14} className='text-xyne-primary-500' />
                   Chat

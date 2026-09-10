@@ -81,7 +81,6 @@ export function SdlcChatPanel({
           aria-label='SDLC conversation'
           data-track-category='SdlcHub'
           data-track-name='SdlcChatThreadViewed'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({
             ownerType: discussion.ownerType,
             conversationId: selectedConversationId,
@@ -114,7 +113,6 @@ export function SdlcChatPanel({
         aria-label='SDLC conversations'
         data-track-category='SdlcHub'
         data-track-name='SdlcChatListViewed'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ ownerType: discussion.ownerType })}
       >
         <ConversationPanelV2

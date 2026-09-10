@@ -154,7 +154,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
           onClick={onBack}
           data-track-category='CallSummary'
           data-track-name='BackFromCallSummary'
-          data-track-kind='passive'
         >
           <ArrowLeft size={16} />
           Call settings
@@ -185,7 +184,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
             title='Edit'
             data-track-category='CallSummary'
             data-track-name='OpenCallSummaryEditor'
-            data-track-kind='passive'
           >
             <Pencil size={16} />
             Edit
@@ -209,7 +207,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
               aria-label='Close'
               data-track-category='CallSummary'
               data-track-name='CloseCallSummaryEditor'
-              data-track-kind='passive'
             >
               <X size={18} />
             </button>
@@ -231,7 +228,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                   className='thin-scrollbar h-full w-full resize-none rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-[13px] leading-[150%] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
                   data-track-category='CallSummary'
                   data-track-name='EditSummaryDraft'
-                  data-track-kind='active'
                 />
                 {aiOverlay}
               </div>
@@ -275,7 +271,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     className='w-full rounded-[10px] border border-border bg-background py-2 pl-3 pr-10 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50'
                     data-track-category='CallSummary'
                     data-track-name='EditWithAIInput'
-                    data-track-kind='passive'
                   />
                   <button
                     type='button'
@@ -286,7 +281,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     data-ph-capture-attribute-track-id='edit_call_summary_with_ai'
                     data-track-category='CallSummary'
                     data-track-name='EditWithAI'
-                    data-track-kind='active'
                   >
                     {aiLoading ? (
                       <Loader2 size={16} className='animate-spin' />
@@ -304,7 +298,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                   className='w-fit text-xs text-primary hover:underline disabled:opacity-40 disabled:no-underline'
                   data-track-category='CallSummary'
                   data-track-name='ResetCallSummary'
-                  data-track-kind='active'
                 >
                   Reset to default
                 </button>
@@ -316,7 +309,6 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                   data-ph-capture-attribute-track-id='save_call_summary_prompt'
                   data-track-category='CallSummary'
                   data-track-name='SaveCallSummary'
-                  data-track-kind='active'
                 >
                   {saving ? 'Saving…' : 'Save'}
                 </button>

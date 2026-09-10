@@ -1038,7 +1038,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 onClick={handleClose}
                 data-track-category='CALLS'
                 data-track-name='CLOSE_SCHEDULE_CALL_MODAL'
-                data-track-kind='passive'
               >
                 <X className='size-4' />
               </Button>
@@ -1347,7 +1346,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                           <Button
                             data-track-category='CALLS'
                             data-track-name='OPEN_RECURRENCE_MENU'
-                            data-track-kind='passive'
                             className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'
                           >
                             <span className='text-sm font-normal leading-6'>{recurrenceLabel}</span>
@@ -1387,7 +1385,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                     onClick={() => setIsRecurring(false)}
                                     data-track-category='CALLS'
                                     data-track-name='SET_NOT_RECURRING'
-                                    data-track-kind='active'
                                   >
                                     Does Not Repeat
                                   </DropdownMenuItem>
@@ -1400,7 +1397,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                     }}
                                     data-track-category='CALLS'
                                     data-track-name='SET_RECURRING_DAILY'
-                                    data-track-kind='active'
                                   >
                                     Daily
                                   </DropdownMenuItem>
@@ -1413,7 +1409,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                     }}
                                     data-track-category='CALLS'
                                     data-track-name='SET_RECURRING_WEEKLY'
-                                    data-track-kind='active'
                                   >
                                     Every Weekday (Mon – Fri)
                                   </DropdownMenuItem>
@@ -1430,7 +1425,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }}
                                         data-track-category='CALLS'
                                         data-track-name='SET_RECURRING_MONTHLY'
-                                        data-track-kind='active'
                                       >
                                         Monthly on {ordinalWord} {weekday}
                                       </DropdownMenuItem>
@@ -1456,7 +1450,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                     }}
                                     data-track-category='CALLS'
                                     data-track-name='OPEN_CUSTOM_RECURRENCE'
-                                    data-track-kind='passive'
                                   >
                                     Custom…
                                   </DropdownMenuItem>
@@ -1508,7 +1501,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }
                                         data-track-category='CALLS'
                                         data-track-name='INCREMENT_REPEAT_INTERVAL'
-                                        data-track-kind='active'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
                                       />
@@ -1520,7 +1512,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }
                                         data-track-category='CALLS'
                                         data-track-name='DECREMENT_REPEAT_INTERVAL'
-                                        data-track-kind='active'
                                         className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
                                         strokeWidth={3}
                                       />
@@ -1553,7 +1544,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         }}
                                         data-track-category='CALLS'
                                         data-track-name={`set-recurrence-frequency-${freq.toLowerCase()}`}
-                                        data-track-kind='active'
                                         className={cn(
                                           'w-full h-7 rounded-full text-[13px] font-medium transition-colors',
                                           recurrenceFrequency === freq
@@ -1587,7 +1577,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                               onClick={() => toggleRecurrenceDay(key)}
                                               data-track-category='CALLS'
                                               data-track-name={`toggle-recurrence-day-${key.toLowerCase()}`}
-                                              data-track-kind='passive'
                                               className={cn(
                                                 'size-[22px] rounded-full text-[12px] transition-colors',
                                                 recurrenceDays.includes(key)
@@ -1633,7 +1622,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                     value='monthly_day'
                                                     data-track-category='CALLS'
                                                     data-track-name='MONTHLY_TYPE_DAY_OF_MONTH'
-                                                    data-track-kind='passive'
                                                   >
                                                     Monthly on day {dayOfMonth}
                                                     {dayOfMonth > 28 && (
@@ -1646,7 +1634,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                                     value='monthly_nth_weekday'
                                                     data-track-category='CALLS'
                                                     data-track-name='MONTHLY_TYPE_DAY_OF_WEEK'
-                                                    data-track-kind='passive'
                                                   >
                                                     Monthly on {ordinalWord} {weekday.toLowerCase()}
                                                     {isLast && occurrence >= 4 && (
@@ -1680,7 +1667,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                         value='never'
                                         data-track-category='CALLS'
                                         data-track-name='SERIES_ENDS_NEVER'
-                                        data-track-kind='passive'
                                       >
                                         Never
                                       </Radio>
@@ -1689,7 +1675,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           value='on'
                                           data-track-category='CALLS'
                                           data-track-name='SERIES_ENDS_ON_DATE'
-                                          data-track-kind='passive'
                                         >
                                           On
                                         </Radio>
@@ -1720,7 +1705,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                           value='after'
                                           data-track-category='CALLS'
                                           data-track-name='SERIES_ENDS_AFTER_COUNT'
-                                          data-track-kind='passive'
                                           className='text-[13px] leading-5'
                                         >
                                           After
@@ -1783,7 +1767,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                               }
                                               data-track-category='CALLS'
                                               data-track-name='INCREMENT_OCCURRENCE_COUNT'
-                                              data-track-kind='active'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',
                                                 seriesEndsType !== 'after' &&
@@ -1800,7 +1783,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                               }
                                               data-track-category='CALLS'
                                               data-track-name='DECREMENT_OCCURRENCE_COUNT'
-                                              data-track-kind='active'
                                               className={cn(
                                                 'size-3 text-secondary-foreground/40 cursor-pointer',
                                                 seriesEndsType !== 'after' &&
@@ -1837,7 +1819,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       }}
                                       data-track-category='CALLS'
                                       data-track-name='CANCEL_CUSTOM_RECURRENCE'
-                                      data-track-kind='passive'
                                       className='rounded-lg text-sm leading-5 bg-transparent h-8 gap-2.5'
                                     >
                                       Cancel
@@ -1860,7 +1841,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                       }}
                                       data-track-category='CALLS'
                                       data-track-name='APPLY_CUSTOM_RECURRENCE'
-                                      data-track-kind='active'
                                       className='rounded-lg text-sm leading-5 bg-primary h-8 gap-2.5'
                                     >
                                       Done
@@ -1956,7 +1936,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   onChange={setEditEntireSeries}
                   data-track-category='CALLS'
                   data-track-name='APPLY_TO_SERIES_TOGGLE'
-                  data-track-kind='active'
                   label={
                     participantsOnly
                       ? 'Apply these people to all calls in this series'
@@ -1981,7 +1960,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       }}
                       data-track-category='CALLS'
                       data-track-name='POST_UPDATES_TO_CHANNEL_TOGGLE'
-                      data-track-kind='active'
                       label='Post call updates to channel'
                     />
                     <Tooltip
@@ -2019,7 +1997,6 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               aria-label={`Remove ${selectedChannelItem.label}`}
                               data-track-category='CALLS'
                               data-track-name='remove-post-call-channel'
-                              data-track-kind='active'
                             >
                               <X className='size-3' />
                             </button>
@@ -2089,7 +2066,6 @@ const SubmitFooter: React.FC<{
         disabled={disabled}
         data-track-category='CALLS'
         data-track-name='SUBMIT_SCHEDULE_CALL'
-        data-track-kind='active'
         className='rounded-lg text-[13px] px-4 h-9 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
       >
         {label}
@@ -2106,7 +2082,6 @@ const SubmitFooter: React.FC<{
         onClick={onCancel}
         data-track-category='CALLS'
         data-track-name='CANCEL_SCHEDULE_CALL'
-        data-track-kind='passive'
         disabled={isSubmitting}
         type='button'
       >

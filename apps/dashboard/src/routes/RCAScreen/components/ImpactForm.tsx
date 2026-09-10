@@ -103,7 +103,6 @@ const ImpactAttachments = ({
             onClick={() => fileInputRef.current?.click()}
             data-track-category='RCA'
             data-track-name='UPLOAD_IMPACT_ATTACHMENT'
-            data-track-kind='active'
             disabled={isUploading}
           >
             Upload files
@@ -540,7 +539,6 @@ export const ImpactForm = ({
             }
             data-track-category='RCA'
             data-track-name='DELETE_IMPACT'
-            data-track-kind='active'
             loading={isDeleting}
             disabled={isSubmitting || deletingImpactId !== null}
             aria-label={isExisting ? `Delete Impact ${index + 1}` : 'Remove Impact'}
@@ -570,7 +568,6 @@ export const ImpactForm = ({
               }}
               data-track-category='RCA'
               data-track-name='ImpactTypeSelect'
-              data-track-kind='passive'
               className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               <option value=''>Select impact type</option>
@@ -667,7 +664,6 @@ export const ImpactForm = ({
                     onClick={() => pendingFileInputsRef.current[id]?.click()}
                     data-track-category='RCA'
                     data-track-name='UPLOAD_PENDING_IMPACT_ATTACHMENT'
-                    data-track-kind='active'
                     disabled={isUploadingAttachments}
                   >
                     Upload files
@@ -733,7 +729,6 @@ export const ImpactForm = ({
             onClick={() => onPhaseChange('rca')}
             data-track-category='RCA'
             data-track-name='GO_TO_RCA_PHASE'
-            data-track-kind='passive'
           >
             Review Previous Phase
           </Button>
@@ -829,7 +824,6 @@ export const ImpactForm = ({
                 }}
                 data-track-category='RCA'
                 data-track-name='ADD_IMPACT'
-                data-track-kind='active'
                 disabled={isSubmitting}
               >
                 <Plus className='h-3.5 w-3.5' />
@@ -856,7 +850,6 @@ export const ImpactForm = ({
                     onClick={() => void handleSaveDraftClick()}
                     data-track-category='RCA'
                     data-track-name='SAVE_IMPACT_DRAFT'
-                    data-track-kind='active'
                     loading={isSubmitting}
                     disabled={isSubmitting}
                   >
@@ -868,7 +861,6 @@ export const ImpactForm = ({
                   onClick={() => void handleSaveAll()}
                   data-track-category='RCA'
                   data-track-name='SAVE_ALL_IMPACTS'
-                  data-track-kind='active'
                   loading={isSubmitting}
                   disabled={isSubmitting}
                 >

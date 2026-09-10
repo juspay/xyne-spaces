@@ -229,7 +229,6 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
             data-track-category='CALLS'
             data-ph-capture-attribute-track-id='start_call_now'
             data-track-name='StartCallNow'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
             <div className='rounded-md bg-border p-2'>

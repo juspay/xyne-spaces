@@ -176,7 +176,6 @@ const getRedirection = (
         onClick={handleClick}
         data-track-category='XYNE_AI_SIDEBAR'
         data-track-name='OPEN_ACTIVITY_ITEM'
-        data-track-kind='passive'
         className='flex-shrink-0 p-1 hover:bg-accent rounded transition-colors cursor-pointer'
         title={`Go to ${url}`}
       >
@@ -266,7 +265,6 @@ export const UserActivityItem = ({
         onClick={handleClick}
         data-track-category='XYNE_AI_SIDEBAR'
         data-track-name='OPEN_ACTIVITY_ITEM'
-        data-track-kind='passive'
         className='w-full flex items-center gap-2 px-4 py-1 text-left'
       >
         {/* Expand/Collapse Chevron */}
@@ -274,7 +272,6 @@ export const UserActivityItem = ({
           onClick={handleToggleExpand}
           data-track-category='XYNE_AI_SIDEBAR'
           data-track-name='TOGGLE_ACTIVITY_DETAILS'
-          data-track-kind='passive'
           className='flex-shrink-0 p-1.5 hover:bg-accent rounded transition-colors cursor-pointer self-start'
           role='button'
           tabIndex={0}
@@ -325,7 +322,6 @@ export const UserActivityItem = ({
             onClick={handleConfigure}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='CONFIGURE_ACTIVITY'
-            data-track-kind='passive'
             className='rounded'
             title='Configure activity'
             type='button'

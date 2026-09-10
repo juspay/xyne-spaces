@@ -238,7 +238,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       disabled={isSwitching || Boolean(switchingToId)}
                       data-track-category='WORKSPACE_SELECTION'
                       data-track-name='SelectWorkspace'
-                      data-track-kind='passive'
                       onClick={() => {
                         void handleSelectWorkspace(workspace.id);
                       }}
@@ -318,7 +317,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       type='text'
                       data-track-category='WORKSPACE_SELECTION'
                       data-track-name='EnterWorkspaceName'
-                      data-track-kind='passive'
                       value={newWorkspaceName}
                       onChange={e => setNewWorkspaceName(e.target.value)}
                       placeholder='e.g. Engineering, Design, Sales'
@@ -342,7 +340,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       type='button'
                       data-track-category='WORKSPACE_SELECTION'
                       data-track-name='CancelCreateWorkspace'
-                      data-track-kind='passive'
                       onClick={() => {
                         setShowCreateForm(false);
                         setNewWorkspaceName('');
@@ -361,7 +358,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                   type='button'
                   data-track-category='WORKSPACE_SELECTION'
                   data-track-name='ShowCreateWorkspaceForm'
-                  data-track-kind='passive'
                   onClick={() => setShowCreateForm(true)}
                   className='group flex w-full items-center gap-3 rounded-2xl border border-dashed border-border bg-transparent p-4 text-left transition-colors hover:border-[hsl(var(--primary))]/40 hover:bg-accent/40'
                 >
@@ -403,7 +399,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                 type='button'
                 data-track-category='WORKSPACE_SELECTION'
                 data-track-name='TryDifferentAccount'
-                data-track-kind='passive'
                 onClick={handleTryDifferentAccount}
                 className='inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors'
               >

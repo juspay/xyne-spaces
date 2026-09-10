@@ -434,7 +434,6 @@ export const CustomField = ({
               className='h-8 w-[140px] rounded-md border border-input bg-background px-3 py-1.5 text-[13px] flex items-center justify-between'
               data-track-category='form'
               data-track-name='field-type-dropdown-toggle'
-              data-track-kind='passive'
             >
               <span>{fieldTypeOptions.find(opt => opt.value === fieldType)?.label || 'Field'}</span>
               <ChevronDown className='h-4 w-4 text-muted-foreground' />
@@ -458,7 +457,6 @@ export const CustomField = ({
                     className='w-full px-3 py-2 text-left text-[13px] hover:bg-muted flex items-center justify-between'
                     data-track-category='form'
                     data-track-name={`select-field-type-${option.value}`}
-                    data-track-kind='passive'
                   >
                     <span>{option.label}</span>
                     {fieldType === option.value && <Check className='h-4 w-4' />}
@@ -482,7 +480,6 @@ export const CustomField = ({
               }`}
               data-track-category='form'
               data-track-name='required-toggle'
-              data-track-kind='active'
               type='button'
             >
               <span
@@ -500,7 +497,6 @@ export const CustomField = ({
             className='w-8 h-8 text-muted-foreground hover:text-xyne-red-500'
             data-track-category='form'
             data-track-name='cancel-field'
-            data-track-kind='passive'
           >
             <Trash2 size={16} />
           </Button>
@@ -540,7 +536,6 @@ export const CustomField = ({
                 className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
                 data-track-category='form'
                 data-track-name='bulk_options_textarea'
-                data-track-kind='passive'
               />
               <div className='flex flex-col gap-[2px]'>
                 <span className='text-[11px] text-muted-foreground'>
@@ -593,7 +588,6 @@ export const CustomField = ({
                         className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
                         data-track-category='form'
                         data-track-name='edit-option'
-                        data-track-kind='active'
                       />
                       {supportsBranching && (
                         <button
@@ -609,7 +603,6 @@ export const CustomField = ({
                           }`}
                           data-track-category='form'
                           data-track-name='toggle-option-branch-panel'
-                          data-track-kind='passive'
                         >
                           {branchFields.length > 0
                             ? `${branchFields.length} field${branchFields.length === 1 ? '' : 's'}`
@@ -623,7 +616,6 @@ export const CustomField = ({
                         className='w-6 h-6 text-muted-foreground hover:text-xyne-red-500 opacity-0 group-hover:opacity-100'
                         data-track-category='form'
                         data-track-name='remove-option'
-                        data-track-kind='active'
                       >
                         <Trash2 size={14} />
                       </Button>
@@ -656,7 +648,6 @@ export const CustomField = ({
                               className='group flex items-center gap-2 px-3 py-2 border-b border-border last:border-b-0 hover:bg-muted cursor-pointer text-[13px]'
                               data-track-category='form'
                               data-track-name='branch-field-row'
-                              data-track-kind='passive'
                             >
                               <span className='flex-1 text-foreground'>
                                 {childField.label}
@@ -697,7 +688,6 @@ export const CustomField = ({
                                   }`}
                                   data-track-category='form'
                                   data-track-name='branch-field-required-toggle'
-                                  data-track-kind='active'
                                 >
                                   <span
                                     className={`absolute top-[2px] left-[2px] w-[10px] h-[10px] bg-background rounded-full transition-transform ${
@@ -729,7 +719,6 @@ export const CustomField = ({
                                   }`}
                                   data-track-category='form'
                                   data-track-name='branch-field-show-in-create-toggle'
-                                  data-track-kind='passive'
                                 >
                                   <span
                                     className={`absolute top-[2px] left-[2px] w-[10px] h-[10px] bg-background rounded-full transition-transform ${
@@ -751,7 +740,6 @@ export const CustomField = ({
                                 className='w-6 h-6 text-muted-foreground hover:text-xyne-red-500'
                                 data-track-category='form'
                                 data-track-name='delete-branch-field'
-                                data-track-kind='passive'
                               >
                                 <Trash2 size={14} />
                               </Button>
@@ -778,7 +766,6 @@ export const CustomField = ({
                             className='w-full flex items-center gap-1.5 px-3 py-2 text-[12px] text-[#6276be] hover:bg-[#6276be]/10'
                             data-track-category='form'
                             data-track-name='add-branch-field'
-                            data-track-kind='passive'
                           >
                             <Plus size={13} />
                             Add field
@@ -805,7 +792,6 @@ export const CustomField = ({
                     className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
                     data-track-category='form'
                     data-track-name='option-input'
-                    data-track-kind='passive'
                   />
                   <Button
                     onClick={handleAddOption}
@@ -815,7 +801,6 @@ export const CustomField = ({
                     className='w-6 h-6 text-muted-foreground hover:text-xyne-gray-600 disabled:opacity-50'
                     data-track-category='form'
                     data-track-name='add-option'
-                    data-track-kind='active'
                   >
                     <CornerDownLeft size={14} />
                   </Button>
@@ -864,7 +849,6 @@ export const CustomField = ({
                         className='h-7 text-[12px] border border-input rounded-md px-2 bg-background'
                         data-track-category='form'
                         data-track-name='rename-option-select'
-                        data-track-kind='active'
                       >
                         {decision.candidateValues.map(value => (
                           <option key={value} value={value}>
@@ -878,7 +862,6 @@ export const CustomField = ({
                         size='sm'
                         data-track-category='form'
                         data-track-name='confirm-rename-option'
-                        data-track-kind='active'
                       >
                         Renamed
                       </Button>
@@ -895,7 +878,6 @@ export const CustomField = ({
                     }
                     data-track-category='form'
                     data-track-name='confirm-replace-option'
-                    data-track-kind='active'
                   >
                     {decision.candidateValues.length > 0
                       ? 'No, different option'
@@ -912,7 +894,6 @@ export const CustomField = ({
               size='sm'
               data-track-category='form'
               data-track-name='cancel-option-decisions'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -922,7 +903,6 @@ export const CustomField = ({
               size='sm'
               data-track-category='form'
               data-track-name='apply-option-decisions'
-              data-track-kind='active'
             >
               Apply
             </Button>

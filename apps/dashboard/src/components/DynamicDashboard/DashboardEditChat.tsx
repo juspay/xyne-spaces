@@ -123,7 +123,6 @@ export const DashboardEditChat = ({
   const dataSourcePicker = (
     <DataSourceChip
       trackName='Dashboard_Chat_Data_Source_Chip'
-      trackKind='passive'
       dataSourceId={dataSourceId}
       setDataSourceId={setDataSourceId}
       dataSources={dataSources}

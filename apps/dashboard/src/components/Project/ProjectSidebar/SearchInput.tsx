@@ -34,7 +34,6 @@ const SearchInput = ({
         data-track-event='blur'
         data-track-category='Projects'
         data-track-name='ProjectSearchInput'
-        data-track-kind='passive'
       />
       <button
         onClick={onClose}
@@ -42,7 +41,6 @@ const SearchInput = ({
         aria-label='Close search'
         data-track-category='Projects'
         data-track-name='CloseSearchInput'
-        data-track-kind='passive'
       >
         <X className='size-3 text-muted-foreground' />
       </button>

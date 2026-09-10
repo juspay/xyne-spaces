@@ -200,7 +200,6 @@ export const SocialMediaDeskIntegrationCard = ({
                   onClick={() => void handleAppConnection(app.id, !app.isActive)}
                   data-track-category='social-media-desk-integration'
                   data-track-name='toggle-google-play-app-connection'
-                  data-track-kind='passive'
                 >
                   {app.isActive ? <Unplug size={14} /> : <Plug size={14} />}
                   {app.isActive ? 'Disconnect' : 'Reconnect'}
@@ -223,7 +222,6 @@ export const SocialMediaDeskIntegrationCard = ({
             }}
             data-track-category='social-media-desk-integration'
             data-track-name='add-google-play-apps'
-            data-track-kind='active'
           >
             <Plus size={14} />
             Add Google Play apps
@@ -236,7 +234,6 @@ export const SocialMediaDeskIntegrationCard = ({
             onClick={() => void handleReconnect()}
             data-track-category='social-media-desk-integration'
             data-track-name='reauthorize-google-play'
-            data-track-kind='active'
           >
             <RefreshCw size={14} />
             Reauthorize Google
@@ -275,7 +272,6 @@ export const SocialMediaDeskIntegrationCard = ({
                     onChange={event => updateApplication(index, 'displayName', event.target.value)}
                     data-track-category='social-media-desk-integration'
                     data-track-name='app-name-input'
-                    data-track-kind='passive'
                     placeholder='My Android app'
                     maxLength={120}
                   />
@@ -291,7 +287,6 @@ export const SocialMediaDeskIntegrationCard = ({
                     onChange={event => updateApplication(index, 'packageName', event.target.value)}
                     data-track-category='social-media-desk-integration'
                     data-track-name='package-name-input'
-                    data-track-kind='passive'
                     placeholder='com.example.app'
                     aria-invalid={
                       application.packageName.length > 0 &&
@@ -312,7 +307,6 @@ export const SocialMediaDeskIntegrationCard = ({
                   }
                   data-track-category='social-media-desk-integration'
                   data-track-name='remove-app-row'
-                  data-track-kind='active'
                 >
                   <Trash2 size={14} />
                 </Button>
@@ -335,7 +329,6 @@ export const SocialMediaDeskIntegrationCard = ({
               }
               data-track-category='social-media-desk-integration'
               data-track-name='add-app-row'
-              data-track-kind='active'
             >
               <Plus size={14} />
               Add another
@@ -349,7 +342,6 @@ export const SocialMediaDeskIntegrationCard = ({
                 onClick={() => setShowAddApps(false)}
                 data-track-category='social-media-desk-integration'
                 data-track-name='cancel-add-apps'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -361,7 +353,6 @@ export const SocialMediaDeskIntegrationCard = ({
                 onClick={() => void handleAddApplications()}
                 data-track-category='social-media-desk-integration'
                 data-track-name='submit-add-apps'
-                data-track-kind='active'
               >
                 Add apps
               </Button>

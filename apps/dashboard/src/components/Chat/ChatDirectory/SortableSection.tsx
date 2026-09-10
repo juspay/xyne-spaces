@@ -126,7 +126,6 @@ const SortableSection = ({
               aria-label='Section options'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='SECTION_OPTIONS_MENU'
-              data-track-kind='passive'
             >
               <ThreeDotsMenuVertical strokeWidth={2.33} size={14} className='shrink-0' />
             </button>
@@ -152,7 +151,6 @@ const SortableSection = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='RENAME_SECTION'
-              data-track-kind='active'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <PencilEdit size={16} />
@@ -167,7 +165,6 @@ const SortableSection = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='MANAGE_SECTION_CHANNELS'
-              data-track-kind='passive'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <ListCheck size={16} />
@@ -182,7 +179,6 @@ const SortableSection = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CREATE_SECTION'
-              data-track-kind='active'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <FolderPlus size={16} />
@@ -206,7 +202,6 @@ const SortableSection = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='DELETE_SECTION'
-              data-track-kind='active'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <DeleteDustbin02 size={16} />

@@ -48,7 +48,6 @@ export const useReactions = (): UseReactionsReturn => {
           hasReacted ? 'REMOVE_REACTION' : 'ADD_REACTION',
           undefined,
           { ...channelTrackingMetadata(channel), messageId, emojiName: emoji },
-          'active',
         );
       } catch (error) {
         throw new Error(error instanceof Error ? error.message : 'Failed to toggle reaction');

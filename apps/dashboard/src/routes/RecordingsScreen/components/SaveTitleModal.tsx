@@ -88,7 +88,6 @@ export function SaveTitleModal({
           className='w-full px-4 py-3 text-base bg-muted dark:bg-gray-900 border border-input dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground dark:text-gray-100 placeholder-gray-400 disabled:opacity-50'
           data-track-category='SaveTitleModal'
           data-track-name='recording_title_input'
-          data-track-kind='passive'
         />
 
         <div className='flex items-center justify-end gap-3 mt-5'>
@@ -98,7 +97,6 @@ export function SaveTitleModal({
             className='flex items-center gap-2 px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed'
             data-track-category='SaveTitleModal'
             data-track-name='save_recording_title'
-            data-track-kind='active'
           >
             {isSaving ? (
               <>

@@ -79,7 +79,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         data-testid='canvas-attachment-backdrop'
         data-track-category='CANVAS'
         data-track-name='Close_Attachment_Modal_Backdrop'
-        data-track-kind='passive'
       />
 
       {/* Modal */}
@@ -97,7 +96,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
             data-testid='canvas-attachment-close'
             data-track-category='CANVAS'
             data-track-name='Close_Attachment_Modal'
-            data-track-kind='passive'
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
@@ -136,7 +134,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
             data-testid='canvas-attachment-create-new'
             data-track-category='CANVAS'
             data-track-name='Create_New_Canvas_From_Attachment'
-            data-track-kind='active'
           >
             <Plus className='w-4 h-4 mr-2' />
             Create New Canvas
@@ -148,7 +145,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
               onClick={handleClose}
               data-track-category='CANVAS'
               data-track-name='CLOSE_CANVAS_ATTACHMENT_MODAL'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -159,7 +155,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
               data-testid='canvas-attachment-insert'
               data-track-category='CANVAS'
               data-track-name='Insert_Canvas_Link'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 canvasId: selectedCanvas?.id,
                 title: selectedCanvas?.title,

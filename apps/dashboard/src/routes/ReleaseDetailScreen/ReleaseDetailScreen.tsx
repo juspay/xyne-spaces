@@ -689,7 +689,6 @@ const ReleaseDetailScreen = (): ReactElement => {
             }
             data-track-category='Release'
             data-track-name='OPEN_RELEASE_CONVERSATION'
-            data-track-kind='passive'
           >
             {row.ticketId}
           </button>
@@ -805,7 +804,6 @@ const ReleaseDetailScreen = (): ReactElement => {
             }
             data-track-category='Release'
             data-track-name='BACK_TO_PROJECT_RELEASES'
-            data-track-kind='passive'
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           >
             <ArrowLeft size={20} />
@@ -824,7 +822,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                     data-track-event='BUTTON_CLICK'
                     data-track-category='Release'
                     data-track-name='GoToReleaseTicket'
-                    data-track-kind='passive'
                     data-testid='go-to-release-ticket'
                     className='inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted transition-colors'
                     title='Open the release ticket in its channel'
@@ -841,7 +838,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                   }}
                   data-track-category='Release'
                   data-track-name='OPEN_RELEASE_IN_NEW_WINDOW'
-                  data-track-kind='passive'
                   className='p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                   title='Open in new window'
                   aria-label='Open in new window'
@@ -995,7 +991,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                     data-track-event='BUTTON_CLICK'
                     data-track-category='Release'
                     data-track-name='ReRunCommitAnalysis'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ releaseTicketId })}
                     data-testid='rerun-commit-analysis'
                     title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
@@ -1011,7 +1006,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                     data-track-event='BUTTON_CLICK'
                     data-track-category='Release'
                     data-track-name='ExportReleaseDevTicketsCsv'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       releaseTicketId,
                       devTicketCount: devTicketRows.length,
@@ -1103,7 +1097,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                           onClick={goPrevArtPage}
                           data-track-category='Release'
                           data-track-name='ARTIFACTS_PREV_PAGE'
-                          data-track-kind='passive'
                           disabled={artPageIndex === 0}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -1114,7 +1107,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                           onClick={goNextArtPage}
                           data-track-category='Release'
                           data-track-name='ARTIFACTS_NEXT_PAGE'
-                          data-track-kind='passive'
                           disabled={!artHasMore}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -1247,7 +1239,6 @@ const ReleaseDetailScreen = (): ReactElement => {
               onClick={failureDialog.close}
               data-track-category='Release'
               data-track-name='CLOSE_FAILURE_DIALOG'
-              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -1260,7 +1251,6 @@ const ReleaseDetailScreen = (): ReactElement => {
               onClick={() => void failureDialog.submit()}
               data-track-category='Release'
               data-track-name='SUBMIT_FAILURE_DIALOG'
-              data-track-kind='active'
             >
               {failureDialog.state.isSubmitting ? 'Saving...' : 'Submit'}
             </button>

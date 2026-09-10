@@ -194,7 +194,6 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             )}
             data-track-category='AskAI'
             data-track-name='citation-doc-raw'
-            data-track-kind='passive'
           >
             Raw
           </button>
@@ -210,7 +209,6 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             )}
             data-track-category='AskAI'
             data-track-name='citation-doc-preview'
-            data-track-kind='passive'
           >
             Preview
           </button>
@@ -398,7 +396,6 @@ export function CitationDocsPanel(): ReactElement | null {
           className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           data-track-category='AskAI'
           data-track-name='citation-docs-expand'
-          data-track-kind='passive'
         >
           <PanelRightOpen className='h-4 w-4' />
         </button>
@@ -419,7 +416,6 @@ export function CitationDocsPanel(): ReactElement | null {
               aria-label='List open documents'
               data-track-category='AskAI'
               data-track-name='citation-docs-list-open'
-              data-track-kind='passive'
             >
               {docs.length}
               <ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
@@ -469,7 +465,6 @@ export function CitationDocsPanel(): ReactElement | null {
                   )}
                   data-track-category='AskAI'
                   data-track-name='citation-doc-tab-select'
-                  data-track-kind='passive'
                 >
                   {iconForSource(doc.source)}
                   <span className='truncate'>{doc.title}</span>
@@ -481,7 +476,6 @@ export function CitationDocsPanel(): ReactElement | null {
                   className='grid h-4 w-4 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10'
                   data-track-category='AskAI'
                   data-track-name='citation-doc-tab-close'
-                  data-track-kind='passive'
                 >
                   <X className='h-3 w-3' strokeWidth={2} />
                 </button>
@@ -500,7 +494,6 @@ export function CitationDocsPanel(): ReactElement | null {
               className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='citation-docs-open-source'
-              data-track-kind='passive'
             >
               <SquareArrowOutUpRight className='h-4 w-4' />
             </button>
@@ -513,7 +506,6 @@ export function CitationDocsPanel(): ReactElement | null {
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='citation-docs-collapse'
-            data-track-kind='passive'
           >
             <PanelRightClose className='h-4 w-4' />
           </button>
@@ -525,7 +517,6 @@ export function CitationDocsPanel(): ReactElement | null {
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='citation-docs-close-all'
-            data-track-kind='passive'
           >
             <X className='h-4 w-4' />
           </button>

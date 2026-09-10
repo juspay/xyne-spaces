@@ -179,7 +179,6 @@ export const CanvasCodeCopyButton = ({
           title='Code language'
           data-track-category='CANVAS'
           data-track-name='Change_Code_Block_Language'
-          data-track-kind='active'
           className='h-[26px] max-w-32 rounded px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground'
         >
           {CANVAS_CODE_LANGUAGES.map(option => (
@@ -198,7 +197,6 @@ export const CanvasCodeCopyButton = ({
         className='flex h-[26px] w-[26px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         data-track-category='CANVAS'
         data-track-name='Copy_Code_Block'
-        data-track-kind='passive'
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </button>
@@ -214,7 +212,6 @@ export const CanvasCodeCopyButton = ({
           className='flex h-[26px] w-[26px] items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
           data-track-category='CANVAS'
           data-track-name='Delete_Code_Block'
-          data-track-kind='active'
         >
           <Trash2 size={13} />
         </button>

@@ -133,7 +133,6 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
-import type { InteractionKind } from '@xyne/shared';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -313,7 +312,6 @@ const SeeMoreItem = ({
   hoverable,
   trackCategory,
   trackName,
-  trackKind,
   trackMetadata,
 }: {
   value: string;
@@ -322,7 +320,6 @@ const SeeMoreItem = ({
   hoverable: boolean;
   trackCategory: string;
   trackName: string;
-  trackKind?: InteractionKind;
   trackMetadata: string;
 }): ReactElement => (
   <Command.Item
@@ -332,7 +329,6 @@ const SeeMoreItem = ({
     style={{ WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
     data-track-category={trackCategory}
     data-track-name={trackName}
-    data-track-kind={trackKind}
     data-track-metadata={trackMetadata}
   >
     {label}
@@ -2712,7 +2708,6 @@ const ChannelCommandMenu = ({
                         hoverable={!isMobile}
                         trackCategory='SEARCH'
                         trackName='SEE_MORE_SECTION'
-                        trackKind='passive'
                         trackMetadata={JSON.stringify({ tab: sectionTab })}
                       />
                     )}
@@ -2795,7 +2790,6 @@ const ChannelCommandMenu = ({
                     hoverable={!isMobile}
                     trackCategory='CHANNEL_SEARCH'
                     trackName='TOGGLE_BACKEND_USER_EXPANSION'
-                    trackKind='passive'
                     trackMetadata={JSON.stringify({ type, isExpanded })}
                   />
                 )}
@@ -2811,7 +2805,6 @@ const ChannelCommandMenu = ({
                     hoverable={!isMobile}
                     trackCategory='SEARCH'
                     trackName='SEE_MORE_SECTION'
-                    trackKind='passive'
                     trackMetadata={JSON.stringify({ tab: sectionTab })}
                   />
                 )}
@@ -3152,7 +3145,6 @@ const ChannelCommandMenu = ({
                         hoverable={!isMobile}
                         trackCategory='CHANNEL_SEARCH'
                         trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        trackKind='passive'
                         trackMetadata={JSON.stringify({ category, isExpanded })}
                       />
                     )}
@@ -3801,7 +3793,6 @@ const ChannelCommandMenu = ({
         className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
         data-track-category='SEARCH'
         data-track-name='SHOW_RESULTS_FOR'
-        data-track-kind='passive'
       >
         <SearchDefault size={14} className='text-muted-foreground shrink-0' />
         <span className='flex items-center flex-wrap gap-1'>
@@ -3863,7 +3854,6 @@ const ChannelCommandMenu = ({
             aria-label='Go back'
             data-track-category='CHANNEL_SEARCH'
             data-track-name='CLOSE_SEARCH_MENU`'
-            data-track-kind='passive'
           >
             <ArrowLeft size={20} />
           </button>
@@ -3966,7 +3956,6 @@ const ChannelCommandMenu = ({
                   )}
                   data-track-category='SEARCH'
                   data-track-name={`TOGGLE_${id.toUpperCase()}`}
-                  data-track-kind='passive'
                 >
                   {label}
                 </button>
@@ -4015,7 +4004,6 @@ const ChannelCommandMenu = ({
           role='presentation'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='ClickSearchResultsArea'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ hasResults })}
           onClick={() => {
             // Blur input when clicking anywhere in this container
@@ -4091,7 +4079,6 @@ const ChannelCommandMenu = ({
                       )}
                       data-track-category='CHANNEL_SEARCH'
                       data-track-name='SELECT_SEARCH_TAB'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ tab: tab.id })}
                     >
                       {tab.icon}
@@ -4636,7 +4623,6 @@ const ChannelCommandMenu = ({
                                 className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
                                 data-track-category='SEARCH'
                                 data-track-name={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
-                                data-track-kind='passive'
                               >
                                 <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
                                   <ChevronDown size={14} />
@@ -4901,7 +4887,6 @@ const ChannelCommandMenu = ({
                     onClick={toggleDeskMergeMode}
                     data-track-category='SEARCH'
                     data-track-name='TOGGLE_DESK_MERGE_MODE'
-                    data-track-kind='passive'
                     className={MERGE_BAR_BUTTON_NO_RING}
                   >
                     Cancel
@@ -4920,7 +4905,6 @@ const ChannelCommandMenu = ({
                       onClick={clearDeskMergeSelection}
                       data-track-category='SEARCH'
                       data-track-name='CLEAR_DESK_MERGE_SELECTION'
-                      data-track-kind='passive'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Clear
@@ -4931,7 +4915,6 @@ const ChannelCommandMenu = ({
                       onClick={toggleDeskMergeMode}
                       data-track-category='SEARCH'
                       data-track-name='TOGGLE_DESK_MERGE_MODE'
-                      data-track-kind='passive'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Cancel
@@ -4942,7 +4925,6 @@ const ChannelCommandMenu = ({
                       onClick={() => setShowMergeDialog(true)}
                       data-track-category='SEARCH'
                       data-track-name='OPEN_MERGE_DIALOG'
-                      data-track-kind='passive'
                       className={MERGE_BAR_BUTTON_NO_RING}
                     >
                       Merge {selectedMergeTickets.size > 0 ? `(${selectedMergeTickets.size})` : ''}
@@ -4996,7 +4978,6 @@ const ChannelCommandMenu = ({
                   className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
                   data-track-category='COMMAND_MENU'
                   data-track-name='TOGGLE_DESK_MERGE_MODE'
-                  data-track-kind='passive'
                 >
                   <span>Select & Merge</span>
                 </button>

@@ -69,7 +69,6 @@ export function MonthView({
                   } ${hasTickets ? 'hover:shadow-inner' : ''}`}
                   data-track-category='CALENDAR_MONTH_VIEW'
                   data-track-name='SelectDay'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     date: dateKey,
                     ticketCount: dayTickets.length,

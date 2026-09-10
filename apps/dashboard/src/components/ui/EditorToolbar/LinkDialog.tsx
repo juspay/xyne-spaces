@@ -126,7 +126,6 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
           onClick={() => setOpen(false)}
           data-track-category='EDITOR_TOOLBAR'
           data-track-name='CLOSE_LINK_DIALOG'
-          data-track-kind='passive'
           className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
         >
           <MultipleCrossCancelDefault className='h-4 w-4' />
@@ -161,7 +160,6 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
             onClick={removeLink}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='REMOVE_LINK'
-            data-track-kind='active'
             className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
             variant='ghost'
           >
@@ -173,7 +171,6 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
             onClick={() => setOpen(false)}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='CANCEL_LINK'
-            data-track-kind='passive'
             variant='secondary'
             className='rounded px-3 py-1.5 text-xs text-foreground'
           >
@@ -183,7 +180,6 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
             onClick={applyLink}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='APPLY_LINK'
-            data-track-kind='active'
             disabled={!linkUrl.trim()}
             className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
           >

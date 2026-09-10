@@ -46,7 +46,6 @@ export function VersionHistory({
           aria-label='Back'
           data-track-category='automation-versions'
           data-track-name='version-history-back'
-          data-track-kind='passive'
           className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/40'
         >
           <ArrowLeft className='size-4' />
@@ -59,7 +58,6 @@ export function VersionHistory({
             onClick={handleCompareClick}
             data-track-category='automation-versions'
             data-track-name='version-history-compare'
-            data-track-kind='passive'
           >
             <GitCompare className='size-4' />
             Compare two versions
@@ -86,7 +84,6 @@ export function VersionHistory({
               data-ph-capture-attribute-track-id='automation_version_history_retry'
               data-track-category='automation-versions'
               data-track-name='version-history-retry'
-              data-track-kind='passive'
               onClick={() => {
                 void refetch();
               }}
@@ -143,7 +140,6 @@ function VersionRow({
       onClick={onClick}
       data-track-category='automation-versions'
       data-track-name='version-history-row-open'
-      data-track-kind='passive'
       className='flex h-16 w-full items-center gap-3 border-b border-border px-6 text-left hover:bg-accent/30'
     >
       <div className='flex flex-1 flex-col gap-0.5 min-w-0'>

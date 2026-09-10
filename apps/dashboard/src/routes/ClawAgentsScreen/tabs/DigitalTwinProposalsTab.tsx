@@ -120,7 +120,6 @@ const DigitalTwinProposalsTab = (): ReactElement => {
           onClick={() => void approveEverything()}
           data-track-category='Claw Agents'
           data-track-name='Digital Twin approve all proposals'
-          data-track-kind='active'
           disabled={bulkActing !== null}
           className='flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-85 active:scale-95 disabled:opacity-50'
         >
@@ -159,7 +158,6 @@ const DigitalTwinProposalsTab = (): ReactElement => {
                   onClick={() => void approveGroup(group.subsystem)}
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin approve subsystem proposals'
-                  data-track-kind='active'
                   disabled={bulkActing !== null}
                   className={cn(
                     'ml-auto flex items-center gap-1 rounded-full border border-emerald-600/40 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 transition hover:bg-muted active:scale-95 disabled:opacity-50 dark:text-emerald-400',

@@ -173,7 +173,6 @@ const MermaidBlockComponent = ({
               aria-label='View diagram'
               data-track-category='Mermaid'
               data-track-name='VIEW_DIAGRAM'
-              data-track-kind='passive'
             >
               <ImageIcon className='w-3 h-3' />
             </button>
@@ -186,7 +185,6 @@ const MermaidBlockComponent = ({
               aria-label='View code'
               data-track-category='Mermaid'
               data-track-name='VIEW_CODE'
-              data-track-kind='passive'
             >
               <Code2 className='w-3 h-3' />
             </button>
@@ -200,7 +198,6 @@ const MermaidBlockComponent = ({
                 aria-label='Download as PNG'
                 data-track-category='Mermaid'
                 data-track-name='DOWNLOAD_PNG'
-                data-track-kind='passive'
               >
                 <Download className='w-3 h-3' />
               </button>
@@ -215,7 +212,6 @@ const MermaidBlockComponent = ({
                 aria-label='Copy code'
                 data-track-category='Mermaid'
                 data-track-name='COPY_CODE'
-                data-track-kind='passive'
               >
                 {copied ? (
                   <Check className='w-3 h-3 text-green-600' />
@@ -233,7 +229,6 @@ const MermaidBlockComponent = ({
                 aria-label='Open preview'
                 data-track-category='Mermaid'
                 data-track-name='OPEN_PREVIEW'
-                data-track-kind='passive'
               >
                 <Maximize2 className='w-3 h-3' />
               </button>
@@ -247,7 +242,6 @@ const MermaidBlockComponent = ({
                 aria-label='Edit source'
                 data-track-category='Mermaid'
                 data-track-name='EDIT_SOURCE'
-                data-track-kind='active'
               >
                 <Pencil className='w-3 h-3' />
               </button>
@@ -261,7 +255,6 @@ const MermaidBlockComponent = ({
                 aria-label='Delete'
                 data-track-category='Mermaid'
                 data-track-name='DELETE_DIAGRAM'
-                data-track-kind='active'
               >
                 <Trash2 className='w-3 h-3' />
               </button>
@@ -293,7 +286,6 @@ const MermaidBlockComponent = ({
               title={previewOnClick ? 'Click to preview' : undefined}
               data-track-category='Mermaid'
               data-track-name='OPEN_PREVIEW'
-              data-track-kind='passive'
             />
             {/* Show subtle loading indicator if re-rendering */}
             {isRendering && (
@@ -326,7 +318,6 @@ const MermaidBlockComponent = ({
             aria-label='Close preview'
             data-track-category='Mermaid'
             data-track-name='CLOSE_PREVIEW'
-            data-track-kind='passive'
           >
             <X className='h-5 w-5 text-muted-foreground' />
           </button>

@@ -60,7 +60,6 @@ const WebView = (): ReactElement => {
                 className='flex items-center gap-2 px-3 py-2 flex-1 text-left'
                 data-track-category='WebView'
                 data-track-name='SwitchTab'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ url: tab.currentUrl })}
               >
                 <span className='text-xs'>🌐</span>
@@ -77,7 +76,6 @@ const WebView = (): ReactElement => {
                 title='Close tab'
                 data-track-category='WebView'
                 data-track-name='CloseTab'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ url: tab.currentUrl })}
               >
                 <span className='text-xs'>✕</span>

@@ -106,7 +106,6 @@ export const ConversationHistory = ({
               }
               data-track-category='XyneAI'
               data-track-name='CloseSearch'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ conversationId })}
             >
               <ArrowLeft
@@ -122,7 +121,6 @@ export const ConversationHistory = ({
                 className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"
                 data-track-category='XyneAI'
                 data-track-name='SearchChatsInput'
-                data-track-kind='passive'
                 autoFocus={!isMobile}
               />
               <Search className='w-4 h-4 text-muted-foreground' />
@@ -133,7 +131,6 @@ export const ConversationHistory = ({
                 className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='CloseHistory'
-                data-track-kind='passive'
               >
                 <X className='w-4 h-4 text-muted-foreground' />
               </button>
@@ -151,7 +148,6 @@ export const ConversationHistory = ({
                 }
                 data-track-category='XyneAI'
                 data-track-name='BackFromHistory'
-                data-track-kind='passive'
               >
                 <ArrowLeft className='w-4 h-4 text-foreground' />
               </button>
@@ -176,7 +172,6 @@ export const ConversationHistory = ({
                 }
                 data-track-category='XyneAI'
                 data-track-name='OpenSearch'
-                data-track-kind='passive'
               >
                 <Search
                   className={
@@ -190,7 +185,6 @@ export const ConversationHistory = ({
                   className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                   data-track-category='XyneAI'
                   data-track-name='CloseHistory'
-                  data-track-kind='passive'
                 >
                   <X className='w-4 h-4 text-muted-foreground' />
                 </button>
@@ -458,7 +452,6 @@ const ConversationItem = ({
         onTouchCancel={isMobile ? handleTouchEnd : undefined}
         data-track-category='XyneAI'
         data-track-name='SELECT_CONVERSATION'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
       >
         <div
@@ -556,7 +549,6 @@ const ConversationItem = ({
               className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-destructive touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='DELETE_CONVERSATION'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
             >
               <XyneDelete color='currentColor' />
@@ -576,7 +568,6 @@ const ConversationItem = ({
               className='opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded'
               data-track-category='XyneAI'
               data-track-name='OPEN_CONVERSATION_MENU'
-              data-track-kind='passive'
             >
               <MoreVertical className='w-4 h-4 text-muted-foreground' />
             </button>
@@ -593,7 +584,6 @@ const ConversationItem = ({
             className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-destructive'
             data-track-category='XyneAI'
             data-track-name='DELETE_DESKTOP'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
           >
             <XyneDelete color='currentColor' />

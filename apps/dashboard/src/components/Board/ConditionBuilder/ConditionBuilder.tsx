@@ -367,7 +367,6 @@ export const ConditionBuilder = ({
           className='text-muted-foreground hover:text-foreground'
           data-track-category='board_config'
           data-track-name='close_condition_builder'
-          data-track-kind='passive'
         >
           <X size={13} />
         </Button>
@@ -505,7 +504,6 @@ export const ConditionBuilder = ({
                     onClick={() => setRequestApprovalOnEntry(prev => !prev)}
                     data-track-category='board_config'
                     data-track-name='toggle_request_approval_on_entry'
-                    data-track-kind='passive'
                     title={
                       formAttached
                         ? 'Not available when a form is attached — the form must be filled manually.'
@@ -546,7 +544,6 @@ export const ConditionBuilder = ({
               className='px-3 py-1.5 text-[13px] font-medium text-red-500 hover:text-red-600 transition-colors'
               data-track-category='board_config'
               data-track-name='delete_condition'
-              data-track-kind='active'
             >
               Delete
             </button>
@@ -558,7 +555,6 @@ export const ConditionBuilder = ({
             className='px-3 py-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='board_config'
             data-track-name='cancel_condition'
-            data-track-kind='passive'
           >
             Cancel
           </button>
@@ -575,7 +571,6 @@ export const ConditionBuilder = ({
             className='px-3 py-1.5 text-[13px] font-medium text-white bg-[#6276be] hover:bg-[#5060a0] disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed rounded-[6px] transition-colors'
             data-track-category='board_config'
             data-track-name='save_condition'
-            data-track-kind='active'
           >
             Save Condition
           </button>

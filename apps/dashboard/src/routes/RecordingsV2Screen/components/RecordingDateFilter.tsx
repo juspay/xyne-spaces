@@ -28,7 +28,6 @@ export function RecordingDateFilter({ value, onChange }: RecordingDateFilterProp
           className='h-9 gap-1 rounded-xl border-border px-3 font-medium shadow-none'
           data-track-category='RecordingsV2'
           data-track-name='open_date_filter'
-          data-track-kind='passive'
         >
           {getRecordingDatePresetLabel(value)}
           <ChevronDown className='size-4 text-muted-foreground' aria-hidden='true' />
@@ -43,7 +42,6 @@ export function RecordingDateFilter({ value, onChange }: RecordingDateFilterProp
             className='justify-between'
             data-track-category='RecordingsV2'
             data-track-name={`filter_date_${option.value}`}
-            data-track-kind='passive'
           >
             {option.label}
             {value === option.value && (

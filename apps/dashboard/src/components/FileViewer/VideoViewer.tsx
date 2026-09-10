@@ -598,7 +598,6 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           controls={false}
           data-track-category='VIDEO_PLAYER'
           data-track-name='ClickVideo'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ attachmentId })}
         >
           <track kind='captions' />
@@ -678,7 +677,6 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                   )}
                   data-track-category='VIDEO_PLAYER'
                   data-track-name='SeekVideo'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ currentTime, attachmentId })}
                 />
               </div>
@@ -786,7 +784,6 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                             className='absolute top-0 left-0 w-full h-1 appearance-none cursor-pointer bg-transparent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:relative [&::-webkit-slider-thumb]:z-10 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer'
                             data-track-category='VIDEO_PLAYER'
                             data-track-name='AdjustVolume'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ volume, attachmentId })}
                           />
                         </div>

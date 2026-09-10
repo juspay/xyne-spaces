@@ -62,7 +62,6 @@ export function WeekView({
                   }`}
                   data-track-category='CALENDAR_WEEK_VIEW'
                   data-track-name='SelectDay'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     date: dateKey,
                     ticketCount: dayTickets.length,

@@ -17,7 +17,6 @@ import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
 import { MetaRow } from '@/routes/AIScreen/library/shared/primitives/MetaRow';
 import { scoreToneClass } from './format';
 import { SUBSYSTEM_ICONS, subsystemLabel } from './subsystems';
-import type { InteractionKind } from '@xyne/shared';
 
 const TONE_CLASS: Record<'default' | 'success' | 'danger', string> = {
   default: 'text-muted-foreground hover:text-foreground',
@@ -32,7 +31,6 @@ const RowAction = ({
   disabled,
   tone = 'default',
   trackName,
-  trackKind,
 }: {
   label: string;
   icon: ReactNode;
@@ -40,7 +38,6 @@ const RowAction = ({
   disabled: boolean;
   tone?: 'default' | 'success' | 'danger';
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement => (
   <Tooltip side='top' content={label}>
     <Button
@@ -52,7 +49,6 @@ const RowAction = ({
       aria-label={label}
       data-track-category='Claw Agents'
       data-track-name={trackName}
-      data-track-kind={trackKind}
       className={cn('size-7 focus-visible:bg-muted focus-visible:ring-0', TONE_CLASS[tone])}
     >
       {icon}
@@ -137,7 +133,6 @@ export const CandidateRow = ({
             onChange={e => setText(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin edit candidate text'
-            data-track-kind='active'
             disabled={isBusy}
             rows={3}
             autoFocus
@@ -179,7 +174,6 @@ export const CandidateRow = ({
             <RowAction
               label='Save edit'
               trackName='Digital Twin save candidate edit'
-              trackKind='active'
               disabled={isBusy}
               tone='success'
               onClick={() => void handleSave()}
@@ -194,7 +188,6 @@ export const CandidateRow = ({
             <RowAction
               label='Cancel'
               trackName='Digital Twin cancel candidate edit'
-              trackKind='passive'
               disabled={isBusy}
               onClick={() => {
                 setText(committed);
@@ -208,7 +201,6 @@ export const CandidateRow = ({
             <RowAction
               label='Edit'
               trackName='Digital Twin edit candidate'
-              trackKind='active'
               disabled={isBusy}
               onClick={() => setEditing(true)}
               icon={<PencilEdit className='size-4' />}
@@ -216,7 +208,6 @@ export const CandidateRow = ({
             <RowAction
               label={isDirty ? 'Save & approve' : 'Approve'}
               trackName='Digital Twin approve candidate'
-              trackKind='active'
               disabled={isBusy}
               tone='success'
               onClick={() => void handleApprove()}
@@ -231,7 +222,6 @@ export const CandidateRow = ({
             <RowAction
               label='Reject'
               trackName='Digital Twin reject candidate'
-              trackKind='active'
               disabled={isBusy}
               tone='danger'
               onClick={() => void handleReject()}

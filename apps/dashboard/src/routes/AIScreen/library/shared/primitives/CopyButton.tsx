@@ -1,18 +1,15 @@
 import { useState, type ReactElement } from 'react';
 import { CopyCopied, CopyDefault } from '@xyne/icons';
-import type { InteractionKind } from '@xyne/shared';
 
 /** Copies `value` and confirms with a tick for two seconds. */
 export function CopyButton({
   value,
   label,
   trackName,
-  trackKind,
 }: {
   value: string;
   label: string;
   trackName: string;
-  trackKind?: InteractionKind;
 }): ReactElement {
   const [copied, setCopied] = useState(false);
 
@@ -34,7 +31,6 @@ export function CopyButton({
       title={label}
       data-track-category='Claw Agents'
       data-track-name={trackName}
-      data-track-kind={trackKind}
       className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
     >
       {copied ? (

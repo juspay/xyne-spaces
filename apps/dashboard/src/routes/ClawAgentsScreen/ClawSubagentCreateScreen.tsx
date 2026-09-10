@@ -288,7 +288,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                   onClick={() => update({ progressLabels: [...state.progressLabels, ''] })}
                   data-track-category='Claw Agents'
                   data-track-name='ADD_PROGRESS_LABEL'
-                  data-track-kind='active'
                 >
                   <Plus className='size-3.5' /> Add label
                 </Button>
@@ -321,7 +320,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                     }
                     data-track-category='Claw Agents'
                     data-track-name='REMOVE_PROGRESS_LABEL'
-                    data-track-kind='active'
                     aria-label='Remove progress label'
                   >
                     <X className='size-4' />
@@ -352,7 +350,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                       onClick={() => toggleSkill(skill.id)}
                       data-track-category='Claw Agents'
                       data-track-name='Toggle subagent skill (create)'
-                      data-track-kind='passive'
                     >
                       <Badge variant={state.skillIds.includes(skill.id) ? 'primary' : 'outline'}>
                         {skill.name}
@@ -413,7 +410,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
             onClick={cancel}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_CREATE_SUBAGENT'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -424,7 +420,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                 onClick={goBack}
                 data-track-category='Claw Agents'
                 data-track-name='SUBAGENT_WIZARD_BACK'
-                data-track-kind='passive'
               >
                 <ChevronLeft className='size-4' />
                 Back
@@ -435,7 +430,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                 onClick={goNext}
                 data-track-category='Claw Agents'
                 data-track-name='SUBAGENT_WIZARD_NEXT'
-                data-track-kind='passive'
                 disabled={!canNext}
               >
                 Next
@@ -446,7 +440,6 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                 onClick={() => void handleCreate()}
                 data-track-category='Claw Agents'
                 data-track-name='CREATE_SUBAGENT'
-                data-track-kind='active'
                 loading={create.isPending}
                 disabled={!canNext}
               >

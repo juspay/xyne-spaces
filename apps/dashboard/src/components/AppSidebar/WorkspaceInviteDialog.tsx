@@ -182,7 +182,6 @@ export const WorkspaceInviteDialog = ({
             className='-mr-1 flex size-6 items-center justify-center rounded-md text-[30px] font-light leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
             data-track-category='WorkspaceInviteDialog'
             data-track-name='Close'
-            data-track-kind='passive'
           >
             &times;
           </button>
@@ -206,7 +205,6 @@ export const WorkspaceInviteDialog = ({
               className='h-10 min-w-0 flex-1 rounded-[13px] border border-border bg-background px-3.5 text-[15px] font-medium text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60 focus:ring-2 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-60'
               data-track-category='WorkspaceInviteDialog'
               data-track-name='EmailsInput'
-              data-track-kind='passive'
             />
             <button
               type='submit'
@@ -215,7 +213,6 @@ export const WorkspaceInviteDialog = ({
               className='h-10 shrink-0 rounded-[12px] bg-[#ff6368] px-6 text-[15px] font-semibold text-white transition-colors hover:bg-[#f2555b] disabled:cursor-not-allowed disabled:opacity-70'
               data-track-category='WorkspaceInviteDialog'
               data-track-name='InviteByEmail'
-              data-track-kind='active'
             >
               {isInviting ? 'Inviting...' : 'Invite'}
             </button>
@@ -243,7 +240,6 @@ export const WorkspaceInviteDialog = ({
               )}
               data-track-category='WorkspaceInviteDialog'
               data-track-name='CopyInviteLink'
-              data-track-kind='passive'
             >
               {copied ? <CheckTickSingle size={21} /> : <CopyDefault size={21} />}
             </button>

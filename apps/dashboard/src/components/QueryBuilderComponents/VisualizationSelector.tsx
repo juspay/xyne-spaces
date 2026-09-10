@@ -130,7 +130,6 @@ export const VisualizationSelector: React.FC<VisualizationSelectorProps> = ({
             onClick={() => onChange(option.type)}
             data-track-category='QueryBuilder'
             data-track-name='SelectVisualizationType'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ visualizationType: option.type })}
             className={cn(
               'p-2 rounded-lg border-2 transition-all flex flex-col items-center gap-1 hover:border-primary/50',

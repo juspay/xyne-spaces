@@ -385,7 +385,6 @@ function TriggerPickerContent({
           placeholder='Search triggers…'
           data-track-category='automation-builder'
           data-track-name='trigger-picker-search'
-          data-track-kind='active'
           className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
         />
       </div>
@@ -421,7 +420,6 @@ function TriggerPickerContent({
                     onClick={() => onPick(item.type)}
                     data-track-category='automation-builder'
                     data-track-name={`trigger-picker-select-${item.type}`}
-                    data-track-kind='active'
                     className={cn(
                       'flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors',
                       'hover:bg-accent/40',

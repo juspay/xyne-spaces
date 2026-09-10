@@ -382,7 +382,6 @@ const AppsScreen = (): ReactElement => {
                 onClick={() => setIsCreateModalOpen(true)}
                 data-track-category='Apps'
                 data-track-name='OpenCreateAppModal'
-                data-track-kind='passive'
               >
                 <Plus size={16} className='mr-1' />
                 Create App
@@ -417,7 +416,6 @@ const AppsScreen = (): ReactElement => {
                 }`}
                 data-track-category='Apps'
                 data-track-name={`AppsView_${tab.value}`}
-                data-track-kind='passive'
               >
                 {tab.label}
               </button>
@@ -438,7 +436,6 @@ const AppsScreen = (): ReactElement => {
                 className='pl-10 h-9'
                 data-track-category='Apps'
                 data-track-name='SearchApps'
-                data-track-kind='passive'
               />
             </div>
           </div>
@@ -496,7 +493,6 @@ const AppsScreen = (): ReactElement => {
                   onClick={loadMore}
                   data-track-category='Apps'
                   data-track-name='LOAD_MORE_APPS'
-                  data-track-kind='passive'
                   disabled={isSearching}
                 >
                   {isSearching ? 'Loading…' : 'Load more'}
@@ -514,7 +510,6 @@ const AppsScreen = (): ReactElement => {
                 onClick={handlePreviousPage}
                 data-track-category='Apps'
                 data-track-name='APPS_PREV_PAGE'
-                data-track-kind='passive'
                 disabled={!hasPreviousPage}
                 className='gap-1'
               >
@@ -528,7 +523,6 @@ const AppsScreen = (): ReactElement => {
                 onClick={handleNextPage}
                 data-track-category='Apps'
                 data-track-name='APPS_NEXT_PAGE'
-                data-track-kind='passive'
                 disabled={!hasNextPage}
                 className='gap-1'
               >

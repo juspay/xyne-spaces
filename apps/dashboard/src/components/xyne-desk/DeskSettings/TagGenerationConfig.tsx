@@ -308,7 +308,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
           onClick={onBack}
           data-track-category='DeskSettings'
           data-track-name='BackFromTagGenerationConfig'
-          data-track-kind='passive'
         >
           <ArrowLeft size={16} />
           Configure Tag Generation
@@ -337,7 +336,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
               onClick={startAdd}
               data-track-category='DeskSettings'
               data-track-name='AddTagCategory'
-              data-track-kind='active'
             >
               <Plus size={14} />
               <span>Add category</span>
@@ -382,7 +380,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                     disabled={editingName !== null}
                     data-track-category='DeskSettings'
                     data-track-name='EditTagCategory'
-                    data-track-kind='active'
                   >
                     <Pencil size={14} />
                   </button>
@@ -394,7 +391,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                     disabled={editingName !== null || isSaving}
                     data-track-category='DeskSettings'
                     data-track-name='DeleteTagCategory'
-                    data-track-kind='active'
                   >
                     <Trash2 size={14} />
                   </button>
@@ -434,7 +430,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryName'
-                  data-track-kind='passive'
                 />
                 {nameFormatError && <p className='mt-1 text-xs text-red-500'>{nameFormatError}</p>}
                 {showNameSuggestions && nameSuggestions.length > 0 && (
@@ -477,7 +472,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   className='size-8 rounded cursor-pointer disabled:opacity-50 border border-border bg-background'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryColor'
-                  data-track-kind='passive'
                 />
                 <span className='text-xs text-desk-helper font-mono'>{form.color}</span>
               </div>
@@ -524,7 +518,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   className='h-[100px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryPrompt'
-                  data-track-kind='passive'
                 />
               </div>
             )}
@@ -548,7 +541,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'
                 data-track-name='TagCategoryAllowedTags'
-                data-track-kind='active'
               />
             </div>
 
@@ -569,7 +561,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   disabled={fieldDisabled}
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryBlacklist'
-                  data-track-kind='active'
                 />
               </div>
             )}
@@ -595,7 +586,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   className='w-full max-w-[120px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryMaxTags'
-                  data-track-kind='active'
                 />
               </div>
             )}
@@ -610,7 +600,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   disabled={fieldDisabled}
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryAllowNewTags'
-                  data-track-kind='active'
                 />
                 Allow new tags to be created
               </label>
@@ -626,7 +615,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'
                 data-track-name='SaveTagCategory'
-                data-track-kind='active'
               >
                 Save
               </button>
@@ -637,7 +625,6 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 disabled={isSaving}
                 data-track-category='DeskSettings'
                 data-track-name='CancelTagCategory'
-                data-track-kind='passive'
               >
                 Cancel
               </button>

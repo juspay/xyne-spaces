@@ -105,7 +105,6 @@ const DigitalTwinProposalsTab = (): ReactElement => {
           ariaLabel='Search proposals'
           trackCategory='Claw Agents'
           trackName='Digital Twin: search proposals'
-          trackKind='passive'
           className='w-full'
         />
 
@@ -127,7 +126,6 @@ const DigitalTwinProposalsTab = (): ReactElement => {
               disabled={bulkActing}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin approve all proposals'
-              data-track-kind='active'
             >
               {!bulkActing && <CheckTickCircle className='size-4' aria-hidden />}
               Approve all

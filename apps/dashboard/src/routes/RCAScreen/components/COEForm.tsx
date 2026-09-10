@@ -513,7 +513,6 @@ export const COEForm = ({
             }
             data-track-category='RCA'
             data-track-name='DELETE_COE'
-            data-track-kind='active'
             loading={isDeleting}
             disabled={isSubmitting || deletingCoeId !== null}
             aria-label={isExisting ? `Delete COE ${index + 1}` : 'Remove COE'}
@@ -566,7 +565,6 @@ export const COEForm = ({
               }}
               data-track-category='RCA'
               data-track-name='CoeActionTypeSelect'
-              data-track-kind='passive'
               className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               {filteredActionTypeOptions.map(option => (
@@ -600,7 +598,6 @@ export const COEForm = ({
               }}
               data-track-category='RCA'
               data-track-name='CoeStatusSelect'
-              data-track-kind='active'
               className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               {coeStatusOptions.map(option => (
@@ -674,7 +671,6 @@ export const COEForm = ({
             onClick={() => onPhaseChange('impact')}
             data-track-category='RCA'
             data-track-name='GO_TO_IMPACT_PHASE'
-            data-track-kind='passive'
           >
             Review Previous Phase
           </Button>
@@ -797,7 +793,6 @@ export const COEForm = ({
                 }}
                 data-track-category='RCA'
                 data-track-name='ADD_COE_ACTION'
-                data-track-kind='active'
                 disabled={isSubmitting}
               >
                 <Plus className='h-3.5 w-3.5' />
@@ -822,7 +817,6 @@ export const COEForm = ({
                   onClick={() => onPhaseChange('impact')}
                   data-track-category='RCA'
                   data-track-name='BACK_TO_IMPACT_PHASE'
-                  data-track-kind='passive'
                   disabled={isSubmitting}
                 >
                   Go Back
@@ -832,7 +826,6 @@ export const COEForm = ({
                   onClick={() => void handleSaveAll()}
                   data-track-category='RCA'
                   data-track-name='SAVE_ALL_COES'
-                  data-track-kind='active'
                   loading={isSubmitting}
                   disabled={isSubmitting}
                 >

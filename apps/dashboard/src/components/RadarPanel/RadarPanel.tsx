@@ -390,7 +390,6 @@ const RadarPanel = (): ReactElement => {
           <button
             data-track-category='RADAR'
             data-track-name='OPEN_THREAD_FROM_ITEM'
-            data-track-kind='passive'
             className='text-left font-bold text-foreground hover:underline text-[15px]'
             onClick={e => {
               e.stopPropagation();
@@ -408,7 +407,6 @@ const RadarPanel = (): ReactElement => {
                 className='group/bullet flex items-start gap-2 text-sm text-muted-foreground rounded cursor-pointer hover:text-foreground'
                 data-track-category='RADAR'
                 data-track-name='OPEN_SOURCE_MESSAGE'
-                data-track-kind='passive'
                 {...openOnClick(() => openThread(card, item.conversationId, item.sourceMessageId))}
               >
                 <span className='mt-[7px] size-1 rounded-full bg-muted-foreground shrink-0' />
@@ -426,7 +424,6 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='RESOLVE_ITEM'
-                data-track-kind='active'
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === itemKey}
                 onClick={e => {
@@ -448,7 +445,6 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='DISMISS_ITEM'
-                data-track-kind='passive'
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === dismissKey}
                 onClick={e => {
@@ -495,7 +491,6 @@ const RadarPanel = (): ReactElement => {
           : {
               'data-track-category': 'RADAR',
               'data-track-name': 'OPEN_THREAD_FROM_CARD',
-              'data-track-kind': 'passive',
               ...openOnClick(() =>
                 openThread(
                   card,
@@ -551,7 +546,6 @@ const RadarPanel = (): ReactElement => {
                     className='fixed inset-0 z-30 cursor-default'
                     data-track-category='RADAR'
                     data-track-name='CLOSE_CARD_MENU'
-                    data-track-kind='passive'
                     onClick={() => setCardMenu(null)}
                   />
                 )}
@@ -568,7 +562,6 @@ const RadarPanel = (): ReactElement => {
                   disabled={busy}
                   data-track-category='RADAR'
                   data-track-name='TOGGLE_CARD_MENU'
-                  data-track-kind='passive'
                   onClick={e => {
                     e.stopPropagation();
                     setCardMenu(open => (open === key ? null : key));
@@ -591,7 +584,6 @@ const RadarPanel = (): ReactElement => {
                         className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
                         data-track-category='RADAR'
                         data-track-name='RESOLVE_ALL_ITEMS'
-                        data-track-kind='active'
                         onClick={() => {
                           setCardMenu(null);
                           void withBusy(key, () => resolveAllRadarItems(card.scopeKey));
@@ -612,7 +604,6 @@ const RadarPanel = (): ReactElement => {
                         className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
                         data-track-category='RADAR'
                         data-track-name='DISMISS_ALL_ITEMS'
-                        data-track-kind='passive'
                         onClick={() => {
                           setCardMenu(null);
                           void withBusy(key, () => dismissAllRadarItems(card.scopeKey));
@@ -640,7 +631,6 @@ const RadarPanel = (): ReactElement => {
         <button
           data-track-category='RADAR'
           data-track-name='OPEN_THREAD_DEBUG'
-          data-track-kind='passive'
           title="This thread's entire run history"
           className='absolute bottom-2.5 right-3 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-accent transition-colors opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100'
           onClick={e => {
@@ -998,7 +988,6 @@ const RadarPanel = (): ReactElement => {
       )}
       data-track-category='RADAR'
       data-track-name='FILTER_CATEGORY'
-      data-track-kind='passive'
       onClick={() => setFilterCategory(id)}
     >
       <span className='flex-1 text-left'>{label}</span>
@@ -1058,7 +1047,6 @@ const RadarPanel = (): ReactElement => {
             aria-label='Previous month'
             data-track-category='RADAR'
             data-track-name='CALENDAR_PREV'
-            data-track-kind='passive'
             onClick={() => shiftMonth(-1)}
           >
             ‹
@@ -1071,7 +1059,6 @@ const RadarPanel = (): ReactElement => {
             aria-label='Next month'
             data-track-category='RADAR'
             data-track-name='CALENDAR_NEXT'
-            data-track-kind='passive'
             onClick={() => shiftMonth(1)}
           >
             ›
@@ -1105,7 +1092,6 @@ const RadarPanel = (): ReactElement => {
                 )}
                 data-track-category='RADAR'
                 data-track-name='CALENDAR_PICK_DAY'
-                data-track-kind='passive'
                 onClick={() => pickDay(day)}
               >
                 {day}
@@ -1155,7 +1141,6 @@ const RadarPanel = (): ReactElement => {
             placeholder='Search people'
             data-track-category='RADAR'
             data-track-name='SEARCH_PICKER_PEOPLE'
-            data-track-kind='passive'
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1166,7 +1151,6 @@ const RadarPanel = (): ReactElement => {
             className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
             data-track-category='RADAR'
             data-track-name='FILTER_PENDING_SELECT_ALL'
-            data-track-kind='passive'
             onClick={() => {
               // Exclude mode: the row means "everyone in", so it clears the
               // whole exclusion set. Acting only on the names the search left
@@ -1208,7 +1192,6 @@ const RadarPanel = (): ReactElement => {
               className='w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
               data-track-category='RADAR'
               data-track-name='FILTER_PENDING_USER'
-              data-track-kind='passive'
               onClick={() => {
                 const next = new Set(selected);
                 if (next.has(id)) next.delete(id);
@@ -1277,7 +1260,6 @@ const RadarPanel = (): ReactElement => {
         aria-expanded={requestedByOpen}
         data-track-category='RADAR'
         data-track-name='TOGGLE_REQUESTED_BY'
-        data-track-kind='passive'
         onClick={() => setRequestedByOpen(open => !open)}
       >
         <span className='flex-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
@@ -1303,7 +1285,6 @@ const RadarPanel = (): ReactElement => {
             className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
             data-track-category='RADAR'
             data-track-name='FILTER_OTHERS_MODE'
-            data-track-kind='passive'
             onClick={() => setOthersMode(mode.id)}
           >
             <span className='flex-1 text-left'>
@@ -1348,7 +1329,6 @@ const RadarPanel = (): ReactElement => {
             className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
             data-track-category='RADAR'
             data-track-name='FILTER_BY_TEAM'
-            data-track-kind='passive'
             onClick={() =>
               setTeamIds(prev => {
                 const next = new Set(prev);
@@ -1439,7 +1419,6 @@ const RadarPanel = (): ReactElement => {
             className='shrink-0 p-1 rounded-md text-muted-foreground hover:bg-accent'
             data-track-category='RADAR'
             data-track-name='CLOSE_MANAGE_TEAMS'
-            data-track-kind='passive'
             onClick={closeManageTeams}
           >
             <X className='size-4' />
@@ -1469,7 +1448,6 @@ const RadarPanel = (): ReactElement => {
                     className='shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-semibold hover:bg-accent'
                     data-track-category='RADAR'
                     data-track-name='EDIT_TEAM'
-                    data-track-kind='active'
                     onClick={() =>
                       setTeamDraft({
                         id: team.id,
@@ -1484,7 +1462,6 @@ const RadarPanel = (): ReactElement => {
                     className='shrink-0 rounded-full border border-[#e8604c]/40 text-[#e8604c] px-3 py-1.5 text-xs font-semibold hover:bg-[#e8604c]/10'
                     data-track-category='RADAR'
                     data-track-name='DELETE_TEAM'
-                    data-track-kind='active'
                     onClick={() => removeTeam(team)}
                   >
                     Delete
@@ -1495,7 +1472,6 @@ const RadarPanel = (): ReactElement => {
                 className='rounded-xl border border-dashed border-border px-3.5 py-3 text-sm font-bold text-[#e8604c] hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='NEW_TEAM'
-                data-track-kind='active'
                 onClick={() => setTeamDraft({ id: null, name: '', memberIds: new Set() })}
               >
                 + New team
@@ -1514,7 +1490,6 @@ const RadarPanel = (): ReactElement => {
                 placeholder='e.g. Platform Pod'
                 data-track-category='RADAR'
                 data-track-name='TEAM_NAME'
-                data-track-kind='passive'
                 value={teamDraft.name}
                 onChange={e => setTeamDraft({ ...teamDraft, name: e.target.value })}
               />
@@ -1536,7 +1511,6 @@ const RadarPanel = (): ReactElement => {
                     placeholder='Search people'
                     data-track-category='RADAR'
                     data-track-name='SEARCH_TEAM_MEMBERS'
-                    data-track-kind='passive'
                     value={memberSearch}
                     onChange={e => setMemberSearch(e.target.value)}
                   />
@@ -1562,7 +1536,6 @@ const RadarPanel = (): ReactElement => {
                       )}
                       data-track-category='RADAR'
                       data-track-name='TEAM_MEMBER'
-                      data-track-kind='passive'
                       onClick={() => {
                         const next = new Set(teamDraft.memberIds);
                         if (next.has(candidate.id)) next.delete(candidate.id);
@@ -1594,7 +1567,6 @@ const RadarPanel = (): ReactElement => {
             className='rounded-full px-4 py-2 text-sm font-semibold hover:bg-accent'
             data-track-category='RADAR'
             data-track-name='MANAGE_TEAMS_BACK'
-            data-track-kind='passive'
             onClick={() => {
               if (teamDraft) setTeamDraft(null);
               else setManageTeams(false);
@@ -1613,7 +1585,6 @@ const RadarPanel = (): ReactElement => {
               )}
               data-track-category='RADAR'
               data-track-name='SAVE_TEAM'
-              data-track-kind='active'
               onClick={saveTeamDraft}
             >
               {teamDraft.id ? 'Save team' : 'Create team'}
@@ -1644,7 +1615,6 @@ const RadarPanel = (): ReactElement => {
                 className='w-full flex items-center gap-3 pl-2 pr-[13px] py-2.5 rounded-lg text-sm hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='FILTER_PENDING_ME'
-                data-track-kind='passive'
                 onClick={() => setPendingMe(v => !v)}
               >
                 <span className='flex-1 min-w-0 flex items-baseline gap-2 text-left'>
@@ -1673,7 +1643,6 @@ const RadarPanel = (): ReactElement => {
                 )}
                 data-track-category='RADAR'
                 data-track-name='FILTER_PENDING_OTHERS'
-                data-track-kind='passive'
                 onClick={() => {
                   setPendingOthers(v => !v);
                   if (pendingOthers) {
@@ -1715,7 +1684,6 @@ const RadarPanel = (): ReactElement => {
                   placeholder='Search channels'
                   data-track-category='RADAR'
                   data-track-name='SEARCH_CHANNELS'
-                  data-track-kind='passive'
                   value={channelSearch}
                   onChange={e => setChannelSearch(e.target.value)}
                 />
@@ -1737,7 +1705,6 @@ const RadarPanel = (): ReactElement => {
                     title={group.live ? undefined : 'Nothing pending here right now'}
                     data-track-category='RADAR'
                     data-track-name='FILTER_BY_CHANNEL'
-                    data-track-kind='passive'
                     onClick={() =>
                       setFilterChannels(prev => {
                         const next = new Set(prev);
@@ -1788,7 +1755,6 @@ const RadarPanel = (): ReactElement => {
                     )}
                     data-track-category='RADAR'
                     data-track-name='FILTER_TIME_RANGE'
-                    data-track-kind='passive'
                     onClick={() => setTimeRange(r)}
                   >
                     {r === 'custom' ? 'Custom range…' : timeLabel[r]}
@@ -1806,7 +1772,6 @@ const RadarPanel = (): ReactElement => {
           className='text-sm font-semibold text-muted-foreground hover:text-foreground'
           data-track-category='RADAR'
           data-track-name='CLEAR_ALL_FILTERS'
-          data-track-kind='passive'
           onClick={clearAllFilters}
         >
           Clear all
@@ -1815,7 +1780,6 @@ const RadarPanel = (): ReactElement => {
           className='px-5 py-2 rounded-full bg-foreground text-background text-sm font-semibold hover:opacity-90'
           data-track-category='RADAR'
           data-track-name='CLOSE_FILTERS'
-          data-track-kind='passive'
           onClick={() => setFiltersOpen(false)}
         >
           Done
@@ -1838,7 +1802,6 @@ const RadarPanel = (): ReactElement => {
             disabled={loading}
             data-track-category='RADAR'
             data-track-name='REFRESH_FEED'
-            data-track-kind='passive'
             onClick={() => void load(true)}
           >
             <RefreshCw className='size-4' />
@@ -1849,7 +1812,6 @@ const RadarPanel = (): ReactElement => {
               className='w-56 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground'
               data-track-category='RADAR'
               data-track-name='DEBUG_THREAD_LOOKUP'
-              data-track-kind='passive'
               placeholder='Debug a thread id… ⏎'
               title='Paste a conversation id and press Enter to open its thread debug'
               value={debugLookup}
@@ -1871,7 +1833,6 @@ const RadarPanel = (): ReactElement => {
                 className='fixed inset-0 z-30 cursor-default'
                 data-track-category='RADAR'
                 data-track-name='CLOSE_FILTERS_BACKDROP'
-                data-track-kind='passive'
                 onClick={() => setFiltersOpen(false)}
               />
             )}
@@ -1886,7 +1847,6 @@ const RadarPanel = (): ReactElement => {
               aria-expanded={filtersOpen}
               data-track-category='RADAR'
               data-track-name='TOGGLE_FILTERS'
-              data-track-kind='passive'
               onClick={() => setFiltersOpen(open => !open)}
             >
               <ListFilter className='size-4' />
@@ -1933,7 +1893,6 @@ const RadarPanel = (): ReactElement => {
                 className='ml-auto p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='CLOSE_THREAD_DEBUG'
-                data-track-kind='passive'
                 onClick={() => setThreadDebug(null)}
               >
                 <X className='size-4' />

@@ -62,7 +62,6 @@ export const BoardTableRow = ({
           className='flex-shrink-0 whitespace-nowrap bg-background border border-border'
           data-track-category='BOARD_CREATE'
           data-track-name='PREVIEW_BOARD'
-          data-track-kind='passive'
         >
           Preview
         </Button>
@@ -72,7 +71,6 @@ export const BoardTableRow = ({
           className='bg-[#6276be] hover:bg-[#5060a0] text-white flex-shrink-0 whitespace-nowrap'
           data-track-category='BOARD_CREATE'
           data-track-name='CLONE_BOARD'
-          data-track-kind='active'
         >
           Clone
         </Button>

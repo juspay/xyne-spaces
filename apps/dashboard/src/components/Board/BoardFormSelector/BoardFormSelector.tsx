@@ -85,7 +85,6 @@ export const BoardFormSelector = ({
             disabled={disabled}
             data-track-category='Board'
             data-track-name='CreateNewForm'
-            data-track-kind='active'
           >
             <Plus size={16} className='mr-1' />
             Create New Form
@@ -129,7 +128,6 @@ export const BoardFormSelector = ({
                       data-track-event='change'
                       data-track-category='Board'
                       data-track-name='ToggleFormSelection'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         formId: form.id,
                         formName: form.formName,
@@ -149,7 +147,6 @@ export const BoardFormSelector = ({
                       onClick={!disabled ? () => toggleExpand(form.id) : undefined}
                       data-track-category='Board'
                       data-track-name='ExpandFormDetails'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         formId: form.id,
                         formName: form.formName,
@@ -186,7 +183,6 @@ export const BoardFormSelector = ({
                     onClick={!disabled ? () => toggleExpand(form.id) : undefined}
                     data-track-category='Board'
                     data-track-name='ToggleFormAccordion'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       formId: form.id,
                       formName: form.formName,

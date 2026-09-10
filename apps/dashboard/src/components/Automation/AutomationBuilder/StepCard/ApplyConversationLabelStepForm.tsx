@@ -139,7 +139,6 @@ export function ApplyConversationLabelStepForm({
           className='h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground'
           data-track-category='automation-builder'
           data-track-name='apply-conversation-label-name'
-          data-track-kind='active'
         />
         <datalist id={`apply-label-suggestions-${pathPrefix}`}>
           {ownedLabels.map(l => (
@@ -171,7 +170,6 @@ export function ApplyConversationLabelStepForm({
                   )}
                   data-track-category='automation-builder'
                   data-track-name='apply-conversation-label-chip'
-                  data-track-kind='passive'
                 >
                   <span
                     className='size-2 rounded-full'

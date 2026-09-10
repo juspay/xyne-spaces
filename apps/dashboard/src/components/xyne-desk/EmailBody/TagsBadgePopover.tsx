@@ -70,7 +70,6 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
           className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
           data-track-category='Tags'
           data-track-name='ExpandTagChips'
-          data-track-kind='passive'
         >
           +{hiddenCount}
         </button>
@@ -82,7 +81,6 @@ export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element |
           className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
           data-track-category='Tags'
           data-track-name='CollapseTagChips'
-          data-track-kind='passive'
         >
           Show less
         </button>
@@ -115,7 +113,6 @@ export const TagsBadgePopover = ({
       aria-label={open ? 'Hide tags' : 'Show tags'}
       data-track-category='Tags'
       data-track-name='ToggleTagsBadge'
-      data-track-kind='active'
     >
       <span>Tags</span>
       <ChevronDown size={12} className={cn('transition-transform', open && 'rotate-180')} />

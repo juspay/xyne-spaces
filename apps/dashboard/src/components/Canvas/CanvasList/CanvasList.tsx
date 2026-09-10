@@ -81,7 +81,6 @@ import {
   useCanvasLabelMapResult,
 } from '../useCanvasLabels';
 import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
-import type { InteractionKind } from '@xyne/shared';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -111,7 +110,6 @@ type CanvasCardMenuItem = {
   submenu?: CanvasCardMenuItem[];
   testId?: string;
   trackName?: string;
-  trackKind?: InteractionKind;
   trackMetadata?: Record<string, unknown>;
 };
 
@@ -354,9 +352,6 @@ const renderCanvasCardMenuItem = (item: CanvasCardMenuItem): React.ReactNode => 
   if (item.trackName) {
     trackAttributes['data-track-category'] = 'CANVAS';
     trackAttributes['data-track-name'] = item.trackName;
-    if (item.trackKind) {
-      trackAttributes['data-track-kind'] = item.trackKind;
-    }
     if (item.trackMetadata) {
       trackAttributes['data-track-metadata'] = JSON.stringify(item.trackMetadata);
     }
@@ -885,7 +880,6 @@ const ChannelScopeFolderGroupSection: React.FC<{
         onClick={() => onToggleFolder(folder.id)}
         data-track-category='CANVAS'
         data-track-name='Toggle_Channel_Folder_Filter_Group'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           folderId: folder.id,
           channelId: selectedScopeChannelId,
@@ -1825,7 +1819,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               ),
               onSelect: () => handleToggleCanvasStar(canvas),
               trackName: 'TOGGLE_CANVAS_STAR',
-              trackKind: 'active' as const,
               trackMetadata: {
                 canvasId: canvas.id,
                 isStarred: canvas.isStarred,
@@ -1842,7 +1835,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               icon: <Copy className='size-3.5' strokeWidth={2.1} />,
               onSelect: () => onDuplicate(canvas.id, canvas),
               trackName: 'Duplicate_Canvas',
-              trackKind: 'active' as const,
               trackMetadata: {
                 canvasId: canvas.id,
                 title: canvas.title,
@@ -1857,7 +1849,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         icon: <ExternalLink className='size-3.5' strokeWidth={2.2} />,
         onSelect: () => handleOpenCanvasInNewTab(canvas),
         trackName: 'OPEN_CANVAS_IN_NEW_TAB',
-        trackKind: 'passive' as const,
         trackMetadata: {
           canvasId: canvas.id,
           source: 'card_context_menu',
@@ -1894,7 +1885,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               separatorBefore: !onArchiveToggle,
               testId: 'canvas-delete-button',
               trackName: 'DELETE_CANVAS',
-              trackKind: 'active' as const,
               trackMetadata: {
                 canvasId: canvas.id,
                 source: 'card_context_menu',
@@ -1917,7 +1907,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         onClick={e => onSelect(e, canvas)}
         data-track-category='CANVAS'
         data-track-name='Open_Canvas'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           canvasId: canvas.id,
           title: canvas.title,
@@ -2047,7 +2036,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 className='flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar hover:text-sidebar-accent-foreground'
                 data-track-category='CANVAS'
                 data-track-name='Open_Canvas_Menu'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                 aria-label='Canvas actions'
               >
@@ -2209,7 +2197,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   data-testid='canvas-search-scope-trigger'
                   data-track-category='CANVAS'
                   data-track-name='OPEN_CANVAS_SEARCH_SCOPE'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     scope: searchScope,
                     channelId: selectedScopeChannelId,
@@ -2241,7 +2228,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         aria-label='Back to search scopes'
                         data-track-category='CANVAS'
                         data-track-name='BACK_TO_CANVAS_SEARCH_SCOPES'
-                        data-track-kind='passive'
                       >
                         <ChevronLeft className='size-3.5' strokeWidth={2.2} />
                       </button>
@@ -2279,7 +2265,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         data-testid='canvas-search-scope-all-channels'
                         data-track-category='CANVAS'
                         data-track-name='SET_CANVAS_SEARCH_SCOPE_ALL_CHANNELS'
-                        data-track-kind='passive'
                       >
                         <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
                         <span className='min-w-0 flex-1 truncate'>All channels</span>
@@ -2298,7 +2283,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                           }}
                           data-track-category='CANVAS'
                           data-track-name='SET_CANVAS_SEARCH_SCOPE_CHANNEL'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ channelId: channel.id })}
                         >
                           <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
@@ -2324,7 +2308,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-testid='canvas-search-scope-direct'
                       data-track-category='CANVAS'
                       data-track-name='SET_CANVAS_SEARCH_SCOPE_DIRECT'
-                      data-track-kind='passive'
                     >
                       <AtSign className='size-3.5 shrink-0 text-sidebar-foreground/45' />
                       <span className='min-w-0 flex-1 truncate'>Shared directly with me</span>
@@ -2344,7 +2327,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-testid='canvas-search-scope-via-channel'
                       data-track-category='CANVAS'
                       data-track-name='OPEN_CANVAS_SEARCH_SCOPE_CHANNELS'
-                      data-track-kind='passive'
                     >
                       <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
                       <span className='max-w-[76px] shrink truncate' title='Shared via channel'>
@@ -2371,7 +2353,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-testid='canvas-search-scope-all'
                       data-track-category='CANVAS'
                       data-track-name='SET_CANVAS_SEARCH_SCOPE_ALL'
-                      data-track-kind='passive'
                     >
                       <Layers className='size-3.5 shrink-0 text-sidebar-foreground/45' />
                       <span className='min-w-0 flex-1 truncate'>All canvases</span>
@@ -2397,7 +2378,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 data-testid='canvas-filter-all'
                 data-track-category='CANVAS'
                 data-track-name='FILTER_ALL'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   filter: 'all',
                   canvasCount: rawItems.length,
@@ -2415,7 +2395,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 data-testid='canvas-filter-created-by-me'
                 data-track-category='CANVAS'
                 data-track-name='FILTER_CREATED_BY_ME'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ filter: 'created_by_me' })}
               >
                 Mine
@@ -2443,7 +2422,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     data-testid='canvas-filter-shared'
                     data-track-category='CANVAS'
                     data-track-name='FILTER_SHARED'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       filter: 'shared',
                       sharedBy: selectedSharedByUserId ?? 'anyone',
@@ -2550,7 +2528,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   data-testid='canvas-label-filter'
                   data-track-category='CANVAS'
                   data-track-name='OPEN_CANVAS_LABEL_FILTER'
-                  data-track-kind='passive'
                 >
                   <Tag className='size-3.5 text-sidebar-foreground/70' strokeWidth={2.1} />
                   Label
@@ -2603,7 +2580,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 className='inline-flex h-7 max-w-full items-center gap-1 rounded-full bg-sidebar-accent-foreground px-2.5 text-[12px] font-medium text-background shadow-sm'
                 data-track-category='CANVAS'
                 data-track-name='CLEAR_CANVAS_LABEL_FILTER'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ label: selectedLabel })}
               >
                 <span className='truncate'>{selectedLabel}</span>
@@ -2629,7 +2605,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
               data-track-category='CANVAS'
               data-track-name='SHOW_MORE_STARRED_CANVASES'
-              data-track-kind='passive'
             >
               <ChevronDown className='size-3.5 shrink-0' strokeWidth={2.2} />
               See {hiddenStarredCount} more
@@ -2642,7 +2617,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
               data-track-category='CANVAS'
               data-track-name='SHOW_LESS_STARRED_CANVASES'
-              data-track-kind='passive'
             >
               <ChevronRight className='size-3.5 shrink-0 -rotate-90' strokeWidth={2.2} />
               Show less

@@ -71,7 +71,6 @@ export const PrioritySubmenu = ({
               `}
               data-track-category='Tickets'
               data-track-name='ToggleSelectAllPriorities'
-              data-track-kind='passive'
             >
               <span className='text-sm font-medium text-primary'>
                 {allSelected ? 'Deselect all' : 'Select all'}
@@ -91,7 +90,6 @@ export const PrioritySubmenu = ({
                 `}
                   data-track-category='Tickets'
                   data-track-name='TogglePriorityFilter'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ priority, selected: !isSelected })}
                   data-testid={`priority-filter-${priority.toLowerCase()}`}
                 >

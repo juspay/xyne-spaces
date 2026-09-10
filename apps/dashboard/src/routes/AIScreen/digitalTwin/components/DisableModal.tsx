@@ -39,7 +39,6 @@ export const DisableModal = ({
             disabled={disableMutation.isPending}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin: cancel disable'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -50,7 +49,6 @@ export const DisableModal = ({
             loading={disableMutation.isPending}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin: confirm disable'
-            data-track-kind='active'
           >
             Disable
           </Button>

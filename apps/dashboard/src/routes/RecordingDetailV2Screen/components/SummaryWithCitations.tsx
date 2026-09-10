@@ -118,7 +118,6 @@ function CitationChip({
         className={PILL_CLASS}
         data-track-category='RecordingCitation'
         data-track-name='open_transcript_citation'
-        data-track-kind='passive'
       >
         {first.timestamp || 'Transcript'}
       </button>
@@ -145,7 +144,6 @@ function CitationChip({
             className='flex w-full items-center gap-1.5 px-2 py-1.5 rounded text-[12px] text-left text-foreground hover:bg-accent transition-colors'
             data-track-category='RecordingCitation'
             data-track-name='open_grouped_transcript_citation'
-            data-track-kind='passive'
             onClick={e => {
               e.preventDefault();
               e.stopPropagation();

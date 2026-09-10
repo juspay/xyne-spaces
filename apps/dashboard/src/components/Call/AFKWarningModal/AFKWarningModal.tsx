@@ -32,7 +32,6 @@ export function AFKWarningModal({
           label: 'Leave',
           onClick: onLeave,
           trackName: 'AFK_WARNING_LEAVE',
-          trackKind: 'active',
           className: 'bg-[#6276BE] hover:bg-[#5264a8] text-white',
         },
       ]}

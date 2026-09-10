@@ -148,7 +148,6 @@ export function RecordingCanvasPane({
               aria-label='Edit notes title'
               data-track-category='RecordingsScreen'
               data-track-name='edit_notes_canvas_title_input'
-              data-track-kind='passive'
             />
             {isSavingTitle && (
               <Loader2 className='size-3 flex-shrink-0 animate-spin text-muted-foreground' />

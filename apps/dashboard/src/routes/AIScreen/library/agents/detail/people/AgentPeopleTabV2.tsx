@@ -183,7 +183,6 @@ export function AgentPeopleTabV2({
               disabled={actions.busy.moderating !== null}
               label='Agent visibility'
               trackName='Agent detail v2: set visibility'
-              trackKind='active'
               onChange={next => {
                 const wantsGlobal = next === 'global';
                 if (wantsGlobal === (agent.scope === 'global')) return;
@@ -200,7 +199,6 @@ export function AgentPeopleTabV2({
               disabled={busyUserId !== null}
               label='Default role for new people'
               trackName='Agent detail v2: set default role'
-              trackKind='active'
               onChange={next => {
                 if (isShareRole(next)) setDefaultRole(next);
               }}
@@ -220,7 +218,6 @@ export function AgentPeopleTabV2({
               aria-expanded={searchOpen}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: toggle member search'
-              data-track-kind='passive'
               className={ICON_BUTTON}
             >
               <SearchDefault className='size-4' aria-hidden />
@@ -232,7 +229,6 @@ export function AgentPeopleTabV2({
                 aria-label='Add people'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: open add member'
-                data-track-kind='passive'
                 className={ICON_BUTTON}
               >
                 <PlusDefault className='size-4' aria-hidden />
@@ -253,7 +249,6 @@ export function AgentPeopleTabV2({
                 aria-label='Filter members'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: filter members'
-                data-track-kind='passive'
                 className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
             </div>
@@ -304,7 +299,6 @@ export function AgentPeopleTabV2({
                           disabled={busyUserId !== null}
                           label={`Role for ${row.name}`}
                           trackName='Agent detail v2: set member role'
-                          trackKind='active'
                           onChange={next => {
                             if (isShareRole(next)) void setRole(row.userId, next);
                           }}
@@ -321,7 +315,6 @@ export function AgentPeopleTabV2({
                           title={`Remove ${row.name}`}
                           data-track-category='Claw Agents'
                           data-track-name='Agent detail v2: remove member'
-                          data-track-kind='active'
                           className={ICON_BUTTON}
                         >
                           <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -360,7 +353,6 @@ export function AgentPeopleTabV2({
                         title='Approve request'
                         data-track-category='Claw Agents'
                         data-track-name='Agent detail v2: approve clone request'
-                        data-track-kind='active'
                         className={ICON_BUTTON}
                       >
                         <CheckTickSingle className='size-4' aria-hidden />
@@ -373,7 +365,6 @@ export function AgentPeopleTabV2({
                         title='Reject request'
                         data-track-category='Claw Agents'
                         data-track-name='Agent detail v2: reject clone request'
-                        data-track-kind='active'
                         className={ICON_BUTTON}
                       >
                         <MultipleCrossCancelDefault className='size-4' aria-hidden />

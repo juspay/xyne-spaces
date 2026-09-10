@@ -753,7 +753,6 @@ export const Summary = (props: SummaryProps): ReactElement => {
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             data-track-category='CHAT_SUMMARY'
             data-track-name='Close_Summary'
-            data-track-kind='passive'
           >
             <X className='w-4 h-4 text-foreground' />
           </button>
@@ -871,7 +870,6 @@ export const Summary = (props: SummaryProps): ReactElement => {
                                 title={`Jump to message ${keypointNum}`}
                                 data-track-category='CHAT_SUMMARY'
                                 data-track-name='Jump_To_Citation'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({ messageNumber })}
                               >
                                 {keypointNum}
@@ -895,7 +893,6 @@ export const Summary = (props: SummaryProps): ReactElement => {
                 title={copied ? 'Copied!' : 'Copy summary'}
                 data-track-category='CHAT_SUMMARY'
                 data-track-name='Copy_Summary'
-                data-track-kind='passive'
               >
                 {copied ? <Check className='w-3.5 h-3.5 text-green-600' /> : <CopyIcon />}
               </button>
@@ -913,7 +910,6 @@ export const Summary = (props: SummaryProps): ReactElement => {
               trackId='retry_summary'
               data-track-category='CHAT_SUMMARY'
               data-track-name='Retry_Summary'
-              data-track-kind='active'
             >
               Try Again
             </Button>

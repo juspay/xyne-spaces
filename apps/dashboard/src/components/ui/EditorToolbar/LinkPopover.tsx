@@ -132,7 +132,6 @@ export const LinkPopover: React.FC<LinkPopoverProps> = ({ editor }) => {
                     }}
                     data-track-category='EDITOR_TOOLBAR'
                     data-track-name='OPEN_LINK_POPOVER'
-                    data-track-kind='passive'
                     className='mt-1 block break-all text-sm text-link-color hover:underline'
                   >
                     {activeLink.href}
@@ -144,7 +143,6 @@ export const LinkPopover: React.FC<LinkPopoverProps> = ({ editor }) => {
                   aria-label='Close'
                   data-track-category='EDITOR_TOOLBAR'
                   data-track-name='CLOSE_LINK_POPOVER'
-                  data-track-kind='passive'
                   className='p-1 rounded text-muted-foreground hover:bg-accent'
                 >
                   <MultipleCrossCancelDefault className='h-4 w-4' />
@@ -160,7 +158,6 @@ export const LinkPopover: React.FC<LinkPopoverProps> = ({ editor }) => {
                   }}
                   data-track-category='EDITOR_TOOLBAR'
                   data-track-name='EDIT_LINK_POPOVER'
-                  data-track-kind='active'
                 >
                   Edit
                 </Button>
@@ -173,7 +170,6 @@ export const LinkPopover: React.FC<LinkPopoverProps> = ({ editor }) => {
                   }}
                   data-track-category='EDITOR_TOOLBAR'
                   data-track-name='REMOVE_LINK_POPOVER'
-                  data-track-kind='active'
                 >
                   Remove
                 </Button>

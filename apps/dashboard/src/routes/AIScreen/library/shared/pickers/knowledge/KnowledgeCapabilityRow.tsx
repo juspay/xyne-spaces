@@ -58,7 +58,6 @@ export function KnowledgeCapabilityRow({
           aria-label='Browse knowledge'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse knowledge'
-          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />
@@ -78,7 +77,6 @@ export function KnowledgeCapabilityRow({
               aria-label={`Remove ${grant.label}`}
               data-track-category='Claw Agents'
               data-track-name='Create agent v2: remove KB grant'
-              data-track-kind='active'
               className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-2.5 pr-2 transition-colors hover:bg-muted/70'
             >
               <span className='flex min-w-0 flex-col items-start'>

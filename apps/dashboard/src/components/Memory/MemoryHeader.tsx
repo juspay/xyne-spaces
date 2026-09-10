@@ -184,7 +184,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             title='Upload .txt or .md files to ingest as SOPs/Facts'
             data-track-category='Memory'
             data-track-name='UploadDocuments'
-            data-track-kind='active'
           >
             <Upload size={14} />
             {uploadMutation.isPending ? 'Uploading…' : 'Upload Docs'}
@@ -198,7 +197,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               title='Delete ALL documents from Vespa memory — irreversible'
               data-track-category='Memory'
               data-track-name='CleanupAllVespaMemory'
-              data-track-kind='active'
             >
               <Trash2 size={14} />
               {cleanupMutation.isPending ? 'Deleting…' : 'Cleanup All'}
@@ -250,7 +248,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               className='px-4 py-2 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors'
               data-track-category='Memory'
               data-track-name='CancelUploadDocuments'
-              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -261,7 +258,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-ph-capture-attribute-track-id='memory_upload_documents'
               data-track-category='Memory'
               data-track-name='ConfirmUploadDocuments'
-              data-track-kind='active'
             >
               {uploadMutation.isPending ? 'Uploading…' : 'Upload'}
             </button>
@@ -284,7 +280,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               className='px-4 py-2 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors'
               data-track-category='Memory'
               data-track-name='CancelCleanupVespaMemory'
-              data-track-kind='passive'
             >
               Cancel
             </button>
@@ -295,7 +290,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-ph-capture-attribute-track-id='memory_cleanup_all_vespa'
               data-track-category='Memory'
               data-track-name='ConfirmCleanupVespaMemory'
-              data-track-kind='active'
             >
               {cleanupMutation.isPending ? 'Deleting…' : 'Delete All'}
             </button>
@@ -331,7 +325,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
                 title='Include user query in search ranking'
                 data-track-category='Memory'
                 data-track-name='ToggleIncludeQuery'
-                data-track-kind='active'
               >
                 Query
               </button>
@@ -349,7 +342,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
                 title='Include summary in search ranking'
                 data-track-category='Memory'
                 data-track-name='ToggleIncludeSummary'
-                data-track-kind='passive'
               >
                 Summary
               </button>
@@ -361,7 +353,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
               data-track-category='Memory'
               data-track-name='ClearAllFilters'
-              data-track-kind='passive'
             >
               <span>Clear All</span>
             </button>
@@ -375,7 +366,6 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
               data-track-category='Memory'
               data-track-name='ClearFilters'
-              data-track-kind='passive'
             >
               <span>Clear Filters</span>
             </button>

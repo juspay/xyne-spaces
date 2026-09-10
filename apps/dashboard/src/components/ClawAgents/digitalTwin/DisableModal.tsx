@@ -31,7 +31,6 @@ export const DisableModal = ({
             onClick={onClose}
             data-track-category='Claw Agents'
             data-track-name='CANCEL_DISABLE_DIGITAL_TWIN'
-            data-track-kind='passive'
             disabled={disableMutation.isPending}
           >
             Cancel
@@ -42,7 +41,6 @@ export const DisableModal = ({
             onClick={submit}
             data-track-category='Claw Agents'
             data-track-name='DISABLE_DIGITAL_TWIN'
-            data-track-kind='active'
             loading={disableMutation.isPending}
           >
             Disable
@@ -57,7 +55,6 @@ export const DisableModal = ({
           onChange={e => setDeleteMemories(e.target.checked)}
           data-track-category='Claw Agents'
           data-track-name='Digital Twin disable delete-all toggle'
-          data-track-kind='active'
           className='accent-destructive'
         />
         <span className='text-xs text-foreground'>

@@ -31,7 +31,6 @@ import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
-import type { InteractionKind } from '@xyne/shared';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -63,7 +62,6 @@ export interface AINavItem {
   matchPath?: string;
   /** Analytics name; emitted as data-track-* on the nav link when set. */
   trackName?: string;
-  trackKind?: InteractionKind;
   adminOnly?: boolean;
   orgManagerOnly?: boolean;
   /** Hidden unless the user has the scheduled morning brief switched on. */
@@ -91,7 +89,6 @@ export const NAV_ITEMS: AINavItem[] = [
     to: '/ai/daily-brief/today',
     matchPath: '/ai/daily-brief',
     trackName: 'OPEN_DAILY_BRIEF',
-    trackKind: 'passive',
     dailyBriefOnly: true,
   },
 ];
@@ -132,7 +129,6 @@ function SidebarNavItem({
       className={cn(NAV_ITEM_CLASS, active ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS)}
       data-track-category='XyneAI'
       data-track-name='SIDEBAR_NAV'
-      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ label })}
     >
       <span className='flex size-4 shrink-0 items-center justify-center'>
@@ -224,7 +220,6 @@ function SessionHistory({
                   className='flex min-w-0 flex-1 items-center self-stretch pl-3 pr-1 text-left text-sm'
                   data-track-category='XyneAI'
                   data-track-name='SELECT_SESSION'
-                  data-track-kind='passive'
                 >
                   <span className='min-w-0 flex-1 truncate'>{session.title}</span>
                 </button>
@@ -245,7 +240,6 @@ function SessionHistory({
                       aria-label='Chat options'
                       data-track-category='XyneAI'
                       data-track-name='OPEN_SESSION_MENU'
-                      data-track-kind='passive'
                     >
                       <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
                     </button>
@@ -262,7 +256,6 @@ function SessionHistory({
                     className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
                     data-track-category='XyneAI'
                     data-track-name='DELETE_SESSION'
-                    data-track-kind='active'
                   >
                     <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
                     <span>Delete</span>
@@ -297,7 +290,6 @@ function SessionHistory({
                 aria-label='Close'
                 data-track-category='XyneAI'
                 data-track-name='CLOSE_DELETE_SESSION_DIALOG'
-                data-track-kind='passive'
               >
                 <X className='size-4' aria-hidden />
               </button>
@@ -313,7 +305,6 @@ function SessionHistory({
                 disabled={isDeleting}
                 data-track-category='XyneAI'
                 data-track-name='CANCEL_DELETE_SESSION'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -324,7 +315,6 @@ function SessionHistory({
                 onClick={() => void confirmDelete()}
                 data-track-category='XyneAI'
                 data-track-name='CONFIRM_DELETE_SESSION'
-                data-track-kind='active'
               >
                 Delete
               </Button>
@@ -406,7 +396,7 @@ export function AISidebar({
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName, trackKind }) => {
+            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
@@ -414,11 +404,7 @@ export function AISidebar({
                   to={prefixWs(to)}
                   aria-current={isActive ? 'page' : undefined}
                   {...(trackName
-                    ? {
-                        'data-track-category': 'XyneAI',
-                        'data-track-name': trackName,
-                        ...(trackKind ? { 'data-track-kind': trackKind } : {}),
-                      }
+                    ? { 'data-track-category': 'XyneAI', 'data-track-name': trackName }
                     : {})}
                   className={cn(
                     NAV_ITEM_CLASS,
@@ -443,7 +429,6 @@ export function AISidebar({
                 className='flex min-w-0 flex-1 items-center gap-1 text-xs font-medium capitalize tracking-[0.48px] text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground'
                 data-track-category='XyneAI'
                 data-track-name='TOGGLE_RECENTS'
-                data-track-kind='passive'
               >
                 <span className='block truncate text-left'>Recents</span>
                 <ChevronBigDown
@@ -463,7 +448,6 @@ export function AISidebar({
                   className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
                   data-track-category='XyneAI'
                   data-track-name='NEW_CHAT_FROM_RECENTS'
-                  data-track-kind='active'
                 >
                   <PencilEditBox
                     size={12}

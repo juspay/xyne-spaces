@@ -33,7 +33,6 @@ export function TableBody<TData extends Record<string, unknown>>({
             onClick={onRowClick ? () => onRowClick(row, rowIndex) : undefined}
             data-track-category='TABLE'
             data-track-name='OPEN_ROW'
-            data-track-kind='passive'
             className={cn(
               'border-b border-border last:border-b-0',
               hoverable && 'hover:bg-muted/50',

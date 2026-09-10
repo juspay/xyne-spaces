@@ -118,7 +118,6 @@ const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
               disabled={isSubmitting}
               data-track-category='Tickets'
               data-track-name='CancelApprovalDialog'
-              data-track-kind='passive'
             >
               {step.responseSchema?.cancelLabel ?? 'Cancel'}
             </Button>

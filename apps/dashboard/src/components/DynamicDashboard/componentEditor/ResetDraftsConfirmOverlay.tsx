@@ -24,7 +24,6 @@ export const ResetDraftsConfirmOverlay = ({
         onClick={onCancel}
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Dismiss_Field_Change_Overlay'
-        data-track-kind='passive'
         className='absolute inset-0 bg-black/50'
       />
       <div className='relative w-[min(440px,92vw)] bg-popover rounded-lg shadow-lg border border-border p-5'>
@@ -50,7 +49,6 @@ export const ResetDraftsConfirmOverlay = ({
             onClick={onCancel}
             data-track-category='COMPONENT_EDITOR'
             data-track-name='CANCEL_RESET_DRAFTS'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -59,7 +57,6 @@ export const ResetDraftsConfirmOverlay = ({
             trackId='reset_component_drafts'
             data-track-category='COMPONENT_EDITOR'
             data-track-name='CONFIRM_RESET_DRAFTS'
-            data-track-kind='active'
           >
             Reset &amp; continue
           </Button>

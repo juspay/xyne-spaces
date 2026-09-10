@@ -508,7 +508,6 @@ const EmailAttachmentsRow = ({
               title={att.originalFilename}
               data-track-category='Support'
               data-track-name='OpenEmailAttachmentImage'
-              data-track-kind='passive'
               className='group relative block rounded-lg overflow-hidden border border-border bg-muted hover:border-foreground/40 transition-colors'
             >
               <EmailImageThumbnail attachmentId={att.id} filename={att.originalFilename} />
@@ -534,7 +533,6 @@ const EmailAttachmentsRow = ({
             title={att.originalFilename}
             data-track-category='Support'
             data-track-name='DownloadEmailAttachment'
-            data-track-kind='passive'
             className='flex items-center gap-2 px-3 py-2 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors min-w-0 max-w-[260px]'
           >
             <Paperclip size={14} className='text-muted-foreground shrink-0' />
@@ -1132,7 +1130,6 @@ const SupportScreen = (): ReactElement => {
                     type='button'
                     data-track-category='Support'
                     data-track-name='SelectDatePreset'
-                    data-track-kind='passive'
                     onClick={() => {
                       handleDateRangeChange(v);
                     }}
@@ -1182,7 +1179,6 @@ const SupportScreen = (): ReactElement => {
                     type='button'
                     data-track-category='Support'
                     data-track-name='SelectCreatedAtPreset'
-                    data-track-kind='passive'
                     onClick={() => {
                       handleCreatedDateRangeChange(v);
                     }}
@@ -2408,7 +2404,6 @@ const SupportScreen = (): ReactElement => {
           }}
           data-track-category='Support'
           data-track-name='SelectEmailChannel'
-          data-track-kind='passive'
         >
           <span className='flex items-center gap-1 shrink-0'>
             {canExpandDesk ? (
@@ -2422,7 +2417,6 @@ const SupportScreen = (): ReactElement => {
                 aria-label={isExpanded ? 'Collapse desk' : 'Expand desk'}
                 data-track-category='Support'
                 data-track-name='ToggleDeskExpand'
-                data-track-kind='passive'
               >
                 {isExpanded ? (
                   <ChevronDown size={12} strokeWidth={2.33} />
@@ -2542,7 +2536,6 @@ const SupportScreen = (): ReactElement => {
                         title='Create channel'
                         data-track-category='Support'
                         data-track-name='CreateChannelOpen'
-                        data-track-kind='active'
                       >
                         <Plus className='size-4' />
                       </button>
@@ -2553,7 +2546,6 @@ const SupportScreen = (): ReactElement => {
                         title='Desk Integrations'
                         data-track-category='Support'
                         data-track-name='OpenDeskIntegrations'
-                        data-track-kind='passive'
                       >
                         <Plug className='size-4 text-muted-foreground' />
                       </button>
@@ -2564,7 +2556,6 @@ const SupportScreen = (): ReactElement => {
                         title='Collapse sidebar'
                         data-track-category='Support'
                         data-track-name='CollapseChannelsSidebar'
-                        data-track-kind='passive'
                       >
                         <ChevronLeft className='size-4' />
                       </button>
@@ -2581,7 +2572,6 @@ const SupportScreen = (): ReactElement => {
                         title='Tickets'
                         data-track-category='Support'
                         data-track-name='OpenTicketsFromSupport'
-                        data-track-kind='passive'
                       >
                         <span className='size-4 flex items-center justify-center shrink-0'>
                           <TicketIcon className='size-4' />
@@ -2656,7 +2646,6 @@ const SupportScreen = (): ReactElement => {
                           title='Open Channels'
                           data-track-category='Support'
                           data-track-name='OpenChannelsSidebar'
-                          data-track-kind='passive'
                         >
                           <ChevronRight size={16} />
                         </button>
@@ -2677,7 +2666,6 @@ const SupportScreen = (): ReactElement => {
                               aria-label={isSelectedChannelStarred ? 'Unstar desk' : 'Star desk'}
                               data-track-category='Support'
                               data-track-name='ToggleStarChannel'
-                              data-track-kind='active'
                               data-track-metadata={JSON.stringify({
                                 channelId: selectedChannelId,
                                 isStarred: isSelectedChannelStarred,
@@ -2701,7 +2689,6 @@ const SupportScreen = (): ReactElement => {
                             className='text-base font-semibold tracking-[-0.32px] flex items-center gap-2 min-w-0 px-1.5 py-0.5 rounded-md hover:bg-muted transition-colors duration-100'
                             data-track-category='Support'
                             data-track-name='OpenChannelInfo'
-                            data-track-kind='passive'
                           >
                             <span className='shrink-0 inline-flex items-center leading-none'>
                               {selectedChannelFull ? (
@@ -2740,7 +2727,6 @@ const SupportScreen = (): ReactElement => {
                             }}
                             data-track-category='Support'
                             data-track-name='ViewMembers'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             title='View members'
                           >
@@ -2763,7 +2749,6 @@ const SupportScreen = (): ReactElement => {
                                     )}
                                     data-track-category='Support'
                                     data-track-name='SyncDropdown'
-                                    data-track-kind='passive'
                                   >
                                     <RefreshCw
                                       size={16}
@@ -2780,7 +2765,6 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => setShowRefetchDialog(true)}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
-                                data-track-kind='passive'
                               >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
@@ -2804,7 +2788,6 @@ const SupportScreen = (): ReactElement => {
                                 }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_DL_MEMBER_SYNC_DIALOG'
-                                data-track-kind='passive'
                                 disabled={isDlMemberSyncing}
                               >
                                 <UserPlus size={14} className='mr-2 shrink-0' />
@@ -2851,7 +2834,6 @@ const SupportScreen = (): ReactElement => {
                               )}
                               data-track-category='Support'
                               data-track-name='RefetchExternalSource'
-                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
                             >
                               <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
@@ -2871,7 +2853,6 @@ const SupportScreen = (): ReactElement => {
                             className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
                             data-track-category='Support'
                             data-track-name='OPEN_XYNE_AI'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
                             <XyneAIStar />
@@ -2899,7 +2880,6 @@ const SupportScreen = (): ReactElement => {
                             )}
                             data-track-category='Support'
                             data-track-name='OpenDeskMetrics'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
                             <BarChart3 size={16} />
@@ -2929,7 +2909,6 @@ const SupportScreen = (): ReactElement => {
                               )}
                               data-track-category='Support'
                               data-track-name='OpenDeskReport'
-                              data-track-kind='passive'
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
                               <FileText size={16} />
@@ -2953,7 +2932,6 @@ const SupportScreen = (): ReactElement => {
                             )}
                             data-track-category='Support'
                             data-track-name='OpenTopicsExplorer'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
                             <GridDashboard01 size={16} />
@@ -2981,7 +2959,6 @@ const SupportScreen = (): ReactElement => {
                           title='Inbox settings'
                           data-track-category='Support'
                           data-track-name='ToggleInboxSettings'
-                          data-track-kind='active'
                         >
                           <Settings size={16} />
                         </button>
@@ -3069,7 +3046,6 @@ const SupportScreen = (): ReactElement => {
                             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='Support'
                             data-track-name='OpenDeskSearch'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
                             <Search size={16} />
@@ -3220,7 +3196,6 @@ const SupportScreen = (): ReactElement => {
                                   className='flex w-full items-center gap-2 rounded-md px-0 py-0.5 text-left text-sm text-foreground hover:text-foreground'
                                   data-track-category='Support'
                                   data-track-name='OpenAutoLabelWizard'
-                                  data-track-kind='passive'
                                 >
                                   <Tag className='size-3.5 text-muted-foreground' />
                                   <span className='font-medium'>Auto-label…</span>
@@ -3228,7 +3203,6 @@ const SupportScreen = (): ReactElement => {
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleMyTickets'
-                                  data-track-kind='passive'
                                   data-track-metadata={JSON.stringify({
                                     assigned: !filters.assigned,
                                   })}
@@ -3245,7 +3219,6 @@ const SupportScreen = (): ReactElement => {
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleHasAiDraft'
-                                  data-track-kind='active'
                                   data-track-metadata={JSON.stringify({
                                     hasAiDraft: filters.hasAiDraft !== true,
                                   })}
@@ -3262,7 +3235,6 @@ const SupportScreen = (): ReactElement => {
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleHasSubTickets'
-                                  data-track-kind='passive'
                                   data-track-metadata={JSON.stringify({
                                     hasSubTickets: filters.hasSubTickets !== true,
                                   })}
@@ -3323,7 +3295,6 @@ const SupportScreen = (): ReactElement => {
                                       )}
                                       data-track-category='Support'
                                       data-track-name='OpenFilterSubmenu'
-                                      data-track-kind='passive'
                                       data-track-metadata={JSON.stringify({
                                         filterId: item.id,
                                         filterLabel: item.label,
@@ -3375,7 +3346,6 @@ const SupportScreen = (): ReactElement => {
                               onClick={() => setFilters({})}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
-                              data-track-kind='passive'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -3431,7 +3401,6 @@ const SupportScreen = (): ReactElement => {
                                   className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                   data-track-category='Support'
                                   data-track-name='ToggleTableColumn'
-                                  data-track-kind='passive'
                                   data-track-metadata={JSON.stringify({
                                     column: column.key,
                                     visible: !isSelected,
@@ -3463,7 +3432,6 @@ const SupportScreen = (): ReactElement => {
                                       className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                       data-track-category='Support'
                                       data-track-name='ToggleTableColumn'
-                                      data-track-kind='passive'
                                       data-track-metadata={JSON.stringify({
                                         column: key,
                                         fieldName: field.fieldName,
@@ -3499,7 +3467,6 @@ const SupportScreen = (): ReactElement => {
                             title='Kanban View'
                             data-track-category='Support'
                             data-track-name='SetKanbanView'
-                            data-track-kind='passive'
                           >
                             <LayoutGrid size={16} />
                           </button>
@@ -3514,7 +3481,6 @@ const SupportScreen = (): ReactElement => {
                             title='List View'
                             data-track-category='Support'
                             data-track-name='SetListView'
-                            data-track-kind='passive'
                           >
                             <List size={16} />
                           </button>
@@ -3529,7 +3495,6 @@ const SupportScreen = (): ReactElement => {
                             title='Table View'
                             data-track-category='Support'
                             data-track-name='SetTableView'
-                            data-track-kind='passive'
                           >
                             <Table2 size={16} />
                           </button>
@@ -3544,7 +3509,6 @@ const SupportScreen = (): ReactElement => {
                             title='Calendar View'
                             data-track-category='Support'
                             data-track-name='SetCalendarView'
-                            data-track-kind='passive'
                           >
                             <CalendarRange size={16} />
                           </button>
@@ -3564,7 +3528,6 @@ const SupportScreen = (): ReactElement => {
                                 onClick={() => openNewCompose(selectedChannelId)}
                                 data-track-category='Support'
                                 data-track-name='OpenComposeEmail'
-                                data-track-kind='passive'
                                 data-track-metadata={JSON.stringify({
                                   channelId: selectedChannelId,
                                 })}
@@ -3586,7 +3549,6 @@ const SupportScreen = (): ReactElement => {
                             }}
                             data-track-category='Support'
                             data-track-name='CloseTicketPanel'
-                            data-track-kind='passive'
                           >
                             <PanelRight size={16} />
                           </Button>
@@ -3614,7 +3576,6 @@ const SupportScreen = (): ReactElement => {
                       onClick={handleMarkSelectedAsRead}
                       data-track-category='Support'
                       data-track-name='MarkSelectedTicketsAsRead'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         channelId: refetchChannelId,
                         count: selectedTicketIds.size,
@@ -3630,7 +3591,6 @@ const SupportScreen = (): ReactElement => {
                       onClick={handleMarkSelectedAsUnread}
                       data-track-category='Support'
                       data-track-name='MarkSelectedTicketsAsUnread'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         channelId: refetchChannelId,
                         count: selectedTicketIds.size,
@@ -3647,7 +3607,6 @@ const SupportScreen = (): ReactElement => {
                         onClick={() => setShowMergeDialog(true)}
                         data-track-category='Support'
                         data-track-name='MergeTickets'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({
                           channelId: refetchChannelId,
                           count: selectedTicketIds.size,
@@ -3664,7 +3623,6 @@ const SupportScreen = (): ReactElement => {
                       onClick={clearTicketSelection}
                       data-track-category='Support'
                       data-track-name='ClearTicketSelection'
-                      data-track-kind='passive'
                     >
                       <X size={14} />
                       Clear
@@ -3780,7 +3738,6 @@ const SupportScreen = (): ReactElement => {
                                     title={`Reopen draft: ${label}`}
                                     data-track-category='Support'
                                     data-track-name='ReopenDraft'
-                                    data-track-kind='active'
                                   >
                                     {label}
                                   </button>
@@ -3792,7 +3749,6 @@ const SupportScreen = (): ReactElement => {
                                     aria-label='Discard draft'
                                     data-track-category='Support'
                                     data-track-name='DiscardDraft'
-                                    data-track-kind='active'
                                   >
                                     <X size={12} />
                                   </button>
@@ -3979,7 +3935,6 @@ const SupportScreen = (): ReactElement => {
                 title='Close'
                 data-track-category='Support'
                 data-track-name='CloseDeskIntegrations'
-                data-track-kind='passive'
               >
                 <X className='size-4' />
               </button>
@@ -4882,7 +4837,6 @@ export const SupportTicketDetail = ({
                     aria-label='Back to ticket list'
                     data-track-category='Support'
                     data-track-name='BackToList'
-                    data-track-kind='passive'
                   >
                     <ArrowLeft size={18} />
                   </button>
@@ -4930,7 +4884,6 @@ export const SupportTicketDetail = ({
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
                           data-track-name='PrevTicket'
-                          data-track-kind='passive'
                         >
                           <ChevronUp size={16} />
                         </button>
@@ -4953,7 +4906,6 @@ export const SupportTicketDetail = ({
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
                           data-track-name='NextTicket'
-                          data-track-kind='passive'
                         >
                           <ChevronDown size={16} />
                         </button>
@@ -4988,7 +4940,6 @@ export const SupportTicketDetail = ({
                         aria-label='More actions'
                         data-track-category='Support'
                         data-track-name='MoreMenu'
-                        data-track-kind='passive'
                       >
                         <MoreHorizontal size={18} />
                       </button>
@@ -5004,7 +4955,6 @@ export const SupportTicketDetail = ({
                               }}
                               data-track-category='Support'
                               data-track-name='OpenLabelPicker'
-                              data-track-kind='passive'
                             >
                               <TagIcon size={14} className='shrink-0' />
                               Add label
@@ -5019,7 +4969,6 @@ export const SupportTicketDetail = ({
                                   className='text-muted-foreground hover:text-foreground transition-colors'
                                   data-track-category='Support'
                                   data-track-name='CloseLabelPicker'
-                                  data-track-kind='passive'
                                 >
                                   <X size={12} />
                                 </button>
@@ -5041,7 +4990,6 @@ export const SupportTicketDetail = ({
                           onSelect={() => setIsRightPanelOpen(true)}
                           data-track-category='Support'
                           data-track-name='OpenThreadPanel'
-                          data-track-kind='passive'
                         >
                           <PanelRight size={14} className='shrink-0' />
                           Open Thread
@@ -5081,7 +5029,6 @@ export const SupportTicketDetail = ({
                           disabled={emailSummaryState === 'loading'}
                           data-track-category='Support'
                           data-track-name='SummarizeEmailThread'
-                          data-track-kind='active'
                         >
                           {emailSummaryState === 'loading' ? (
                             <Loader2 size={14} className='animate-spin shrink-0' />
@@ -5105,7 +5052,6 @@ export const SupportTicketDetail = ({
                         }}
                         data-track-category='Support'
                         data-track-name='CopyTicketLink'
-                        data-track-kind='passive'
                       >
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
@@ -5123,7 +5069,6 @@ export const SupportTicketDetail = ({
                             }}
                             data-track-category='Support'
                             data-track-name='MarkTicketUnread'
-                            data-track-kind='active'
                           >
                             <MailOpen size={14} className='shrink-0' />
                             Mark as unread
@@ -5192,7 +5137,6 @@ export const SupportTicketDetail = ({
                         disabled={!ticket || !!ticket.isArchived}
                         data-track-category='Support'
                         data-track-name='ArchiveTicket'
-                        data-track-kind='active'
                         className='text-destructive focus:text-destructive'
                       >
                         <Archive size={14} className='shrink-0' />
@@ -5336,7 +5280,6 @@ export const SupportTicketDetail = ({
                                 className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                                 data-track-category='Support'
                                 data-track-name='RegenerateEmailSummary'
-                                data-track-kind='active'
                               >
                                 <RefreshCw size={13} />
                               </button>
@@ -5348,7 +5291,6 @@ export const SupportTicketDetail = ({
                             className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                             data-track-category='Support'
                             data-track-name='DismissEmailSummary'
-                            data-track-kind='passive'
                           >
                             <X size={14} />
                           </button>
@@ -5687,7 +5629,6 @@ export const SupportTicketDetail = ({
                           onClick={() => setShowArchiveConfirmDialog(false)}
                           data-track-category='Support'
                           data-track-name='CANCEL_ARCHIVE_TICKET'
-                          data-track-kind='passive'
                         >
                           Cancel
                         </Button>
@@ -5695,7 +5636,6 @@ export const SupportTicketDetail = ({
                           onClick={() => handleArchiveTicket()}
                           data-track-category='Support'
                           data-track-name='CONFIRM_ARCHIVE_TICKET'
-                          data-track-kind='active'
                           disabled={!ticket || !!ticket.isArchived || isArchivingTicket}
                           loading={isArchivingTicket}
                           className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
@@ -6112,7 +6052,6 @@ const EmailThreadItem = ({
                   className='inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-border text-xs font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer'
                   data-track-category='Support'
                   data-track-name='ReplyToSpecificEmail'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ emailId: email.id })}
                 >
                   <ArrowUp size={12} className='rotate-[-90deg]' />
@@ -6127,7 +6066,6 @@ const EmailThreadItem = ({
                   className='inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-border text-xs font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer'
                   data-track-category='Support'
                   data-track-name='ReplyAllToSpecificEmail'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ emailId: email.id })}
                 >
                   <ReplyAll size={12} />

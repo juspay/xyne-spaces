@@ -124,7 +124,6 @@ const LaunchScreen = (): ReactElement => {
                 className='text-blue-600 hover:underline bg-transparent border-none cursor-pointer p-0'
                 data-track-category='NAVIGATION'
                 data-track-name='ContinueInBrowser'
-                data-track-kind='passive'
               >
                 continue in browser
               </button>

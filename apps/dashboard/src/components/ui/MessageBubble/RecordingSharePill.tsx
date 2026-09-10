@@ -21,6 +21,5 @@ export const RecordingSharePill: React.FC<RecordingSharePillProps> = ({
     ariaLabel={`Open recording ${title}`}
     onOpen={onOpen}
     trackName='OPEN_SHARED_RECORDING'
-    trackKind='passive'
   />
 );

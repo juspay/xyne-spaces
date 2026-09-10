@@ -61,7 +61,6 @@ export const DrillResultBubble = ({
         className='mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 disabled:text-muted-foreground disabled:hover:text-muted-foreground'
         data-track-category='DYNAMIC_DASHBOARD'
         data-track-name='Add_Drill_To_Dashboard'
-        data-track-kind='active'
       >
         {added ? <Check size={12} /> : <Plus size={12} />}
         {added ? 'Added to dashboard' : adding ? 'Adding…' : 'Add to dashboard'}

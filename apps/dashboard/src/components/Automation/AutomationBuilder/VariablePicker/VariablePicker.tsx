@@ -118,7 +118,6 @@ export function VariablePicker({
           placeholder='Search variables…'
           data-track-category='automation-builder'
           data-track-name='variable-picker-search'
-          data-track-kind='passive'
           className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
         />
       </div>
@@ -146,7 +145,6 @@ export function VariablePicker({
                     }
                     data-track-category='automation-builder'
                     data-track-name={`variable-picker-toggle-group-${group.groupKey}`}
-                    data-track-kind='passive'
                     className={cn(
                       'w-full flex items-center gap-1.5 px-3 py-1.5 text-left',
                       'text-[11px] font-medium uppercase tracking-wide text-muted-foreground',
@@ -180,7 +178,6 @@ export function VariablePicker({
                             onClick={() => handlePick(entry)}
                             data-track-category='automation-builder'
                             data-track-name='variable-picker-select'
-                            data-track-kind='passive'
                             className={cn(
                               'w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left',
                               'text-sm text-foreground hover:bg-accent/40',

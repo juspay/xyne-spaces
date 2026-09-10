@@ -102,7 +102,6 @@ export function ClawCitationGroup({
           }}
           data-track-category='AskAI'
           data-track-name='citation-open-doc-panel'
-          data-track-kind='passive'
         >
           {inner}
         </button>
@@ -120,7 +119,6 @@ export function ClawCitationGroup({
         onClick={() => onOpenToolDebug(it.toolCallId)}
         data-track-category='XyneAI'
         data-track-name='DEBUG_CITATION_OPEN'
-        data-track-kind='passive'
       >
         {inner}
       </button>
@@ -220,7 +218,6 @@ export function ClawCitationGroup({
                 }}
                 data-track-category='AskAI'
                 data-track-name='citation-open-doc-panel-grouped'
-                data-track-kind='passive'
               >
                 {inner}
               </button>
@@ -238,7 +235,6 @@ export function ClawCitationGroup({
               onClick={() => onOpenToolDebug(it.toolCallId)}
               data-track-category='XyneAI'
               data-track-name='DEBUG_CITATION_OPEN'
-              data-track-kind='passive'
             >
               {inner}
             </button>

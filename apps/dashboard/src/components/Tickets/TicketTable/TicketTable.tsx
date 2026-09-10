@@ -125,7 +125,6 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
         onClick={e => e.stopPropagation()}
         data-track-category='Tickets'
         data-track-name='ToggleSelectAll'
-        data-track-kind='passive'
       />
     </div>
   );
@@ -162,7 +161,6 @@ const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
           }}
           data-track-category='Tickets'
           data-track-name='DeselectRow'
-          data-track-kind='passive'
         >
           <Check className='w-3 h-3 text-white' strokeWidth={3} />
         </button>
@@ -177,7 +175,6 @@ const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
           onClick={e => e.stopPropagation()}
           data-track-category='Tickets'
           data-track-name='SelectRow'
-          data-track-kind='passive'
         />
       ) : (
         <span className='text-sm text-muted-foreground'>{rowIndex}</span>
@@ -373,14 +370,12 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               tabIndex={0}
               data-track-category='Tickets'
               data-track-name='TicketRow'
-              data-track-kind='passive'
             >
               <button
                 className='text-xs text-muted-foreground font-medium font-mono hover:text-blue-600 hover:underline transition-colors'
                 onClick={handleTicketClick}
                 data-track-category='Tickets'
                 data-track-name='OpenTicket'
-                data-track-kind='passive'
               >
                 {params.data.xyneId}
               </button>

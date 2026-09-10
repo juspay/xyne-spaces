@@ -62,7 +62,6 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
           rows={1}
           data-track-category='CLAW_CHAT'
           data-track-name='COMPOSER_INPUT'
-          data-track-kind='passive'
           className={cn(
             'flex-1 resize-none bg-transparent text-sm text-foreground outline-none',
             'placeholder:text-muted-foreground max-h-32',
@@ -75,7 +74,6 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
             aria-label='Stop generating'
             data-track-category='CLAW_CHAT'
             data-track-name='STOP_GENERATION'
-            data-track-kind='active'
             className='flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-accent transition-colors'
           >
             <Square className='size-3 fill-current' />
@@ -89,7 +87,6 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
             data-ph-capture-attribute-track-id='claw_send_message'
             data-track-category='CLAW_CHAT'
             data-track-name='SEND_MESSAGE'
-            data-track-kind='active'
             className={cn(
               'flex size-7 shrink-0 items-center justify-center rounded-full transition-colors',
               canSend

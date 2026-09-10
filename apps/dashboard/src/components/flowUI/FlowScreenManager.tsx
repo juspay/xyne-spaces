@@ -187,7 +187,6 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
                       aria-label='Back'
                       data-track-category='flow'
                       data-track-name='back-popup'
-                      data-track-kind='passive'
                     >
                       <ChevronLeft className='size-3.5' />
                     </button>
@@ -202,7 +201,6 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
                   aria-label='Close'
                   data-track-category='flow'
                   data-track-name='close-popup'
-                  data-track-kind='passive'
                 >
                   <X className='size-3.5' />
                 </button>

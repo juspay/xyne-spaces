@@ -389,7 +389,6 @@ function BreadcrumbBar({ crumbs, onJump }: { crumbs: Crumb[]; onJump: (idx: numb
               onClick={() => onJump(idx)}
               data-track-category='Claw Agents'
               data-track-name={`Navigate knowledge base breadcrumb: ${label}`}
-              data-track-kind='passive'
               className={`flex items-center gap-1 truncate rounded px-1.5 py-0.5 transition ${
                 isLast
                   ? 'cursor-default font-medium text-foreground'
@@ -436,7 +435,6 @@ function Row({
       onClick={onClick}
       data-track-category='Claw Agents'
       data-track-name={`Open knowledge base row: ${primary}`}
-      data-track-kind='passive'
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={
@@ -556,7 +554,6 @@ function CollectionsList({
                 }}
                 data-track-category='Claw Agents'
                 data-track-name='Toggle knowledge base collection grant'
-                data-track-kind='passive'
                 className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition ${
                   checked
                     ? 'border-emerald-500 bg-emerald-100 text-emerald-700'
@@ -637,7 +634,6 @@ function FolderContents({
                 }}
                 data-track-category='Claw Agents'
                 data-track-name='Toggle knowledge base folder grant'
-                data-track-kind='passive'
                 disabled={covered}
                 className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide transition ${
                   checked
@@ -675,7 +671,6 @@ function FolderContents({
                 onChange={() => onToggleFile(node, f)}
                 data-track-category='Claw Agents'
                 data-track-name='Toggle knowledge base file grant'
-                data-track-kind='passive'
                 className='h-3.5 w-3.5 accent-emerald-500'
               />
             }
@@ -757,7 +752,6 @@ function SelectedPanel({
                 onClick={it.onRemove}
                 data-track-category='Claw Agents'
                 data-track-name='Remove knowledge base selection'
-                data-track-kind='active'
                 className='flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground'
                 aria-label='Remove'
                 title='Remove'

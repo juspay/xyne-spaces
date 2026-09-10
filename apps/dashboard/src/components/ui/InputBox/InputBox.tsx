@@ -1352,18 +1352,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         // Tracked here, not on the Send button: Enter, the button, the mobile
         // editor and shortcuts all land in this function, and only a send that
         // succeeded should count.
-        globalClickTracker.trackManualEvent(
-          'CHAT_INPUT',
-          'SEND_MESSAGE',
-          undefined,
-          {
-            ...channelTrackingMetadata(trackedChannel),
-            ...(conversationId !== null && { conversationId }),
-            isThreadReply: conversationId !== null,
-            hasAttachments: filesToSend.length > 0,
-          },
-          'active',
-        );
+        globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
+          ...channelTrackingMetadata(trackedChannel),
+          ...(conversationId !== null && { conversationId }),
+          isThreadReply: conversationId !== null,
+          hasAttachments: filesToSend.length > 0,
+        });
 
         editor.commands.setContent('');
         setContent('');
@@ -1666,7 +1660,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   onClick={onCancelSlashCommandArtifact}
                   data-track-category='CHAT_INPUT'
                   data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
-                  data-track-kind='passive'
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
                   aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >
@@ -1920,7 +1913,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }}
                           data-track-category='CHAT_INPUT'
                           data-track-name='ATTACH_FILE'
-                          data-track-kind='active'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
                           <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
@@ -1932,7 +1924,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }}
                           data-track-category='CHAT_INPUT'
                           data-track-name='ATTACH_TRANSCRIPT'
-                          data-track-kind='active'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1943,7 +1934,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           }}
                           data-track-category='CHAT_INPUT'
                           data-track-name='ATTACH_CANVAS'
-                          data-track-kind='active'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1997,7 +1987,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        data-track-kind='active'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -2022,7 +2011,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        data-track-kind='active'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
@@ -2044,7 +2032,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => setShowFormatToolbar(prev => !prev)}
                         data-track-category='CHAT_INPUT'
                         data-track-name='TOGGLE_FORMAT_TOOLBAR'
-                        data-track-kind='passive'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -2089,7 +2076,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={onCancel}
                         data-track-category='CHAT_INPUT'
                         data-track-name='CANCEL_EDITING'
-                        data-track-kind='passive'
                         className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
@@ -2170,7 +2156,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   }}
                                   data-track-category='CHAT_INPUT'
                                   data-track-name='CREATE_TICKET_FROM_INPUT'
-                                  data-track-kind='passive'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
@@ -2183,7 +2168,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   }}
                                   data-track-category='CHAT_INPUT'
                                   data-track-name='OPEN_SCHEDULE_DIALOG'
-                                  data-track-kind='passive'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -2245,7 +2229,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 }}
                                 data-track-category='CHAT_INPUT'
                                 data-track-name='SEND_FROM_MENU'
-                                data-track-kind='active'
                               >
                                 <ArrowUp className='h-4 w-4' /> Send now
                               </DropdownMenuItem>
@@ -2256,7 +2239,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 }}
                                 data-track-category='CHAT_INPUT'
                                 data-track-name='OPEN_SCHEDULE_DIALOG'
-                                data-track-kind='passive'
                               >
                                 <Clock className='h-4 w-4' /> Schedule message
                               </DropdownMenuItem>
@@ -2308,7 +2290,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               title='Change message send behavior'
               data-track-category='CHAT_INPUT'
               data-track-name='OpenMessagingPreferences'
-              data-track-kind='passive'
             >
               <span className='font-semibold'>Shift / ⌘ + Return</span>{' '}
               {enterSendsMessage ? 'to add a new line' : 'to send'}

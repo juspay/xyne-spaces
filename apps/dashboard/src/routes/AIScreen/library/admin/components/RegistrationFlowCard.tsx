@@ -41,7 +41,6 @@ function StepButton({
       loading={isLoading}
       data-track-category='Claw Admin'
       data-track-name={`Registration step: ${label}`}
-      data-track-kind='passive'
       className={cn(
         'rounded-md',
         isDone && 'bg-muted text-foreground',
@@ -88,7 +87,6 @@ export function RegistrationFlowCard({
             onClick={onDismiss}
             data-track-category='Claw Admin'
             data-track-name='Dismiss registration'
-            data-track-kind='passive'
             className='text-xs text-muted-foreground transition-colors hover:text-foreground'
           >
             Dismiss
@@ -114,7 +112,6 @@ export function RegistrationFlowCard({
                 onClick={step === 'upload' ? onSkipUpload : onDismiss}
                 data-track-category='Claw Admin'
                 data-track-name={`Skip ${step}`}
-                data-track-kind='passive'
                 className='text-xs text-muted-foreground transition-colors hover:text-foreground'
               >
                 Skip

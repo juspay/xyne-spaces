@@ -17,7 +17,6 @@ import type {
   AttachmentPanelState,
   DeskTicketPanelState,
 } from './PanelTypes';
-import type { InteractionKind } from '@xyne/shared';
 
 // ————————————————————————————————————————————————————————————————
 // Public API
@@ -82,7 +81,6 @@ const PANEL_RENDERERS: PanelRegistry = {
 interface PanelCloseHeaderProps extends BasePanelProps {
   label: string;
   trackName: string;
-  trackKind?: InteractionKind;
   title?: string;
 }
 
@@ -92,7 +90,6 @@ interface PanelCloseHeaderProps extends BasePanelProps {
 function PanelCloseHeader({
   label,
   trackName,
-  trackKind,
   onClose,
   title,
 }: PanelCloseHeaderProps): ReactElement {
@@ -109,7 +106,6 @@ function PanelCloseHeader({
         aria-label={label}
         data-track-category='SEARCH_RESULTS'
         data-track-name={trackName}
-        data-track-kind={trackKind}
       >
         <X size={18} />
       </button>
@@ -165,12 +161,7 @@ function ProfilePanel({ panel, onClose }: ProfilePanelProps): ReactElement {
   const { user: currentUser } = useAuth();
   return (
     <>
-      <PanelCloseHeader
-        label='Close profile'
-        trackName='CLOSE_PROFILE_PANEL'
-        trackKind='passive'
-        onClose={onClose}
-      />
+      <PanelCloseHeader label='Close profile' trackName='CLOSE_PROFILE_PANEL' onClose={onClose} />
       <div className='flex-1 min-h-0 overflow-y-auto'>
         <UserProfile
           userId={panel.userId}
@@ -189,12 +180,7 @@ interface CanvasPanelProps extends BasePanelProps {
 function CanvasPanel({ panel, onClose }: CanvasPanelProps): ReactElement {
   return (
     <>
-      <PanelCloseHeader
-        label='Close canvas'
-        trackName='CLOSE_CANVAS_PANEL'
-        trackKind='passive'
-        onClose={onClose}
-      />
+      <PanelCloseHeader label='Close canvas' trackName='CLOSE_CANVAS_PANEL' onClose={onClose} />
       <div className='flex-1 min-h-0 overflow-hidden'>
         <CanvasScreen canvasId={panel.canvasId} />
       </div>
@@ -212,7 +198,6 @@ function AttachmentPanel({ panel, onClose }: AttachmentPanelProps): ReactElement
       <PanelCloseHeader
         label='Close attachment'
         trackName='CLOSE_ATTACHMENT_PANEL'
-        trackKind='passive'
         title={panel.fileName}
         onClose={onClose}
       />
@@ -248,7 +233,6 @@ function DeskTicketPanel({ panel, onClose }: DeskTicketPanelProps): ReactElement
       <PanelCloseHeader
         label='Close ticket'
         trackName='CLOSE_DESK_TICKET_PANEL'
-        trackKind='passive'
         title={panel.title}
         onClose={onClose}
       />

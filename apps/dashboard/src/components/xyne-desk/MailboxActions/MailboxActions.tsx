@@ -104,7 +104,6 @@ export const MailboxActions = ({
           className={cn(btn, 'shrink-0')}
           data-track-category='Support'
           data-track-name='ToggleMailboxStar'
-          data-track-kind='active'
         >
           <Star
             size={18}
@@ -165,7 +164,6 @@ export const MailboxActions = ({
           className='hover:bg-muted rounded-full p-0.5'
           data-track-category='Support'
           data-track-name='RemoveMailboxState'
-          data-track-kind='active'
         >
           <X className='size-2.5' />
         </button>

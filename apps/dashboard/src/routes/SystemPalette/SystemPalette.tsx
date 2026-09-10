@@ -51,7 +51,6 @@ const SystemPalette = (): ReactElement => {
                 data-testid={`system-theme-btn-${t}`}
                 data-track-category='SystemPalette'
                 data-track-name='SelectTheme'
-                data-track-kind='passive'
               >
                 {t.replace('_', ' ')}
               </button>

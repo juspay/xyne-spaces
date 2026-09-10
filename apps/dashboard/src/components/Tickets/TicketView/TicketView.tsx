@@ -72,7 +72,6 @@ const TicketView = (): ReactElement => {
               }}
               data-track-category='Tickets'
               data-track-name='NavigateBackFromTicket'
-              data-track-kind='passive'
             />
             <span className='text-[14px] text-foreground font-mono'>{ticket.xyneId}</span>
           </div>

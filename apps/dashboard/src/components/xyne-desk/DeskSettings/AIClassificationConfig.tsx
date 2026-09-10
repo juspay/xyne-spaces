@@ -142,7 +142,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
         onClick={onBack}
         data-track-category='DeskSettings'
         data-track-name='BackFromClassificationConfig'
-        data-track-kind='passive'
       >
         <ArrowLeft size={16} />
         Configure Auto-classification
@@ -176,7 +175,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='CategoryFieldName'
-          data-track-kind='passive'
         />
       </div>
 
@@ -195,7 +193,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='SubCategoryFieldName'
-          data-track-kind='passive'
         />
       </div>
 
@@ -211,7 +208,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
             disabled={fieldDisabled}
             data-track-category='DeskSettings'
             data-track-name='TogglePromptGuide'
-            data-track-kind='passive'
           >
             <CircleHelp size={13} />
           </button>
@@ -263,7 +259,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           className='h-[150px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='ClassificationPrompt'
-          data-track-kind='passive'
         />
       </div>
 
@@ -335,7 +330,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
               }}
               data-track-category='DeskSettings'
               data-track-name='AddClassificationRule'
-              data-track-kind='active'
             >
               <Plus size={14} />
               <span>Add rule</span>
@@ -368,7 +362,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleCategory'
-                    data-track-kind='active'
                   />
                   <input
                     type='text'
@@ -378,7 +371,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleSubCategory'
-                    data-track-kind='active'
                   />
                   <Select value={editUserGroup} onValueChange={setEditUserGroup}>
                     <SelectTrigger className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'>
@@ -400,7 +392,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       className='text-xs font-medium text-desk-accent disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='DeskSettings'
                       data-track-name='SaveEditRule'
-                      data-track-kind='active'
                       data-ph-capture-attribute-track-id='desk_classification_rule_update'
                     >
                       Save
@@ -411,7 +402,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       className='text-xs font-medium text-muted-foreground hover:text-foreground'
                       data-track-category='DeskSettings'
                       data-track-name='CancelEditRule'
-                      data-track-kind='passive'
                     >
                       Cancel
                     </button>
@@ -442,7 +432,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       title='Edit rule'
                       data-track-category='DeskSettings'
                       data-track-name='EditClassificationRule'
-                      data-track-kind='active'
                     >
                       Edit
                     </button>
@@ -453,7 +442,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       title='Delete rule'
                       data-track-category='DeskSettings'
                       data-track-name='DeleteClassificationRule'
-                      data-track-kind='active'
                       data-ph-capture-attribute-track-id='desk_classification_rule_delete'
                     >
                       <Trash2 size={14} />
@@ -486,7 +474,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                   className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                   data-track-category='DeskSettings'
                   data-track-name='NewRuleCategory'
-                  data-track-kind='active'
                 />
               </div>
 
@@ -526,7 +513,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                 data-track-category='DeskSettings'
                 data-track-name='NewRuleSubCategory'
-                data-track-kind='active'
               />
             </div>
 
@@ -542,7 +528,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 className='px-[12px] py-[6px] text-sm font-medium text-foreground bg-background border border-border rounded-[10px] hover:bg-accent transition-colors'
                 data-track-category='DeskSettings'
                 data-track-name='CancelNewRule'
-                data-track-kind='passive'
               >
                 Cancel
               </button>
@@ -553,7 +538,6 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='DeskSettings'
                 data-track-name='ConfirmAddRule'
-                data-track-kind='active'
                 data-ph-capture-attribute-track-id='desk_classification_rule_create'
               >
                 Add Rule

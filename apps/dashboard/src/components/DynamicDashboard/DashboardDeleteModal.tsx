@@ -29,7 +29,6 @@ export const DashboardDeleteModal = ({
           disabled={isDeleting}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Cancel_Delete_Dashboard'
-          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -39,7 +38,6 @@ export const DashboardDeleteModal = ({
           disabled={isDeleting}
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Confirm_Delete_Dashboard'
-          data-track-kind='active'
         >
           {isDeleting && <Loader2 size={14} className='mr-1.5 animate-spin' />}
           {isDeleting ? 'Deleting…' : 'Delete'}

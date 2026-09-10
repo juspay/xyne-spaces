@@ -1,5 +1,4 @@
 import type { ReactElement } from 'react';
-import type { InteractionKind } from '@xyne/shared';
 
 export interface SidebarNavItemProps {
   icon: ReactElement;
@@ -7,7 +6,6 @@ export interface SidebarNavItemProps {
   onClick?: () => void;
   disabled?: boolean;
   trackName?: string;
-  trackKind?: InteractionKind;
 }
 
 export const SidebarNavItem = ({
@@ -16,7 +14,6 @@ export const SidebarNavItem = ({
   onClick,
   disabled,
   trackName,
-  trackKind,
 }: SidebarNavItemProps): ReactElement => (
   <button
     type='button'
@@ -28,7 +25,6 @@ export const SidebarNavItem = ({
     }`}
     data-track-category='DYNAMIC_DASHBOARD'
     data-track-name={trackName ?? 'Sidebar_Nav'}
-    data-track-kind={trackKind}
   >
     <span className={disabled ? 'text-xyne-gray-300' : 'text-xyne-gray-500'}>{icon}</span>
     {label}

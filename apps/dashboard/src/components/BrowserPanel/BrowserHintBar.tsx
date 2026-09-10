@@ -42,7 +42,6 @@ export function BrowserHintBar({
               className='underline underline-offset-2 transition-colors hover:text-foreground'
               data-track-category='BROWSER'
               data-track-name='OpenLinkPreferences'
-              data-track-kind='passive'
             >
               change default in preferences
             </button>
@@ -55,7 +54,6 @@ export function BrowserHintBar({
             className='mt-px shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-border hover:text-foreground'
             data-track-category='BROWSER'
             data-track-name='DismissLinkHint'
-            data-track-kind='passive'
           >
             <X size={12} />
           </button>

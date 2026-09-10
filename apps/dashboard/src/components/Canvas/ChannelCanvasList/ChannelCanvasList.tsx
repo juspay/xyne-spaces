@@ -149,7 +149,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 data-testid='canvas-filter-all'
                 data-track-category='CANVAS'
                 data-track-name='Filter_Channel_Canvases_All'
-                data-track-kind='passive'
               >
                 All
               </button>
@@ -163,7 +162,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 data-testid='canvas-filter-created-by-me'
                 data-track-category='CANVAS'
                 data-track-name='Filter_Channel_Canvases_Created_By_Me'
-                data-track-kind='passive'
               >
                 Created by me
               </button>
@@ -177,7 +175,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 data-testid='canvas-filter-shared'
                 data-track-category='CANVAS'
                 data-track-name='Filter_Channel_Canvases_Shared'
-                data-track-kind='passive'
               >
                 Shared
               </button>
@@ -247,7 +244,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                         onClick={() => toggleFolder(folderGroup.folder.id)}
                         data-track-category='CANVAS'
                         data-track-name='Toggle_Channel_Folder'
-                        data-track-kind='passive'
                       >
                         {isCollapsed ? (
                           <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
@@ -270,7 +266,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                           data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                           data-track-category='CANVAS'
                           data-track-name='Create_Canvas_In_Channel_Folder'
-                          data-track-kind='active'
                         >
                           <Plus className='w-4 h-4 text-muted-foreground' />
                         </button>

@@ -176,7 +176,6 @@ const TicketPreviewContent = ({
                   className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
                   data-track-category='BOARD_CREATE'
                   data-track-name='ShowMoreFields'
-                  data-track-kind='passive'
                 >
                   Show More ({remainingFields.length} more fields)
                   <ChevronDown size={16} />
@@ -187,7 +186,6 @@ const TicketPreviewContent = ({
                   className='flex items-center gap-[6px] py-[4px] text-[13px] font-[450] text-muted-foreground leading-[1.2] tracking-[-0.1px] hover:text-muted-foreground transition-colors cursor-pointer bg-transparent border-0'
                   data-track-category='BOARD_CREATE'
                   data-track-name='ShowLessFields'
-                  data-track-kind='passive'
                 >
                   Show Less
                   <ChevronUp size={16} />

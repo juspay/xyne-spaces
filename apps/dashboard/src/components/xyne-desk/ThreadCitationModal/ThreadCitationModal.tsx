@@ -129,7 +129,6 @@ export function ThreadCitationModal(): ReactElement | null {
           aria-label='Back'
           data-track-category='AIDraft'
           data-track-name='ThreadCitationBack'
-          data-track-kind='passive'
         >
           <ArrowLeft size={16} />
         </button>
@@ -143,7 +142,6 @@ export function ThreadCitationModal(): ReactElement | null {
           aria-label='Close source preview'
           data-track-category='AIDraft'
           data-track-name='ThreadCitationClose'
-          data-track-kind='passive'
         >
           <X size={16} />
         </button>
@@ -180,7 +178,6 @@ export function ThreadCitationModal(): ReactElement | null {
           onClick={close}
           data-track-category='AIDraft'
           data-track-name='CloseThreadCitationBackdrop'
-          data-track-kind='passive'
         />
         <div style={modalStyle}>{modalCard}</div>
       </>,
@@ -197,7 +194,6 @@ export function ThreadCitationModal(): ReactElement | null {
         onClick={close}
         data-track-category='AIDraft'
         data-track-name='CloseThreadCitationBackdrop'
-        data-track-kind='passive'
       />
       <div className='relative w-[80vw] max-w-[1100px] h-[85vh]'>{modalCard}</div>
     </div>

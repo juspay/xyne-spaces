@@ -201,7 +201,6 @@ export function BriefFeaturesDialog({
                       aria-pressed={isActive}
                       data-track-category='DailyBrief'
                       data-track-name='daily-brief-features-tab'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ tab: value })}
                       className={cn(
                         'flex h-9 items-center rounded-[10px] px-2.5 transition-colors duration-200 ease-out',
@@ -278,7 +277,6 @@ export function BriefFeaturesDialog({
                   }}
                   data-track-category='DailyBrief'
                   data-track-name='daily-brief-features-step'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ step })}
                   className={cn(
                     'h-1.5 overflow-hidden rounded-full bg-muted-foreground/25 transition-all duration-300 ease-out',

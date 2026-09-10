@@ -56,7 +56,6 @@ export function DetailListRow({
           title={removeLabel}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: remove list item'
-          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -137,7 +136,6 @@ export function DetailListCard({
           aria-expanded={expanded}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: expand list'
-          data-track-kind='passive'
           className='flex w-full items-center border-t border-border bg-muted/40 px-4 py-3 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
         >
           {expanded ? 'Show less' : `View ${hidden} other${hidden === 1 ? '' : 's'}`}

@@ -63,7 +63,6 @@ export function SkillFilesField({
             title='Upload folder'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: upload folder'
-            data-track-kind='active'
             className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <FolderDefault className='size-4' aria-hidden />
@@ -75,7 +74,6 @@ export function SkillFilesField({
             title='Upload files'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: upload files'
-            data-track-kind='active'
             className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <PlusDefault className='size-4' aria-hidden />
@@ -105,7 +103,6 @@ export function SkillFilesField({
                 title={`Remove ${file.relativePath}`}
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: remove file'
-                data-track-kind='active'
                 className='flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground'
               >
                 <MultipleCrossCancelDefault className='size-3' aria-hidden />

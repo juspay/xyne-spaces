@@ -82,7 +82,6 @@ export const McpConnectDialog = ({
             onClick={(): void => onOpenChange(false)}
             data-track-category='Claw MCP'
             data-track-name='CancelConnectMcp'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -91,7 +90,6 @@ export const McpConnectDialog = ({
             disabled={submitting || missingRequired}
             data-track-category='Claw MCP'
             data-track-name='SubmitConnectMcp'
-            data-track-kind='active'
           >
             {submitting ? 'Connecting…' : 'Connect'}
           </Button>
@@ -137,7 +135,6 @@ export const McpConnectDialog = ({
               data-testid={`mcp-cred-${field.name}`}
               data-track-category='Claw MCP'
               data-track-name='EditMcpCredential'
-              data-track-kind='active'
             />
           </div>
         ))

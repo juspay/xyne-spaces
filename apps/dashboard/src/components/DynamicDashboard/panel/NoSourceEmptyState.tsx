@@ -14,7 +14,6 @@ export const NoSourceEmptyState = ({ onConnect }: { onConnect: () => void }): Re
       className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-xyne-primary-500 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-primary-600'
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Open_Data_Sources_Admin'
-      data-track-kind='passive'
     >
       <Zap size={14} />
       Connect Sources

@@ -77,7 +77,6 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
             activeId={activeId}
             onSelect={setActive}
             trackName='Filter agents by category'
-            trackKind='passive'
           />
         </LibraryToolbarPortal>
       }

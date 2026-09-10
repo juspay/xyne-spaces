@@ -81,7 +81,6 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
           className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
           data-track-category='FileViewer'
           data-track-name='RetryLoadCode'
-          data-track-kind='passive'
           data-ph-capture-attribute-track-id='retry_load_code'
         >
           Try Again
@@ -259,7 +258,6 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
             className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur border border-border text-foreground text-xs hover:bg-accent transition-colors'
             data-track-category='FileViewer'
             data-track-name='ToggleMarkdownRaw'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ fileName })}
           >
             View code
@@ -330,7 +328,6 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
               className='ml-2 px-2.5 py-1 rounded-md border border-border bg-background/70 dark:bg-black/20 text-xs text-foreground hover:bg-accent transition-colors'
               data-track-category='FileViewer'
               data-track-name='ToggleMarkdownRendered'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ fileName })}
             >
               Preview

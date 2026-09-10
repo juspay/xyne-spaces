@@ -74,7 +74,6 @@ export function CredentialFormFields({
               aria-label='Auth type'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: credential auth type'
-              data-track-kind='passive'
               className='h-11 w-full rounded-2xl'
             >
               <SelectValue />
@@ -104,7 +103,6 @@ export function CredentialFormFields({
             autoFocus
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: credential api key'
-            data-track-kind='passive'
             className={FIELD}
           />
         </Field>
@@ -118,7 +116,6 @@ export function CredentialFormFields({
           aria-label='Model'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: credential model'
-          data-track-kind='passive'
           className={FIELD}
         />
       </Field>
@@ -131,7 +128,6 @@ export function CredentialFormFields({
           aria-label='Base URL'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: credential base url'
-          data-track-kind='passive'
           className={FIELD}
         />
       </Field>
@@ -149,7 +145,6 @@ export function CredentialFormFields({
               aria-label='Reasoning effort'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: credential reasoning effort'
-              data-track-kind='passive'
               className='h-11 w-full rounded-2xl'
             >
               <SelectValue />

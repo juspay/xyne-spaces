@@ -70,7 +70,6 @@ export const ProjectCard = ({
       className='bg-background rounded-lg shadow-sm border border-border p-6 hover:shadow-md transition-shadow cursor-pointer'
       data-track-category='Projects'
       data-track-name='OpenProject'
-      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ projectId: project.id, projectName: project.name })}
     >
       <div className='flex items-start justify-between mb-4'>
@@ -102,7 +101,6 @@ export const ProjectCard = ({
               onClick={handleCopyId}
               data-track-category='Projects'
               data-track-name='COPY_PROJECT_ID'
-              data-track-kind='passive'
               title='Copy project ID'
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -118,7 +116,6 @@ export const ProjectCard = ({
                 onClick={handleEditClick}
                 data-track-category='Projects'
                 data-track-name='EditProject'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   projectId: project.id,
                   projectName: project.name,

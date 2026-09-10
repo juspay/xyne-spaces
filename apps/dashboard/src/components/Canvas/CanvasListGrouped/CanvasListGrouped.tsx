@@ -603,7 +603,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
             data-ph-capture-attribute-track-id='create_canvas_in_channel_root'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_CHANNEL_ROOT'
-            data-track-kind='active'
           >
             <FileText className='w-4 h-4 text-muted-foreground shrink-0' />
             <span className='text-sm'>Create in channel</span>
@@ -622,7 +621,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                     data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                     data-track-category='CANVAS'
                     data-track-name='CREATE_CANVAS_IN_CHANNEL_FOLDER'
-                    data-track-kind='active'
                   >
                     <Folder className='w-4 h-4 text-amber-500 shrink-0' />
                     <span className='text-sm truncate'>{folder.name}</span>
@@ -656,7 +654,6 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                 data-ph-capture-attribute-track-id='create_channel_canvas_folder'
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CHANNEL_CANVAS_FOLDER'
-                data-track-kind='active'
               >
                 Create
               </button>

@@ -553,7 +553,6 @@ const ScheduledMessageModal = ({
                             }}
                             data-track-category='scheduled-message'
                             data-track-name={`toggle-day-${day.value}`}
-                            data-track-kind='passive'
                             className={cn(
                               'flex h-9 w-9 items-center justify-center rounded-full border text-sm font-medium transition-colors',
                               isActive
@@ -735,7 +734,6 @@ const ScheduledMessageModal = ({
                     disabled={!canEdit}
                     data-track-category='scheduled-message'
                     data-track-name='toggle-active'
-                    data-track-kind='active'
                     className='w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                   />
                 )}
@@ -758,7 +756,6 @@ const ScheduledMessageModal = ({
                   onClick={() => void handleDelete()}
                   data-track-category='scheduled-message'
                   data-track-name='DELETE_SCHEDULED_MESSAGE'
-                  data-track-kind='active'
                 >
                   Delete
                 </Button>
@@ -770,7 +767,6 @@ const ScheduledMessageModal = ({
                 onClick={() => onOpenChange(false)}
                 data-track-category='scheduled-message'
                 data-track-name='CLOSE_SCHEDULED_MESSAGE_MODAL'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>

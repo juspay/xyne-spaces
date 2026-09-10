@@ -226,7 +226,6 @@ export const FileViewerPanel: React.FC<{
             }}
             data-track-category='knowledge-base'
             data-track-name='BACK_FROM_FILE_VIEWER'
-            data-track-kind='passive'
           >
             <ArrowLeft size={16} />
             Back to Collections
@@ -262,7 +261,6 @@ export const FileViewerPanel: React.FC<{
               }}
               data-track-category='knowledge-base'
               data-track-name='BACK_FROM_FILE_VIEWER'
-              data-track-kind='passive'
             >
               <ArrowLeft size={16} />
               Back
@@ -337,7 +335,6 @@ export const FileViewerPanel: React.FC<{
               aria-label='Ask AI'
               data-track-category='knowledge-base'
               data-track-name='file-viewer-open-ai-chat'
-              data-track-kind='passive'
               className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
             >
               <XyneAIStar size={22} />
@@ -353,7 +350,6 @@ export const FileViewerPanel: React.FC<{
             aria-pressed={vespaInspectorOpen}
             data-track-category='knowledge-base'
             data-track-name='file-viewer-vespa-document'
-            data-track-kind='passive'
             className={`grid h-8 w-8 place-items-center rounded-md transition ${
               vespaInspectorOpen
                 ? 'bg-secondary text-foreground'
@@ -371,7 +367,6 @@ export const FileViewerPanel: React.FC<{
             aria-label='Share'
             data-track-category='knowledge-base'
             data-track-name='file-viewer-share'
-            data-track-kind='passive'
             className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary'
           >
             <Share2 className='h-4 w-4' strokeWidth={1.75} />
@@ -389,7 +384,6 @@ export const FileViewerPanel: React.FC<{
           className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
           data-track-category='knowledge-base'
           data-track-name='file-viewer-download'
-          data-track-kind='passive'
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
         </button>
@@ -404,7 +398,6 @@ export const FileViewerPanel: React.FC<{
           className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
           data-track-category='knowledge-base'
           data-track-name='file-viewer-back'
-          data-track-kind='passive'
         >
           <ArrowLeft className='h-3.5 w-3.5' strokeWidth={1.75} />
         </button>
@@ -438,7 +431,6 @@ export const FileViewerPanel: React.FC<{
                 title='Close'
                 data-track-category='knowledge-base'
                 data-track-name='file-viewer-close-vespa-document'
-                data-track-kind='passive'
                 className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
               >
                 <X className='h-4 w-4' strokeWidth={1.75} />

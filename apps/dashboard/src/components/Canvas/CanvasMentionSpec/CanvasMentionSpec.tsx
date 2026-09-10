@@ -172,7 +172,6 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
                 }}
                 data-track-category='CANVAS'
                 data-track-name='GRANT_GROUP_MENTION_ACCESS'
-                data-track-kind='active'
               >
                 {formatCanvasRoleLabel(role)}
               </Button>
@@ -213,7 +212,6 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
               }}
               data-track-category='CANVAS'
               data-track-name='GRANT_USER_MENTION_ACCESS'
-              data-track-kind='active'
             >
               {role.charAt(0) + role.slice(1).toLowerCase()}
             </Button>

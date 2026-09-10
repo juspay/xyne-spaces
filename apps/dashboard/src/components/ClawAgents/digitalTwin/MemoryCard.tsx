@@ -34,7 +34,6 @@ export const MemoryCard = ({
                 onClick={() => setExpanded(e => !e)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin memory expand'
-                data-track-kind='passive'
                 className='text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline'
               >
                 {expanded ? 'show less' : 'show more'}
@@ -58,7 +57,6 @@ export const MemoryCard = ({
                 onClick={() => setShowReasoning(s => !s)}
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin memory curator reasoning'
-                data-track-kind='passive'
                 className='underline-offset-2 hover:text-foreground hover:underline'
               >
                 {showReasoning ? 'hide curator' : 'why?'}
@@ -82,7 +80,6 @@ export const MemoryCard = ({
             data-ph-capture-attribute-track-id='digital_twin_delete_memory'
             data-track-category='Claw Agents'
             data-track-name='Digital Twin delete memory'
-            data-track-kind='active'
             className='shrink-0 text-muted-foreground transition-colors hover:text-destructive'
             title='Delete memory'
             aria-label='Delete memory'

@@ -3812,7 +3812,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     }}
                     data-track-category='TicketReports'
                     data-track-name='OpenTicketReports'
-                    data-track-kind='passive'
                   >
                     <Download className='size-4' />
                     <span>Export report</span>
@@ -3851,7 +3850,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       aria-label='Discard unsaved changes'
                       data-track-category='Projects'
                       data-track-name='ResetView'
-                      data-track-kind='passive'
                     >
                       Reset
                     </Button>
@@ -3866,7 +3864,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   aria-label='Share view'
                   data-track-category='Projects'
                   data-track-name='ShareView'
-                  data-track-kind='passive'
                 >
                   <Share2 className='w-3 h-3 text-muted-foreground' />
                   <span>Share</span>
@@ -3879,7 +3876,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     className='rounded-[10px]'
                     data-track-category='Projects'
                     data-track-name='SaveView'
-                    data-track-kind='active'
                   >
                     <Bookmark className='w-3 h-3' />
                     <span>Save</span>
@@ -3897,7 +3893,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         className='rounded-[10px]'
                         data-track-category='Projects'
                         data-track-name='SaveView'
-                        data-track-kind='active'
                       >
                         <Bookmark className='w-3 h-3' />
                         <span>{viewId ? 'Save' : 'Save view'}</span>
@@ -3918,7 +3913,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         placeholder='e.g. My open PRs'
                         data-track-category='Projects'
                         data-track-name='SaveViewNameInput'
-                        data-track-kind='passive'
                         className={cn(
                           'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
                           'text-foreground outline-none placeholder:text-muted-foreground',
@@ -3932,7 +3926,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onClick={() => setIsSavePopoverOpen(false)}
                           data-track-category='Tickets'
                           data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
-                          data-track-kind='passive'
                         >
                           Cancel
                         </Button>
@@ -3941,7 +3934,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onClick={handleConfirmSaveWorkspaceView}
                           data-track-category='Tickets'
                           data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
-                          data-track-kind='active'
                           disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
                         >
                           Save
@@ -3959,7 +3951,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   data-track-event='BUTTON_CLICK'
                   data-track-category='Tickets'
                   data-track-name='CREATE_TICKET_KANBAN'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ boardId, channelId })}
                   onClick={() => {
                     setCreateTicketSeed(null);
@@ -3994,7 +3985,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     title='Kanban View'
                     data-track-category='Tickets'
                     data-track-name='SetKanbanView'
-                    data-track-kind='passive'
                     data-testid='kanban-view-btn'
                   >
                     <SquareKanban className='w-3.5 h-3.5' />
@@ -4019,7 +4009,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     title='Table View'
                     data-track-category='Tickets'
                     data-track-name='SetTableView'
-                    data-track-kind='passive'
                     data-testid='table-view-btn'
                   >
                     <GridTable className='w-3.5 h-3.5' />
@@ -4043,7 +4032,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       title='Calendar View'
                       data-track-category='KANBAN'
                       data-track-name='SetCalendarView'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         layout: 'calendar',
                         viewMode,
@@ -4080,7 +4068,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     }`}
                     data-track-category='KANBAN'
                     data-track-name='ToggleAssignedToMeFilter'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ assigned: !filters.assigned })}
                   >
                     <span className='text-xs font-medium'>Assigned To Me</span>
@@ -4104,7 +4091,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     }`}
                     data-track-category='KANBAN'
                     data-track-name='ToggleCreatedByMeFilter'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ created: !filters.created })}
                   >
                     <span className='text-xs font-medium'>Created By Me</span>
@@ -4124,7 +4110,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 title='Filter Overdue Tickets'
                 data-track-category='KANBAN'
                 data-track-name='ToggleOverdueFilter'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   showOverdueOnly: !showOverdueOnly,
                   viewMode,
@@ -4177,7 +4162,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'
                       data-track-category='Tickets'
                       data-track-name='CloseCustomizeView'
-                      data-track-kind='passive'
                     >
                       <X className='w-3.5 h-3.5' />
                     </button>
@@ -4198,7 +4182,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               type='button'
                               data-track-category='saved-views'
                               data-track-name='apply-saved-view'
-                              data-track-kind='passive'
                               className={`group relative flex items-center gap-1.5 px-[10px] py-[6px] rounded-[10px] border cursor-pointer transition-colors ${
                                 isActive ? 'border-[#57AB02]' : 'border-[#DBDCDF]'
                               }`}
@@ -4266,7 +4249,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 <button
                                   data-track-category='saved-views'
                                   data-track-name='delete-saved-view'
-                                  data-track-kind='active'
                                   className='hidden group-hover:flex items-center justify-center absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-secondary hover:bg-red-100 transition-colors'
                                   title='Delete view'
                                   onClick={e => {
@@ -4299,7 +4281,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           data-track-event='BUTTON_CLICK'
                           data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMFORTABLE'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'comfortable' })}
                         >
                           <AcOnSlow className='h-4 w-4' />
@@ -4316,7 +4297,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           data-track-event='BUTTON_CLICK'
                           data-track-category='Tickets'
                           data-track-name='KANBAN_VIEW_COMPACT'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ boardId, viewMode: 'compact' })}
                         >
                           <TextAlignJustify className='h-4 w-4' />
@@ -4452,7 +4432,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <button
                   data-track-category='saved-views'
                   data-track-name='dismiss-active-view'
-                  data-track-kind='passive'
                   onClick={() => {
                     setSelectedViewId(null);
                     try {
@@ -4501,7 +4480,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   title='Back to main tickets'
                   data-track-category='flow_board'
                   data-track-name='back_to_main_tickets'
-                  data-track-kind='passive'
                   className='flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
                 >
                   <ArrowLeft className='h-[18px] w-[18px]' />
@@ -4532,7 +4510,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     placeholder='Search ticket ID or title'
                     data-track-category='flow_board'
                     data-track-name='search_flow_run'
-                    data-track-kind='passive'
                     className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
                   />
                 </label>
@@ -4556,7 +4533,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     aria-label='Ask AI'
                     data-track-category='flow_board'
                     data-track-name='ask_ai_flow_run'
-                    data-track-kind='active'
                     className='flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                   >
                     <XyneAIStar />
@@ -4571,7 +4547,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       title={flowRunExporting ? 'Downloading…' : 'Download'}
                       data-track-category='flow_board'
                       data-track-name='download_flow_run'
-                      data-track-kind='passive'
                       className='flex h-9 shrink-0 items-center gap-1 rounded-[10px] border border-border bg-background pl-2.5 pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
                     >
                       <Download className='h-[17px] w-[17px]' />
@@ -4607,7 +4582,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       aria-label='Ask AI'
                       data-track-category='flow_board'
                       data-track-name='ask_ai_flow_board'
-                      data-track-kind='active'
                       className='flex items-center justify-center rounded-md border border-border bg-background p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                     >
                       <XyneAIStar />
@@ -4621,7 +4595,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           disabled={flowRunExporting !== null}
                           data-track-category='flow_board'
                           data-track-name='download_flow_runs'
-                          data-track-kind='passive'
                           className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60'
                         >
                           <Download className='h-3.5 w-3.5' />
@@ -4642,7 +4615,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       }
                       data-track-category='flow_board'
                       data-track-name='edit_board'
-                      data-track-kind='active'
                       className='flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground'
                     >
                       <Pencil className='h-3 w-3' />
@@ -4683,7 +4655,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           type='button'
                           data-track-category='flow_board'
                           data-track-name='open_flow_run'
-                          data-track-kind='passive'
                           onClick={() => {
                             // An explicit open from the grid starts fresh
                             forgetRunUiState(root.key);
@@ -4963,7 +4934,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         }}
                         data-track-category='flow_board'
                         data-track-name='toggle_flow_legend'
-                        data-track-kind='passive'
                         className='flex w-full shrink-0 items-center justify-between gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/50'
                       >
                         <span className='flex min-w-0 items-center gap-1.5'>
@@ -5032,7 +5002,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         }}
                         data-track-category='flow_board'
                         data-track-name='toggle_flow_activity'
-                        data-track-kind='passive'
                         className='flex w-full shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-background/90 px-3.5 py-2.5 text-left transition-colors hover:bg-muted/50'
                       >
                         <span className='flex min-w-0 items-center gap-1.5'>
@@ -5214,7 +5183,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     className={`flex items-center gap-3 px-4 py-3 bg-muted transition-colors w-full text-left ${isExpanded ? 'border-b border-border' : 'border-none'} `}
                     data-track-category='Tickets'
                     data-track-name='ToggleGroupExpansion'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ groupKey: group.key, isExpanded })}
                   >
                     {isExpanded ? (
@@ -5315,7 +5283,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         onClick={() => toggleGroupExpansion(group.key)}
                         data-track-category='KANBAN'
                         data-track-name='ToggleGroupExpansion'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ groupKey: group.key, groupBy })}
                         className={`flex items-center gap-3 p-4 bg-muted hover:bg-border transition-colors sticky left-0 z-10 w-full text-left border-b border-border ${isExpanded ? 'rounded-t-lg ' : 'rounded-lg'}`}
                       >
@@ -5507,7 +5474,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 onClick={() => setShowBackwardConfirmDialog(false)}
                 data-track-category='Tickets'
                 data-track-name='CancelBackwardStageChange'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -5543,7 +5509,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 className='bg-primary text-primary-foreground hover:bg-blue-700'
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   ticketId: backwardStageChange?.ticketId,
                   stageName: backwardStageChange?.stageName,
@@ -5576,7 +5541,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 onClick={cancelRejectedApproval}
                 data-track-category='Tickets'
                 data-track-name='CANCEL_REJECTED_APPROVAL'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -5584,7 +5548,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 onClick={confirmRejectedApproval}
                 data-track-category='Tickets'
                 data-track-name='CONFIRM_REJECTED_APPROVAL'
-                data-track-kind='active'
                 className='bg-primary text-primary-foreground hover:bg-blue-700'
               >
                 Approve
@@ -5615,7 +5578,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 onClick={() => setDeleteViewConfirm(null)}
                 data-track-category='Tickets'
                 data-track-name='CANCEL_DELETE_VIEW'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -5654,7 +5616,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 }}
                 data-track-category='Tickets'
                 data-track-name='CONFIRM_DELETE_VIEW'
-                data-track-kind='active'
                 className='bg-red-500 text-white hover:bg-red-600'
               >
                 Delete

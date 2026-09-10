@@ -84,7 +84,6 @@ export function BriefHistoryMenu({
           style={APP_NO_DRAG_STYLE}
           data-track-category='DailyBrief'
           data-track-name='daily-brief-history-menu'
-          data-track-kind='passive'
           className={cn(HEADER_ICON_CLASS, open && 'bg-accent text-foreground')}
         >
           <ClockDefault size={18} />

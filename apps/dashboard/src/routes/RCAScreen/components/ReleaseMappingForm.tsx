@@ -429,7 +429,6 @@ export const ReleaseMappingForm = ({
             onClick={() => void handleAddMapping()}
             data-track-category='RCA'
             data-track-name='ADD_RELEASE_MAPPING'
-            data-track-kind='active'
             disabled={isSubmitting || isSaving}
           >
             <Plus className='h-4 w-4' />
@@ -509,7 +508,6 @@ export const ReleaseMappingForm = ({
                           onClick={() => void handleDeleteMapping(attribution.id)}
                           data-track-category='RCA'
                           data-track-name='DELETE_RELEASE_MAPPING'
-                          data-track-kind='active'
                           loading={deletingId === attribution.id}
                           disabled={isSubmitting || deletingId !== null}
                           aria-label='Remove release mapping'
@@ -531,7 +529,6 @@ export const ReleaseMappingForm = ({
               onClick={handleContinue}
               data-track-category='RCA'
               data-track-name='CONTINUE_FROM_RELEASE_MAPPING'
-              data-track-kind='passive'
               disabled={isSubmitting}
             >
               Next

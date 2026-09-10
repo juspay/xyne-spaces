@@ -195,7 +195,6 @@ export function RecordingInterruptGuard(): ReactElement | null {
           onClick={(): void => settle(false)}
           data-track-category='RecordingsV2'
           data-track-name='RECORDING_INTERRUPT_KEEP'
-          data-track-kind='passive'
           disabled={stopping}
           className='w-full shrink-0 active:scale-[0.96] sm:w-auto'
           data-testid='recording-interrupt-keep'
@@ -209,7 +208,6 @@ export function RecordingInterruptGuard(): ReactElement | null {
             onClick={handleStop}
             data-track-category='RecordingsV2'
             data-track-name='RECORDING_INTERRUPT_STOP'
-            data-track-kind='active'
             loading={stopping}
             disabled={stopping}
             className='w-full shrink-0 active:scale-[0.96] sm:w-auto'

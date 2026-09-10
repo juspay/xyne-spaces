@@ -221,7 +221,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                   }}
                   data-track-category='Memory'
                   data-track-name='ToggleCompareSelection'
-                  data-track-kind='passive'
                 >
                   {/* Index: visible by default, hidden on hover (or when checked) */}
                   <span
@@ -241,7 +240,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                     }`}
                     data-track-category='Memory'
                     data-track-name='CompareCheckbox'
-                    data-track-kind='passive'
                   />
                 </div>
               );
@@ -547,7 +545,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
             data-ph-capture-attribute-track-id='memory_delete_session'
             data-track-category='Memory'
             data-track-name='DeleteSession'
-            data-track-kind='active'
           >
             <Trash2 size={12} />
             {deleteSessionMutation.isPending ? 'Deleting…' : 'Delete Session'}
@@ -829,7 +826,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
             className='px-4 py-1.5 text-sm font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
             data-track-category='Memory'
             data-track-name='OpenCompareView'
-            data-track-kind='passive'
           >
             Compare
           </button>
@@ -838,7 +834,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
             className='px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors'
             data-track-category='Memory'
             data-track-name='ClearCompareSelection'
-            data-track-kind='passive'
           >
             Clear
           </button>

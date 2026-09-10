@@ -340,7 +340,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                     onClick={handleOpenWorkspaceSettings}
                     data-track-category='CHANNEL_SETTINGS'
                     data-track-name='OPEN_WORKSPACE_SETTINGS'
-                    data-track-kind='passive'
                     className='shrink-0'
                   >
                     Manage in Workspace Management
@@ -355,7 +354,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   onClick={() => void handleCopyChannelEmail()}
                   data-track-category='CHANNEL_SETTINGS'
                   data-track-name='COPY_CHANNEL_EMAIL'
-                  data-track-kind='passive'
                   className='shrink-0'
                 >
                   Copy
@@ -373,7 +371,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
             data-track-category='CHANNEL_SETTINGS'
             data-track-name='CopyMemberNames'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
           >
             <span className='inline-flex items-center gap-2'>Copy member names</span>
@@ -387,7 +384,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
             data-track-category='CHANNEL_SETTINGS'
             data-track-name='CopyMemberEmails'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
           >
             <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
@@ -413,7 +409,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                       className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
                       data-track-category='CHANNEL_SETTINGS'
                       data-track-name='MakeChannelPublic'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({ channelId: channel.id })}
                     >
                       Change to public
@@ -445,7 +440,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
                   data-track-category='CHANNEL_SETTINGS'
                   data-track-name='UnarchiveChannel'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ channelId: channel.id })}
                 >
                   Unarchive channel
@@ -472,7 +466,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                   className='mt-1 inline-flex items-center self-start rounded-[8px] border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-100 dark:bg-red-950 dark:border-red-800 dark:text-red-400'
                   data-track-category='CHANNEL_SETTINGS'
                   data-track-name='ArchiveChannel'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ channelId: channel.id })}
                 >
                   Archive channel
@@ -507,7 +500,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 onClick={() => setShowUnarchiveDialog(false)}
                 data-track-category='CHANNEL_SETTINGS'
                 data-track-name='CANCEL_UNARCHIVE_CHANNEL'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -515,7 +507,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 onClick={handleUnarchiveChannel}
                 data-track-category='CHANNEL_SETTINGS'
                 data-track-name='CONFIRM_UNARCHIVE_CHANNEL'
-                data-track-kind='active'
                 className='bg-green-600 text-white hover:bg-green-700'
               >
                 Unarchive Channel
@@ -549,7 +540,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 onClick={() => setShowArchiveDialog(false)}
                 data-track-category='CHANNEL_SETTINGS'
                 data-track-name='CANCEL_ARCHIVE_CHANNEL'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -557,7 +547,6 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
                 onClick={handleArchiveChannel}
                 data-track-category='CHANNEL_SETTINGS'
                 data-track-name='CONFIRM_ARCHIVE_CHANNEL'
-                data-track-kind='active'
                 className='bg-amber-600 text-white hover:bg-amber-700'
               >
                 Archive Channel

@@ -64,7 +64,6 @@ export function RecapCardsList({
               className='shrink-0 text-xs text-muted-foreground/60 hover:text-primary transition-colors mt-0.5'
               data-track-category='AILanding'
               data-track-name='ViewRecapChannel'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ channelId: card.channelId })}
             >
               View

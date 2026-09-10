@@ -818,7 +818,6 @@ export function AutomationBuilder({
                 aria-label='Back to automations list'
                 data-track-category='automation-builder'
                 data-track-name='back-to-list'
-                data-track-kind='passive'
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:text-foreground hover:bg-accent/40',
@@ -862,7 +861,6 @@ export function AutomationBuilder({
                 disabled={!onShowVersionHistory}
                 data-track-category='automation-builder'
                 data-track-name='header-version-indicator'
-                data-track-kind='passive'
                 className='rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/40 disabled:pointer-events-none'
               >
                 v{versionPosition.number}
@@ -881,7 +879,6 @@ export function AutomationBuilder({
                 aria-label={`Delete draft automation ${name || 'Untitled automation'}`}
                 data-track-category='automation-builder'
                 data-track-name='header-delete-draft'
-                data-track-kind='active'
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:bg-red-500/10 hover:text-red-600',
@@ -919,7 +916,6 @@ export function AutomationBuilder({
                 }}
                 data-track-category='automation-builder'
                 data-track-name='header-cancel-edit'
-                data-track-kind='passive'
               >
                 Cancel
               </Button>
@@ -930,7 +926,6 @@ export function AutomationBuilder({
                 trackId='save_automation'
                 data-track-category='automation-builder'
                 data-track-name='header-save'
-                data-track-kind='active'
                 className='font-semibold'
               >
                 <SaveIcon className='size-4' />
@@ -946,7 +941,6 @@ export function AutomationBuilder({
                   onClick={() => onShowRuns(savedId)}
                   data-track-category='automation-builder'
                   data-track-name='header-runs'
-                  data-track-kind='passive'
                 >
                   <History className='size-4' />
                   Runs
@@ -959,7 +953,6 @@ export function AutomationBuilder({
                   onClick={() => onShowVersionHistory(savedId)}
                   data-track-category='automation-builder'
                   data-track-name='header-version-history'
-                  data-track-kind='passive'
                 >
                   <GitBranch className='size-4' />
                   Versions
@@ -972,7 +965,6 @@ export function AutomationBuilder({
                   onClick={() => void navigate(`/automations/new?fork=${savedId}&clone=1`)}
                   data-track-category='automation-builder'
                   data-track-name='header-clone'
-                  data-track-kind='active'
                 >
                   <Copy className='size-4' />
                   Clone
@@ -991,7 +983,6 @@ export function AutomationBuilder({
                       disabled={disableMutation.isPending}
                       data-track-category='automation-builder'
                       data-track-name='header-disable'
-                      data-track-kind='passive'
                     >
                       <Power className='size-4' />
                       Disable
@@ -1006,7 +997,6 @@ export function AutomationBuilder({
                     trackId='activate_automation'
                     data-track-category='automation-builder'
                     data-track-name='header-activate'
-                    data-track-kind='active'
                   >
                     <Power className='size-4' />
                     Activate
@@ -1024,7 +1014,6 @@ export function AutomationBuilder({
                   trackId='archive_automation'
                   data-track-category='automation-builder'
                   data-track-name='header-archive'
-                  data-track-kind='passive'
                 >
                   <Archive className='size-4' />
                   Archive
@@ -1039,7 +1028,6 @@ export function AutomationBuilder({
                   trackId='submit_automation_for_approval'
                   data-track-category='automation-builder'
                   data-track-name='header-submit-for-approval'
-                  data-track-kind='active'
                   className='font-semibold'
                 >
                   <Send className='size-4' />
@@ -1059,7 +1047,6 @@ export function AutomationBuilder({
                   trackId='revoke_automation_proposal'
                   data-track-category='automation-builder'
                   data-track-name='header-revoke'
-                  data-track-kind='active'
                 >
                   <Undo2 className='size-4' />
                   Revoke
@@ -1101,7 +1088,6 @@ export function AutomationBuilder({
                     disabled={rejectMutation.isPending || approveMutation.isPending}
                     data-track-category='automation-builder'
                     data-track-name='header-reject'
-                    data-track-kind='active'
                   >
                     <X className='size-4' />
                     Reject
@@ -1113,7 +1099,6 @@ export function AutomationBuilder({
                     trackId='approve_automation_proposal'
                     data-track-category='automation-builder'
                     data-track-name='header-approve'
-                    data-track-kind='active'
                     className='font-semibold'
                   >
                     <Check className='size-4' />
@@ -1357,7 +1342,6 @@ export function AutomationBuilder({
               onClick={() => setDeleteDialogOpen(false)}
               data-track-category='automation-builder'
               data-track-name='delete-draft-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1373,7 +1357,6 @@ export function AutomationBuilder({
               }}
               data-track-category='automation-builder'
               data-track-name='delete-draft-confirm'
-              data-track-kind='active'
             >
               Delete draft
             </Button>
@@ -1399,7 +1382,6 @@ export function AutomationBuilder({
               onClick={() => setEditConfirmOpen(false)}
               data-track-category='automation-builder'
               data-track-name='edit-confirm-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1411,7 +1393,6 @@ export function AutomationBuilder({
               }}
               data-track-category='automation-builder'
               data-track-name='edit-confirm-continue'
-              data-track-kind='active'
             >
               Continue editing
             </Button>
@@ -1438,7 +1419,6 @@ export function AutomationBuilder({
               onClick={() => setProposeChangeConfirmOpen(false)}
               data-track-category='automation-builder'
               data-track-name='propose-change-confirm-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1450,7 +1430,6 @@ export function AutomationBuilder({
               }}
               data-track-category='automation-builder'
               data-track-name='propose-change-confirm-continue'
-              data-track-kind='active'
             >
               Start proposal
             </Button>
@@ -1481,7 +1460,6 @@ export function AutomationBuilder({
             rows={4}
             data-track-category='automation-builder'
             data-track-name='reject-note'
-            data-track-kind='active'
           />
           <div className='flex justify-end gap-2'>
             <Button
@@ -1493,7 +1471,6 @@ export function AutomationBuilder({
               }}
               data-track-category='automation-builder'
               data-track-name='reject-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1510,7 +1487,6 @@ export function AutomationBuilder({
               trackId='reject_automation_proposal'
               data-track-category='automation-builder'
               data-track-name='reject-confirm'
-              data-track-kind='active'
             >
               Reject
             </Button>
@@ -1536,7 +1512,6 @@ export function AutomationBuilder({
               onClick={() => setDisableDialogOpen(false)}
               data-track-category='automation-builder'
               data-track-name='disable-cancel'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -1551,7 +1526,6 @@ export function AutomationBuilder({
               trackId='disable_automation_keep_queued'
               data-track-category='automation-builder'
               data-track-name='disable-keep-queued'
-              data-track-kind='passive'
             >
               Let them finish
             </Button>
@@ -1567,7 +1541,6 @@ export function AutomationBuilder({
               trackId='disable_automation_cancel_queued'
               data-track-category='automation-builder'
               data-track-name='disable-cancel-queued'
-              data-track-kind='passive'
             >
               Stop them
             </Button>
@@ -1897,7 +1870,6 @@ function InlineEditableText({
         data-slot='input'
         data-track-category='automation-builder'
         data-track-name='inline-edit-input'
-        data-track-kind='passive'
         className={cn(
           'placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base text-foreground shadow-xs transition-[color,box-shadow] outline-none md:text-sm',
           'h-8 px-2',
@@ -1934,7 +1906,6 @@ function InlineEditableText({
       title={value || placeholder}
       data-track-category='automation-builder'
       data-track-name='inline-edit-text'
-      data-track-kind='active'
       className={cn(
         'cursor-text truncate rounded-md px-2 py-1 text-left',
         'transition-colors',

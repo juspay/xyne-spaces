@@ -38,7 +38,6 @@ export const IngestionProgressPill = ({
       onClick={onClick}
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Open_Ingestion_Progress'
-      data-track-kind='passive'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -80,7 +79,6 @@ export const IngestionProgressPill = ({
             aria-label='Dismiss'
             data-track-category='DYNAMIC_DASHBOARD'
             data-track-name='Dismiss_Ingestion_Progress'
-            data-track-kind='passive'
           >
             <X size={11} />
           </button>

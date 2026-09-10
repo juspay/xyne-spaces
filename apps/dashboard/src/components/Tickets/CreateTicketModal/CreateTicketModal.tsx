@@ -2068,7 +2068,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }
               data-track-category='Tickets'
               data-track-name='ShareCreateTicketModal'
-              data-track-kind='active'
             >
               <LinkIcon strokeWidth={2.33} className='size-3.5' />
             </Button>
@@ -2084,7 +2083,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               title='Open in new window'
               data-track-category='Tickets'
               data-track-name='PopOutCreateTicketModal'
-              data-track-kind='active'
             >
               <SquareArrowOutUpRight strokeWidth={2.33} className='size-3.5' />
             </Button>
@@ -2097,7 +2095,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             className='size-6 '
             data-track-category='Tickets'
             data-track-name='CloseCreateTicketModal'
-            data-track-kind='passive'
           >
             <X strokeWidth={2.33} className='size-3.5' />
           </Button>
@@ -2154,7 +2151,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   data-testid='ticket-title-input'
                   data-track-category='Tickets'
                   data-track-name='EDIT_TICKET_TITLE'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                   className={cn(
                     '!text-xl !leading-tight truncate',
@@ -2195,7 +2191,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 data-testid='ticket-description-input'
                 data-track-category='Tickets'
                 data-track-name='EDIT_TICKET_DESCRIPTION'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                 onChange={e => {
                   const newValue = e.target.value;
@@ -2252,7 +2247,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
                             data-track-category='Tickets'
                             data-track-name='SaveEditedSubTicket'
-                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
                             Done
@@ -2290,7 +2284,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
                             data-track-category='Tickets'
                             data-track-name='EditSubTicket'
-                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
                             Edit
@@ -2302,7 +2295,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             className='text-muted-foreground hover:text-muted-foreground'
                             data-track-category='Tickets'
                             data-track-name='DeleteSubTicket'
-                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
                             <Trash2 className='size-[14px]' />
@@ -2419,7 +2411,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       aria-label={selected ? `Remove ${o.label}` : `Add ${o.label}`}
                       data-track-category='CreateTicket'
                       data-track-name='ToggleReleaseRepo'
-                      data-track-kind='passive'
                       className={cn(
                         'grid size-[18px] shrink-0 place-items-center rounded-[5px] border text-[11px] font-semibold transition-colors',
                         selected
@@ -2435,7 +2426,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       onClick={toggle}
                       data-track-category='CreateTicket'
                       data-track-name='ToggleReleaseRepoLabel'
-                      data-track-kind='active'
                       className={cn(
                         'min-w-0 flex-1 truncate text-left text-sm font-semibold',
                         selected ? 'text-foreground' : 'text-muted-foreground',
@@ -2457,7 +2447,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                           data-track-category='CreateTicket'
                           data-track-name='RepoDeployedCommit'
-                          data-track-kind='active'
                         />
                         <span className='text-muted-foreground'>→</span>
                         <input
@@ -2467,7 +2456,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                           data-track-category='CreateTicket'
                           data-track-name='RepoNewCommit'
-                          data-track-kind='active'
                         />
                       </div>
                     ) : (
@@ -2498,7 +2486,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                         data-track-category='CreateTicket'
                         data-track-name='RepoBranch'
-                        data-track-kind='passive'
                       />
                     </div>
                   )}
@@ -3048,7 +3035,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             data-testid='ticket-attachment-button'
             data-track-category='Tickets'
             data-track-name='ATTACH_FILE'
-            data-track-kind='active'
             data-track-metadata={JSON.stringify({
               boardId: selectedBoardId,
               channelId,
@@ -3069,7 +3055,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     data-testid='ticket-submit-button'
                     data-track-category='Tickets'
                     data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       boardId: selectedBoardId,
                       channelId,
@@ -3093,7 +3078,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 data-testid='ticket-submit-button'
                 data-track-category='Tickets'
                 data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   boardId: selectedBoardId,
                   channelId,
@@ -3147,7 +3131,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 onClick={() => setShowDiscardConfirm(false)}
                 data-track-category='Tickets'
                 data-track-name='KeepEditingCreateTicket'
-                data-track-kind='passive'
               >
                 Keep editing
               </Button>
@@ -3157,7 +3140,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 onClick={handleConfirmDiscard}
                 data-track-category='Tickets'
                 data-track-name='DiscardCreateTicket'
-                data-track-kind='active'
               >
                 Discard
               </Button>

@@ -117,7 +117,6 @@ export const FormSubmissionBlock = ({
         onClick={() => setFormExpanded(prev => !prev)}
         data-track-category='ticket_activity'
         data-track-name='toggle_form_submission'
-        data-track-kind='passive'
         className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors'
       >
         {formExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}

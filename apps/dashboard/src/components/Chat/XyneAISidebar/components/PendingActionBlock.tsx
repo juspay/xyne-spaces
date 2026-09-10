@@ -150,7 +150,6 @@ function PendingActionItem({
           type='button'
           data-track-category='XyneAI'
           data-track-name='approve-action'
-          data-track-kind='active'
         >
           {state === 'running' ? (
             <Loader2 size={10} className='animate-spin' />
@@ -167,7 +166,6 @@ function PendingActionItem({
           type='button'
           data-track-category='XyneAI'
           data-track-name='decline-action'
-          data-track-kind='active'
         >
           <X size={10} />
           Decline

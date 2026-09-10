@@ -458,7 +458,6 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             data-prevent-thread
             data-track-category='SLASH_COMMAND_ARTIFACT'
             data-track-name='CLOSE_ARTIFACT'
-            data-track-kind='passive'
             data-track-metadata={trackingMetadata}
           >
             <X className='size-4' />
@@ -495,7 +494,6 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
               data-track-name='START_NEW_CALL'
-              data-track-kind='active'
               data-track-metadata={trackingMetadata}
             >
               <Phone className='size-4' />
@@ -527,7 +525,6 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               data-prevent-thread
               data-track-category='SLASH_COMMAND_ARTIFACT'
               data-track-name='COPY_CALL_LINK'
-              data-track-kind='passive'
               data-track-metadata={trackingMetadata}
             >
               <Copy className='size-4' />
@@ -548,7 +545,6 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             data-prevent-thread
             data-track-category='SLASH_COMMAND_ARTIFACT'
             data-track-name='START_CALL'
-            data-track-kind='active'
             data-track-metadata={trackingMetadata}
           >
             <Phone className='size-4' />

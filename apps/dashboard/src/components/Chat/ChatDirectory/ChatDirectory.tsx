@@ -102,7 +102,6 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
-import type { InteractionKind } from '@xyne/shared';
 
 const ContainerDropZone = ({
   id,
@@ -124,7 +123,6 @@ const ContainerDropZone = ({
 const GroupSettingsMenu = ({
   group,
   trackName,
-  trackKind,
   groupPreferences,
   setGroupPreference,
   onOpenChange,
@@ -134,7 +132,6 @@ const GroupSettingsMenu = ({
 }: {
   group: SidebarGroup;
   trackName: string;
-  trackKind?: InteractionKind;
   groupPreferences: Record<SidebarGroup, SidebarGroupPreference>;
   setGroupPreference: (group: SidebarGroup, patch: Partial<SidebarGroupPreference>) => void;
   onOpenChange?: (open: boolean) => void;
@@ -144,7 +141,6 @@ const GroupSettingsMenu = ({
     label: string;
     icon: ComponentType<PikaIconProps>;
     trackName: string;
-    trackKind?: InteractionKind;
     onSelect: () => void;
   }[];
 }): ReactElement => {
@@ -171,7 +167,6 @@ const GroupSettingsMenu = ({
           aria-label='Section options'
           data-track-category='CHAT_SIDEBAR'
           data-track-name={trackName}
-          data-track-kind={trackKind}
         >
           <ThreeDotsMenuVertical strokeWidth={2.33} size={14} className='shrink-0' />
         </button>
@@ -196,7 +191,6 @@ const GroupSettingsMenu = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name={action.trackName}
-              data-track-kind={action.trackKind}
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <Glyph size={16} />
@@ -647,7 +641,6 @@ const ChatDirectory = ({
                 aria-label='Search'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='OPEN_SEARCH'
-                data-track-kind='passive'
               >
                 <SearchDefault size={16} className='text-sidebar-foreground' />
               </button>
@@ -683,7 +676,6 @@ const ChatDirectory = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='NEW_MESSAGE'
-              data-track-kind='active'
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
                 <ChatPlus className='size-4' />
@@ -703,7 +695,6 @@ const ChatDirectory = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='OPEN_THREADS'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ threadCount, hasUnreadThreads })}
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
@@ -736,7 +727,6 @@ const ChatDirectory = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='OPEN_UNREADS'
-              data-track-kind='passive'
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
                 <ChatTyping className='size-4' />
@@ -756,7 +746,6 @@ const ChatDirectory = ({
               data-testid='open-bookmarks-button'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='OPEN_BOOKMARKS'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ overdueRemindersCount })}
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
@@ -787,7 +776,6 @@ const ChatDirectory = ({
               data-testid='open-drafts-and-sent-button'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='OPEN_DRAFTS_AND_SENT'
-              data-track-kind='passive'
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
                 <SendPlaneSlant className='size-4' />
@@ -825,7 +813,6 @@ const ChatDirectory = ({
               }}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='OPEN_RECAP'
-              data-track-kind='passive'
             >
               <span className='size-4 flex items-center justify-center shrink-0'>
                 <ListAiGenerated className='size-4' />
@@ -855,7 +842,6 @@ const ChatDirectory = ({
                 }}
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='OPEN_RADAR'
-                data-track-kind='passive'
               >
                 <span className='size-4 flex items-center justify-center shrink-0'>
                   <RadarIcon className='size-4' />
@@ -903,7 +889,6 @@ const ChatDirectory = ({
                         <GroupSettingsMenu
                           group='starred'
                           trackName='STARRED_SECTION_OPTIONS'
-                          trackKind='passive'
                           groupPreferences={groupPreferences}
                           setGroupPreference={setGroupPreference}
                         />
@@ -1040,7 +1025,6 @@ const ChatDirectory = ({
                           }}
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='BROWSE_CHANNELS'
-                          data-track-kind='passive'
                         >
                           <SearchDefault
                             strokeWidth={2.33}
@@ -1066,7 +1050,6 @@ const ChatDirectory = ({
                           data-track-event='BUTTON_CLICK'
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='CREATE_NEW_CHANNEL'
-                          data-track-kind='active'
                           data-track-metadata={JSON.stringify({ source: 'directory' })}
                         >
                           <PlusDefault
@@ -1079,7 +1062,6 @@ const ChatDirectory = ({
                       <GroupSettingsMenu
                         group='channels'
                         trackName='CHANNELS_SECTION_OPTIONS'
-                        trackKind='passive'
                         groupPreferences={groupPreferences}
                         setGroupPreference={setGroupPreference}
                         onOpenChange={setIsSectionMenuOpen}
@@ -1089,21 +1071,18 @@ const ChatDirectory = ({
                             label: 'Browse channels',
                             icon: SearchDefault,
                             trackName: 'BROWSE_CHANNELS',
-                            trackKind: 'passive',
                             onSelect: () => void navigate('/chat/search?mode=channels'),
                           },
                           {
                             label: 'Create channel',
                             icon: PlusDefault,
                             trackName: 'CREATE_NEW_CHANNEL',
-                            trackKind: 'active',
                             onSelect: () => setShowAddChannelForm(true),
                           },
                           {
                             label: 'New section',
                             icon: FolderPlus,
                             trackName: 'CREATE_NEW_SECTION',
-                            trackKind: 'active',
                             onSelect: () => {
                               setAddSectionSource('channels');
                               setShowAddSectionForm(true);
@@ -1175,7 +1154,6 @@ const ChatDirectory = ({
                         data-track-event='BUTTON_CLICK'
                         data-track-category='CHAT_SIDEBAR'
                         data-track-name='CREATE_DIRECT_MESSAGE'
-                        data-track-kind='active'
                         data-track-metadata={JSON.stringify({ source: 'directory' })}
                       >
                         <PlusDefault
@@ -1188,7 +1166,6 @@ const ChatDirectory = ({
                     <GroupSettingsMenu
                       group='dms'
                       trackName='DM_SECTION_OPTIONS'
-                      trackKind='passive'
                       allowMentionsFilter={false}
                       groupPreferences={groupPreferences}
                       setGroupPreference={setGroupPreference}
@@ -1197,14 +1174,12 @@ const ChatDirectory = ({
                           label: 'Add direct message',
                           icon: PlusDefault,
                           trackName: 'CREATE_DIRECT_MESSAGE',
-                          trackKind: 'active',
                           onSelect: handleAddDirectMessage,
                         },
                         {
                           label: 'New section',
                           icon: FolderPlus,
                           trackName: 'CREATE_NEW_SECTION',
-                          trackKind: 'active',
                           onSelect: () => {
                             setAddSectionSource('dms');
                             setShowAddSectionForm(true);
@@ -1331,7 +1306,6 @@ const ChatDirectory = ({
                 aria-label='Close'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CLOSE_DELETE_SECTION'
-                data-track-kind='passive'
                 className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
               >
                 <MultipleCrossCancelDefault size={20} />
@@ -1355,7 +1329,6 @@ const ChatDirectory = ({
                 onClick={() => setSectionToDelete(null)}
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CANCEL_DELETE_SECTION'
-                data-track-kind='passive'
                 className='inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors'
               >
                 Cancel
@@ -1365,7 +1338,6 @@ const ChatDirectory = ({
                 data-ph-capture-attribute-track-id='delete_channel_section'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CONFIRM_DELETE_SECTION'
-                data-track-kind='active'
                 className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
               >
                 Delete
@@ -1439,7 +1411,7 @@ const ChatDirectory = ({
             <button
               onClick={() => void navigate('/chat')}
               data-track-category='CHAT_SIDEBAR'
-              data-track-name='BACK_TO_CHAT' data-track-kind='passive'
+              data-track-name='BACK_TO_CHAT'
               className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
@@ -1448,7 +1420,7 @@ const ChatDirectory = ({
               <button
                 onClick={() => setIsCommandMenuOpen(true)}
                 data-track-category='CHAT_SIDEBAR'
-                data-track-name='OPEN_COMMAND_MENU' data-track-kind='passive'
+                data-track-name='OPEN_COMMAND_MENU'
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
@@ -1462,13 +1434,13 @@ const ChatDirectory = ({
           <div className='pb-6 flex items-center justify-between'>
             <button onClick={() => void navigate('/chat')}
               data-track-category='CHAT_SIDEBAR'
-              data-track-name='BACK_TO_CHAT' data-track-kind='passive' className='cursor-pointer'>
+              data-track-name='BACK_TO_CHAT' className='cursor-pointer'>
               <h2 className='text-black font-inter text-base font-semibold leading-normal'>Chat</h2>
             </button>
             <button
               onClick={() => setIsCommandMenuOpen(true)}
               data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_COMMAND_MENU' data-track-kind='passive'
+              data-track-name='OPEN_COMMAND_MENU'
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
               <SearchDefault size={16} />
@@ -1503,7 +1475,7 @@ const ChatDirectory = ({
               void navigate('/chat/bookmarks');
             }}
             data-track-category='CHAT_SIDEBAR'
-            data-track-name='OPEN_BOOKMARKS' data-track-kind='passive'
+            data-track-name='OPEN_BOOKMARKS'
             data-track-metadata={JSON.stringify({ overdueRemindersCount })}
           />
           <hr className='border-border mt-4' />

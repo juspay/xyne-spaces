@@ -1,7 +1,6 @@
 import { ReactElement } from 'react';
 import { Pencil, Send } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
-import type { InteractionKind } from '@xyne/shared';
 
 /**
  * Lazy per-desk subtree rendered under an expanded desk row. Shows the user's
@@ -27,7 +26,6 @@ export const DeskDraftSubtree = ({
         active={activeFolder === 'userDrafts'}
         onClick={onOpenUserDrafts}
         trackName='OpenDeskUserDrafts'
-        trackKind='passive'
       />
       <SubItem
         icon={<Send size={14} />}
@@ -35,7 +33,6 @@ export const DeskDraftSubtree = ({
         active={activeFolder === 'userSent'}
         onClick={onOpenUserSent}
         trackName='OpenDeskUserSent'
-        trackKind='passive'
       />
     </div>
   );
@@ -47,17 +44,9 @@ interface SubItemProps {
   active: boolean;
   onClick: () => void;
   trackName: string;
-  trackKind?: InteractionKind;
 }
 
-const SubItem = ({
-  icon,
-  label,
-  active,
-  onClick,
-  trackName,
-  trackKind,
-}: SubItemProps): ReactElement => (
+const SubItem = ({ icon, label, active, onClick, trackName }: SubItemProps): ReactElement => (
   <button
     type='button'
     onClick={onClick}
@@ -69,7 +58,6 @@ const SubItem = ({
     )}
     data-track-category='Support'
     data-track-name={trackName}
-    data-track-kind={trackKind}
   >
     <span className='size-4 flex items-center justify-center shrink-0'>{icon}</span>
     <span className='flex-1 truncate min-w-0'>{label}</span>

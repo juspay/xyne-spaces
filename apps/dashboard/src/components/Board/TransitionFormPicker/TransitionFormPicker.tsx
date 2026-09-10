@@ -66,7 +66,6 @@ export const TransitionFormPicker = ({
           onClick: onCreateForm,
           trackCategory: 'board_stage_config',
           trackName: 'create_transition_form',
-          trackKind: 'active',
         }}
       />
     </div>

@@ -62,7 +62,6 @@ export function OtherUserEventBlock({
       }}
       data-track-category='CALENDAR'
       data-track-name='other-user-event-block'
-      data-track-kind='active'
       onClick={onClick}
       onKeyDown={
         interactive && onClick

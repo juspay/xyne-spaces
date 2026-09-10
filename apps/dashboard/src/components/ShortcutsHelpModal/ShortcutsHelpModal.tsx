@@ -74,7 +74,6 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
             aria-label='Close'
             data-track-category='Help'
             data-track-name='CloseShortcutsModal'
-            data-track-kind='passive'
           >
             <X className='w-5 h-5' />
           </button>

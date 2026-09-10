@@ -134,7 +134,6 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
         aria-label='Open Ozonetel toolbar'
         data-track-category='Support'
         data-track-name='OpenOzonetelToolbar'
-        data-track-kind='passive'
         onClick={onClick}
       >
         <Phone size={16} className='shrink-0' />
@@ -238,7 +237,6 @@ function FloatingCloudAgentPanel({
             aria-label='Move Ozonetel panel'
             data-track-category='Support'
             data-track-name='DragOzonetelToolbar'
-            data-track-kind='passive'
             onMouseDown={startDragging}
           >
             <span className='text-muted-foreground'>::</span>
@@ -251,7 +249,6 @@ function FloatingCloudAgentPanel({
             title='Close'
             data-track-category='Support'
             data-track-name='CloseOzonetelToolbar'
-            data-track-kind='passive'
             onMouseDown={event => event.stopPropagation()}
             onClick={close}
           >

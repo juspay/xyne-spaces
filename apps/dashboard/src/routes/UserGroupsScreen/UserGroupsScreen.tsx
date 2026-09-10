@@ -194,7 +194,6 @@ const UserGroupsScreen = (): ReactElement => {
                 onClick={() => setShowCreateModal(true)}
                 data-track-category='UserGroups'
                 data-track-name='CreateUserGroup'
-                data-track-kind='active'
                 data-testid='create-user-group-btn'
               >
                 <PlusDefault size={16} />

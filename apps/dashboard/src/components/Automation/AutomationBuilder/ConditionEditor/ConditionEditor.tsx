@@ -92,7 +92,6 @@ export function ConditionEditor({
               onClick={() => removeItem(index)}
               data-track-category='automation-builder'
               data-track-name='condition-remove'
-              data-track-kind='active'
               className='mt-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-500/10'
               aria-label='Remove condition'
             >
@@ -108,7 +107,6 @@ export function ConditionEditor({
           onClick={addLeaf}
           data-track-category='automation-builder'
           data-track-name='ADD_CONDITION_LEAF'
-          data-track-kind='active'
         >
           <Plus className='size-4' />
           Add condition
@@ -202,7 +200,6 @@ function LeafRow({
             onClick={() => wrap('all')}
             data-track-category='automation-builder'
             data-track-name='condition-wrap-and'
-            data-track-kind='active'
             className='text-[11px] text-muted-foreground hover:text-foreground'
           >
             + Group AND
@@ -212,7 +209,6 @@ function LeafRow({
             onClick={() => wrap('any')}
             data-track-category='automation-builder'
             data-track-name='condition-wrap-or'
-            data-track-kind='active'
             className='text-[11px] text-muted-foreground hover:text-foreground'
           >
             + Group OR
@@ -381,7 +377,6 @@ function VariableField({ value, sources, onChange }: VariableFieldProps): React.
               }}
               data-track-category='automation-builder'
               data-track-name='condition-clear-variable'
-              data-track-kind='passive'
               aria-label='Clear variable'
               className='flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60'
             >

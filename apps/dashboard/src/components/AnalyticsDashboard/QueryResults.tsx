@@ -116,7 +116,6 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
       className='react-resizable-handle react-resizable-handle-se !w-5 !h-5 !right-0 !bottom-0 !bg-none !p-0 !m-0 opacity-50 hover:opacity-100 transition-opacity'
       data-track-category='ANALYTICS'
       data-track-name='Resize_Query_Card'
-      data-track-kind='passive'
       aria-label='Resize'
     >
       <svg
@@ -464,7 +463,6 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                             className='hover:bg-primary/10 hover:text-primary transition-colors'
                             data-track-category='ANALYTICS'
                             data-track-name='Expand_Query_Card'
-                            data-track-kind='passive'
                             data-track-metadata={JSON.stringify({
                               queryId: r.queryId,
                               visualType: r.visualType,
@@ -484,7 +482,6 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                           className='hover:bg-primary/10 hover:text-primary transition-colors'
                           data-track-category='ANALYTICS'
                           data-track-name='Refresh_Query'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                         >
                           <RefreshCw className='h-3.5 w-3.5' />
@@ -507,7 +504,6 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                             className='hover:bg-primary/10 hover:text-primary transition-colors'
                             data-track-category='ANALYTICS'
                             data-track-name='Edit_Query'
-                            data-track-kind='active'
                             data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                           >
                             <Edit className='h-3.5 w-3.5' />
@@ -521,7 +517,6 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                           className='hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors'
                           data-track-category='ANALYTICS'
                           data-track-name='Delete_Query'
-                          data-track-kind='active'
                           data-track-metadata={JSON.stringify({ queryId: r.queryId })}
                         >
                           <Trash2 className='h-3.5 w-3.5' />
@@ -598,7 +593,6 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                 className='hover:bg-muted transition-colors'
                 data-track-category='ANALYTICS'
                 data-track-name='Close_Expanded_Query'
-                data-track-kind='passive'
               >
                 <X className='h-4 w-4' />
               </Button>

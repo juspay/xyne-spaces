@@ -225,7 +225,6 @@ const ActivityTab = ({ agent, permissions }: ActivityTabProps): ReactElement => 
             onChange={event => setStatus(event.target.value as AgentRunStatusFilter)}
             data-track-category='Claw Agents'
             data-track-name='Filter agent runs by status'
-            data-track-kind='passive'
             className='h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground'
           >
             {STATUS_OPTIONS.map(option => (
@@ -252,7 +251,6 @@ const ActivityTab = ({ agent, permissions }: ActivityTabProps): ReactElement => 
               onChange={event => setOwnerFilter(event.target.value)}
               data-track-category='Claw Agents'
               data-track-name='Filter agent runs by owner'
-              data-track-kind='passive'
               aria-label='Filter runs by owner'
               className='h-8 min-w-44 rounded-md border border-border bg-background px-2 text-xs text-foreground'
             >

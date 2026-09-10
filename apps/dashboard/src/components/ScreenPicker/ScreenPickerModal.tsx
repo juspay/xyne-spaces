@@ -96,7 +96,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
       }}
       data-track-category='screen-picker'
       data-track-name='backdrop-dismiss'
-      data-track-kind='passive'
     >
       <div className='bg-background border border-border rounded-xl shadow-2xl w-[780px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden'>
         {/* Header */}
@@ -108,7 +107,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
             aria-label='Close'
             data-track-category='screen-picker'
             data-track-name='close'
-            data-track-kind='passive'
           >
             <X className='w-4 h-4' />
           </button>
@@ -123,7 +121,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
             }}
             data-track-category='screen-picker'
             data-track-name='tab-screen'
-            data-track-kind='passive'
             className={cn(
               'flex items-center gap-1.5 px-1 pb-2.5 mr-6 text-sm font-medium border-b-2 -mb-px transition-colors',
               activeTab === 'screen'
@@ -153,7 +150,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
             }}
             data-track-category='screen-picker'
             data-track-name='tab-window'
-            data-track-kind='passive'
             className={cn(
               'flex items-center gap-1.5 px-1 pb-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
               activeTab === 'window'
@@ -196,7 +192,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
                   onDoubleClick={handleShare}
                   data-track-category='screen-picker'
                   data-track-name='source-select'
-                  data-track-kind='passive'
                   className={cn(
                     'group flex flex-col rounded-lg overflow-hidden border-2 transition-all duration-150 text-left focus:outline-none',
                     selectedId === source.id
@@ -258,7 +253,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
               className='w-4 h-4 rounded accent-blue-500 cursor-pointer'
               data-track-category='screen-picker'
               data-track-name='toggle-audio'
-              data-track-kind='passive'
             />
             <span className='text-sm text-muted-foreground'>Share system audio</span>
           </label>
@@ -268,7 +262,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
               onClick={handleCancel}
               data-track-category='screen-picker'
               data-track-name='cancel'
-              data-track-kind='passive'
               className='px-4 py-2 text-sm rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
             >
               Cancel
@@ -279,7 +272,6 @@ export function ScreenPickerModal(): React.ReactElement | null {
               data-ph-capture-attribute-track-id='share_screen'
               data-track-category='screen-picker'
               data-track-name='share'
-              data-track-kind='active'
               className={cn(
                 'px-5 py-2 text-sm rounded-lg font-medium transition-colors',
                 selectedId

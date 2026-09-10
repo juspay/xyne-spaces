@@ -151,7 +151,6 @@ export const LiveRecordingControlBar = ({
             title='Recording — click to stop and finalize'
             data-track-category='RecordingDetailV2'
             data-track-name='stop_live_recording'
-            data-track-kind='active'
           >
             {isStopping ? (
               <Spinner size={22} className='animate-spin' />
@@ -262,7 +261,6 @@ const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement
       onClick={onSelect}
       data-track-category='RecordingDetailV2'
       data-track-name='marker_open_transcript_moment'
-      data-track-kind='passive'
       className={className}
       style={{ left: `${percent}%` }}
       title={title}
@@ -297,7 +295,6 @@ const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactEle
       onClick={onSelect}
       data-track-category='RecordingDetailV2'
       data-track-name='marker_open_transcript_item'
-      data-track-kind='passive'
       className={className}
       style={{ left: `${percent}%` }}
       title={title}
@@ -548,7 +545,6 @@ const RecordedTimelineBar = ({
                 aria-label='Seek recording'
                 data-track-category='RecordingDetailV2'
                 data-track-name='seek_recording'
-                data-track-kind='passive'
               />
             </>
           )}
@@ -630,7 +626,6 @@ const PlaybackSpeedControl = ({ rate, onChange }: PlaybackSpeedControlProps): Re
           )}
           data-track-category='RecordingDetailV2'
           data-track-name='set_playback_speed'
-          data-track-kind='passive'
         >
           {speed.label}
         </button>
@@ -707,7 +702,6 @@ export const RecordingVisualizer = ({
       title='Open transcript'
       data-track-category='RecordingDetailV2'
       data-track-name='waveform_open_transcript'
-      data-track-kind='passive'
     >
       {bars}
     </button>

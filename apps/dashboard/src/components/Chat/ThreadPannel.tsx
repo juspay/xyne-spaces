@@ -928,7 +928,6 @@ export const ThreadMessages = ({
         aria-label={`Open ${channelDisplayName}`}
         data-track-category='THREAD_PANEL'
         data-track-name='OPEN_IN_CHANNEL_FROM_FOCUS'
-        data-track-kind='passive'
         className='group/chan flex shrink-0 items-center gap-1 max-w-[180px] rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         style={APP_NO_DRAG_STYLE}
       >
@@ -1079,7 +1078,6 @@ export const ThreadMessages = ({
                         hasActiveCall={hasActiveCallForConversation}
                         trackCategory='THREAD_PANEL'
                         trackName='INITIATE_CALL_FROM_THREAD'
-                        trackKind='active'
                         trackMetadata={{
                           channelId: channel?.id,
                           conversationId: derivedConversationId,
@@ -1095,7 +1093,6 @@ export const ThreadMessages = ({
                         }
                         trackCategory='THREAD_PANEL'
                         trackName='START_RECORDING_FROM_THREAD'
-                        trackKind='active'
                         trackMetadata={{
                           channelId: channel?.id,
                           conversationId: derivedConversationId,
@@ -1205,7 +1202,6 @@ export const ThreadMessages = ({
             }}
             data-track-category='THREAD_PANEL'
             data-track-name='OPEN_XYNE_AI_FROM_THREAD'
-            data-track-kind='passive'
             className='h-7 w-7 rounded-lg'
           >
             <XyneAIStar />
@@ -1221,7 +1217,6 @@ export const ThreadMessages = ({
           hasActiveCall={hasActiveCallForConversation}
           trackCategory='THREAD_PANEL'
           trackName='INITIATE_CALL_FROM_THREAD'
-          trackKind='active'
           trackMetadata={{
             channelId: channel?.id,
             conversationId: derivedConversationId,
@@ -1236,7 +1231,6 @@ export const ThreadMessages = ({
           hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
           trackCategory='THREAD_PANEL'
           trackName='START_RECORDING_FROM_THREAD'
-          trackKind='active'
           trackMetadata={{
             channelId: channel?.id,
             conversationId: derivedConversationId,
@@ -1280,7 +1274,6 @@ export const ThreadMessages = ({
                 className='gap-2'
                 data-track-category='THREAD_PANEL'
                 data-track-name='OPEN_THREAD_TAG_MENU'
-                data-track-kind='passive'
               >
                 <TagIcon size={16} className='shrink-0' />
                 <span className='flex-1'>Thread tags</span>
@@ -1307,7 +1300,6 @@ export const ThreadMessages = ({
               onClick={handleAddContextClick}
               data-track-category='THREAD_PANEL'
               data-track-name='OPEN_CONTEXT_MENU'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 conversationId: derivedConversationId,
               })}
@@ -1322,7 +1314,6 @@ export const ThreadMessages = ({
               onClick={openInNewWindow}
               data-track-category='THREAD_PANEL'
               data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
-              data-track-kind='passive'
             >
               <ExternalLinkSquare size={16} className='shrink-0' />
               <span className='flex-1'>Open in new window</span>
@@ -1335,7 +1326,6 @@ export const ThreadMessages = ({
               data-testid='thread-create-ticket-button'
               data-track-category='THREAD_PANEL'
               data-track-name='CREATE_TICKET_FROM_THREAD'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({
                 channelId: channel?.id,
                 projectId: channel?.projectId,
@@ -1359,7 +1349,6 @@ export const ThreadMessages = ({
             aria-label='Close thread panel'
             data-track-category='THREAD_PANEL'
             data-track-name='CLOSE_THREAD_PANEL'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ conversationId })}
           >
             <MultipleCrossCancelDefault size={16} />
@@ -1416,7 +1405,6 @@ export const ThreadMessages = ({
                   aria-label={`Copy ticket ID ${ticket.xyneId}`}
                   data-track-category='THREAD_PANEL'
                   data-track-name='COPY_TICKET_ID'
-                  data-track-kind='passive'
                   className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded flex-shrink-0 cursor-pointer select-text transition-colors'
                 >
                   {ticket.xyneId}
@@ -1447,7 +1435,6 @@ export const ThreadMessages = ({
                     }}
                     data-track-category='THREAD_PANEL'
                     data-track-name='OPEN_XYNE_AI_FROM_THREAD'
-                    data-track-kind='passive'
                     className='h-7 w-7 rounded-lg'
                   >
                     <XyneAIStar />
@@ -1462,7 +1449,6 @@ export const ThreadMessages = ({
                   hasActiveCall={hasActiveCallForConversation}
                   trackCategory='THREAD_PANEL'
                   trackName='INITIATE_CALL_FROM_THREAD'
-                  trackKind='active'
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
@@ -1473,7 +1459,6 @@ export const ThreadMessages = ({
                   hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
                   trackCategory='THREAD_PANEL'
                   trackName='START_RECORDING_FROM_THREAD'
-                  trackKind='active'
                   trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
                 />
               )}
@@ -1513,7 +1498,6 @@ export const ThreadMessages = ({
                       onClick={openTicketDetailsExpandedView}
                       data-track-category='THREAD_PANEL'
                       data-track-name='OPEN_TICKET_EXPANDED_VIEW'
-                      data-track-kind='passive'
                     >
                       <MaximizeTwoArrow size={16} className='shrink-0' />
                       <span className='flex-1'>Expand view</span>
@@ -1525,7 +1509,6 @@ export const ThreadMessages = ({
                         className='gap-2'
                         data-track-category='THREAD_PANEL'
                         data-track-name='OPEN_THREAD_TAG_MENU'
-                        data-track-kind='passive'
                       >
                         <TagIcon size={16} className='shrink-0' />
                         <span className='flex-1'>Thread tags</span>
@@ -1552,7 +1535,6 @@ export const ThreadMessages = ({
                       onClick={handleAddContextClick}
                       data-track-category='THREAD_PANEL'
                       data-track-name='OPEN_CONTEXT_MENU'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         conversationId: derivedConversationId,
                       })}
@@ -1567,7 +1549,6 @@ export const ThreadMessages = ({
                       onClick={openInNewWindow}
                       data-track-category='THREAD_PANEL'
                       data-track-name='OPEN_THREAD_IN_NEW_WINDOW'
-                      data-track-kind='passive'
                     >
                       <ExternalLinkSquare size={16} className='shrink-0' />
                       <span className='flex-1'>Open in new window</span>
@@ -1578,7 +1559,6 @@ export const ThreadMessages = ({
                     onClick={handleCopyTicketViewLink}
                     data-track-category='THREAD_PANEL'
                     data-track-name='COPY_TICKET_LINK'
-                    data-track-kind='passive'
                   >
                     <LinkSlant size={16} className='shrink-0' />
                     <span className='flex-1'>Copy ticket link</span>
@@ -1591,7 +1571,6 @@ export const ThreadMessages = ({
                     onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
                     data-track-category='THREAD_PANEL'
                     data-track-name='CLOSE_TICKET_DETAILS_THREAD'
-                    data-track-kind='passive'
                     className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                     variant='ghost'
                     size='sm'
@@ -1665,7 +1644,6 @@ export const ThreadMessages = ({
                         onClick={resolvedOnClose}
                         data-track-category='THREAD_PANEL'
                         data-track-name='CLOSE_THREAD_PANEL'
-                        data-track-kind='passive'
                         aria-label='Close thread panel'
                       >
                         <X size={20} />
@@ -1677,7 +1655,6 @@ export const ThreadMessages = ({
                         aria-label='Close thread panel'
                         data-track-category='THREAD_PANEL'
                         data-track-name='CLOSE_THREAD_PANEL'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ conversationId })}
                       >
                         <X size={20} />
@@ -1819,7 +1796,6 @@ export const ThreadMessages = ({
                         onClick={() => void navigate(`/newWindow/chat/dir/${derivedChannelId}`)}
                         data-track-category='THREAD_PANEL'
                         data-track-name='BACK_TO_CHANNEL'
-                        data-track-kind='passive'
                         aria-label='Back to channel'
                       >
                         <ArrowLeft size={16} />

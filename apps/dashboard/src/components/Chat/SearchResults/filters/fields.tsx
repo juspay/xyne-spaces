@@ -68,7 +68,6 @@ export function SelectField({
         className={cn(FIELD_BOX, SELECT_BOX)}
         data-track-category='SEARCH_FILTERS'
         data-track-name={`OPEN_${track}`}
-        data-track-kind='passive'
       >
         {/* An unset select reads as a placeholder, not as a chosen value. */}
         <span className={cn('truncate', !value && 'text-muted-foreground')}>
@@ -91,7 +90,6 @@ export function SelectField({
               className={MENU_ROW}
               data-track-category='SEARCH_FILTERS'
               data-track-name={`SET_${track}`}
-              data-track-kind='active'
             >
               <Check
                 className={cn(
@@ -151,7 +149,6 @@ export function TokenBox({
               aria-label={`Remove ${labelFor(id)}`}
               data-track-category='SEARCH_FILTERS'
               data-track-name={`REMOVE_${track}`}
-              data-track-kind='active'
             >
               <X className='size-3' />
             </button>
@@ -183,7 +180,6 @@ export function TokenBox({
                 className={cn(MENU_ITEM, 'hover:bg-muted')}
                 data-track-category='SEARCH_FILTERS'
                 data-track-name={`PICK_${track}`}
-                data-track-kind='passive'
               >
                 <span className='truncate'>{o.label}</span>
               </button>

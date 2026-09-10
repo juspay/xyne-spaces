@@ -53,7 +53,6 @@ export function RecapCalendarView({
           className='text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent transition-colors'
           data-track-category='RECAP_CALENDAR'
           data-track-name='CloseCalendar'
-          data-track-kind='passive'
         >
           Close
         </button>
@@ -69,7 +68,6 @@ export function RecapCalendarView({
           defaultMonth={selectedDateObj ?? new Date()}
           data-track-category='RECAP_CALENDAR'
           data-track-name='SelectDate'
-          data-track-kind='passive'
         />
       </div>
 

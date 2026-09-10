@@ -302,7 +302,6 @@ export const WorkspaceSwitcher: React.FC = () => {
         data-testid='workspace-switcher-trigger'
         data-track-category='Workspace_Switcher'
         data-track-name='Open_Switcher'
-        data-track-kind='passive'
         title={displayName || 'Workspace'}
       >
         {initial}
@@ -346,7 +345,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                     disabled={isSwitching}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Switch_Workspace'
-                    data-track-kind='passive'
                     className='h-auto w-full flex items-center justify-start gap-2.5 px-3 py-2 rounded-none hover:bg-muted transition-colors text-left disabled:opacity-60'
                   >
                     {/* Workspace icon with deterministic color */}
@@ -392,7 +390,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                 onClick={() => setShowSignInList(prev => !prev)}
                 data-track-category='Workspace_Switcher'
                 data-track-name='Sign_In_Another_Workspace'
-                data-track-kind='passive'
                 className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
               >
                 <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
@@ -429,7 +426,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                           disabled={isSwitching}
                           data-track-category='Workspace_Switcher'
                           data-track-name='Switch_Workspace_SignIn'
-                          data-track-kind='passive'
                           className='h-auto w-full flex items-center justify-start gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
                         >
                           <div
@@ -478,7 +474,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                     onChange={e => setWorkspaceName(e.target.value)}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Workspace_Name_Input'
-                    data-track-kind='passive'
                     className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
                     required
                     // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -491,7 +486,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                       disabled={creating || !workspaceName.trim()}
                       data-track-category='Workspace_Switcher'
                       data-track-name='Create_Workspace'
-                      data-track-kind='active'
                       className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
                     >
                       {creating ? 'Creating…' : 'Create'}
@@ -505,7 +499,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                       }}
                       data-track-category='Workspace_Switcher'
                       data-track-name='Cancel_Create_Workspace'
-                      data-track-kind='passive'
                       className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
                     >
                       Cancel
@@ -521,7 +514,6 @@ export const WorkspaceSwitcher: React.FC = () => {
                     }}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Show_Create_Workspace_Form'
-                    data-track-kind='passive'
                     className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
                   >
                     <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>

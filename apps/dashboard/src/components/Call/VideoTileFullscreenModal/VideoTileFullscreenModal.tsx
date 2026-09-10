@@ -102,7 +102,6 @@ export function VideoTileFullscreenModal({
       data-testid='video-tile-fullscreen-modal'
       data-track-category='CALLS'
       data-track-name='Close_VideoTile_Fullscreen_Backdrop'
-      data-track-kind='passive'
       tabIndex={-1}
     >
       <button
@@ -116,7 +115,6 @@ export function VideoTileFullscreenModal({
         aria-label='Close expanded view'
         data-track-category='CALLS'
         data-track-name='Close_VideoTile_Fullscreen'
-        data-track-kind='passive'
       >
         <Minimize2 className='h-5 w-5' />
       </button>

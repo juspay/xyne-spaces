@@ -146,7 +146,6 @@ export const TagEditorContent = ({
                       data-ph-capture-attribute-track-id='toggle_tag'
                       data-track-category='Support'
                       data-track-name='ToggleTag'
-                      data-track-kind='active'
                       onClick={() => {
                         void (isActive
                           ? removeTag(group.category, allowedTag)
@@ -189,7 +188,6 @@ export const TagEditorContent = ({
                             data-ph-capture-attribute-track-id='remove_tag'
                             data-track-category='Support'
                             data-track-name='RemoveTag'
-                            data-track-kind='active'
                             onClick={() => {
                               void removeTag(group.category, t.tag);
                             }}
@@ -214,7 +212,6 @@ export const TagEditorContent = ({
                       type='button'
                       data-track-category='Support'
                       data-track-name='OpenAddTag'
-                      data-track-kind='passive'
                       onClick={() => setOpenDropdown(isDropdownOpen ? null : group.category)}
                       className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors'
                     >
@@ -231,7 +228,6 @@ export const TagEditorContent = ({
                             data-ph-capture-attribute-track-id='add_tag'
                             data-track-category='Support'
                             data-track-name='AddTag'
-                            data-track-kind='active'
                             onClick={() => {
                               setOpenDropdown(null);
                               void addTag(group.category, t);
@@ -250,7 +246,6 @@ export const TagEditorContent = ({
                               placeholder='custom-tag'
                               data-track-category='Support'
                               data-track-name='AddCustomTag'
-                              data-track-kind='active'
                               value={customInput[group.category] ?? ''}
                               onChange={e =>
                                 setCustomInput(prev => ({
@@ -322,7 +317,6 @@ export const EntityTagsBadge = ({
       aria-label={open ? 'Hide tags' : 'Show tags'}
       data-track-category='Tags'
       data-track-name='ToggleTagsBadge'
-      data-track-kind='active'
     >
       <Tag size={11} className='shrink-0' />
       <span>Tags</span>
@@ -418,7 +412,6 @@ export const EntityTagsReadBadge = ({
       aria-label={open ? 'Hide tags' : 'Show tags'}
       data-track-category='Tags'
       data-track-name='ToggleTagsBadge'
-      data-track-kind='active'
     >
       <span>Tags</span>
       <ChevronDown size={12} className={cn('transition-transform', open && 'rotate-180')} />

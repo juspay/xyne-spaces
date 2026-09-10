@@ -155,7 +155,6 @@ export function CanvasToolbarAttachedActions({
         disabled={!canvasId}
         data-track-category='CANVAS'
         data-track-name='Selection_Ask_AI'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ canvasId })}
       >
         <img alt='AI' width='14' height='14' src='/svgs/icons/ai-bot-gradient-star.svg' />
@@ -173,7 +172,6 @@ export function CanvasToolbarAttachedActions({
           onClick={onAddComment}
           data-track-category='CANVAS'
           data-track-name='Selection_Add_Comment'
-          data-track-kind='active'
           data-track-metadata={JSON.stringify({ canvasId })}
         >
           <MessageSquarePlus className='size-3.5' aria-hidden='true' />
@@ -188,7 +186,6 @@ export function CanvasToolbarAttachedActions({
           onClick={handleCreateTicket}
           data-track-category='CANVAS'
           data-track-name='Selection_Create_Ticket'
-          data-track-kind='active'
           data-track-metadata={JSON.stringify({ canvasId })}
         >
           <Ticket className='size-3.5' aria-hidden='true' />

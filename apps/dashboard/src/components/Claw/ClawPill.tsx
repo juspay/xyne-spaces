@@ -42,7 +42,6 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
       data-thinking={isThinking ? 'true' : undefined}
       data-track-category='CLAW_OVERLAY'
       data-track-name='OPEN_PANEL'
-      data-track-kind='passive'
       className={cn(
         'relative isolate flex shrink-0 select-none items-center gap-2 overflow-hidden',
         isOpen
@@ -79,7 +78,6 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
               title='Minimize Claw'
               data-track-category='CLAW_OVERLAY'
               data-track-name='MINIMIZE_PANEL'
-              data-track-kind='passive'
               className='flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             >
               <Minus className='size-4' strokeWidth={2.25} />

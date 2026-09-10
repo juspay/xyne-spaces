@@ -118,7 +118,6 @@ const ProjectRecapPanel = (): ReactElement => {
           }
           data-track-category='PROJECT_RECAP_PANEL'
           data-track-name='CLICK_CITATION'
-          data-track-kind='passive'
         >
           {point.citationIndex}
         </button>

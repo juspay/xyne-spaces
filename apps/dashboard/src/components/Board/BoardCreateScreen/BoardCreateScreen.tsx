@@ -163,7 +163,6 @@ const BoardCreateScreen = ({
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
               data-track-category='BOARD_CREATE'
               data-track-name='NAVIGATE_BACK'
-              data-track-kind='passive'
             >
               <ChevronLeft size={16} />
             </Button>
@@ -179,7 +178,6 @@ const BoardCreateScreen = ({
               onClick={onClose}
               data-track-category='BOARD_CREATE'
               data-track-name='CLOSE_BOARD_CREATE'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -188,7 +186,6 @@ const BoardCreateScreen = ({
               onClick={handleCreateNew}
               data-track-category='BOARD_CREATE'
               data-track-name='CREATE_BOARD'
-              data-track-kind='active'
             >
               <Plus size={14} />
               Create Board
@@ -222,7 +219,6 @@ const BoardCreateScreen = ({
                       className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'
                       data-track-category='BOARD_CREATE'
                       data-track-name='SEARCH_BOARDS'
-                      data-track-kind='passive'
                     />
                   </div>
                 </div>

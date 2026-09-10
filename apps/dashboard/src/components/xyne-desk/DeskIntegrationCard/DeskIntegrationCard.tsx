@@ -94,7 +94,6 @@ export const DeskIntegrationCard = ({
             )}
             data-track-category='desk-integration'
             data-track-name='open-disconnect-confirm'
-            data-track-kind='passive'
           >
             <Unplug size={14} className='shrink-0' />
             Disconnect
@@ -112,7 +111,6 @@ export const DeskIntegrationCard = ({
             )}
             data-track-category='desk-integration'
             data-track-name='connect'
-            data-track-kind='active'
             data-ph-capture-attribute-track-id='desk_integration_reconnect'
           >
             <Plug size={14} className='shrink-0' />
@@ -148,7 +146,6 @@ export const DeskIntegrationCard = ({
               onClick={() => setShowDisconnectConfirm(false)}
               data-track-category='desk-integration'
               data-track-name='CANCEL_DISCONNECT'
-              data-track-kind='passive'
               disabled={isDisconnecting}
             >
               Cancel
@@ -160,7 +157,6 @@ export const DeskIntegrationCard = ({
               disabled={isDisconnecting}
               data-track-category='desk-integration'
               data-track-name='confirm-disconnect'
-              data-track-kind='active'
             >
               {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
             </Button>

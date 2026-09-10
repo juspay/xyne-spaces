@@ -133,7 +133,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
             aria-label='Close preview'
             data-track-category='CANVAS'
             data-track-name='Close_Canvas_Preview'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId })}
           >
             <X size={12} className='text-muted-foreground' />
@@ -166,7 +165,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         }}
         data-track-category='CANVAS'
         data-track-name='Navigate_To_Canvas'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ canvasId: canvas.id, title: canvas.title })}
       >
         {onClose && (
@@ -177,7 +175,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
             aria-label='Close preview'
             data-track-category='CANVAS'
             data-track-name='Close_Canvas_Preview'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ canvasId })}
           >
             <X size={14} className='text-muted-foreground' />
@@ -216,7 +213,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
       onClick={handleNavigate}
       data-track-category='CANVAS'
       data-track-name='Navigate_To_Canvas'
-      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ canvasId: canvas.id, title: canvas.title })}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -234,7 +230,6 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
           aria-label='Close preview'
           data-track-category='CANVAS'
           data-track-name='Close_Canvas_Preview'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ canvasId })}
         >
           <X size={14} className='text-muted-foreground' />

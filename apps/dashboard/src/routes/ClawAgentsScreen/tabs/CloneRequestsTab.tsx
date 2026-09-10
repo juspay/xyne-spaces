@@ -71,7 +71,6 @@ const CloneRequestsTab = ({ agent }: { agent: Agent }): ReactElement => {
                     onClick={() => void resolve(request, 'approve')}
                     data-track-category='Claw Agents'
                     data-track-name='APPROVE_CLONE_REQUEST'
-                    data-track-kind='active'
                   >
                     <Check className='size-4' /> Approve
                   </Button>
@@ -84,7 +83,6 @@ const CloneRequestsTab = ({ agent }: { agent: Agent }): ReactElement => {
                     onClick={() => void resolve(request, 'reject')}
                     data-track-category='Claw Agents'
                     data-track-name='REJECT_CLONE_REQUEST'
-                    data-track-kind='active'
                   >
                     <X className='size-4' /> Decline
                   </Button>

@@ -93,7 +93,6 @@ export function ProjectRepositoriesSection(props: {
           onClick={() => void load()}
           data-track-category='ProjectRepos'
           data-track-name='RetryLoadRepositories'
-          data-track-kind='passive'
         >
           Retry
         </Button>
@@ -113,7 +112,6 @@ export function ProjectRepositoriesSection(props: {
           onClick={props.onAdd}
           data-track-category='ProjectRepos'
           data-track-name='AddRepositoryClicked'
-          data-track-kind='active'
         >
           Add Repository
         </Button>
@@ -183,7 +181,6 @@ function RepositoryCard(props: {
             onClick={props.onCheck}
             data-track-category='ProjectRepos'
             data-track-name='RunAccessCheck'
-            data-track-kind='passive'
           >
             <RefreshCw className='h-4 w-4' /> Refresh now
           </Button>
@@ -213,7 +210,6 @@ function RepositoryCard(props: {
             onClick={props.onSettings}
             data-track-category='ProjectRepos'
             data-track-name='CredentialSettingsOpened'
-            data-track-kind='passive'
           >
             Credential settings
           </button>

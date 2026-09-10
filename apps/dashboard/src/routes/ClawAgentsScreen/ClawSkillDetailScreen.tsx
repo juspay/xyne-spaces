@@ -114,7 +114,6 @@ const AutoTextarea = ({
       className={className}
       data-track-category='Claw Agents'
       data-track-name='Edit skill text field'
-      data-track-kind='passive'
       {...props}
     />
   );
@@ -137,7 +136,6 @@ const DirtyActions = ({
       onClick={onSave}
       data-track-category='Claw Agents'
       data-track-name='SAVE_SKILL'
-      data-track-kind='active'
     >
       Save
     </Button>
@@ -148,7 +146,6 @@ const DirtyActions = ({
       onClick={onCancel}
       data-track-category='Claw Agents'
       data-track-name='CANCEL_SKILL_EDIT'
-      data-track-kind='passive'
     >
       Cancel
     </Button>
@@ -180,7 +177,6 @@ const TabButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Open skill detail tab: ${label}`}
-    data-track-kind='passive'
     className={cn(
       'rounded-md px-2 py-1.5 text-sm transition-colors',
       active
@@ -258,7 +254,6 @@ const FilesSection = ({
             onClick={() => dirInputRef.current?.click()}
             data-track-category='Claw Agents'
             data-track-name='PICK_SKILL_DIRECTORY'
-            data-track-kind='passive'
           >
             <FolderOpen className='size-3.5' />
             Upload folder
@@ -270,7 +265,6 @@ const FilesSection = ({
             onClick={() => fileInputRef.current?.click()}
             data-track-category='Claw Agents'
             data-track-name='PICK_SKILL_FILES'
-            data-track-kind='passive'
           >
             <Upload className='size-3.5' />
             Upload files
@@ -622,7 +616,6 @@ const ClawSkillDetailScreen = (): ReactElement => {
                             onChange={e => setDraftName(e.target.value)}
                             data-track-category='Claw Agents'
                             data-track-name='Edit skill name'
-                            data-track-kind='active'
                             placeholder='Skill name'
                             aria-label='Skill name'
                             className={cn(seamlessField, 'font-medium')}
@@ -699,7 +692,6 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           onClick={() => mdInputRef.current?.click()}
                           data-track-category='Claw Agents'
                           data-track-name='PICK_SKILL_MARKDOWN'
-                          data-track-kind='passive'
                         >
                           <Upload className='size-3.5' />
                           Upload .md
@@ -769,7 +761,6 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           onClick={() => void handlePublish()}
                           data-track-category='Claw Agents'
                           data-track-name='PUBLISH_SKILL'
-                          data-track-kind='active'
                         >
                           <Globe className='size-3.5' />
                           Publish
@@ -790,7 +781,6 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           onClick={() => setShowDeleteDialog(true)}
                           data-track-category='Claw Agents'
                           data-track-name='OPEN_DELETE_SKILL_CONFIRM'
-                          data-track-kind='passive'
                         >
                           <Trash2 className='size-3.5' />
                           Delete

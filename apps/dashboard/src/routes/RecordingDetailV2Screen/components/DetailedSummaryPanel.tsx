@@ -34,7 +34,6 @@ export function DetailedSummaryPanel({
             aria-label='Close detailed summary'
             data-track-category='RecordingDetailV2'
             data-track-name='close_detailed_summary'
-            data-track-kind='passive'
           >
             <ChevronLeft className='size-4' aria-hidden='true' />
           </button>

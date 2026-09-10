@@ -416,7 +416,6 @@ const AIScreen = (): ReactElement => {
               title='Reopen the app panel'
               data-track-category='AskAI'
               data-track-name='ArtifactAppPaneReopen'
-              data-track-kind='active'
             >
               <PanelRightOpen className='h-3.5 w-3.5' aria-hidden='true' />
               Open app

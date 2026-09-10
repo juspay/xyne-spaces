@@ -354,7 +354,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               onClick={handlePictureClick}
               data-track-category='USER_PROFILE'
               data-track-name='CHANGE_PROFILE_PICTURE'
-              data-track-kind='active'
               onKeyDown={e => {
                 if (e.key === 'Enter') handlePictureClick();
               }}
@@ -426,7 +425,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   onClick={handleSaveEdit}
                   data-track-category='USER_PROFILE'
                   data-track-name='SAVE_TEAM'
-                  data-track-kind='active'
                   className='p-1 text-green-600 hover:bg-green-50 rounded'
                   title='Save'
                 >
@@ -436,7 +434,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   onClick={handleCancelEdit}
                   data-track-category='USER_PROFILE'
                   data-track-name='CANCEL_EDIT_TEAM'
-                  data-track-kind='passive'
                   className='p-1 text-muted-foreground hover:bg-accent rounded'
                   title='Cancel'
                 >
@@ -453,7 +450,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   onClick={() => handleStartEdit('team', userProfile.team)}
                   data-track-category='USER_PROFILE'
                   data-track-name='EDIT_TEAM_NAME'
-                  data-track-kind='active'
                   className='text-muted-foreground hover:text-muted-foreground'
                   title='Edit team name'
                 >
@@ -466,7 +462,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               onClick={() => handleStartEdit('team')}
               data-track-category='USER_PROFILE'
               data-track-name='START_EDIT_TEAM'
-              data-track-kind='passive'
               className='mt-1 text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Team Name</span>
@@ -509,7 +504,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 onClick={handleMessageClick}
                 data-track-category='USER_PROFILE'
                 data-track-name='SEND_MESSAGE_TO_USER'
-                data-track-kind='active'
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
@@ -520,7 +514,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 onClick={handleHuddleClick}
                 data-track-category='USER_PROFILE'
                 data-track-name='START_HUDDLE_WITH_USER'
-                data-track-kind='active'
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
@@ -546,7 +539,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               onClick={() => setIsStatusModalOpen(true)}
               data-track-category='USER_PROFILE'
               data-track-name='OPEN_STATUS_MODAL'
-              data-track-kind='passive'
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
@@ -579,7 +571,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     onClick={handleClearStatus}
                     data-track-category='USER_PROFILE'
                     data-track-name='CLEAR_STATUS'
-                    data-track-kind='active'
                     className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                     title='Clear status'
                   >
@@ -639,7 +630,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   }}
                   data-track-category='USER_PROFILE'
                   data-track-name='CANCEL_EDIT_MANAGER'
-                  data-track-kind='passive'
                   className='px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground'
                 >
                   Cancel
@@ -662,7 +652,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   }}
                   data-track-category='USER_PROFILE'
                   data-track-name='SAVE_MANAGER'
-                  data-track-kind='active'
                   className='px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800'
                 >
                   Save
@@ -684,7 +673,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               }}
               data-track-category='USER_PROFILE'
               data-track-name='START_EDIT_MANAGER'
-              data-track-kind='passive'
               className='text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Manager</span>
@@ -715,7 +703,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   onClick={handleCopyUserId}
                   data-track-category='USER_PROFILE'
                   data-track-name='COPY_USER_ID'
-                  data-track-kind='passive'
                   title='Copy user ID'
                 >
                   {copiedUserId ? <Check className='size-3' /> : <Copy className='size-3' />}
@@ -751,7 +738,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       onClick={() => handleStartEdit('displayName', userProfile.displayName)}
                       data-track-category='USER_PROFILE'
                       data-track-name='START_EDIT_DISPLAY_NAME'
-                      data-track-kind='passive'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit display name'
                     >
@@ -779,7 +765,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleSaveEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='SAVE_DISPLAY_NAME'
-                        data-track-kind='active'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -789,7 +774,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleCancelEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='CANCEL_EDIT_DISPLAY_NAME'
-                        data-track-kind='passive'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -805,7 +789,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     onClick={() => handleStartEdit('displayName', userProfile?.displayName)}
                     data-track-category='USER_PROFILE'
                     data-track-name='START_EDIT_DISPLAY_NAME'
-                    data-track-kind='passive'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Display Name
@@ -829,7 +812,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       onClick={() => handleStartEdit('phoneNumber', userProfile.phoneNumber)}
                       data-track-category='USER_PROFILE'
                       data-track-name='START_EDIT_PHONE_NUMBER'
-                      data-track-kind='passive'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit phone number'
                     >
@@ -857,7 +839,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleSaveEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='SAVE_PHONE_NUMBER'
-                        data-track-kind='active'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -867,7 +848,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleCancelEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='CANCEL_EDIT_PHONE_NUMBER'
-                        data-track-kind='passive'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -883,7 +863,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     onClick={() => handleStartEdit('phoneNumber')}
                     data-track-category='USER_PROFILE'
                     data-track-name='START_EDIT_PHONE_NUMBER'
-                    data-track-kind='passive'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Phone Number
@@ -931,7 +910,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       onClick={() => handleStartEdit('dob', userProfile.dob)}
                       data-track-category='USER_PROFILE'
                       data-track-name='START_EDIT_BIRTH_DATE'
-                      data-track-kind='passive'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit birth date'
                     >
@@ -958,7 +936,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleSaveEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='SAVE_BIRTH_DATE'
-                        data-track-kind='active'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -968,7 +945,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         onClick={handleCancelEdit}
                         data-track-category='USER_PROFILE'
                         data-track-name='CANCEL_EDIT_BIRTH_DATE'
-                        data-track-kind='passive'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -993,7 +969,6 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     onClick={() => handleStartEdit('dob')}
                     data-track-category='USER_PROFILE'
                     data-track-name='START_EDIT_BIRTH_DATE'
-                    data-track-kind='passive'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Birth Date

@@ -132,7 +132,6 @@ export function AgentBehaviourTabV2({
               placeholder="eg. Always respond in the user's language"
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: reminders'
-              data-track-kind='passive'
               className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground read-only:opacity-70 focus:outline-none focus:ring-1 focus:ring-ring'
             />
             {editable && remindersDirty && (
@@ -144,7 +143,6 @@ export function AgentBehaviourTabV2({
                   className='h-auto rounded-xl px-3 py-2 text-sm'
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: discard reminders'
-                  data-track-kind='active'
                 >
                   Discard
                 </Button>
@@ -161,7 +159,6 @@ export function AgentBehaviourTabV2({
                   className='h-auto rounded-xl bg-foreground px-3 py-2 text-sm text-background hover:bg-foreground/90'
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: save reminders'
-                  data-track-kind='active'
                 >
                   Save
                 </Button>
@@ -185,7 +182,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Sandbox repository'
               trackName='Agent detail v2: set sandbox repo'
-              trackKind='active'
               onChange={next =>
                 setSandbox({ sandboxRepo: next === NONE ? '' : next }, 'Sandbox repository updated')
               }
@@ -202,7 +198,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Read-only multi-repo sandbox'
               trackName='Agent detail v2: toggle read-only sandbox'
-              trackKind='passive'
               onChange={next => setSandbox({ forceReadOnlySandbox: next }, 'Sandbox mode updated')}
             />
           </BehaviourRow>
@@ -218,7 +213,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Research product'
               trackName='Agent detail v2: set research product'
-              trackKind='active'
               onChange={next =>
                 setSandbox(
                   { researchProductId: next === NONE ? '' : next },
@@ -240,7 +234,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Research repository'
               trackName='Agent detail v2: set research repository'
-              trackKind='active'
               onChange={next =>
                 setSandbox(
                   { researchRepositoryId: next === NONE ? '' : next },
@@ -265,7 +258,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Suggest goals'
               trackName='Agent detail v2: toggle suggest goals'
-              trackKind='passive'
               onChange={next => setBehaviour({ suggestGoal: next }, 'Autonomy updated')}
             />
           </BehaviourRow>
@@ -281,7 +273,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Always goal'
               trackName='Agent detail v2: toggle always goal'
-              trackKind='passive'
               onChange={next => setBehaviour({ autoGoal: next }, 'Autonomy updated')}
             />
           </BehaviourRow>
@@ -299,7 +290,6 @@ export function AgentBehaviourTabV2({
               <BehaviourEditButton
                 label='Edit delivery criteria'
                 trackName='Agent detail v2: edit verify criteria'
-                trackKind='active'
                 disabled={busy}
                 onClick={() => setCriteriaOpen(true)}
               />
@@ -310,7 +300,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Verify responses'
               trackName='Agent detail v2: toggle verify responses'
-              trackKind='passive'
               onChange={next => setBehaviour({ verifyResponses: next }, 'Verification updated')}
             />
           </BehaviourRow>
@@ -325,7 +314,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Enforce citations'
               trackName='Agent detail v2: toggle enforce citations'
-              trackKind='passive'
               onChange={next => setBehaviour({ citationReflection: next }, 'Verification updated')}
             />
           </BehaviourRow>
@@ -341,7 +329,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Auto-cite all tools'
               trackName='Agent detail v2: toggle auto-cite tools'
-              trackKind='passive'
               onChange={next => setBehaviour({ autoToolCitations: next }, 'Verification updated')}
             />
           </BehaviourRow>
@@ -360,7 +347,6 @@ export function AgentBehaviourTabV2({
               <BehaviourEditButton
                 label='Edit output format'
                 trackName='Agent detail v2: edit structured output'
-                trackKind='active'
                 disabled={busy}
                 onClick={() => setOutputOpen(true)}
               />
@@ -371,7 +357,6 @@ export function AgentBehaviourTabV2({
               disabled={busy}
               label='Structured output'
               trackName='Agent detail v2: toggle structured output'
-              trackKind='passive'
               onChange={next => {
                 // Turning it on needs a schema, so the dialog collects one first.
                 if (next) setOutputOpen(true);

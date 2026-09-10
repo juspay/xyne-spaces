@@ -80,7 +80,6 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
             onClick={onClose}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='CLOSE_EMOJI_PICKER'
-            data-track-kind='passive'
           >
             <X className='h-5 w-5 text-muted-foreground hover:text-foreground' />
           </button>
@@ -145,7 +144,6 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
             onClick={onClose}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='CANCEL_ADD_CUSTOM_EMOJI'
-            data-track-kind='passive'
             disabled={isLoading}
             className='px-4 py-2 rounded hover:bg-accent disabled:opacity-40'
           >
@@ -155,7 +153,6 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
             onClick={handleSave}
             data-track-category='EDITOR_TOOLBAR'
             data-track-name='SAVE_CUSTOM_EMOJI'
-            data-track-kind='active'
             disabled={!file || !name || isLoading}
             className='px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-40'
           >
@@ -208,7 +205,6 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
       onClick={() => setEmojiOpen(true)}
       data-track-category='EDITOR_TOOLBAR'
       data-track-name='OPEN_EMOJI_PICKER'
-      data-track-kind='passive'
       className={`p-1.5 rounded hover:bg-accent ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       aria-label='Insert emoji'
       data-testid='insert-emoji-btn'
@@ -270,7 +266,6 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
               }}
               data-track-category='EDITOR_TOOLBAR'
               data-track-name='START_ADD_CUSTOM_EMOJI'
-              data-track-kind='active'
             >
               Add Emoji
             </button>

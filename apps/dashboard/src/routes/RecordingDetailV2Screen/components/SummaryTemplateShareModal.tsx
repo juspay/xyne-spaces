@@ -219,7 +219,6 @@ export function SummaryTemplateShareModal({
               className='mt-2 h-8 w-full rounded-lg text-xs font-medium'
               data-track-category='SummaryTemplates'
               data-track-name='ShareTemplateConfirm'
-              data-track-kind='active'
             >
               {sharing
                 ? 'Sharing…'
@@ -273,7 +272,6 @@ export function SummaryTemplateShareModal({
                       aria-label='Remove access'
                       data-track-category='SummaryTemplates'
                       data-track-name='RevokeTemplateShare'
-                      data-track-kind='active'
                     >
                       {revokingId === share.id ? (
                         <Spinner className='size-3 animate-spin' />
@@ -359,7 +357,6 @@ export function SummaryTemplateShareModal({
                   onClick={() => setShowAdmins(value => !value)}
                   data-track-category='SummaryTemplates'
                   data-track-name='ToggleTemplateAdmins'
-                  data-track-kind='active'
                   className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
                 >
                   {showAdmins ? 'Hide admins' : 'Show admins'}
@@ -375,7 +372,6 @@ export function SummaryTemplateShareModal({
                   className='h-7 px-0 text-xs font-medium'
                   data-track-category='SummaryTemplates'
                   data-track-name='WithdrawTemplatePublication'
-                  data-track-kind='active'
                 >
                   Withdraw request
                 </Button>
@@ -391,7 +387,6 @@ export function SummaryTemplateShareModal({
                     className={`${INLINE_ACTION_CLASS} text-muted-foreground`}
                     data-track-category='SummaryTemplates'
                     data-track-name='DenyTemplatePublication'
-                    data-track-kind='active'
                   >
                     Deny
                   </Button>
@@ -403,7 +398,6 @@ export function SummaryTemplateShareModal({
                     className={`${INLINE_ACTION_CLASS} bg-foreground text-background hover:bg-foreground/90`}
                     data-track-category='SummaryTemplates'
                     data-track-name='ApproveTemplatePublication'
-                    data-track-kind='active'
                   >
                     Approve and publish
                   </Button>
@@ -436,7 +430,6 @@ export function SummaryTemplateShareModal({
                   onClick={() => void handlePublication('unpublish')}
                   data-track-category='SummaryTemplates'
                   data-track-name='UnpublishTemplate'
-                  data-track-kind='active'
                 >
                   Make private
                 </Button>

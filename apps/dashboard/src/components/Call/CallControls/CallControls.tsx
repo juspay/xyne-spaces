@@ -440,7 +440,6 @@ export function CallControls({
       isActive: isWhiteboardOpen,
       onSelect: handleWhiteboardClick,
       trackName: 'TOGGLE_WHITEBOARD',
-      trackKind: 'passive',
     },
   ];
 
@@ -487,7 +486,6 @@ export function CallControls({
                   data-testid='mic-toggle-button'
                   data-track-category='CALLS'
                   data-track-name='MIC_TOGGLE'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
                 >
                   {isMicEnabled || isPushToTalkActive ? (
@@ -519,7 +517,6 @@ export function CallControls({
                 title='Select audio devices'
                 data-track-category='CALLS'
                 data-track-name='Toggle_Mic_Menu'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
               >
                 <ChevronUp
@@ -606,7 +603,6 @@ export function CallControls({
                   data-testid='camera-toggle-button'
                   data-track-category='CALLS'
                   data-track-name='CAMERA_TOGGLE'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
                 >
                   {isCameraEnabled ? (
@@ -640,7 +636,6 @@ export function CallControls({
                 title='Select camera'
                 data-track-category='CALLS'
                 data-track-name='Toggle_Camera_Menu'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
               >
                 <ChevronUp
@@ -682,7 +677,6 @@ export function CallControls({
                   title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
                   data-track-category='CALLS'
                   data-track-name='TOGGLE_BACKGROUND_BLUR'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     enabled: !isBackgroundBlurEnabled,
                     callId,
@@ -730,7 +724,6 @@ export function CallControls({
               data-track-event='BUTTON_CLICK'
               data-track-category='CALLS'
               data-track-name='TOGGLE_SCREEN_SHARE'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               aria-label={screenShareTooltip}
@@ -790,7 +783,6 @@ export function CallControls({
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='TOGGLE_DRAW_MODE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId, enabled: isDrawingEnabled })}
           >
             <Pencil
@@ -818,7 +810,6 @@ export function CallControls({
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             data-track-category='CALLS'
             data-track-name='TOGGLE_CALL_CHAT'
-            data-track-kind='passive'
             title='Call chat'
           >
             <MessageCircleMore
@@ -851,7 +842,6 @@ export function CallControls({
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='TOGGLE_HOST_CONTROLS'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ isOpen: isHostControlsOpen })}
           >
             <UserCog
@@ -878,7 +868,6 @@ export function CallControls({
           data-track-event='BUTTON_CLICK'
           data-track-category='CALLS'
           data-track-name='TOGGLE_PARTICIPANTS_SIDEBAR'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ isOpen: isParticipantsSidebarOpen })}
         >
           <Users
@@ -914,7 +903,6 @@ export function CallControls({
           }
           data-track-category='CALLS'
           data-track-name='SHARE_CALL_LINK'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ callId, isExternalUser })}
         >
           <Share2
@@ -949,7 +937,6 @@ export function CallControls({
               title='Send a reaction'
               data-track-category='CALLS'
               data-track-name='TOGGLE_REACTION_PICKER'
-              data-track-kind='passive'
             >
               <SmilePlus
                 className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
@@ -978,7 +965,6 @@ export function CallControls({
                     data-ph-capture-attribute-track-id='send_reaction'
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ emoji, callId })}
                   >
                     {emoji}
@@ -1008,7 +994,6 @@ export function CallControls({
               title={aiButtonTitle}
               data-track-category='CALLS'
               data-track-name='AI_Assistant'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 isControlledByOther,
                 hasPendingRequest: hasPendingRequestFromOther,
@@ -1039,7 +1024,6 @@ export function CallControls({
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             data-track-category='CALLS'
             data-track-name='TOGGLE_CHAT'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
             title='Thread chat'
           >
@@ -1065,7 +1049,6 @@ export function CallControls({
             title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
             data-track-category='CALLS'
             data-track-name='TOGGLE_VIEW_MODE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId: callId, viewMode })}
           >
             {viewMode === 'mini' ? (
@@ -1101,7 +1084,6 @@ export function CallControls({
                 data-track-event='BUTTON_CLICK'
                 data-track-category='CALLS'
                 data-track-name='OPEN_CALL_TOOLS_MENU'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ callId })}
                 title='More options'
               >
@@ -1134,7 +1116,6 @@ export function CallControls({
                     data-track-event='BUTTON_CLICK'
                     data-track-category='CALLS'
                     data-track-name={item.trackName}
-                    data-track-kind={item.trackKind}
                     data-track-metadata={JSON.stringify({ callId, enabled: item.isActive })}
                   >
                     <Icon className='h-4 w-4 text-emerald-300' aria-hidden />
@@ -1163,7 +1144,6 @@ export function CallControls({
             aria-pressed={isPresentationMode}
             data-track-category='CALLS'
             data-track-name='TOGGLE_PRESENTATION_MODE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ callId, isEnabled: isPresentationMode })}
           >
             <XyneTelepresenceIcon
@@ -1185,7 +1165,6 @@ export function CallControls({
           data-ph-capture-attribute-track-id='end_call'
           data-track-category='CALLS'
           data-track-name='END_CALL'
-          data-track-kind='active'
           data-track-metadata={JSON.stringify({ callId })}
         >
           <PhoneOff

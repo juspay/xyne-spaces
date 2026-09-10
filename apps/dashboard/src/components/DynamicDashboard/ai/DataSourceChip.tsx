@@ -3,14 +3,12 @@ import { Check, ChevronDown, Database, Search } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
 import type { DataSourceListItem } from '../../../services/DynamicDashboard/dataSourcesService';
 import { healthDotClass } from '../DatabaseVisualizer/DataSourcePicker';
-import type { InteractionKind } from '@xyne/shared';
 
 interface DataSourceChipProps {
   dataSourceId: string | null;
   setDataSourceId: (id: string) => void;
   dataSources: ReadonlyArray<DataSourceListItem>;
   trackName: string;
-  trackKind?: InteractionKind;
 }
 
 /**
@@ -24,7 +22,6 @@ export function DataSourceChip({
   setDataSourceId,
   dataSources,
   trackName,
-  trackKind,
 }: DataSourceChipProps): ReactElement | null {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -57,7 +54,6 @@ export function DataSourceChip({
           type='button'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name={trackName}
-          data-track-kind={trackKind}
           className='group inline-flex items-center gap-1 h-6 pl-1.5 pr-1.5 rounded-md bg-muted border border-border hover:bg-accent data-[state=open]:bg-accent transition-colors text-[12px] leading-4 text-foreground'
         >
           <Database size={11} className='shrink-0 text-muted-foreground' />

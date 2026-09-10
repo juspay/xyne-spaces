@@ -165,7 +165,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             }`}
             data-track-category='DeskSettings'
             data-track-name='SendAsAliasInput'
-            data-track-kind='passive'
           />
           {sendAsAliasError && (
             <p className='text-[12px] leading-[120%] text-red-500'>{sendAsAliasError}</p>
@@ -202,7 +201,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     className='text-desk-accent-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='RemoveCcEmail'
-                    data-track-kind='active'
                     aria-label={`Remove ${email}`}
                   >
                     <X size={14} />
@@ -218,7 +216,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                 }}
                 data-track-category='DeskSettings'
                 data-track-name='CcEmailInput'
-                data-track-kind='passive'
                 onKeyDown={e => {
                   const hasDropdown = ccInputValue.length >= 1 && ccUserMatchesVisible.length > 0;
 
@@ -267,7 +264,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       }`}
                       data-track-category='DeskSettings'
                       data-track-name='SelectCcUser'
-                      data-track-kind='passive'
                       onMouseEnter={() => setCcHighlightIndex(idx)}
                       onClick={() => {
                         if (!isSelected) addCcEmail(user.email);
@@ -458,7 +454,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                 }}
                 data-track-category='DeskSettings'
                 data-track-name='AddSignature'
-                data-track-kind='active'
               >
                 <Plus size={14} />
                 <span>Add Signature</span>
@@ -499,7 +494,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                           className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
-                          data-track-kind='active'
                         >
                           Set as default
                         </button>
@@ -515,7 +509,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                         aria-label='Edit signature'
                         data-track-category='DeskSettings'
                         data-track-name='EditSignature'
-                        data-track-kind='active'
                       >
                         <Pencil size={16} />
                       </button>
@@ -528,7 +521,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                         aria-label='Delete signature'
                         data-track-category='DeskSettings'
                         data-track-name='DeleteSignature'
-                        data-track-kind='active'
                       >
                         <Trash2 size={16} />
                       </button>
@@ -547,7 +539,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   }}
                   data-track-category='DeskSettings'
                   data-track-name='AddSignature'
-                  data-track-kind='active'
                 >
                   <Plus size={14} />
                   <span>Add Signature</span>

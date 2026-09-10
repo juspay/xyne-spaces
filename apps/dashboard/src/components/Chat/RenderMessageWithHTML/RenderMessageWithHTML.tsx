@@ -139,7 +139,6 @@ export const InternalXyneLink = ({
         onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_MESSAGE_LINK'
-        data-track-kind='passive'
         {...props}
       >
         {children}
@@ -181,7 +180,6 @@ export const InternalXyneLink = ({
         onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
         {...props}
       >
@@ -215,7 +213,6 @@ export const InternalXyneLink = ({
           onClick={onClick}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
           {...props}
         >
@@ -230,7 +227,6 @@ export const InternalXyneLink = ({
         title='Copy original link'
         data-track-category='MESSAGE'
         data-track-name='COPY_INTERNAL_LINK'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
       >
         {copied ? (
@@ -292,7 +288,6 @@ const CanvasLink = ({
       {...props}
       data-track-category='MESSAGE'
       data-track-name='OPEN_CANVAS_LINK'
-      data-track-kind='passive'
       data-track-metadata={JSON.stringify({ href: resolvedHref })}
     >
       {children}
@@ -423,7 +418,6 @@ export function ChannelMentionRenderer({
             className='text-xs cursor-pointer bg-none border border-border px-2 py-1 rounded-md text-muted-foreground hover:bg-accent w-full'
             data-track-category='MESSAGE'
             data-track-name='VIEW_CHANNEL_MENTION'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ channelId })}
           >
             View Channel
@@ -499,7 +493,6 @@ export function GroupMentionRenderer({
         tabIndex={0}
         data-track-category='MESSAGE'
         data-track-name='VIEW_GROUP_MENTION'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ groupId })}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -535,7 +528,6 @@ function CollapsibleConversationHistory({
         className='see-more-btn text-primary hover:text-primary/80 font-medium text-sm underline cursor-pointer bg-none border-none p-0 mb-2'
         data-track-category='MESSAGE'
         data-track-name='TOGGLE_CONVERSATION_HISTORY'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ isExpanded })}
       >
         {isExpanded ? 'See less' : 'See more'}
@@ -628,7 +620,6 @@ function MessageCodeBlock({
               className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
               data-track-category='MESSAGE'
               data-track-name='TOGGLE_CODE_BLOCK'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
             >
               <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
@@ -646,7 +637,6 @@ function MessageCodeBlock({
         title='Copy code snippet'
         data-track-category='MESSAGE'
         data-track-name='COPY_CODE_SNIPPET'
-        data-track-kind='passive'
       >
         <span className='flex items-center justify-center p-1'>
           {copied ? (
@@ -939,7 +929,6 @@ const parseNode = (
             className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
             data-track-category='MESSAGE'
             data-track-name='ClickExternalLink'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ url, isExternal: external })}
           >
             {url}

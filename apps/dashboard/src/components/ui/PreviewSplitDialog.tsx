@@ -203,7 +203,6 @@ export const PreviewThreadPanel: React.FC<{
         onClick={onClose}
         data-track-category='FileViewer'
         data-track-name='CloseThreadPanel'
-        data-track-kind='passive'
         className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
         aria-label='Close'
       >

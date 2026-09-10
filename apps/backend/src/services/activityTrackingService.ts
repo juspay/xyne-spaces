@@ -1,6 +1,6 @@
 import { ActivityEventRepository, CreateActivityEventInput } from '@/database/repositories/activityEventRepository';
 import { logger } from '@/utils/logger';
-import { ActivityEventPayload, isInteractionKind } from '@xyne/shared';
+import { ActivityEventPayload } from '@xyne/shared';
 import { triggerNudgesFromActivity } from '@/services/nudges/nudgeTriggerService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
@@ -29,10 +29,6 @@ class ActivityTrackingService {
         category: payload.event_category,
         name: payload.event_name,
         trigger: payload.trigger_type,
-        // 'active' = persisted a write, 'passive' = read/navigation. 'unknown'
-        // means a current client could not classify it; rows from bundles
-        // predating the field have no property at all.
-        interactionKind: payload.interaction_kind ?? 'unknown',
         platform: payload.platform,
         url: payload.url,
         ...(resolved && { module: resolved.module, workspaceId: resolved.workspaceId }),
@@ -67,9 +63,6 @@ class ActivityTrackingService {
     const payload: ActivityEventPayload = {
       ...rawPayload,
       event_category: canonicalizeTrackingCategory(rawPayload.event_category),
-      // Classification is decided at the source (data-track-kind / the shared
-      // registry); anything else a client sends is treated as unclassified.
-      interaction_kind: isInteractionKind(rawPayload.interaction_kind) ? rawPayload.interaction_kind : null,
     };
 
     // Emitted before the write so a database failure cannot suppress the
@@ -86,7 +79,6 @@ class ActivityTrackingService {
         url: payload.url,
         triggerType: payload.trigger_type,
         contextMetadata: payload.context_metadata,
-        interactionKind: payload.interaction_kind ?? null,
         platform: payload.platform,
         timestamp: new Date(payload.timestamp),
       };

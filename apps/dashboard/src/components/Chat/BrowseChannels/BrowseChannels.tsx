@@ -141,7 +141,6 @@ const BrowseChannels = (): ReactElement => {
           aria-label='Back to chat'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='BACK_FROM_BROWSE_CHANNELS'
-          data-track-kind='passive'
         >
           <ArrowLeft size={20} />
         </button>
@@ -174,7 +173,6 @@ const BrowseChannels = (): ReactElement => {
               aria-label={`Sort by ${sortBy === 'alphabetical' ? 'alphabetical' : 'member count'}, click to change`}
               data-track-category='CHANNEL_SEARCH'
               data-track-name='TOGGLE_CHANNEL_SORT'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ sortBy })}
             >
               <ArrowUpDown size={12} className='text-muted-foreground' />
@@ -202,7 +200,6 @@ const BrowseChannels = (): ReactElement => {
                     aria-label={`${isPrivate ? 'Private channel' : 'Channel'}: ${channel.name}`}
                     data-track-category='CHANNEL_SEARCH'
                     data-track-name='SELECT_CHANNEL'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       channelId: channel.id,
                       channelName: channel.name,
@@ -257,7 +254,6 @@ const BrowseChannels = (): ReactElement => {
                   className='p-1 rounded hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed'
                   data-track-category='CHANNEL_SEARCH'
                   data-track-name='CHANNELS_PREV_PAGE'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ currentPage })}
                 >
                   <ChevronLeft size={16} className='text-muted-foreground' />
@@ -271,7 +267,6 @@ const BrowseChannels = (): ReactElement => {
                   className='p-1 rounded hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed'
                   data-track-category='CHANNEL_SEARCH'
                   data-track-name='CHANNELS_NEXT_PAGE'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ currentPage })}
                 >
                   <ChevronRight size={16} className='text-muted-foreground' />

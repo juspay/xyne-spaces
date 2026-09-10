@@ -83,7 +83,6 @@ const TabButton = ({
     onClick={onClick}
     data-track-category='Claw Agents'
     data-track-name={`Agent Detail Tab: ${label}`}
-    data-track-kind='passive'
     className={cn(
       'w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors',
       active

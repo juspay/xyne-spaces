@@ -85,7 +85,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
                   autoFocus
                   data-track-category='Claw Agents'
                   data-track-name='Create skill v2: name'
-                  data-track-kind='active'
                   className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
                 />
                 <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
@@ -105,7 +104,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
                     aria-label='Skill handle'
                     data-track-category='Claw Agents'
                     data-track-name='Create skill v2: handle'
-                    data-track-kind='active'
                     className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
                   />
                 </div>
@@ -130,7 +128,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
                 placeholder='What this skill covers and when agents should reach for it.'
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: description'
-                data-track-kind='active'
                 className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
             </div>
@@ -146,7 +143,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
                 placeholder='The markdown playbook an agent reads while working…'
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: content'
-                data-track-kind='active'
                 className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
               <span className='self-end text-xs leading-4 text-muted-foreground'>
@@ -172,7 +168,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
             className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: cancel'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -183,7 +178,6 @@ const ClawSkillCreateV2 = (): ReactElement => {
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name='Create skill v2: create'
-            data-track-kind='active'
           >
             Create
           </Button>

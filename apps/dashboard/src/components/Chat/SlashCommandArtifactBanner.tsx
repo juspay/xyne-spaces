@@ -120,7 +120,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
           aria-controls='slash-command-artifact-banner-popover'
           data-track-category='SLASH_COMMAND_ARTIFACT'
           data-track-name='TOGGLE_BANNER_POPOVER'
-          data-track-kind='passive'
         >
           <span className='absolute inset-1 animate-ping rounded-lg border border-orange-400 opacity-40 motion-reduce:animate-none' />
           <TriangleAlert className='relative size-5' strokeWidth={2} />
@@ -156,7 +155,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
               aria-label='Close slash command artifact alerts'
               data-track-category='SLASH_COMMAND_ARTIFACT'
               data-track-name='CLOSE_BANNER_POPOVER'
-              data-track-kind='passive'
             >
               <X className='size-3' />
             </button>
@@ -174,7 +172,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                 className='flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-orange-300 bg-white/70 px-3 text-xs font-semibold hover:bg-white dark:border-orange-800 dark:bg-orange-950 dark:hover:bg-orange-900'
                 data-track-category='SLASH_COMMAND_ARTIFACT'
                 data-track-name='VIEW_FROM_BANNER'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({
                   artifactKey: getSlashCommandArtifactDiagnosticKey(item.messageId),
                   channelKey: getSlashCommandArtifactDiagnosticKey(item.channelId),
@@ -203,7 +200,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                   className='flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg bg-orange-500 px-2.5 text-xs font-semibold text-white hover:bg-orange-600 disabled:cursor-default disabled:opacity-70'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='JOIN_CALL_FROM_BANNER'
-                  data-track-kind='active'
                   data-track-metadata={JSON.stringify({
                     artifactKey: getSlashCommandArtifactDiagnosticKey(item.messageId),
                     channelKey: getSlashCommandArtifactDiagnosticKey(item.channelId),
@@ -225,7 +221,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                   aria-label='Previous slash command artifact banner'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='PREVIOUS_BANNER'
-                  data-track-kind='passive'
                 >
                   <ChevronLeft className='size-3' />
                 </button>
@@ -239,7 +234,6 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                   aria-label='Next slash command artifact banner'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='NEXT_BANNER'
-                  data-track-kind='passive'
                 >
                   <ChevronRight className='size-3' />
                 </button>

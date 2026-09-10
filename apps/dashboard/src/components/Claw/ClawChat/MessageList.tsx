@@ -47,7 +47,6 @@ export function MessageList({ messages, onRetry }: MessageListProps): ReactEleme
           aria-label='Scroll to latest message'
           data-track-category='CLAW_CHAT'
           data-track-name='SCROLL_TO_BOTTOM'
-          data-track-kind='passive'
           className={cn(
             'absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border',
             'bg-popover text-popover-foreground shadow-sm p-1.5 hover:bg-accent transition-colors',

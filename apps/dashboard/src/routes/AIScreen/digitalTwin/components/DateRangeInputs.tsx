@@ -24,7 +24,6 @@ export const DateRangeInputs = ({
       onChange={e => range.setCustomFrom(e.target.value)}
       data-track-category='Claw Agents'
       data-track-name={`${trackName} from date`}
-      data-track-kind='passive'
       className={INPUT_CLASS}
     />
     <span className='shrink-0 text-xs text-muted-foreground'>→</span>
@@ -36,7 +35,6 @@ export const DateRangeInputs = ({
       onChange={e => range.setCustomTo(e.target.value)}
       data-track-category='Claw Agents'
       data-track-name={`${trackName} to date`}
-      data-track-kind='passive'
       className={INPUT_CLASS}
     />
     {showDayCount && range.customDays > 0 && (

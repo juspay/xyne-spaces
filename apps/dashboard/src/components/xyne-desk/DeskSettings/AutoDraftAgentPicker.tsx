@@ -56,7 +56,6 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
         className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
         data-track-category='DeskSettings'
         data-track-name='SelectAutoDraftAgent'
-        data-track-kind='passive'
       >
         <SelectValue placeholder={`Default (${defaultLabel})`} />
       </SelectTrigger>
@@ -87,7 +86,6 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
           className='rounded-[8px] text-desk-accent'
           data-track-category='DeskSettings'
           data-track-name='AddClawAgent'
-          data-track-kind='active'
         >
           <span className='flex items-center gap-2'>
             <Plus size={14} />

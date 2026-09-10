@@ -161,7 +161,6 @@ export const ConversationLabels = ({
         className='w-full bg-transparent border-b border-border text-sm px-2 py-1.5 outline-none mb-1'
         data-track-category='Support'
         data-track-name='LabelSearchInput'
-        data-track-kind='passive'
       />
       {filtered.map(label => {
         const selected = appliedNames.has(label.name.toLowerCase());
@@ -175,7 +174,6 @@ export const ConversationLabels = ({
             className='flex items-center justify-between w-full px-2 py-1.5 text-sm rounded text-left hover:bg-muted text-foreground'
             data-track-category='Support'
             data-track-name='ToggleConversationLabel'
-            data-track-kind='active'
           >
             <span className='flex items-center gap-2 min-w-0'>
               <span className='size-2.5 rounded-full shrink-0' style={{ backgroundColor: color }} />
@@ -197,7 +195,6 @@ export const ConversationLabels = ({
             className='flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded font-medium text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='CreateConversationLabel'
-            data-track-kind='active'
           >
             <Plus className='size-4' />
             Create &ldquo;{search.trim()}&rdquo;
@@ -232,7 +229,6 @@ export const ConversationLabels = ({
                 className='hover:bg-muted rounded-full p-0.5'
                 data-track-category='Support'
                 data-track-name='RemoveConversationLabel'
-                data-track-kind='active'
               >
                 <X className='size-2.5' />
               </button>
@@ -255,7 +251,6 @@ export const ConversationLabels = ({
           title='Label'
           data-track-category='Support'
           data-track-name='OpenLabelPicker'
-          data-track-kind='passive'
         >
           <TagIcon size={16} />
         </button>

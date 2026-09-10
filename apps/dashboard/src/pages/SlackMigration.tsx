@@ -574,7 +574,6 @@ function GuideRail({
                     rel='noreferrer'
                     data-track-category='SLACK_MIGRATION'
                     data-track-name='OPEN_SLACK_APP_INSTALL_PAGE'
-                    data-track-kind='passive'
                     className='inline-flex items-center gap-0.5 font-medium text-primary hover:underline'
                   >
                     Slack app install page
@@ -833,7 +832,6 @@ export default function SlackMigration(): React.JSX.Element {
                       onClick={() => setTab(k)}
                       data-track-category='SLACK_MIGRATION'
                       data-track-name={`TAB_${k.toUpperCase()}`}
-                      data-track-kind='passive'
                       className={cn(
                         'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                         tab === k
@@ -887,7 +885,6 @@ export default function SlackMigration(): React.JSX.Element {
                           }
                           data-track-category='SLACK_MIGRATION'
                           data-track-name='SUBMIT_DM_MIGRATION'
-                          data-track-kind='active'
                         >
                           Migrate my DMs
                         </Button>
@@ -915,7 +912,6 @@ export default function SlackMigration(): React.JSX.Element {
                           onChange={e => setChannel({ ...channel, slackChannelId: e.target.value })}
                           data-track-category='SLACK_MIGRATION'
                           data-track-name='SLACK_CHANNEL_ID_INPUT'
-                          data-track-kind='passive'
                           className='font-mono'
                         />
                       </div>
@@ -933,7 +929,6 @@ export default function SlackMigration(): React.JSX.Element {
                           onChange={e => setChannel({ ...channel, xyneChannelId: e.target.value })}
                           data-track-category='SLACK_MIGRATION'
                           data-track-name='XYNE_CHANNEL_ID_INPUT'
-                          data-track-kind='passive'
                           className='font-mono'
                         />
                       </div>
@@ -962,7 +957,6 @@ export default function SlackMigration(): React.JSX.Element {
                       onChange={c => setChannel({ ...channel, announceInSlack: c })}
                       data-track-category='SLACK_MIGRATION'
                       data-track-name='ANNOUNCE_IN_SLACK_TOGGLE'
-                      data-track-kind='passive'
                       label='Post a “Migrated to Xyne Spaces” notice in the Slack channel when it’s done'
                       size='md'
                     />
@@ -980,7 +974,6 @@ export default function SlackMigration(): React.JSX.Element {
                         loading={busy}
                         data-track-category='SLACK_MIGRATION'
                         data-track-name='SUBMIT_CHANNEL_MIGRATION'
-                        data-track-kind='active'
                         trackId='slack_migration_submit_channel'
                         onClick={() =>
                           void run(() => slackMigrationApi.submitChannel(channel)).then(ok => {
@@ -1029,7 +1022,6 @@ export default function SlackMigration(): React.JSX.Element {
                       disabled={exporting}
                       data-track-category='SLACK_MIGRATION'
                       data-track-name='EXPORT_HISTORY'
-                      data-track-kind='passive'
                       className='text-xs font-medium text-primary hover:underline disabled:opacity-50'
                     >
                       {exporting ? 'Exporting…' : 'Export history'}
@@ -1097,7 +1089,6 @@ function IngestionControl({
               onClick={() => void run(() => slackMigrationApi.stopIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='STOP_INGESTION'
-              data-track-kind='active'
             >
               <Square className='size-3.5' />
               Stop ingestion
@@ -1110,7 +1101,6 @@ function IngestionControl({
               onClick={() => void run(() => slackMigrationApi.startIngestion())}
               data-track-category='SLACK_MIGRATION'
               data-track-name='START_INGESTION'
-              data-track-kind='active'
             >
               <Play className='size-3.5' />
               Start ingestion
@@ -1156,7 +1146,6 @@ function OwnerActions({
           onClick={() => act('resume', () => slackMigrationApi.resumeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_OWN_JOB'
-          data-track-kind='active'
         >
           <RotateCcw className='size-3.5' />
           Resume
@@ -1172,7 +1161,6 @@ function OwnerActions({
           onClick={() => act('remove', () => slackMigrationApi.removeMine(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='DELETE_OWN_JOB'
-          data-track-kind='active'
           className='text-destructive hover:text-destructive'
         >
           <Trash2 className='size-3.5' />
@@ -1212,7 +1200,6 @@ function AdminActions({
           onClick={() => act('refresh', () => slackMigrationApi.refresh(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='REFRESH_JOB'
-          data-track-kind='passive'
           title='Collect messages sent since collection before ingesting'
         >
           <RotateCcw className='size-3.5' />
@@ -1228,7 +1215,6 @@ function AdminActions({
           onClick={() => act('approve', () => slackMigrationApi.approve(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='APPROVE_JOB'
-          data-track-kind='active'
         >
           <Check className='size-3.5' />
           Approve
@@ -1244,7 +1230,6 @@ function AdminActions({
           onClick={() => act('stop', () => slackMigrationApi.stop(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='STOP_JOB'
-          data-track-kind='active'
         >
           <Square className='size-3.5' />
           Stop
@@ -1260,7 +1245,6 @@ function AdminActions({
           onClick={() => act('resume', () => slackMigrationApi.resume(job.id))}
           data-track-category='SLACK_MIGRATION'
           data-track-name='RESUME_JOB'
-          data-track-kind='active'
         >
           <RotateCcw className='size-3.5' />
           Resume
@@ -1275,7 +1259,6 @@ function AdminActions({
         onClick={() => act('remove', () => slackMigrationApi.remove(job.id))}
         data-track-category='SLACK_MIGRATION'
         data-track-name='DELETE_JOB'
-        data-track-kind='active'
         className='text-destructive hover:text-destructive'
       >
         <Trash2 className='size-3.5' />

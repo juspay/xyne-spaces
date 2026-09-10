@@ -138,7 +138,6 @@ export function SummaryTemplateMenu({
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackCategory}
           data-track-name='regenerate_selected_summary_template'
-          data-track-kind='active'
         >
           <Refresh strokeWidth={2.5} className={cn('size-4', isRegenerating && 'animate-spin')} />
         </button>
@@ -187,7 +186,6 @@ export function SummaryTemplateMenu({
                   )}
                   data-track-category={trackCategory}
                   data-track-name='select_summary_template'
-                  data-track-kind='active'
                 >
                   <span
                     className={cn(
@@ -222,7 +220,6 @@ export function SummaryTemplateMenu({
         )}
         data-track-category={trackCategory}
         data-track-name='open_all_summary_templates'
-        data-track-kind='passive'
       >
         <span
           className={cn(
@@ -249,7 +246,6 @@ export function SummaryTemplateMenu({
         )}
         data-track-category={trackCategory}
         data-track-name='new_summary_template'
-        data-track-kind='passive'
       >
         <span
           className={cn(

@@ -46,7 +46,6 @@ export const FilterPills = <T extends string>({
           onClick={() => onTabChange(tab.value)}
           data-track-category='FILTER_PILLS'
           data-track-name='CHANGE_FILTER_TAB'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ tab: tab.value })}
           className={cn(
             'flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-base transition-colors',

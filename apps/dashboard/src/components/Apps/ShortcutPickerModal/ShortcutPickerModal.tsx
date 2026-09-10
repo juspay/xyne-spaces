@@ -86,7 +86,6 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
       aria-label='Close shortcuts modal'
       data-track-category='shortcut-picker'
       data-track-name='close-modal-backdrop'
-      data-track-kind='passive'
       onClick={e => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -114,7 +113,6 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
             onClick={onClose}
             data-track-category='shortcut-picker'
             data-track-name='close-modal-button'
-            data-track-kind='passive'
           >
             <X className='w-4 h-4' />
           </Button>
@@ -140,7 +138,6 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
               onChange={e => setSearch(e.target.value)}
               data-track-category='shortcut-picker'
               data-track-name='search-shortcuts'
-              data-track-kind='passive'
               className='w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
             />
           </div>
@@ -165,7 +162,6 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                     onClick={() => void handleSelect(shortcut)}
                     data-track-category='shortcut-picker'
                     data-track-name='run-shortcut'
-                    data-track-kind='active'
                     className='w-full h-auto flex items-start justify-start gap-3 px-2 py-2 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50'
                   >
                     <div className='flex-shrink-0 w-7 h-7 rounded bg-primary/10 flex items-center justify-center mt-0.5'>

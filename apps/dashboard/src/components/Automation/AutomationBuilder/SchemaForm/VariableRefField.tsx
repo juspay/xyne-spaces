@@ -34,7 +34,6 @@ export function VariableRefField({
         placeholder={placeholder}
         data-track-category='automation-builder'
         data-track-name='VariableRefFieldInput'
-        data-track-kind='passive'
         className='h-9 w-full flex-1 rounded-md border border-input bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40'
       />
       <UseVariableButton

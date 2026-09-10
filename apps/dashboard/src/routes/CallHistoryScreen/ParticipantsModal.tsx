@@ -62,7 +62,6 @@ function CallParticipantsContent({
         className='mt-4 w-full'
         data-track-category='CALLS'
         data-track-name='CloseParticipantsModal'
-        data-track-kind='passive'
       >
         Close
       </Button>

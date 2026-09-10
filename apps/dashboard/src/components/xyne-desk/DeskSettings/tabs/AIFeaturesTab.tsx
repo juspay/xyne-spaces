@@ -274,7 +274,6 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 }
                 data-track-category='DeskSettings'
                 data-track-name='SelectDeskReportRangeLastDay'
-                data-track-kind='passive'
               >
                 Last 1 day
               </button>
@@ -289,7 +288,6 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
                 }
                 data-track-category='DeskSettings'
                 data-track-name='SelectDeskReportRangeLastWeek'
-                data-track-kind='passive'
               >
                 Last 1 week
               </button>
@@ -365,7 +363,6 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
               }}
               data-track-category='DeskSettings'
               data-track-name='ConfigurePriority'
-              data-track-kind='passive'
             >
               <Pencil size={14} />
               Configure
@@ -399,7 +396,6 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
               }}
               data-track-category='DeskSettings'
               data-track-name='ConfigureClassification'
-              data-track-kind='passive'
             >
               <Pencil size={14} />
               Configure
@@ -624,7 +620,6 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
                 disabled={!canManage}
                 data-track-category='DeskSettings'
                 data-track-name='AiSyncToggleClassification'
-                data-track-kind='active'
               />
             </span>
           </MaybeTooltip>
@@ -653,7 +648,6 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
                 disabled={!canManage}
                 data-track-category='DeskSettings'
                 data-track-name='AiSyncTogglePriority'
-                data-track-kind='active'
               />
             </span>
           </MaybeTooltip>
@@ -677,7 +671,6 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
                 disabled={!canManage}
                 data-track-category='DeskSettings'
                 data-track-name='AiSyncToggleAutoDraft'
-                data-track-kind='active'
               />
             </span>
           </MaybeTooltip>
@@ -696,7 +689,6 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
             disabled={!canManage || syncLoading || inCooldown || !anySelected}
             data-track-category='DeskSettings'
             data-track-name='RunAiSync'
-            data-track-kind='active'
           >
             {syncLoading ? <Loader2 size={14} className='animate-spin' /> : <Sparkles size={14} />}
             {inCooldown ? 'AI Sync ran recently — wait a few minutes' : 'Run AI Sync'}

@@ -135,7 +135,6 @@ export function SubagentContributorsTabV2({
               aria-expanded={searchOpen}
               data-track-category='Claw Agents'
               data-track-name='Subagent detail v2: toggle contributor search'
-              data-track-kind='passive'
               className={ICON_BUTTON}
             >
               <SearchDefault className='size-4' aria-hidden />
@@ -147,7 +146,6 @@ export function SubagentContributorsTabV2({
                 aria-label='Add contributors'
                 data-track-category='Claw Agents'
                 data-track-name='Subagent detail v2: open add contributor'
-                data-track-kind='passive'
                 className={ICON_BUTTON}
               >
                 <PlusDefault className='size-4' aria-hidden />
@@ -174,7 +172,6 @@ export function SubagentContributorsTabV2({
                 aria-label='Filter contributors'
                 data-track-category='Claw Agents'
                 data-track-name='Subagent detail v2: filter contributors'
-                data-track-kind='passive'
                 className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
             </div>
@@ -211,7 +208,6 @@ export function SubagentContributorsTabV2({
                           title={`Remove ${row.name}`}
                           data-track-category='Claw Agents'
                           data-track-name='Subagent detail v2: remove contributor'
-                          data-track-kind='active'
                           className={ICON_BUTTON}
                         >
                           <MultipleCrossCancelDefault className='size-4' aria-hidden />

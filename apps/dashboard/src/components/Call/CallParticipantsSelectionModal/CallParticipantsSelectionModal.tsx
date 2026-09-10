@@ -227,7 +227,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             onClick={handleClose}
             data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
             data-track-name='CLOSE_PARTICIPANTS_MODAL'
-            data-track-kind='passive'
           >
             <X className='size-4' />
           </Button>
@@ -247,7 +246,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                   }}
                   data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
                   data-track-name='ClearAllCallParticipants'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({
                     count: selectedUsers.length,
                     channelId,
@@ -287,7 +285,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                       className='text-muted-foreground hover:text-muted-foreground flex-shrink-0'
                       data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
                       data-track-name='RemoveCallParticipant'
-                      data-track-kind='active'
                       data-track-metadata={JSON.stringify({
                         userId: user.id,
                         channelId,
@@ -325,7 +322,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               onClick={handleClose}
               data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
               data-track-name='CANCEL_PARTICIPANTS_SELECTION'
-              data-track-kind='passive'
             >
               Cancel
             </Button>
@@ -334,7 +330,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               onClick={handleSubmit}
               data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
               data-track-name='CONFIRM_PARTICIPANTS_SELECTION'
-              data-track-kind='active'
               disabled={selectedParticipants.length === 0}
               className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >

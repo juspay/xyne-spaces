@@ -97,7 +97,6 @@ function CitationList({ citations }: CitationListProps): ReactElement {
         type='button'
         data-track-category='XyneAI'
         data-track-name='toggle-citations-expand'
-        data-track-kind='passive'
       >
         <span>Citations ({citations.length})</span>
         {hasOverflow && (
@@ -121,7 +120,6 @@ function CitationList({ citations }: CitationListProps): ReactElement {
                   onClick={e => e.stopPropagation()}
                   data-track-category='XyneAI'
                   data-track-name='open-citation-link'
-                  data-track-kind='passive'
                 >
                   {label}
                 </Link>
@@ -179,7 +177,6 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
         type='button'
         data-track-category='XyneAI'
         data-track-name='toggle-tool-invocation'
-        data-track-kind='active'
       >
         <ChevronRight
           size={14}

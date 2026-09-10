@@ -74,7 +74,6 @@ function CanvasMathBlock(props: {
                   aria-label='Edit source'
                   data-track-category='CANVAS'
                   data-track-name='Edit_Math_Block'
-                  data-track-kind='active'
                 >
                   <Pencil className='h-3 w-3' />
                 </button>
@@ -86,7 +85,6 @@ function CanvasMathBlock(props: {
                   aria-label='Delete'
                   data-track-category='CANVAS'
                   data-track-name='Delete_Math_Block'
-                  data-track-kind='active'
                 >
                   <Trash2 className='h-3 w-3' />
                 </button>
@@ -117,7 +115,6 @@ function CanvasMathBlock(props: {
             aria-label='Done editing'
             data-track-category='CANVAS'
             data-track-name='Done_Editing_Math_Block'
-            data-track-kind='passive'
           >
             <Check className='h-3 w-3' />
           </button>

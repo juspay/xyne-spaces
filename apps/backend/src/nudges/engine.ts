@@ -256,7 +256,6 @@ export class NudgeEvaluationEngine {
       url: event.url,
       triggerType: event.triggerType,
       contextMetadata: (event.contextMetadata ?? null) as UserActivityEvent['contextMetadata'],
-      interactionKind: null,
       platform: event.platform as Platform,
       timestamp: event.timestamp,
     };

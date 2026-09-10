@@ -55,7 +55,6 @@ export const AiSidePanel = ({
   const picker = (
     <DataSourceChip
       trackName='Component_Editor_Data_Source_Chip'
-      trackKind='passive'
       dataSourceId={dataSourceId || null}
       setDataSourceId={setDataSourceId}
       dataSources={dataSources}

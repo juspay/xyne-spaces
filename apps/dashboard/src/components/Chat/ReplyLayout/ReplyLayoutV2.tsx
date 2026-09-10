@@ -91,7 +91,6 @@ const ReplyLayoutV2: React.FC<{
         }`}
         data-track-category='MESSAGE'
         data-track-name='OPEN_THREAD_FROM_REPLY_LAYOUT'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ replyCount: replies?.replyCount, messageId })}
       >
         {/* Replier Avatars */}

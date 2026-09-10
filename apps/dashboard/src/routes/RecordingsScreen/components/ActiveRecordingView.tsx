@@ -92,7 +92,6 @@ function TranscriptSearchBar({
             className='flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/70 outline-none'
             data-track-category='RecordingsScreen'
             data-track-name='transcript_search_input'
-            data-track-kind='passive'
           />
           {query && matchCount > 0 && (
             <span className='text-xs text-muted-foreground tabular-nums whitespace-nowrap'>
@@ -108,7 +107,6 @@ function TranscriptSearchBar({
               aria-label='Previous match'
               data-track-category='RecordingsScreen'
               data-track-name='transcript_search_previous'
-              data-track-kind='passive'
             >
               <ChevronUp className='size-4' strokeWidth={1.5} />
             </button>
@@ -120,7 +118,6 @@ function TranscriptSearchBar({
               aria-label='Next match'
               data-track-category='RecordingsScreen'
               data-track-name='transcript_search_next'
-              data-track-kind='passive'
             >
               <ChevronDown className='size-4' strokeWidth={1.5} />
             </button>
@@ -132,7 +129,6 @@ function TranscriptSearchBar({
             aria-label='Close search'
             data-track-category='RecordingsScreen'
             data-track-name='transcript_search_close'
-            data-track-kind='passive'
           >
             <X className='size-4' strokeWidth={1.5} />
           </button>
@@ -149,7 +145,6 @@ function TranscriptSearchBar({
           className='inline-flex items-center justify-center gap-1.5 h-8 px-2.5 border border-border bg-background rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
           data-track-category='RecordingsScreen'
           data-track-name='find_in_transcript'
-          data-track-kind='passive'
         >
           <Search className='size-3.5' strokeWidth={1.5} />
           <span>Find</span>

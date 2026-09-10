@@ -89,7 +89,6 @@ export const IconPicker = ({
           )}
           data-track-category='AskAI'
           data-track-name='ArtifactAppIconPickerOpen'
-          data-track-kind='passive'
         >
           <AppIcon name={value} size={size} aria-hidden='true' />
         </button>
@@ -111,7 +110,6 @@ export const IconPicker = ({
             className='-mr-1 shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='ArtifactAppIconPickerClose'
-            data-track-kind='passive'
           >
             <X className='h-4 w-4' aria-hidden='true' />
           </button>
@@ -134,7 +132,6 @@ export const IconPicker = ({
                 className='flex shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
                 data-track-category='AskAI'
                 data-track-name='ArtifactAppIconClear'
-                data-track-kind='passive'
               >
                 <X className='h-3.5 w-3.5' aria-hidden='true' />
                 Remove
@@ -167,7 +164,6 @@ export const IconPicker = ({
                   )}
                   data-track-category='AskAI'
                   data-track-name='ArtifactAppIconPick'
-                  data-track-kind='passive'
                 >
                   <AppIcon name={m.name} size={20} aria-hidden='true' />
                 </button>

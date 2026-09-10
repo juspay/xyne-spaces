@@ -96,7 +96,6 @@ export function FlowStepConfigPanel({
           onClick={onClose}
           data-track-category='flow_plan_editor'
           data-track-name='close_gate_config'
-          data-track-kind='passive'
           className='p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors'
         >
           <X size={13} />
@@ -126,7 +125,6 @@ export function FlowStepConfigPanel({
               onClick={() => setDraftGateType('confirmation')}
               data-track-category='flow_plan_editor'
               data-track-name='gate_type_confirmation'
-              data-track-kind='passive'
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${
                 draftGate.type === 'confirmation'
                   ? 'bg-[#6276be] border-[#6276be] text-white'
@@ -141,7 +139,6 @@ export function FlowStepConfigPanel({
               onClick={() => setDraftGateType('form')}
               data-track-category='flow_plan_editor'
               data-track-name='gate_type_form'
-              data-track-kind='passive'
               className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${
                 draftGate.type === 'form'
                   ? 'bg-[#6276be] border-[#6276be] text-white'
@@ -167,7 +164,6 @@ export function FlowStepConfigPanel({
             rows={3}
             data-track-category='flow_plan_editor'
             data-track-name='input_confirmation_prompt'
-            data-track-kind='passive'
             className='min-h-[72px] text-[12px]'
           />
         </div>
@@ -217,7 +213,6 @@ export function FlowStepConfigPanel({
                     onClick={() => void handleOpenAttachedForm()}
                     data-track-category='flow_plan_editor'
                     data-track-name='edit_gate_form'
-                    data-track-kind='active'
                     className='p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                   >
                     <Settings2 size={12} />
@@ -228,7 +223,6 @@ export function FlowStepConfigPanel({
                     onClick={() => setDraftFormGate({ type: 'form', formId: '' })}
                     data-track-category='flow_plan_editor'
                     data-track-name='remove_gate_form'
-                    data-track-kind='active'
                     className='p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
                   >
                     <X size={11} />
@@ -288,7 +282,6 @@ export function FlowStepConfigPanel({
           onClick={onClose}
           data-track-category='flow_plan_editor'
           data-track-name='cancel_gate_config'
-          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -299,7 +292,6 @@ export function FlowStepConfigPanel({
           onClick={handleSavePanel}
           data-track-category='flow_plan_editor'
           data-track-name='save_gate_config'
-          data-track-kind='active'
         >
           Save
         </Button>

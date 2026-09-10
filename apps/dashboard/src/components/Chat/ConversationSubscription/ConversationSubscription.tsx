@@ -148,7 +148,6 @@ export const ConversationSubscription = React.forwardRef<
           aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
           data-track-category='CONVERSATION_SUBSCRIPTION'
           data-track-name='TOGGLE_SUBSCRIPTION_ICON'
-          data-track-kind='active'
         >
           {isSubscribed ? (
             <NotificationBellOn size={16} className='text-primary' />
@@ -171,7 +170,6 @@ export const ConversationSubscription = React.forwardRef<
           aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
           data-track-category='CONVERSATION_SUBSCRIPTION'
           data-track-name='TOGGLE_SUBSCRIPTION_DROPDOWN'
-          data-track-kind='passive'
         >
           <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
             {showBellOn ? <NotificationBellOn size={16} /> : <NotificationBellOff size={16} />}
@@ -195,7 +193,6 @@ export const ConversationSubscription = React.forwardRef<
         aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
         data-track-category='CONVERSATION_SUBSCRIPTION'
         data-track-name='TOGGLE_SUBSCRIPTION_BUTTON'
-        data-track-kind='active'
       >
         {showBellOn ? (
           <NotificationBellOn

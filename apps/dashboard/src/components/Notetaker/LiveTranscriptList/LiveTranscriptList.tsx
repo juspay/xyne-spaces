@@ -171,7 +171,6 @@ export const LiveTranscriptList = ({
             aria-label='Search transcript'
             data-track-category={trackCategory}
             data-track-name='transcript_search_input'
-            data-track-kind='passive'
           />
           {search.query && (
             <>
@@ -190,7 +189,6 @@ export const LiveTranscriptList = ({
                 aria-label='Previous match'
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_previous'
-                data-track-kind='passive'
               >
                 <ChevronUp size={14} />
               </Button>
@@ -204,7 +202,6 @@ export const LiveTranscriptList = ({
                 aria-label='Next match'
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_next'
-                data-track-kind='passive'
               >
                 <ChevronDown size={14} />
               </Button>
@@ -217,7 +214,6 @@ export const LiveTranscriptList = ({
                 aria-label='Clear transcript search'
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_clear'
-                data-track-kind='passive'
               >
                 <MultipleCrossCancelDefault className='size-3' />
               </Button>
@@ -253,7 +249,6 @@ export const LiveTranscriptList = ({
                   className='pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-foreground px-3 text-xs font-medium text-background shadow-lg backdrop-blur-sm outline-none transition-colors hover:text-background'
                   data-track-category={trackCategory}
                   data-track-name='return_to_current'
-                  data-track-kind='passive'
                 >
                   Return to current
                   <ChevronDown size={13} strokeWidth={2.5} />

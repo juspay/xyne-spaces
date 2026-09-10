@@ -579,7 +579,6 @@ const AuthScreen = (): ReactElement | null => {
         disabled={isLoading}
         data-track-category='Auth'
         data-track-name='GoogleSignIn'
-        data-track-kind='passive'
       >
         <>
           <GoogleLogo />
@@ -664,7 +663,6 @@ const AuthScreen = (): ReactElement | null => {
                         className='flex items-center gap-3 p-4 border border-border rounded-lg hover:border-blue-500 hover:bg-accent transition-all text-left'
                         data-track-category='Auth'
                         data-track-name='SelectWorkspace'
-                        data-track-kind='passive'
                         data-track-metadata={JSON.stringify({ workspaceId: workspace.id })}
                       >
                         <div className='w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center'>
@@ -705,7 +703,6 @@ const AuthScreen = (): ReactElement | null => {
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
-                    data-track-kind='passive'
                   >
                     Try with a different account
                   </button>
@@ -759,7 +756,6 @@ const AuthScreen = (): ReactElement | null => {
                               className='text-xs font-medium px-3 py-1.5 rounded-md bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
                               data-track-category='Auth'
                               data-track-name='RequestEnterpriseWorkspaceAccess'
-                              data-track-kind='active'
                               data-track-metadata={JSON.stringify({ workspaceId: ws.id })}
                             >
                               {isRequestingEnterpriseJoin ? '...' : 'Request to join'}
@@ -789,7 +785,6 @@ const AuthScreen = (): ReactElement | null => {
                         className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                         data-track-category='Auth'
                         data-track-name='NewEnterpriseWorkspaceNameInput'
-                        data-track-kind='passive'
                       />
                       <button
                         type='button'
@@ -802,7 +797,6 @@ const AuthScreen = (): ReactElement | null => {
                         className='px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
                         data-track-category='Auth'
                         data-track-name='CreateEnterpriseWorkspace'
-                        data-track-kind='active'
                       >
                         {isCreatingEnterpriseWorkspace ? 'Creating...' : 'Create'}
                       </button>
@@ -815,7 +809,6 @@ const AuthScreen = (): ReactElement | null => {
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
-                    data-track-kind='passive'
                   >
                     Try with a different account
                   </button>
@@ -838,7 +831,6 @@ const AuthScreen = (): ReactElement | null => {
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
-                    data-track-kind='passive'
                   >
                     Try with a work email
                   </button>
@@ -895,7 +887,6 @@ const AuthScreen = (): ReactElement | null => {
                         required
                         data-track-category='Auth'
                         data-track-name='OrgNameInput'
-                        data-track-kind='passive'
                       />
                       {isOrganizationNameTakenError && (
                         <p className='text-xs text-amber-600 mt-1'>
@@ -921,7 +912,6 @@ const AuthScreen = (): ReactElement | null => {
                         required
                         data-track-category='Auth'
                         data-track-name='WorkspaceNameInput'
-                        data-track-kind='passive'
                       />
                     </div>
                   </div>
@@ -932,7 +922,6 @@ const AuthScreen = (): ReactElement | null => {
                     className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                     data-track-category='Auth'
                     data-track-name='CreateOrganization'
-                    data-track-kind='active'
                   >
                     {isLoading ? 'Creating...' : 'Create Organization'}
                   </button>
@@ -944,7 +933,6 @@ const AuthScreen = (): ReactElement | null => {
                       className='text-sm text-muted-foreground hover:text-foreground'
                       data-track-category='Auth'
                       data-track-name='BackToWorkspaceSelection'
-                      data-track-kind='passive'
                     >
                       Back to workspace selection
                     </button>
@@ -964,7 +952,6 @@ const AuthScreen = (): ReactElement | null => {
                           className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                           data-track-category='Auth'
                           data-track-name='GoogleSignIn'
-                          data-track-kind='passive'
                         >
                           <span
                             data-button-left-slot='true'
@@ -986,7 +973,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                             data-track-category='Auth'
                             data-track-name='MicrosoftSignIn'
-                            data-track-kind='passive'
                           >
                             <span
                               data-button-left-slot='true'
@@ -1019,7 +1005,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                             data-track-category='Auth'
                             data-track-name='EmailSignInToggle'
-                            data-track-kind='passive'
                           >
                             <span className='text-sm font-semibold text-center text-white'>
                               Sign in with Email
@@ -1034,7 +1019,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='text-xs text-muted-foreground hover:text-foreground text-center'
                             data-track-category='Auth'
                             data-track-name='EmailRegisterToggle'
-                            data-track-kind='passive'
                           >
                             Don&apos;t have an account? Sign up
                           </button>
@@ -1074,7 +1058,6 @@ const AuthScreen = (): ReactElement | null => {
                                 }`}
                                 data-track-category='Auth'
                                 data-track-name='RegisterNameInput'
-                                data-track-kind='passive'
                               />
                               {regNameError && (
                                 <p className='text-xs text-red-600'>{regNameError}</p>
@@ -1096,7 +1079,6 @@ const AuthScreen = (): ReactElement | null => {
                                 }`}
                                 data-track-category='Auth'
                                 data-track-name='RegisterEmailInput'
-                                data-track-kind='passive'
                               />
                               {regEmailError && (
                                 <p className='text-xs text-red-600'>{regEmailError}</p>
@@ -1122,7 +1104,6 @@ const AuthScreen = (): ReactElement | null => {
                                 }`}
                                 data-track-category='Auth'
                                 data-track-name='RegisterPasswordInput'
-                                data-track-kind='passive'
                               />
                               {regPasswordError && (
                                 <p className='text-xs text-red-600'>{regPasswordError}</p>
@@ -1144,7 +1125,6 @@ const AuthScreen = (): ReactElement | null => {
                                 }`}
                                 data-track-category='Auth'
                                 data-track-name='RegisterConfirmPasswordInput'
-                                data-track-kind='passive'
                               />
                               {regConfirmPasswordError && (
                                 <p className='text-xs text-red-600'>{regConfirmPasswordError}</p>
@@ -1156,7 +1136,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
                                 data-track-category='Auth'
                                 data-track-name='RegisterSubmit'
-                                data-track-kind='active'
                               >
                                 {regLoading ? 'Sending...' : 'Send Verification Code'}
                               </button>
@@ -1190,7 +1169,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
                                 data-track-category='Auth'
                                 data-track-name='RegisterVerifyCodeInput'
-                                data-track-kind='passive'
                               />
                               {regError && <p className='text-xs text-red-600'>{regError}</p>}
                               {regMessage && <p className='text-xs text-green-600'>{regMessage}</p>}
@@ -1200,7 +1178,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
                                 data-track-category='Auth'
                                 data-track-name='RegisterVerifySubmit'
-                                data-track-kind='passive'
                               >
                                 {regLoading ? 'Verifying...' : 'Verify & Continue'}
                               </button>
@@ -1213,7 +1190,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='text-xs text-muted-foreground hover:text-foreground text-center'
                                 data-track-category='Auth'
                                 data-track-name='RegisterResendCode'
-                                data-track-kind='passive'
                               >
                                 Resend code
                               </button>
@@ -1229,7 +1205,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='text-xs text-muted-foreground hover:text-foreground text-center'
                             data-track-category='Auth'
                             data-track-name='BackToSignIn'
-                            data-track-kind='passive'
                           >
                             Back to sign in
                           </button>
@@ -1256,7 +1231,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ForgotPasswordEmailInput'
-                                data-track-kind='passive'
                               />
                               {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
                               {fpMessage && <p className='text-xs text-green-600'>{fpMessage}</p>}
@@ -1266,7 +1240,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
                                 data-track-category='Auth'
                                 data-track-name='SendResetCode'
-                                data-track-kind='active'
                               >
                                 {fpLoading ? 'Sending...' : 'Send Code'}
                               </button>
@@ -1298,7 +1271,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
                                 data-track-category='Auth'
                                 data-track-name='ResetCodeInput'
-                                data-track-kind='passive'
                               />
                               <input
                                 type='password'
@@ -1309,7 +1281,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ResetNewPasswordInput'
-                                data-track-kind='passive'
                               />
                               <input
                                 type='password'
@@ -1320,7 +1291,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ResetConfirmPasswordInput'
-                                data-track-kind='passive'
                               />
                               {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
                               <button
@@ -1329,7 +1299,6 @@ const AuthScreen = (): ReactElement | null => {
                                 className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ResetPassword'
-                                data-track-kind='active'
                               >
                                 {fpLoading ? 'Resetting...' : 'Reset Password'}
                               </button>
@@ -1362,7 +1331,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='text-xs text-muted-foreground hover:text-foreground text-center'
                             data-track-category='Auth'
                             data-track-name='BackToSignIn'
-                            data-track-kind='passive'
                           >
                             Back to sign in
                           </button>
@@ -1383,7 +1351,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
                             data-track-name='EmailInput'
-                            data-track-kind='passive'
                           />
                           <input
                             type='password'
@@ -1394,7 +1361,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
                             data-track-name='PasswordInput'
-                            data-track-kind='passive'
                           />
                           <button
                             type='button'
@@ -1405,7 +1371,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='text-xs text-muted-foreground hover:text-foreground text-right self-end'
                             data-track-category='Auth'
                             data-track-name='ForgotPassword'
-                            data-track-kind='passive'
                           >
                             Forgot password?
                           </button>
@@ -1415,7 +1380,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
                             data-track-category='Auth'
                             data-track-name='EmailSignInSubmit'
-                            data-track-kind='passive'
                           >
                             {isLoading ? 'Please wait...' : 'Sign In'}
                           </button>
@@ -1429,7 +1393,6 @@ const AuthScreen = (): ReactElement | null => {
                             className='text-xs text-muted-foreground hover:text-foreground text-center'
                             data-track-category='Auth'
                             data-track-name='SwitchToRegister'
-                            data-track-kind='passive'
                           >
                             Don&apos;t have an account? Sign up
                           </button>

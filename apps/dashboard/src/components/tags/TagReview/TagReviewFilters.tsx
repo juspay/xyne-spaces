@@ -98,7 +98,6 @@ export const TagReviewFilter = ({
             aria-label={searchPlaceholder}
             data-track-category='TagReview'
             data-track-name='SearchFilter'
-            data-track-kind='passive'
             className='w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground'
           />
         </div>
@@ -119,7 +118,6 @@ export const TagReviewFilter = ({
                 onClick={() => toggle(option.value)}
                 data-track-category='TagReview'
                 data-track-name='ToggleFilter'
-                data-track-kind='passive'
                 className='flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted'
               >
                 <span
@@ -167,7 +165,6 @@ export const ClearFiltersPill = ({ onClear }: { onClear: () => void }): JSX.Elem
     onClick={onClear}
     data-track-category='TagReview'
     data-track-name='ClearFilters'
-    data-track-kind='passive'
     className='rounded-[10px] text-muted-foreground hover:bg-muted'
   >
     <X className='size-3' />

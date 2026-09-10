@@ -119,7 +119,6 @@ function CredentialsForm({
           onClick={onCancel}
           data-track-category='Claw Admin'
           data-track-name='Cancel global MCP credentials'
-          data-track-kind='passive'
         >
           Cancel
         </Button>
@@ -129,7 +128,6 @@ function CredentialsForm({
           onClick={submit}
           data-track-category='Claw Admin'
           data-track-name='Save global MCP credentials'
-          data-track-kind='active'
         >
           Save credentials
         </Button>
@@ -189,7 +187,6 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
         placeholder='Search MCP servers'
         ariaLabel='Search MCP servers'
         trackName='Admin: search global MCP servers'
-        trackKind='passive'
         className='w-full'
       />
     </AdminToolbarPortal>
@@ -267,7 +264,6 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                     onClick={() => setOpenForm(formOpen ? null : server.type)}
                     data-track-category='Claw Admin'
                     data-track-name='Toggle global MCP credentials form'
-                    data-track-kind='passive'
                   >
                     <KeySlant className='size-4' />
                     {server.hasGlobalCredentials ? 'Update creds' : 'Set creds'}
@@ -283,7 +279,6 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
                       onClick={() => setDeleteTarget(server)}
                       data-track-category='Claw Admin'
                       data-track-name='Delete global MCP credentials'
-                      data-track-kind='active'
                     >
                       <DeleteDustbin01 className='size-4' />
                       Delete creds

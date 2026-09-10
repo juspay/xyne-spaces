@@ -247,7 +247,6 @@ export const DataTable: React.FC<DataTableProps> = ({
             )}
             data-track-category='ANALYTICS'
             data-track-name='DataTable_Search'
-            data-track-kind='passive'
           />
         </div>
       </div>
@@ -349,7 +348,6 @@ export const DataTable: React.FC<DataTableProps> = ({
               className='px-3 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               data-track-category='ANALYTICS'
               data-track-name='DataTable_Previous_Page'
-              data-track-kind='passive'
             >
               Previous
             </button>
@@ -359,7 +357,6 @@ export const DataTable: React.FC<DataTableProps> = ({
               className='px-3 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               data-track-category='ANALYTICS'
               data-track-name='DataTable_Next_Page'
-              data-track-kind='passive'
             >
               Next
             </button>

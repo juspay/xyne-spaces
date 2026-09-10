@@ -232,7 +232,6 @@ export function MessageCardAttachmentThumbnails({
       role='presentation'
       data-track-category={trackCategory}
       data-track-name='MESSAGE_CARD_ATTACHMENTS_STRIP'
-      data-track-kind='passive'
     >
       {attachments.map(att => {
         if (isImageMime(att.mimetype)) {
@@ -245,7 +244,6 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View attachment ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_IMAGE'
-              data-track-kind='passive'
             >
               <PanelAuthImageThumb
                 attachmentId={att.id}
@@ -266,7 +264,6 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View video ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_VIDEO'
-              data-track-kind='passive'
             >
               {att.thumbnailUrl ? (
                 <PanelAuthImageThumb
@@ -292,7 +289,6 @@ export function MessageCardAttachmentThumbnails({
             aria-label={`View file ${att.originalFilename}`}
             data-track-category={trackCategory}
             data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_FILE'
-            data-track-kind='passive'
           >
             {iconSrc ? (
               <span className='h-5 w-5 shrink-0'>

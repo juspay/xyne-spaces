@@ -13,7 +13,6 @@ import {
   ReadOnlyBadge,
 } from '../../../shared/primitives/DetailPrimitives';
 import type { SkillDetailActions } from '../useSkillDetailActions';
-import type { InteractionKind } from '@xyne/shared';
 
 const LOCK_NOTE = 'Only the person who created this skill, or an admin, can change it.';
 
@@ -29,7 +28,6 @@ function UploadButton({
   accept,
   multiple,
   trackName,
-  trackKind,
   onFiles,
 }: {
   label: string;
@@ -37,7 +35,6 @@ function UploadButton({
   accept?: string;
   multiple?: boolean;
   trackName: string;
-  trackKind?: InteractionKind;
   onFiles: (files: FileList) => void;
 }): ReactElement {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,7 +48,6 @@ function UploadButton({
         aria-label={label}
         data-track-category='Claw Agents'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='flex h-6 shrink-0 items-center gap-1.5 rounded-md bg-muted px-1.5 text-sm leading-5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
       >
         {busy ? (
@@ -120,7 +116,6 @@ export function SkillContextTabV2({
               busy={busy.uploading}
               multiple
               trackName='Skill detail v2: upload files'
-              trackKind='active'
               onFiles={list => void readAll(list)}
             />
           ) : (
@@ -184,7 +179,6 @@ export function SkillContextTabV2({
               busy={busy.uploading}
               accept='.md,text/markdown'
               trackName='Skill detail v2: upload markdown'
-              trackKind='active'
               onFiles={list => void readMarkdown(list)}
             />
           ) : (

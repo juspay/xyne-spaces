@@ -227,7 +227,6 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
         className='space-y-1.5'
         data-track-category={trackCategory}
         data-track-name={`share_${subject}_message_input`}
-        data-track-kind='active'
         onKeyDownCapture={event => {
           if (event.key === 'Enter' && !event.shiftKey && selectedValues.length > 0) {
             if (inputBoxRef.current?.isSuggestionOpen()) return;
@@ -273,7 +272,6 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
           disabled={selectedValues.length === 0 || sharing}
           data-track-category={trackCategory}
           data-track-name={`share_${subject}_confirm`}
-          data-track-kind='active'
         >
           {sharing ? 'Sharing...' : 'Share'}
         </Button>
@@ -305,7 +303,6 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
                         aria-label='Open shared conversation'
                         data-track-category={trackCategory}
                         data-track-name={`open_${subject}_share_conversation`}
-                        data-track-kind='passive'
                       >
                         <LinkChainSlant className='size-3.5' aria-hidden='true' />
                       </Link>
@@ -318,7 +315,6 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
                     aria-label='Remove access'
                     data-track-category={trackCategory}
                     data-track-name={`revoke_${subject}_share`}
-                    data-track-kind='active'
                   >
                     <X className='size-3.5' />
                   </button>

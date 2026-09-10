@@ -46,7 +46,6 @@ export function DrawingToolbar(): React.ReactElement {
         aria-pressed={tool === 'pen'}
         data-track-category='CALLS'
         data-track-name='Draw_Set_Tool_Pen'
-        data-track-kind='passive'
       >
         <Pencil className='w-4 h-4' aria-hidden />
       </button>
@@ -64,7 +63,6 @@ export function DrawingToolbar(): React.ReactElement {
         aria-pressed={tool === 'eraser'}
         data-track-category='CALLS'
         data-track-name='Draw_Set_Tool_Eraser'
-        data-track-kind='passive'
       >
         <Eraser className='w-4 h-4' aria-hidden />
       </button>
@@ -88,7 +86,6 @@ export function DrawingToolbar(): React.ReactElement {
           aria-label={`Color ${c}`}
           data-track-category='CALLS'
           data-track-name='Draw_Set_Color'
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ color: c })}
         />
       ))}
@@ -121,7 +118,6 @@ export function DrawingToolbar(): React.ReactElement {
           aria-valuenow={strokeWidth}
           data-track-category='CALLS'
           data-track-name='Draw_Set_Stroke_Width'
-          data-track-kind='passive'
         />
       </div>
 
@@ -147,7 +143,6 @@ export function DrawingToolbar(): React.ReactElement {
         aria-label='Exit drawing mode'
         data-track-category='CALLS'
         data-track-name='Draw_Exit'
-        data-track-kind='passive'
       >
         <X className='w-4 h-4' aria-hidden />
       </button>

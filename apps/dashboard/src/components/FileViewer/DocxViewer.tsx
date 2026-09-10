@@ -140,7 +140,6 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
               className='mt-2 px-3 py-1 bg-red-600 dark:bg-red-700 text-white text-sm rounded hover:bg-red-700 dark:hover:bg-red-600 transition-colors'
               data-track-category='FileViewer'
               data-track-name='RETRY_LOAD_DOCUMENT'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ fileType: 'docx', source })}
               data-ph-capture-attribute-track-id='retry_load_document'
             >

@@ -40,7 +40,6 @@ export const ComponentEditorHeader = ({
         className='inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Refresh_Preview_Click'
-        data-track-kind='passive'
       >
         <RefreshCw
           size={14}
@@ -54,7 +53,6 @@ export const ComponentEditorHeader = ({
         className='inline-flex items-center h-8 px-4 rounded-lg border border-xyne-gray-200 bg-white text-[13px] leading-[18px] font-medium text-xyne-gray-900 transition-colors hover:bg-xyne-gray-50'
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Cancel_Click'
-        data-track-kind='passive'
       >
         Cancel
       </button>
@@ -66,7 +64,6 @@ export const ComponentEditorHeader = ({
         className='inline-flex items-center h-8 px-4 rounded-lg bg-xyne-primary-500 text-[13px] leading-[18px] font-medium text-white transition-colors hover:bg-xyne-primary-600 disabled:bg-xyne-gray-300 disabled:text-white disabled:cursor-not-allowed'
         data-track-category='COMPONENT_EDITOR'
         data-track-name='Save_Click'
-        data-track-kind='active'
       >
         {isSaving ? <Loader2 size={14} className='mr-1.5 animate-spin' /> : null}
         {isSaving ? 'Saving…' : 'Save'}

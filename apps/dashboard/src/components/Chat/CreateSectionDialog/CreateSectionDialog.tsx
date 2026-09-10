@@ -52,7 +52,6 @@ const ChannelRow = ({
         onChange={onToggle}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='CREATE_SECTION_TOGGLE_CHANNEL'
-        data-track-kind='active'
         className='size-4 accent-action-primary'
       />
       <span className='shrink-0 text-muted-foreground'>
@@ -223,7 +222,6 @@ export const CreateSectionDialog = ({
       aria-label='Close'
       data-track-category='CHAT_SIDEBAR'
       data-track-name='CLOSE_CREATE_SECTION'
-      data-track-kind='passive'
       className='-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
     >
       <X className='size-5' />
@@ -257,7 +255,6 @@ export const CreateSectionDialog = ({
               value={emoji}
               onChange={setEmoji}
               trackName='CREATE_SECTION_EMOJI'
-              trackKind='active'
             />
             <input
               id='section-name'
@@ -284,7 +281,6 @@ export const CreateSectionDialog = ({
               aria-invalid={showError}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CREATE_SECTION_NAME'
-              data-track-kind='active'
               className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
             />
           </div>
@@ -336,7 +332,6 @@ export const CreateSectionDialog = ({
           autoComplete='off'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CREATE_SECTION_FILTER_CHANNELS'
-          data-track-kind='active'
           className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
         />
       </div>
@@ -350,7 +345,6 @@ export const CreateSectionDialog = ({
               onChange={toggleSelectAll}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CREATE_SECTION_SELECT_ALL'
-              data-track-kind='active'
               className='size-4 accent-action-primary'
             />
             Select all
@@ -385,7 +379,6 @@ export const CreateSectionDialog = ({
             onClick={handleSkip}
             data-track-category='CHAT_SIDEBAR'
             data-track-name='SKIP_ADD_CHANNELS_TO_SECTION'
-            data-track-kind='passive'
           >
             Skip
           </Button>
@@ -397,7 +390,6 @@ export const CreateSectionDialog = ({
             trackId='add_channels_to_section'
             data-track-category='CHAT_SIDEBAR'
             data-track-name='ADD_CHANNELS_TO_SECTION'
-            data-track-kind='active'
             disabled={selected.size === 0}
             className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
           >

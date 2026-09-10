@@ -58,7 +58,6 @@ const FileCard = ({ att }: { att: MessageAttachmentRow }): React.JSX.Element => 
     className='flex w-full items-center gap-2 rounded-md border border-border bg-card p-2 text-left transition hover:bg-accent'
     data-track-category='Tickets'
     data-track-name='StageFormConflictOpenFile'
-    data-track-kind='passive'
   >
     <div className='pointer-events-none'>
       <MessageAttachment attachment={att} compact={true} />
@@ -94,7 +93,6 @@ const LocalFilePreview = ({
         className='flex w-full items-center gap-2 rounded-md border border-border bg-card p-2 text-left transition hover:bg-accent'
         data-track-category='Tickets'
         data-track-name='StageFormConflictOpenLocalFile'
-        data-track-kind='passive'
       >
         {url ? (
           <img src={url} alt={file.name} className='h-16 w-16 shrink-0 rounded-md object-cover' />
@@ -236,7 +234,6 @@ export const StageFormConflictDialog: React.FC<StageFormConflictDialogProps> = (
                       disabled={isConfirming}
                       data-track-category='Tickets'
                       data-track-name='StageFormConflictChoice'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({
                         fieldId: conflict.fieldId,
                         choice: side,
@@ -272,7 +269,6 @@ export const StageFormConflictDialog: React.FC<StageFormConflictDialogProps> = (
             disabled={isConfirming}
             data-track-category='Tickets'
             data-track-name='CancelStageFormConflict'
-            data-track-kind='passive'
           >
             Cancel
           </Button>
@@ -281,7 +277,6 @@ export const StageFormConflictDialog: React.FC<StageFormConflictDialogProps> = (
             disabled={isConfirming}
             data-track-category='Tickets'
             data-track-name='ApplyStageFormConflict'
-            data-track-kind='active'
           >
             {isConfirming && <Loader2 size={16} className='animate-spin' />}
             Apply &amp; save

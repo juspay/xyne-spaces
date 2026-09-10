@@ -109,7 +109,6 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
             className='w-full text-sm text-foreground placeholder:text-muted-foreground bg-transparent focus:outline-none'
             data-track-category='DeskSettings'
             data-track-name='SignatureNameInput'
-            data-track-kind='passive'
           />
         </div>
         <div className='h-[2px] bg-gray-100 dark:bg-gray-700 mt-1 mb-0' />
@@ -123,7 +122,6 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
           className='px-[12px] py-[6px] text-sm font-medium text-foreground bg-background border border-border rounded-[10px] hover:bg-accent transition-colors'
           data-track-category='DeskSettings'
           data-track-name='CancelSignatureEdit'
-          data-track-kind='passive'
         >
           Cancel
         </button>
@@ -135,7 +133,6 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
           className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='DeskSettings'
           data-track-name='SaveSignature'
-          data-track-kind='active'
         >
           {isSaving ? 'Saving…' : initial?.id ? 'Save' : 'Add Signature'}
         </button>

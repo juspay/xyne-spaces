@@ -136,7 +136,6 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
           onClick={() => void loadRequests()}
           data-track-category='Organisations'
           data-track-name='RELOAD_JOIN_REQUESTS'
-          data-track-kind='passive'
           loading={isLoading}
         >
           <RefreshCw className='h-4 w-4' />
@@ -201,7 +200,6 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
                         }
                         data-track-category='Organisations'
                         data-track-name='REJECT_JOIN_REQUEST'
-                        data-track-kind='active'
                         className='text-destructive hover:bg-destructive/10 hover:text-destructive'
                       >
                         <UserX className='h-4 w-4' />
@@ -215,7 +213,6 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
                         }
                         data-track-category='Organisations'
                         data-track-name='APPROVE_JOIN_REQUEST'
-                        data-track-kind='active'
                       >
                         <UserCheck className='h-4 w-4' />
                         Approve

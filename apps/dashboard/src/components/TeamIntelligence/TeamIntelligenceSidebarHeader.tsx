@@ -37,7 +37,6 @@ const TeamIntelligenceSidebarHeader = ({
           onClick={handleCloseSidebar}
           data-track-category='team-intelligence'
           data-track-name='collapse-team-intelligence-sidebar'
-          data-track-kind='passive'
           className='rounded-md transition-colors text-muted-foreground'
           aria-label='Close sidebar'
         >

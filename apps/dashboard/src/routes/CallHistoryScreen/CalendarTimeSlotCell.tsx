@@ -1,7 +1,6 @@
 import { type ReactNode, type ReactElement } from 'react';
 import { cn } from '../../utils/classNames';
 import { createSlotClickHandler } from './CalenderViewUtils';
-import type { InteractionKind } from '@xyne/shared';
 
 interface CalendarTimeSlotCellProps {
   setNodeRef: (node: HTMLElement | null) => void;
@@ -13,7 +12,6 @@ interface CalendarTimeSlotCellProps {
     | undefined;
   consumeDragEnd: (() => boolean) | undefined;
   trackName: string;
-  trackKind?: InteractionKind;
   className?: string;
   children: ReactNode;
 }
@@ -26,7 +24,6 @@ export function CalendarTimeSlotCell({
   onDragCreatePointerDown,
   consumeDragEnd,
   trackName,
-  trackKind,
   className,
   children,
 }: CalendarTimeSlotCellProps): ReactElement {
@@ -51,7 +48,6 @@ export function CalendarTimeSlotCell({
       }
       data-track-category='CALLS'
       data-track-name={trackName}
-      data-track-kind={trackKind}
       className={cn('flex-1 relative', onCreateCallAtSlot && 'cursor-pointer', className)}
     >
       {children}

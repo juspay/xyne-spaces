@@ -184,7 +184,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               ? {
                   'data-track-category': 'MESSAGE',
                   'data-track-name': 'OPEN_MY_MESSAGE_BUBBLE_MOBILE',
-                  'data-track-kind': 'passive',
                   // Static label: the auto-label would capture message content.
                   'data-track-label': 'message_bubble',
                 }

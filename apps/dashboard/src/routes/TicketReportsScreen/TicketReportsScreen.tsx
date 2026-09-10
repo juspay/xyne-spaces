@@ -422,7 +422,6 @@ const TicketReportsScreen = ({
             className='mb-6 flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground'
             data-track-category='TicketReports'
             data-track-name='Back'
-            data-track-kind='passive'
           >
             <ArrowLeft size={20} />
             <span>{fromListProjects ? 'Back to Projects' : 'Back'}</span>
@@ -485,7 +484,6 @@ const TicketReportsScreen = ({
                         className={inputClass}
                         data-track-category='TicketReports'
                         data-track-name='SelectProject'
-                        data-track-kind='passive'
                       >
                         {!requiresProject && <option value=''>All projects</option>}
                         {requiresProject && <option value=''>Select a project</option>}
@@ -557,7 +555,6 @@ const TicketReportsScreen = ({
                       className={inputClass}
                       data-track-category='TicketReports'
                       data-track-name='CreatedFrom'
-                      data-track-kind='active'
                     />
                     <span className='text-xs font-normal text-muted-foreground'>
                       Optional start date.
@@ -573,7 +570,6 @@ const TicketReportsScreen = ({
                       className={inputClass}
                       data-track-category='TicketReports'
                       data-track-name='CreatedTo'
-                      data-track-kind='active'
                     />
                     <span className='text-xs font-normal text-muted-foreground'>
                       Includes the full selected day.
@@ -634,7 +630,6 @@ const TicketReportsScreen = ({
                                   onClick={() => selectAllBoardColumns(board.id)}
                                   data-track-category='TicketReports'
                                   data-track-name='SelectAllBoardColumns'
-                                  data-track-kind='passive'
                                 >
                                   Select all
                                 </Button>
@@ -645,7 +640,6 @@ const TicketReportsScreen = ({
                                   onClick={() => selectCoreBoardColumns(board.id)}
                                   data-track-category='TicketReports'
                                   data-track-name='SelectCoreBoardColumns'
-                                  data-track-kind='passive'
                                 >
                                   Core columns
                                 </Button>
@@ -665,7 +659,6 @@ const TicketReportsScreen = ({
                                       className='size-4 accent-primary'
                                       data-track-category='TicketReports'
                                       data-track-name='ToggleBoardColumn'
-                                      data-track-kind='passive'
                                     />
                                     <span className='min-w-0 truncate'>{column.label}</span>
                                     {column.kind === 'CUSTOM' && (
@@ -733,7 +726,6 @@ const TicketReportsScreen = ({
                 loading={requestPending}
                 data-track-category='TicketReports'
                 data-track-name='GenerateExport'
-                data-track-kind='active'
               >
                 <FileSpreadsheet className='size-4' />
                 Download report
@@ -804,7 +796,6 @@ const TicketReportsScreen = ({
                           className='inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent'
                           data-track-category='TicketReports'
                           data-track-name='DownloadExport'
-                          data-track-kind='passive'
                         >
                           {downloadingId === record.id ? (
                             <Loader2 className='h-3.5 w-3.5 animate-spin' />

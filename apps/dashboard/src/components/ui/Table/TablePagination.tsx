@@ -44,7 +44,6 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
           onClick={() => onPageChange(currentPage - 1)}
           data-track-category='TABLE'
           data-track-name='PREV_PAGE'
-          data-track-kind='passive'
           disabled={currentPage <= 1}
           className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
         >
@@ -57,7 +56,6 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
           onClick={() => onPageChange(currentPage + 1)}
           data-track-category='TABLE'
           data-track-name='NEXT_PAGE'
-          data-track-kind='passive'
           disabled={currentPage >= totalPages}
           className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
         >

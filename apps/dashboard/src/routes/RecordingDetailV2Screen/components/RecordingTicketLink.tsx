@@ -125,7 +125,6 @@ export function RecordingTicketLink({
             className='max-w-40 truncate transition-colors hover:text-muted-foreground'
             data-track-category='RecordingDetailV2'
             data-track-name='open_linked_ticket'
-            data-track-kind='passive'
           >
             {label}
           </Link>
@@ -139,7 +138,6 @@ export function RecordingTicketLink({
             aria-label={`Unlink ticket ${label}`}
             data-track-category='RecordingDetailV2'
             data-track-name='unlink_ticket'
-            data-track-kind='active'
           >
             <X className='size-3' aria-hidden='true' />
           </button>

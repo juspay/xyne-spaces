@@ -113,7 +113,6 @@ export const StepAssigneePicker: React.FC<{
           title={assigneeId ? 'Change default assignee' : 'Set default assignee for this step'}
           data-track-category='flow_plan_editor'
           data-track-name='toggle_step_assignee'
-          data-track-kind='active'
         >
           {assigneeId ? (
             <UserAvatar userId={assigneeId} showActiveStatus={false} size={AvatarSize.SM} />
@@ -151,7 +150,6 @@ export const StepAssigneePicker: React.FC<{
               className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
               data-track-category='flow_plan_editor'
               data-track-name='search_step_assignee'
-              data-track-kind='passive'
             />
           </div>
         </div>
@@ -168,7 +166,6 @@ export const StepAssigneePicker: React.FC<{
             )}
             data-track-category='flow_plan_editor'
             data-track-name='clear_step_assignee'
-            data-track-kind='active'
           >
             <span className='flex items-center justify-center w-5 h-5 rounded-sm bg-border'>
               <X className='w-3 h-3 text-muted-foreground' />
@@ -189,7 +186,6 @@ export const StepAssigneePicker: React.FC<{
               )}
               data-track-category='flow_plan_editor'
               data-track-name='select_step_assignee'
-              data-track-kind='active'
             >
               <UserAvatar userId={user.id} showActiveStatus={false} size={AvatarSize.SM} />
               <div className='flex-1 min-w-0'>
@@ -270,7 +266,6 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
                   onClick={onConfigure}
                   data-track-category='flow_plan_editor'
                   data-track-name='configure_step_gate'
-                  data-track-kind='passive'
                   className={`p-1 rounded-md transition-colors ${
                     data.configuring
                       ? 'bg-[#6276be] text-white'
@@ -285,7 +280,6 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
                   onClick={onDelete}
                   data-track-category='flow_plan_editor'
                   data-track-name='delete_step'
-                  data-track-kind='active'
                   className='p-1 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors'
                   title='Delete step'
                 >
@@ -312,7 +306,6 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
               placeholder='Step title...'
               data-track-category='flow_plan_editor'
               data-track-name='input_step_title'
-              data-track-kind='passive'
               className='nodrag w-full text-[13px] font-medium text-foreground bg-transparent border-none focus:outline-none'
               onPointerDown={e => e.stopPropagation()}
             />
@@ -348,7 +341,6 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
               onPointerDown={e => e.stopPropagation()}
               data-track-category='flow_plan_editor'
               data-track-name='add_step'
-              data-track-kind='active'
             >
               <Plus size={11} /> Add step
             </DropdownMenuTrigger>
@@ -467,7 +459,6 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
               onClick={data.onConfigure}
               data-track-category='flow_plan_editor'
               data-track-name='configure_decision'
-              data-track-kind='passive'
               className='rounded p-1 hover:bg-[hsl(var(--flow-decision-hover))]'
             >
               <Settings2 size={12} />
@@ -477,7 +468,6 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
               onClick={data.onDelete}
               data-track-category='flow_plan_editor'
               data-track-name='delete_decision'
-              data-track-kind='active'
               className='rounded p-1 hover:bg-red-50 hover:text-red-500'
             >
               <Trash2 size={12} />

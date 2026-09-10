@@ -93,7 +93,6 @@ export const PaginationControls = ({
           disabled={pageIndex === 0}
           data-track-category='team-intelligence'
           data-track-name={`previous-${trackName}-page`}
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
           className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
         >
@@ -108,7 +107,6 @@ export const PaginationControls = ({
           disabled={pageIndex >= pageCount - 1}
           data-track-category='team-intelligence'
           data-track-name={`next-${trackName}-page`}
-          data-track-kind='passive'
           data-track-metadata={JSON.stringify({ page: pageIndex + 1, pageCount })}
           className='rounded-md border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-action-accent/50 disabled:cursor-not-allowed disabled:opacity-40'
         >
@@ -253,7 +251,6 @@ export const SignalCard = ({ signal }: { signal: Signal }): ReactElement => {
             aria-expanded={open}
             data-track-category='team-intelligence'
             data-track-name='toggle-signal-card'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ label: signal.label, isExpanded: !open })}
             className='mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-action-accent transition-colors hover:text-action-accent/80'
           >
@@ -319,7 +316,6 @@ export const ExpandableList = ({
               aria-expanded={isExpanded}
               data-track-category='team-intelligence'
               data-track-name='toggle-leadership-headline'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ title, isExpanded: !isExpanded })}
               className='flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30'
             >

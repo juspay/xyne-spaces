@@ -92,7 +92,6 @@ const ConnectionsTab = ({ agent, permissions }: ConnectionsTabProps): ReactEleme
                       onClick={() => void removeConnection(connection)}
                       data-track-category='Claw Agents'
                       data-track-name='REMOVE_CONNECTION'
-                      data-track-kind='active'
                       aria-label={`Remove ${connection.displayName}`}
                       className='text-muted-foreground hover:text-destructive'
                     >

@@ -37,7 +37,6 @@ export const XyneAIQuickMenu = ({
         className={QUICK_NAV_ROW_CLASS}
         data-track-category='App_Sidebar'
         data-track-name='XyneAI_Quick_New_Chat'
-        data-track-kind='active'
       >
         <PencilEditBox size={16} className='shrink-0' aria-hidden />
         New chat
@@ -53,7 +52,6 @@ export const XyneAIQuickMenu = ({
             className={QUICK_NAV_ROW_CLASS}
             data-track-category='App_Sidebar'
             data-track-name='XyneAI_Quick_Nav'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ path: item.to, label: item.label })}
           >
             <Icon size={16} className='shrink-0' aria-hidden />

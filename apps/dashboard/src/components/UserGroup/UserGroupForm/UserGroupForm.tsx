@@ -205,7 +205,6 @@ export const UserGroupForm = ({
             }`}
             data-track-category='UserGroups'
             data-track-name='SwitchToAboutTab'
-            data-track-kind='passive'
           >
             About
           </Button>
@@ -220,7 +219,6 @@ export const UserGroupForm = ({
             }`}
             data-track-category='UserGroups'
             data-track-name='SwitchToMembersTab'
-            data-track-kind='passive'
             data-testid='members-tab-btn'
           >
             Members
@@ -327,7 +325,6 @@ export const UserGroupForm = ({
           type='button'
           data-track-category='UserGroups'
           data-track-name='CancelUserGroupForm'
-          data-track-kind='passive'
         >
           Cancel
         </Button>

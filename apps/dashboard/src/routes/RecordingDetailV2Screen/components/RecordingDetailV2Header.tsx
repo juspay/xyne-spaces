@@ -96,7 +96,6 @@ export const EditableTitleInput = ({
     autoFocus
     data-track-category={trackCategory}
     data-track-name='edit_title_input'
-    data-track-kind='passive'
     {...(onMouseDown ? { onMouseDown } : {})}
     {...(onTouchStart ? { onTouchStart } : {})}
   />
@@ -233,7 +232,6 @@ export const RecordingDetailV2Header = ({
               className='flex items-baseline gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='RecordingDetailV2'
               data-track-name='edit_title_click_title'
-              data-track-kind='active'
             >
               <h1 className='flex min-w-0 items-baseline gap-2 text-3xl font-medium text-foreground'>
                 {isLive && <span className='shrink-0 text-muted-foreground/70'>Capturing:</span>}
@@ -304,7 +302,6 @@ export const RecordingDetailV2Header = ({
                 aria-label='Minimize to floating overlay'
                 data-track-category='RecordingDetailV2'
                 data-track-name='minimize_to_overlay'
-                data-track-kind='passive'
               >
                 <MinimizeLineArrow className='size-3.5' />
               </Button>

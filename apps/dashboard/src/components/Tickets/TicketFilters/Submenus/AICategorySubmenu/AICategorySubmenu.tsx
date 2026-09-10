@@ -103,7 +103,6 @@ export const AICategorySubmenu = ({
               `}
               data-track-category='Tickets'
               data-track-name='ToggleSelectAllAICategories'
-              data-track-kind='passive'
             >
               <span className='flex-1 text-left text-sm font-medium text-primary'>
                 {allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -127,7 +126,6 @@ export const AICategorySubmenu = ({
                   `}
                   data-track-category='Tickets'
                   data-track-name='ToggleAICategoryFilter'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ category, selected: !isSelected })}
                   data-testid={`ai-category-filter-${category.toLowerCase()}`}
                 >

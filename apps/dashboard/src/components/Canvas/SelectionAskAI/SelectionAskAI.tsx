@@ -167,7 +167,6 @@ export const SelectionAskAI = ({
         }}
         data-track-category='CANVAS'
         data-track-name='Selection_Ask_AI'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           canvasId,
           textLength: selectedText.length,

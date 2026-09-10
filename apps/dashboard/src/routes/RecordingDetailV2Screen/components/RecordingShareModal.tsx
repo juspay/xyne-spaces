@@ -197,7 +197,6 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
             data-testid='recording-copy-link-button'
             data-track-category='RecordingDetailV2'
             data-track-name='copy_recording_link'
-            data-track-kind='passive'
           >
             <Link2 className='w-4 h-4' />
             Copy link

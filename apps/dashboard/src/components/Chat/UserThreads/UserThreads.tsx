@@ -97,7 +97,6 @@ const ThreadRow = memo(
               className='text-base font-semibold text-foreground hover:underline'
               data-track-category='USER_THREADS'
               data-track-name='OPEN_USER_THREAD'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ channelId, conversationId })}
             >
               {displayName}
@@ -339,7 +338,6 @@ const UserThreads = (): ReactElement => {
               data-ph-capture-attribute-track-id='retry_thread_list_page'
               data-track-category='USER_THREADS'
               data-track-name='RETRY_THREAD_LIST_PAGE'
-              data-track-kind='passive'
             >
               Try loading more again
             </button>
@@ -374,7 +372,6 @@ const UserThreads = (): ReactElement => {
               aria-pressed={sortMode === 'sections'}
               data-track-category='USER_THREADS'
               data-track-name='SORT_UNREAD_FIRST'
-              data-track-kind='passive'
             >
               Unread first
             </button>
@@ -389,7 +386,6 @@ const UserThreads = (): ReactElement => {
               aria-pressed={sortMode === 'recent'}
               data-track-category='USER_THREADS'
               data-track-name='SORT_MOST_RECENT'
-              data-track-kind='passive'
             >
               Most recent
             </button>
@@ -409,7 +405,6 @@ const UserThreads = (): ReactElement => {
                 data-ph-capture-attribute-track-id='retry_thread_list'
                 data-track-category='USER_THREADS'
                 data-track-name='RETRY_THREAD_LIST'
-                data-track-kind='passive'
               >
                 Try again
               </button>

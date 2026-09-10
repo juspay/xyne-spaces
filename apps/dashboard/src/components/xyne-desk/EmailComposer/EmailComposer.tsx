@@ -2071,7 +2071,6 @@ export const EmailComposer = ({
                   aria-label='Close review dialog'
                   data-track-category='Support'
                   data-track-name='CloseTwoStepSendReview'
-                  data-track-kind='passive'
                 >
                   <X size={16} />
                 </button>
@@ -2176,7 +2175,6 @@ export const EmailComposer = ({
                     className='rounded-lg px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted'
                     data-track-category='Support'
                     data-track-name='CancelTwoStepSend'
-                    data-track-kind='passive'
                   >
                     Back to edit
                   </button>
@@ -2187,7 +2185,6 @@ export const EmailComposer = ({
                     className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
-                    data-track-kind='active'
                     data-ph-capture-attribute-track-id='send_email_confirm'
                   >
                     {isSending ? (
@@ -2239,7 +2236,6 @@ export const EmailComposer = ({
               onClick={handleExpand}
               data-track-category='Support'
               data-track-name='ExpandReplyComposer'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 toCount: toEmails.length,
                 ccCount: ccEmails.length,
@@ -2290,7 +2286,6 @@ export const EmailComposer = ({
                         aria-label={`Switch reply mode. Current: ${replyMode === 'replyAll' ? 'Reply all' : 'Reply'}`}
                         data-track-category='Support'
                         data-track-name='ComposerReplyModeDropdown'
-                        data-track-kind='active'
                       >
                         <div className='flex items-center gap-1'>
                           {replyMode === 'replyAll' ? (
@@ -2348,7 +2343,6 @@ export const EmailComposer = ({
                     title='Collapse'
                     data-track-category='Support'
                     data-track-name='CollapseReplyComposer'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({
                       toEmails: toEmails,
                       ccEmails: ccEmails,
@@ -2391,7 +2385,6 @@ export const EmailComposer = ({
                   handleBlur={handleToBlur}
                   focusSuggest={focusSuggest}
                   trackName='FocusToField'
-                  trackKind='passive'
                   trackMetadata={{
                     toEmails,
                     ccEmails,
@@ -2407,7 +2400,6 @@ export const EmailComposer = ({
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
                           data-track-category='Support'
                           data-track-name='ShowCcField'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({
                             ccMails: ccEmails,
                             bccCount: bccEmails.length,
@@ -2424,7 +2416,6 @@ export const EmailComposer = ({
                           className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
                           data-track-category='Support'
                           data-track-name='ShowBccField'
-                          data-track-kind='passive'
                           data-track-metadata={JSON.stringify({
                             ccCount: ccEmails.length,
                             bccEmails: bccEmails,
@@ -2506,7 +2497,6 @@ export const EmailComposer = ({
                           title='Discard draft'
                           data-track-category='Support'
                           data-track-name='DiscardComposerDraft'
-                          data-track-kind='active'
                           data-ph-capture-attribute-track-id='discard_composer_draft'
                         >
                           <Trash2 size={14} />
@@ -2525,7 +2515,6 @@ export const EmailComposer = ({
                           title='Minimize (keeps draft)'
                           data-track-category='Support'
                           data-track-name='MinimizeReplyComposer'
-                          data-track-kind='passive'
                         >
                           <Minimize2 size={14} />
                         </button>
@@ -2566,7 +2555,6 @@ export const EmailComposer = ({
                   handleBlur={handleCcBlur}
                   focusSuggest={focusSuggest}
                   trackName='FocusCcField'
-                  trackKind='passive'
                   trackMetadata={{
                     ccCount: ccEmails.length,
                     bccCount: bccEmails.length,
@@ -2607,7 +2595,6 @@ export const EmailComposer = ({
                   handleBlur={handleBccBlur}
                   focusSuggest={focusSuggest}
                   trackName='FocusBccField'
-                  trackKind='passive'
                   trackMetadata={{
                     bccCount: bccEmails,
                     conversationId,
@@ -2632,7 +2619,6 @@ export const EmailComposer = ({
               aria-label='Subject'
               data-track-category='Support'
               data-track-name='EditComposeSubject'
-              data-track-kind='active'
             />
             {/* AI subject suggestion — disabled until the body has content
                 since the model needs the email text to ground the subject. */}
@@ -2657,7 +2643,6 @@ export const EmailComposer = ({
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
-                  data-track-kind='active'
                   data-ph-capture-attribute-track-id='generate_compose_subject'
                 >
                   {subjectAI.isGenerating ? (
@@ -2737,7 +2722,6 @@ export const EmailComposer = ({
                       aria-label='Open AI draft'
                       data-track-category='Support'
                       data-track-name='ExpandAIDraft'
-                      data-track-kind='passive'
                     >
                       <span
                         className='flex items-center justify-center w-5 h-5 rounded-md'
@@ -2842,7 +2826,6 @@ export const EmailComposer = ({
                   className='flex-1 min-w-0 bg-transparent outline-none text-[15px] text-foreground placeholder:text-muted-foreground/70'
                   data-track-category='Support'
                   data-track-name='AIPromptInput'
-                  data-track-kind='passive'
                   aria-label={`Tell ${draftAgentName} what to write`}
                 />
                 <button
@@ -2854,7 +2837,6 @@ export const EmailComposer = ({
                   className='text-[14px] text-muted-foreground hover:text-foreground font-medium px-3 py-1.5 rounded-full transition-colors'
                   data-track-category='Support'
                   data-track-name='AIPromptCancel'
-                  data-track-kind='passive'
                 >
                   Cancel
                 </button>
@@ -2876,7 +2858,6 @@ export const EmailComposer = ({
                   )}
                   data-track-category='Support'
                   data-track-name='AIPromptCreate'
-                  data-track-kind='active'
                 >
                   Create
                 </button>
@@ -2908,7 +2889,6 @@ export const EmailComposer = ({
                     aria-label='Attach files'
                     data-track-category='Support'
                     data-track-name='AddEmailAttachment'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({
                       conversationId,
                       attachmentCount: attachments.length,
@@ -2934,7 +2914,6 @@ export const EmailComposer = ({
                       }
                       data-track-category='email-compose'
                       data-track-name='select-signature'
-                      data-track-kind='active'
                     >
                       <Signature size={14} />
                     </button>
@@ -2947,7 +2926,6 @@ export const EmailComposer = ({
                       }}
                       data-track-category='Support'
                       data-track-name='OPEN_SUPPORT_FROM_COMPOSER'
-                      data-track-kind='passive'
                       className='text-xs text-muted-foreground'
                     >
                       Manage signatures
@@ -2957,7 +2935,6 @@ export const EmailComposer = ({
                       onClick={() => setSelectedSignatureId(null)}
                       data-track-category='Support'
                       data-track-name='CLEAR_EMAIL_SIGNATURE'
-                      data-track-kind='active'
                       className={!selectedSignatureId ? 'font-medium' : ''}
                     >
                       No signature
@@ -2968,7 +2945,6 @@ export const EmailComposer = ({
                         onClick={() => setSelectedSignatureId(sig.id)}
                         data-track-category='Support'
                         data-track-name='SELECT_EMAIL_SIGNATURE'
-                        data-track-kind='active'
                         className={selectedSignatureId === sig.id ? 'font-medium' : ''}
                       >
                         {sig.name}
@@ -2988,7 +2964,6 @@ export const EmailComposer = ({
                     aria-label='Add signature'
                     data-track-category='email-compose'
                     data-track-name='add-signature'
-                    data-track-kind='active'
                   >
                     <Signature size={14} />
                   </button>
@@ -3003,7 +2978,6 @@ export const EmailComposer = ({
                   aria-label='Clear email body'
                   data-track-category='Support'
                   data-track-name='ClearEmailBody'
-                  data-track-kind='active'
                 >
                   <Eraser size={14} />
                 </button>
@@ -3046,7 +3020,6 @@ export const EmailComposer = ({
                     aria-label='See sources'
                     data-track-category='Support'
                     data-track-name='SeeDraftSources'
-                    data-track-kind='passive'
                   >
                     <ExternalLink size={14} />
                     <span className='text-xs font-medium'>See sources</span>
@@ -3069,7 +3042,6 @@ export const EmailComposer = ({
                 title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send'}
                 data-track-category='Support'
                 data-track-name='SendEmailReply'
-                data-track-kind='active'
                 data-track-metadata={JSON.stringify({
                   conversationId,
                   attachmentCount: attachments.length,

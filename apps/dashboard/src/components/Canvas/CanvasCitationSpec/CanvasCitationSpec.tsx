@@ -267,7 +267,6 @@ function GroupHoverList({ callId, segs }: { callId: string; segs: ParsedSeg[] })
             className='flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-accent transition-colors'
             data-track-category='TranscriptCitation'
             data-track-name='open_grouped_transcript_reference'
-            data-track-kind='passive'
           >
             <SpeakerAvatar speakerId={s.speakerId} speaker={s.speaker} size='sm' px={22} />
             <span className='min-w-0 flex-1'>
@@ -318,7 +317,6 @@ const CitationRender = ({ inlineContent }: CitationRenderProps): React.ReactElem
       className={PILL_CLASS}
       data-track-category='TranscriptCitation'
       data-track-name='open_transcript_citation'
-      data-track-kind='passive'
     >
       {isGroup ? <span>{segs.length} refs</span> : <span>{first.timestamp || 'Transcript'}</span>}
     </button>

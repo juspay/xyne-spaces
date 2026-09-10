@@ -33,7 +33,6 @@ export function AgentColorRow({ color, onChange }: AgentColorRowProps): ReactEle
             onClick={() => onChange(value)}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: pick color'
-            data-track-kind='active'
             className={cn(
               'flex size-6 shrink-0 items-center justify-center rounded-full text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
               !selected && 'opacity-80 hover:scale-110 hover:opacity-100',

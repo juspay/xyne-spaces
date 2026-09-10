@@ -58,7 +58,6 @@ export function AddStepRow({
             aria-expanded={open}
             data-track-category='automation-builder'
             data-track-name='add-step-open'
-            data-track-kind='active'
             className={cn(
               'flex items-center justify-center rounded-full border border-border bg-background',
               'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
@@ -81,7 +80,6 @@ export function AddStepRow({
             placeholder='Search steps…'
             data-track-category='automation-builder'
             data-track-name='add-step-search'
-            data-track-kind='active'
             className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
           />
         </div>
@@ -106,7 +104,6 @@ export function AddStepRow({
                     type='button'
                     data-track-category='automation-builder'
                     data-track-name={`add-step-pick-${item.type}`}
-                    data-track-kind='active'
                     onClick={() => {
                       onPick(item.type);
                       setOpen(false);

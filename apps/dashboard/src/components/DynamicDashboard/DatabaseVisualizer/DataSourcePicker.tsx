@@ -50,7 +50,6 @@ export function DataSourcePicker({
           type='button'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='Db_Viz_Open_Source_Picker'
-          data-track-kind='passive'
           className='group inline-flex items-center gap-2 h-9 pl-2.5 pr-2 max-w-[260px] rounded-lg border border-border bg-card hover:bg-accent data-[state=open]:bg-accent transition-colors'
         >
           <span className='shrink-0 flex items-center justify-center w-6 h-6 rounded-md bg-muted'>
@@ -86,7 +85,6 @@ export function DataSourcePicker({
               aria-label='Search databases'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Source_Search'
-              data-track-kind='passive'
               className='w-full h-8 pl-7 pr-2 text-[13px] bg-background border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
             />
           </div>
@@ -110,7 +108,6 @@ export function DataSourcePicker({
                   }}
                   data-track-category='DYNAMIC_DASHBOARD'
                   data-track-name='Db_Viz_Pick_Source'
-                  data-track-kind='passive'
                   className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors ${
                     active ? 'bg-accent' : 'hover:bg-accent/60'
                   }`}

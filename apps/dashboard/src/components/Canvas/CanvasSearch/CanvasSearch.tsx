@@ -119,7 +119,6 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
           data-track-event='blur'
           data-track-category='CANVAS'
           data-track-name='Canvas_Search_Input'
-          data-track-kind='passive'
         />
       </div>
 
@@ -132,7 +131,6 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
             aria-label='Previous match'
             data-track-category='CANVAS'
             data-track-name='Search_Previous_Match'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({
               query,
               currentIndex,
@@ -165,7 +163,6 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
             aria-label='Next match'
             data-track-category='CANVAS'
             data-track-name='Search_Next_Match'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({
               query,
               currentIndex,
@@ -195,7 +192,6 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
         aria-label='Close search'
         data-track-category='CANVAS'
         data-track-name='Close_Canvas_Search'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({ query })}
       >
         <svg

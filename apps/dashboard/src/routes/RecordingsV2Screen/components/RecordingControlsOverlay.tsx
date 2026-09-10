@@ -53,7 +53,6 @@ const RecordingControlsOverlay = ({
             aria-keyshortcuts='Meta+Alt+X Control+Alt+X'
             data-track-category='RecordingControlsOverlay'
             data-track-name='start_recording'
-            data-track-kind='active'
           >
             <span className='flex size-5 shrink-0 items-center justify-center text-primary-foreground'>
               <MicOn size={15} strokeWidth={2.2} variant='Contrast' />

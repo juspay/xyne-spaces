@@ -43,7 +43,6 @@ import { HighlightMatch } from './components/HighlightMatch';
 import { SurfaceLogo } from './components/SurfaceLogo';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
-import type { InteractionKind } from '@xyne/shared';
 
 const isRegistered = (agent: Agent): boolean =>
   Boolean(agent.spacesAppId) && (agent.spacesAppTokenConfigured ?? Boolean(agent.spacesAppToken));
@@ -273,7 +272,6 @@ export function AgentsTab({
         placeholder='Search agents'
         ariaLabel='Search agents'
         trackName='Admin: search agents'
-        trackKind='passive'
         className='w-full'
       />
     </AdminToolbarPortal>
@@ -305,7 +303,6 @@ export function AgentsTab({
       danger?: boolean;
       showLabel?: boolean;
       trackName?: string;
-      trackKind?: InteractionKind;
     } = {},
   ): ReactElement => {
     const button = (
@@ -318,7 +315,6 @@ export function AgentsTab({
         aria-label={label}
         data-track-category='Claw Admin'
         data-track-name={options.trackName ?? label}
-        data-track-kind={options.trackKind}
         className={cn(
           'focus-visible:bg-muted focus-visible:ring-0',
           options.danger
@@ -353,7 +349,6 @@ export function AgentsTab({
             disabled={busy}
             data-track-category='Claw Admin'
             data-track-name='Add surface'
-            data-track-kind='active'
             className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
           >
             <PluginAddonDefault className='size-4 text-current' />

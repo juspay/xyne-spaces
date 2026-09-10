@@ -4,13 +4,11 @@ import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { useTheme } from '../../hooks/useTheme';
 import { useCustomEmojis } from '../../hooks/useCustomEmojis';
 import { renderEmoji } from '../../utils/customEmojiUtils';
-import type { InteractionKind } from '@xyne/shared';
 
 interface SectionEmojiPickerProps {
   value: string;
   onChange: (emoji: string) => void;
   trackName: string;
-  trackKind?: InteractionKind;
 }
 
 // Absolute, not a portal — so it scrolls inside the modal and isn't offset by the dialog transform.
@@ -18,7 +16,6 @@ export const SectionEmojiPicker = ({
   value,
   onChange,
   trackName,
-  trackKind,
 }: SectionEmojiPickerProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -45,7 +42,6 @@ export const SectionEmojiPicker = ({
         aria-label='Section emoji'
         data-track-category='CHAT_SIDEBAR'
         data-track-name={trackName}
-        data-track-kind={trackKind}
         className='flex w-7 items-center justify-center rounded text-base text-muted-foreground outline-none hover:text-foreground'
       >
         {value ? renderEmoji(value) : <Smile className='size-4' />}

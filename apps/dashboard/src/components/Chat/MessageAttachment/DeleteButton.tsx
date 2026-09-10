@@ -80,7 +80,6 @@ export const DeleteButton = memo<DeleteButtonProps>(
           aria-busy={isDeleting}
           data-track-category='MESSAGE_ATTACHMENT'
           data-track-name='DeleteAttachment'
-          data-track-kind='active'
           data-track-metadata={JSON.stringify({ fileName })}
         >
           {isDeleting ? (
@@ -121,7 +120,6 @@ export const DeleteButton = memo<DeleteButtonProps>(
                 }}
                 data-track-category='MESSAGE_ATTACHMENT'
                 data-track-name='CLOSE_DELETE_ATTACHMENT_DIALOG'
-                data-track-kind='passive'
                 variant='secondary'
                 aria-label='Close dialog'
               >
@@ -147,7 +145,6 @@ export const DeleteButton = memo<DeleteButtonProps>(
                 }}
                 data-track-category='MESSAGE_ATTACHMENT'
                 data-track-name='CANCEL_DELETE_ATTACHMENT'
-                data-track-kind='passive'
                 disabled={isDeleting}
                 variant='secondary'
               >
@@ -161,7 +158,6 @@ export const DeleteButton = memo<DeleteButtonProps>(
                 }}
                 data-track-category='MESSAGE_ATTACHMENT'
                 data-track-name='CONFIRM_DELETE_ATTACHMENT'
-                data-track-kind='active'
                 trackId='delete_attachment'
                 disabled={isDeleting}
                 variant='destructive'

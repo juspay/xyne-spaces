@@ -54,7 +54,6 @@ export const ThreadInfoIndicator: React.FC<ThreadInfoIndicatorProps> = ({
       }}
       data-track-category='MESSAGE'
       data-track-name='OPEN_THREAD_FROM_INDICATOR'
-      data-track-kind='passive'
       onKeyDown={e => {
         if (!canOpen) return;
         if (e.key === 'Enter' || e.key === ' ') {
@@ -100,7 +99,6 @@ export const AlsoSentToChannelIndicator: React.FC<AlsoSentToChannelIndicatorProp
         }}
         data-track-category='MESSAGE'
         data-track-name='COPY_THREAD_LINK'
-        data-track-kind='passive'
         className='text-xs text-primary hover:text-primary/80 hover:underline mt-1 p-0 h-auto'
       >
         Also sent to{' '}
@@ -148,7 +146,6 @@ export const ViewNewerRepliesButton: React.FC<ViewNewerRepliesButtonProps> = ({
         onClick={handleOpenParentThread}
         data-track-category='MESSAGE'
         data-track-name='OPEN_PARENT_THREAD'
-        data-track-kind='passive'
         className={`flex items-center gap-2 text-xs bg-transparent border-0 cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-1 ${
           isMe ? 'max-[500px]:justify-end' : ''
         }`}

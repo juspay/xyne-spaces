@@ -42,7 +42,6 @@ export const FlowPlanEdge: FC<EdgeProps<FlowPlanEdgeData>> = ({
             type='button'
             data-track-category='flow_plan_editor'
             data-track-name='delete_edge'
-            data-track-kind='active'
             title='Delete connection'
             onClick={event => {
               event.stopPropagation();

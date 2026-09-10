@@ -264,7 +264,6 @@ export function AutoLabelWizard({
               onClick={() => setView('create')}
               data-track-category='xyne-desk'
               data-track-name='auto-label-back-to-create'
-              data-track-kind='passive'
               aria-label='Back to create rule'
               title='Back to create rule'
             >
@@ -291,7 +290,6 @@ export function AutoLabelWizard({
               onClick={() => setView('rules')}
               data-track-category='xyne-desk'
               data-track-name='auto-label-manage-rules'
-              data-track-kind='passive'
             >
               <ListChecks className='size-4' />
               Rules
@@ -391,7 +389,6 @@ export function AutoLabelWizard({
               className='h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground'
               data-track-category='xyne-desk'
               data-track-name='auto-label-label-search'
-              data-track-kind='passive'
             />
             {conflictingLabel && (
               <p
@@ -434,7 +431,6 @@ export function AutoLabelWizard({
                     )}
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-pick-existing'
-                    data-track-kind='passive'
                   >
                     <span
                       className='size-2.5 rounded-full shrink-0'
@@ -460,7 +456,6 @@ export function AutoLabelWizard({
                   className='flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent/50'
                   data-track-category='xyne-desk'
                   data-track-name='auto-label-create-new'
-                  data-track-kind='active'
                 >
                   <span
                     className='size-2.5 rounded-full shrink-0'
@@ -534,7 +529,6 @@ export function AutoLabelWizard({
               onClick={() => onOpenChange(false)}
               data-track-category='xyne-desk'
               data-track-name='auto-label-rules-close'
-              data-track-kind='passive'
             >
               Close
             </Button>
@@ -544,7 +538,6 @@ export function AutoLabelWizard({
               onClick={() => setView('create')}
               data-track-category='xyne-desk'
               data-track-name='auto-label-new-rule'
-              data-track-kind='active'
             >
               <Plus className='size-4' />
               New rule
@@ -558,7 +551,6 @@ export function AutoLabelWizard({
             onClick={() => (step === 'label' ? setStep('filters') : onOpenChange(false))}
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-back'
-            data-track-kind='passive'
           >
             {step === 'label' ? 'Back' : 'Cancel'}
           </Button>
@@ -571,7 +563,6 @@ export function AutoLabelWizard({
             onClick={() => setStep('label')}
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-next'
-            data-track-kind='passive'
           >
             Next
           </Button>
@@ -584,7 +575,6 @@ export function AutoLabelWizard({
             trackId='create_auto_label_rule'
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-save'
-            data-track-kind='active'
           >
             {saveMutation.isPending ? (
               <>

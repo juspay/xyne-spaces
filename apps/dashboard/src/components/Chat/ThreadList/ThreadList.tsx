@@ -559,7 +559,6 @@ const ThreadList = ({
             aria-label='Scroll to bottom'
             data-track-category='THREAD_PANEL'
             data-track-name='THREAD_SCROLL_TO_BOTTOM'
-            data-track-kind='passive'
           >
             <ArrowDown className='w-5 h-5 text-foreground' />
           </button>
@@ -571,7 +570,6 @@ const ThreadList = ({
             aria-label='Scroll to top'
             data-track-category='THREAD_PANEL'
             data-track-name='THREAD_SCROLL_TO_TOP'
-            data-track-kind='passive'
           >
             <ArrowUp className='w-5 h-5 text-foreground' />
           </button>
@@ -660,7 +658,6 @@ const ThreadList = ({
                       className='flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors'
                       data-track-category='THREAD_PANEL'
                       data-track-name='EXPAND_THREAD'
-                      data-track-kind='passive'
                       data-track-metadata={JSON.stringify({ hiddenCount })}
                     >
                       <span className='mr-0.5'>↳</span>
@@ -681,7 +678,6 @@ const ThreadList = ({
                 className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
                 data-track-category='THREAD_PANEL'
                 data-track-name='COLLAPSE_THREAD'
-                data-track-kind='passive'
               >
                 <ChevronUp className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
                 <span>Collapse thread</span>
@@ -698,7 +694,6 @@ const ThreadList = ({
           aria-label='Scroll to bottom'
           data-track-category='THREAD_PANEL'
           data-track-name='THREAD_SCROLL_TO_BOTTOM'
-          data-track-kind='passive'
         >
           <ArrowDown className='w-5 h-5 text-foreground' />
         </button>
@@ -710,7 +705,6 @@ const ThreadList = ({
           aria-label='Scroll to top'
           data-track-category='THREAD_PANEL'
           data-track-name='THREAD_SCROLL_TO_TOP'
-          data-track-kind='passive'
         >
           <ArrowUp className='w-5 h-5 text-foreground' />
         </button>

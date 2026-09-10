@@ -690,7 +690,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
       contentEditable={false}
       data-track-category='CANVAS'
       data-track-name='table_filter_event_boundary'
-      data-track-kind='passive'
       role='presentation'
       onClick={event => event.stopPropagation()}
       onKeyDown={event => {
@@ -715,7 +714,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
           data-active={hasActiveFilters ? 'true' : 'false'}
           data-track-category='CANVAS'
           data-track-name='table_filter_open'
-          data-track-kind='passive'
           aria-label='Filter table rows'
           aria-pressed={hasActiveFilters}
           title='Filter table rows'
@@ -752,7 +750,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                   data-active={filterMode === 'and' ? 'true' : 'false'}
                   data-track-category='CANVAS'
                   data-track-name='table_filter_mode_and'
-                  data-track-kind='passive'
                   aria-pressed={filterMode === 'and'}
                   onMouseDown={event => event.preventDefault()}
                   onClick={() => setFilterMode('and')}
@@ -765,7 +762,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                   data-active={filterMode === 'or' ? 'true' : 'false'}
                   data-track-category='CANVAS'
                   data-track-name='table_filter_mode_or'
-                  data-track-kind='passive'
                   aria-pressed={filterMode === 'or'}
                   onMouseDown={event => event.preventDefault()}
                   onClick={() => setFilterMode('or')}
@@ -783,7 +779,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                 className='inline-flex size-6 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-none transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-[0.45]'
                 data-track-category='CANVAS'
                 data-track-name='table_filter_add'
-                data-track-kind='passive'
                 aria-label='Add table filter'
                 title={hasMaxFilters ? undefined : 'Add table filter'}
                 disabled={hasMaxFilters}
@@ -798,7 +793,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
               className='inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-none transition-colors hover:bg-accent hover:text-foreground'
               data-track-category='CANVAS'
               data-track-name='table_filter_close'
-              data-track-kind='passive'
               aria-label={
                 hasActiveFilters ? 'Clear and close table filters' : 'Close table filters'
               }
@@ -850,7 +844,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                             className='inline-flex h-[26px] w-36 min-w-36 max-w-36 cursor-pointer items-center justify-between gap-1 rounded-md border-0 bg-popover px-2 text-left text-xs leading-4 tracking-normal text-popover-foreground shadow-none transition-colors hover:bg-accent hover:text-accent-foreground'
                             data-track-category='CANVAS'
                             data-track-name='table_filter_column_menu_open'
-                            data-track-kind='passive'
                             aria-label='Filter table column'
                             aria-haspopup='listbox'
                             aria-expanded={openColumnFilterId === filter.id}
@@ -883,7 +876,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                                   data-selected={option.value === filter.column ? 'true' : 'false'}
                                   data-track-category='CANVAS'
                                   data-track-name='table_filter_column_select'
-                                  data-track-kind='passive'
                                   role='option'
                                   aria-selected={option.value === filter.column}
                                   title={option.label}
@@ -938,7 +930,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                             className='inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent bg-transparent text-muted-foreground shadow-none transition-colors hover:bg-accent hover:text-foreground'
                             data-track-category='CANVAS'
                             data-track-name='table_filter_remove'
-                            data-track-kind='passive'
                             aria-label='Remove table filter'
                             title='Remove table filter'
                             onMouseDown={event => event.preventDefault()}
@@ -955,7 +946,6 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                                   className='flex w-full min-w-0 cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-xs leading-4 tracking-normal hover:bg-accent hover:text-accent-foreground'
                                   data-track-category='CANVAS'
                                   data-track-name='table_filter_autocomplete_select'
-                                  data-track-kind='passive'
                                   title={option}
                                   onMouseDown={event => {
                                     event.preventDefault();

@@ -59,7 +59,6 @@ export const TagChipInput: React.FC<TagChipInputProps> = ({
               onClick={() => removeTag(index)}
               data-track-category='ENTITY_PICKER'
               data-track-name='REMOVE_TAG_CHIP'
-              data-track-kind='active'
               className='rounded p-0.5 hover:bg-accent'
               aria-label={`Remove ${tag}`}
             >

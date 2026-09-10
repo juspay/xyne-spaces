@@ -92,7 +92,6 @@ export function SubagentDetailHeaderV2({
         onClick={onBack}
         data-track-category='Claw Agents'
         data-track-name='Subagent detail v2: back'
-        data-track-kind='passive'
         className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
       >
         <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
@@ -125,7 +124,6 @@ export function SubagentDetailHeaderV2({
                 aria-label='More actions'
                 data-track-category='Claw Agents'
                 data-track-name='Subagent detail v2: more actions'
-                data-track-kind='passive'
                 className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
               >
                 <ThreeDotsMenuHorizontal className='size-4' aria-hidden />

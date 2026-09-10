@@ -54,7 +54,6 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
       onClick={handleClick}
       trackCategory='twin-dock'
       trackName='open-twin-draft'
-      trackKind='passive'
       actions={null}
     />
   );

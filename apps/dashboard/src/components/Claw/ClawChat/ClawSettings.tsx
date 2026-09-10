@@ -19,7 +19,6 @@ export function ClawSettings({ onBack }: ClawSettingsProps): ReactElement {
           aria-label='Back'
           data-track-category='CLAW_CHAT'
           data-track-name='SETTINGS_BACK'
-          data-track-kind='passive'
           className='flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
         >
           <ArrowLeft className='size-4' />

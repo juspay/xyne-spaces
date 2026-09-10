@@ -104,7 +104,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
             className='flex items-center gap-1 text-sm font-medium text-foreground hover:bg-muted px-2 py-1 rounded-md transition-colors'
             data-track-category='Support'
             data-track-name='RefetchCalendarOpenMonths'
-            data-track-kind='passive'
           >
             {MONTH_NAMES[month]}, {year}
             <ChevronDown className='size-3.5 text-muted-foreground' />
@@ -116,7 +115,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
               data-track-name='RefetchCalendarPrev'
-              data-track-kind='passive'
             >
               <ChevronLeft className='size-4' />
             </button>
@@ -126,7 +124,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
               data-track-name='RefetchCalendarNext'
-              data-track-kind='passive'
             >
               <ChevronRight className='size-4' />
             </button>
@@ -202,7 +199,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
                   )}
                   data-track-category='Support'
                   data-track-name='RefetchCalendarDay'
-                  data-track-kind='passive'
                 >
                   {pad2(dayNum)}
                 </button>
@@ -224,7 +220,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
           className='flex items-center gap-1 text-sm font-medium text-foreground hover:bg-muted px-2 py-1 rounded-md transition-colors'
           data-track-category='Support'
           data-track-name='RefetchCalendarOpenYears'
-          data-track-kind='passive'
         >
           {year}
           <ChevronDown className='size-3.5 text-muted-foreground' />
@@ -236,7 +231,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
             className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='RefetchCalendarPrevYear'
-            data-track-kind='passive'
           >
             <ChevronLeft className='size-4' />
           </button>
@@ -246,7 +240,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
             className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='RefetchCalendarNextYear'
-            data-track-kind='passive'
           >
             <ChevronRight className='size-4' />
           </button>
@@ -269,7 +262,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
               )}
               data-track-category='Support'
               data-track-name='RefetchCalendarPickMonth'
-              data-track-kind='passive'
             >
               {label}
             </button>
@@ -299,7 +291,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
               data-track-name='RefetchCalendarPrevDecade'
-              data-track-kind='passive'
             >
               <ChevronLeft className='size-4' />
             </button>
@@ -311,7 +302,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
               className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted'
               data-track-category='Support'
               data-track-name='RefetchCalendarNextDecade'
-              data-track-kind='passive'
             >
               <ChevronRight className='size-4' />
             </button>
@@ -334,7 +324,6 @@ export const RangeCalendar: React.FC<RangeCalendarProps> = ({
                 )}
                 data-track-category='Support'
                 data-track-name='RefetchCalendarPickYear'
-                data-track-kind='passive'
               >
                 {y}
               </button>

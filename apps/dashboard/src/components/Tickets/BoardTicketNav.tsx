@@ -19,7 +19,6 @@ export const BoardTicketNav = ({ ticketId }: BoardTicketNavProps): ReactElement 
         className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
         data-track-category='Tickets'
         data-track-name='PrevTicket'
-        data-track-kind='passive'
       >
         <ChevronUp size={16} />
       </button>
@@ -31,7 +30,6 @@ export const BoardTicketNav = ({ ticketId }: BoardTicketNavProps): ReactElement 
         className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
         data-track-category='Tickets'
         data-track-name='NextTicket'
-        data-track-kind='passive'
       >
         <ChevronDown size={16} />
       </button>

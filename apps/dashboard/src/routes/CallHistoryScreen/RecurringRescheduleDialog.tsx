@@ -34,7 +34,6 @@ const RecurringRescheduleDialog = ({
           onClick={onCancel}
           data-track-category='CALLS'
           data-track-name='recurring-reschedule-cancel'
-          data-track-kind='passive'
           className='text-sm px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer text-foreground'
         >
           Cancel
@@ -43,7 +42,6 @@ const RecurringRescheduleDialog = ({
           onClick={onConfirm}
           data-track-category='CALLS'
           data-track-name='recurring-reschedule-confirm'
-          data-track-kind='active'
           className='text-sm px-4 py-2 rounded-lg bg-[#6276BE] text-white hover:bg-[#5566ae] transition-colors cursor-pointer'
         >
           Reschedule this event

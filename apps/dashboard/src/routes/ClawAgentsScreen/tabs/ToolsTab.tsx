@@ -204,7 +204,6 @@ const ToolsTab = ({ agent, permissions }: ToolsTabProps): ReactElement => {
           onClick={() => void handleSave()}
           data-track-category='Claw Agents'
           data-track-name='SAVE_TOOLS'
-          data-track-kind='active'
         >
           {saving ? 'Saving…' : 'Save changes'}
         </Button>

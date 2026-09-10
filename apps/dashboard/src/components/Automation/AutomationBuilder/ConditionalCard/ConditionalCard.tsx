@@ -80,7 +80,6 @@ export function ConditionalCard({
           onClick={() => setCollapsed(prev => !prev)}
           data-track-category='automation-builder'
           data-track-name='conditional-toggle-collapse'
-          data-track-kind='passive'
         >
           <div className='flex size-8 items-center justify-center rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400'>
             <GitBranch className='size-4' />
@@ -107,7 +106,6 @@ export function ConditionalCard({
             aria-label='Move up'
             data-track-category='automation-builder'
             data-track-name='conditional-move-up'
-            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               index === 1
@@ -124,7 +122,6 @@ export function ConditionalCard({
             aria-label='Move down'
             data-track-category='automation-builder'
             data-track-name='conditional-move-down'
-            data-track-kind='active'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
               index === total
@@ -159,7 +156,6 @@ export function ConditionalCard({
               }}
               data-track-category='automation-builder'
               data-track-name='conditional-delete'
-              data-track-kind='active'
               className='flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-500/10'
             >
               <Trash2 className='size-4' />
@@ -180,7 +176,6 @@ export function ConditionalCard({
                 onClick={() => setEditorOpen(true)}
                 data-track-category='automation-builder'
                 data-track-name='conditional-open-editor'
-                data-track-kind='passive'
                 className='gap-1.5'
               >
                 <Pencil className='size-3.5' />
@@ -192,7 +187,6 @@ export function ConditionalCard({
               onClick={() => setEditorOpen(true)}
               data-track-category='automation-builder'
               data-track-name='conditional-open-editor'
-              data-track-kind='passive'
               className={cn(
                 'rounded-md border px-3 py-2 text-left text-xs',
                 conditionUnset
@@ -239,7 +233,6 @@ export function ConditionalCard({
                     }}
                     data-track-category='automation-builder'
                     data-track-name='conditional-cancel-condition'
-                    data-track-kind='passive'
                   >
                     Cancel
                   </Button>
@@ -247,7 +240,6 @@ export function ConditionalCard({
                     size='sm'
                     data-track-category='automation-builder'
                     data-track-name='conditional-save-condition'
-                    data-track-kind='active'
                     onClick={() => {
                       if (hasInvalidTagCondition(draftCondition)) {
                         setTagConditionError(

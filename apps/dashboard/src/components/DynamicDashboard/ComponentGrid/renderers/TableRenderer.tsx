@@ -143,7 +143,6 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
           className='flex-1 text-xs bg-transparent focus:outline-none placeholder:text-muted-foreground'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Global_Search_Change'
-          data-track-kind='passive'
         />
       </div>
 
@@ -176,7 +175,6 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
                             className='inline-flex items-center gap-1 hover:text-foreground transition-colors'
                             data-track-category='DASHBOARD_TABLE'
                             data-track-name='Toggle_Sort'
-                            data-track-kind='passive'
                           >
                             <span>{flexRender(col.columnDef.header, header.getContext())}</span>
                             {sorted === 'asc' ? (
@@ -254,7 +252,6 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
             className='bg-background border border-border rounded px-1 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring'
             data-track-category='DASHBOARD_TABLE'
             data-track-name='Change_Page_Size'
-            data-track-kind='passive'
           >
             {PAGE_SIZE_OPTIONS.map(n => (
               <option key={n} value={n}>
@@ -311,7 +308,6 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
             className='flex items-center gap-1 hover:text-foreground transition-colors shrink-0'
             data-track-category='DASHBOARD_TABLE'
             data-track-name='Reset_Filters'
-            data-track-kind='passive'
           >
             <RotateCcw size={11} /> Reset
           </button>
@@ -373,7 +369,6 @@ const ColumnFilterButton = ({ column, active }: ColumnFilterButtonProps): ReactE
           aria-label={`Filter ${column.id}`}
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Open_Column_Filter'
-          data-track-kind='passive'
         >
           <Filter size={12} />
           {active && (
@@ -394,7 +389,6 @@ const ColumnFilterButton = ({ column, active }: ColumnFilterButtonProps): ReactE
               className='inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground'
               data-track-category='DASHBOARD_TABLE'
               data-track-name='Clear_Column_Filter'
-              data-track-kind='passive'
             >
               <X size={11} /> Clear
             </button>
@@ -440,7 +434,6 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
               className='h-3.5 w-3.5'
               data-track-category='DASHBOARD_TABLE'
               data-track-name='Filter_Enum_Toggle'
-              data-track-kind='passive'
             />
             <span className='truncate'>{v}</span>
           </label>
@@ -463,7 +456,6 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
         className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-ring'
         data-track-category='DASHBOARD_TABLE'
         data-track-name='Filter_Contains_Change'
-        data-track-kind='passive'
       />
     );
   }
@@ -488,7 +480,6 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Min_Change'
-          data-track-kind='passive'
         />
         <span className='text-muted-foreground text-xs'>–</span>
         <input
@@ -499,7 +490,6 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Max_Change'
-          data-track-kind='passive'
         />
       </div>
     );
@@ -517,7 +507,6 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
             onClick={() => column.setFilterValue(label === 'any' ? undefined : label)}
             data-track-category='DASHBOARD_TABLE'
             data-track-name='Filter_Boolean_Pick'
-            data-track-kind='passive'
             className={`px-2 py-1.5 rounded border transition-colors ${
               isOn
                 ? 'bg-primary text-primary-foreground border-primary'

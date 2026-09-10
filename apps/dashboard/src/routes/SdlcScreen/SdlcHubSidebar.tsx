@@ -84,7 +84,6 @@ export function SdlcHubRepositories(props: {
           aria-label='Repositories in this hub'
           data-track-category='SdlcHub'
           data-track-name='HubRepositoryListOpened'
-          data-track-kind='passive'
         >
           <GitBranch className='size-4 shrink-0 text-sidebar-foreground/65' />
           <span className='min-w-0 flex-1 truncate text-left'>Repositories</span>
@@ -110,7 +109,6 @@ export function SdlcHubRepositories(props: {
               className='flex items-center gap-2 px-2.5 py-2 transition-colors hover:bg-muted/60'
               data-track-category='SdlcHub'
               data-track-name='HubRepositoryOpened'
-              data-track-kind='passive'
             >
               <GitBranch className='size-3.5 shrink-0 text-muted-foreground' />
               <span className='min-w-0 flex-1 truncate text-[12.5px]'>{repository.name}</span>
@@ -128,7 +126,6 @@ export function SdlcHubRepositories(props: {
         }}
         data-track-category='SdlcHub'
         data-track-name='HubRepositoriesOpened'
-        data-track-kind='passive'
       >
         <Settings2 className='size-3.5' />
         Manage repositories

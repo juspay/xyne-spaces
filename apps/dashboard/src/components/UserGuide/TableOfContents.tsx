@@ -61,7 +61,6 @@ export const TableOfContents = ({
                 onClick={() => scrollToSection(`guide-${category.id}`)}
                 data-track-category='USER_GUIDE'
                 data-track-name='JUMP_TO_CATEGORY'
-                data-track-kind='passive'
                 className={`w-full flex items-center gap-1.5 pt-3 pb-1 px-2.5 rounded-sm text-[11px] font-bold uppercase tracking-[0.12em] transition-colors duration-150 text-left ${
                   isCategoryActive
                     ? 'text-foreground'
@@ -87,7 +86,6 @@ export const TableOfContents = ({
                       onClick={() => scrollToSection(`guide-feature-${feature.id}`)}
                       data-track-category='USER_GUIDE'
                       data-track-name='JUMP_TO_FEATURE'
-                      data-track-kind='passive'
                       className={`w-full text-left py-1 px-2 rounded text-[12px] transition-colors duration-100 truncate ${
                         isFeatureActive
                           ? 'text-foreground font-medium bg-primary/[0.06]'

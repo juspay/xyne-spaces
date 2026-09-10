@@ -179,7 +179,6 @@ const ChannelItemV2 = memo(
         onClick={handleChannelClick}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
-        data-track-kind='passive'
         data-track-metadata={JSON.stringify({
           channelId: channel.id,
           channelName: displayName,
@@ -250,7 +249,6 @@ const ChannelItemV2 = memo(
                   aria-label='Channel section options'
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='CHANNEL_SECTION_MENU'
-                  data-track-kind='passive'
                 >
                   <ThreeDotsMenuVertical size={14} className='shrink-0' />
                 </button>
@@ -280,7 +278,6 @@ const ChannelItemV2 = memo(
                           }}
                           data-track-category='CHAT_SIDEBAR'
                           data-track-name='MOVE_CHANNEL_TO_SECTION'
-                          data-track-kind='active'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -306,7 +303,6 @@ const ChannelItemV2 = memo(
                       }}
                       data-track-category='CHAT_SIDEBAR'
                       data-track-name='REMOVE_CHANNEL_FROM_SECTION'
-                      data-track-kind='active'
                     >
                       <FolderRemove size={14} className='shrink-0' />
                       <span className='flex-1'>Remove from section</span>
@@ -324,7 +320,6 @@ const ChannelItemV2 = memo(
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({
                 channelId: channel.id,
                 channelName: displayName,

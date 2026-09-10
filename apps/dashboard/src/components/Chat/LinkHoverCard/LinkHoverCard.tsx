@@ -72,7 +72,6 @@ export const LinkHoverCard: React.FC<LinkHoverCardProps> = ({ href, children }) 
                 onClick={handleOpen}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_LINK_HOVER_CARD'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ url: href })}
               >
                 <ExternalLink className='h-4 w-4' />
@@ -87,7 +86,6 @@ export const LinkHoverCard: React.FC<LinkHoverCardProps> = ({ href, children }) 
                 onClick={handleCopy}
                 data-track-category='MESSAGE'
                 data-track-name='COPY_LINK_HOVER_CARD'
-                data-track-kind='passive'
                 data-track-metadata={JSON.stringify({ url: href })}
               >
                 {copied ? (

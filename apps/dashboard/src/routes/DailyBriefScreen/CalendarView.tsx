@@ -52,7 +52,6 @@ export function CalendarView({
         aria-label='Back to recent briefs'
         data-track-category='DailyBrief'
         data-track-name='daily-brief-calendar-back'
-        data-track-kind='passive'
         className='self-start flex items-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground pl-0.5 pr-1 py-0.5'
       >
         <ChevronBigLeft size={14} variant='Solid' />
@@ -104,7 +103,6 @@ export function CalendarView({
           }}
           data-track-category='DailyBrief'
           data-track-name='daily-brief-calendar-day'
-          data-track-kind='passive'
         />
       )}
     </div>

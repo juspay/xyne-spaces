@@ -147,7 +147,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
             onClick={() => void navigate(`${libraryPath}?tab=mcp`)}
             data-track-category='Claw Agents'
             data-track-name='MCP detail v2: back'
-            data-track-kind='passive'
             className='flex h-7 w-fit shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
           >
             <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
@@ -202,7 +201,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                         onClick={(): void => setDefinitionOpen(true)}
                         data-track-category='Claw MCP'
                         data-track-name='EditMcpDefinition'
-                        data-track-kind='active'
                       >
                         Edit definition
                       </Button>
@@ -215,7 +213,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                         disabled={connecting}
                         data-track-category='Claw MCP'
                         data-track-name='EditMcpCredentials'
-                        data-track-kind='active'
                       >
                         Edit credentials
                       </Button>
@@ -228,7 +225,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                         disabled={connecting || !connection}
                         data-track-category='Claw MCP'
                         data-track-name='DisconnectMcp'
-                        data-track-kind='active'
                       >
                         {connecting ? 'Disconnecting…' : 'Disconnect'}
                       </Button>
@@ -239,7 +235,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                         disabled={connecting || server.enabled === false}
                         data-track-category='Claw MCP'
                         data-track-name='ConnectMcp'
-                        data-track-kind='active'
                       >
                         {connecting ? 'Connecting…' : 'Connect'}
                       </Button>
@@ -271,7 +266,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                             value={server.url}
                             label='Copy endpoint'
                             trackName='MCP detail v2: copy endpoint'
-                            trackKind='passive'
                           />
                         ),
                       }
@@ -305,7 +299,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                     value={configJson}
                     label='Copy configuration'
                     trackName='MCP detail v2: copy configuration'
-                    trackKind='passive'
                   />
                 }
               >

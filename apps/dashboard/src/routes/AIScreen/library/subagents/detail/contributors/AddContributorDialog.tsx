@@ -61,7 +61,6 @@ export function AddContributorDialog({
           className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
           data-track-category='Claw Agents'
           data-track-name='Subagent detail v2: close add contributor'
-          data-track-kind='passive'
         >
           Done
         </Button>
@@ -79,7 +78,6 @@ export function AddContributorDialog({
           aria-label='Search people'
           data-track-category='Claw Agents'
           data-track-name='Subagent detail v2: search people'
-          data-track-kind='passive'
           className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
         />
       </div>
@@ -109,7 +107,6 @@ export function AddContributorDialog({
                   className='h-auto rounded-xl bg-foreground px-3 py-1.5 text-sm text-background hover:bg-foreground/90'
                   data-track-category='Claw Agents'
                   data-track-name='Subagent detail v2: add contributor'
-                  data-track-kind='active'
                 >
                   Add
                 </Button>

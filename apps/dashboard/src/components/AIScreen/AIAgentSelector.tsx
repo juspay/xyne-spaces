@@ -84,7 +84,6 @@ export function AIAgentSelector({
       )}
       data-track-category='XyneAI'
       data-track-name='OPEN_AGENT_SELECTOR'
-      data-track-kind='passive'
     >
       {selectedAgent ? (
         <span
@@ -139,7 +138,6 @@ export function AIAgentSelector({
               autoFocus
               data-track-category='XyneAI'
               data-track-name='SearchAgentSelector'
-              data-track-kind='passive'
             />
             {query && (
               <button
@@ -148,7 +146,6 @@ export function AIAgentSelector({
                 className='text-muted-foreground hover:text-foreground text-xs shrink-0'
                 data-track-category='XyneAI'
                 data-track-name='CLEAR_AGENT_SEARCH'
-                data-track-kind='passive'
               >
                 Clear
               </button>
@@ -181,7 +178,6 @@ export function AIAgentSelector({
               )}
               data-track-category='XyneAI'
               data-track-name='SELECT_AGENT'
-              data-track-kind='passive'
               data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
             >
               <Bot className='w-4 h-4 shrink-0' />
@@ -215,7 +211,6 @@ export function AIAgentSelector({
                   )}
                   data-track-category='XyneAI'
                   data-track-name='SELECT_AGENT'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
                 >
                   <span className='font-normal truncate'>{agent.name}</span>

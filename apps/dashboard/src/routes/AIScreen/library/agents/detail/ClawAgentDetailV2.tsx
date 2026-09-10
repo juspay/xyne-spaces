@@ -85,7 +85,6 @@ const ClawAgentDetailV2 = (): ReactElement => {
                 aria-current={entry.id === tab ? 'page' : undefined}
                 data-track-category='Claw Agents'
                 data-track-name={`Agent detail v2 tab: ${entry.label}`}
-                data-track-kind='passive'
                 className={cn(
                   'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
                   entry.id === tab
@@ -143,7 +142,6 @@ const ClawAgentDetailV2 = (): ReactElement => {
                     type='button'
                     data-track-category='Claw Agents'
                     data-track-name='Agent detail v2: version history'
-                    data-track-kind='passive'
                     className='underline underline-offset-2'
                   >
                     Version history

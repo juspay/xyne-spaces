@@ -91,7 +91,6 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
             data-track-category='ChatMessage'
             data-track-name='TOGGLE_EXPAND_MESSAGE'
-            data-track-kind='passive'
             data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}
           >
             <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />

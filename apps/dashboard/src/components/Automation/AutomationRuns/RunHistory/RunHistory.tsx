@@ -119,7 +119,6 @@ export function RunHistory({
           aria-label='Back'
           data-track-category='automation-runs'
           data-track-name='run-history-back'
-          data-track-kind='passive'
           className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/40'
         >
           <ArrowLeft className='size-4' />
@@ -134,7 +133,6 @@ export function RunHistory({
             }}
             data-track-category='automation-runs'
             data-track-name='run-history-clear-filters'
-            data-track-kind='passive'
             className='ml-auto text-[11px] text-muted-foreground hover:text-foreground hover:underline'
           >
             Clear filters
@@ -169,7 +167,6 @@ export function RunHistory({
               data-ph-capture-attribute-track-id='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
-              data-track-kind='active'
               onClick={() => {
                 void refetch();
               }}
@@ -212,7 +209,6 @@ export function RunHistory({
                   }}
                   data-track-category='automation-runs'
                   data-track-name='LOAD_MORE_RUNS'
-                  data-track-kind='passive'
                 >
                   {isFetchingNextPage ? 'Loading…' : 'Load more'}
                 </Button>
@@ -244,7 +240,6 @@ function RunRow({
       onClick={onClick}
       data-track-category='automation-runs'
       data-track-name='run-history-row-open'
-      data-track-kind='passive'
       className='flex h-16 w-full items-center gap-3 border-b border-border px-6 text-left hover:bg-accent/30'
     >
       <div className='flex size-9 items-center justify-center'>

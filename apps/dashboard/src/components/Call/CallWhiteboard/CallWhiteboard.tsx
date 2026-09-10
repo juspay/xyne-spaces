@@ -567,7 +567,6 @@ export function CallWhiteboard({
                 aria-pressed={tool === 'pen'}
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Set_Tool_Pen'
-                data-track-kind='passive'
               >
                 <Brush className='h-4 w-4' aria-hidden />
               </button>
@@ -583,7 +582,6 @@ export function CallWhiteboard({
                 aria-pressed={tool === 'eraser'}
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Set_Tool_Eraser'
-                data-track-kind='passive'
               >
                 <Eraser className='h-4 w-4' aria-hidden />
               </button>
@@ -599,7 +597,6 @@ export function CallWhiteboard({
                 aria-pressed={tool === 'delete'}
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Set_Tool_Delete'
-                data-track-kind='passive'
               >
                 <Trash2 className='h-4 w-4' aria-hidden />
               </button>
@@ -623,7 +620,6 @@ export function CallWhiteboard({
                   aria-pressed={color === item && tool === 'pen'}
                   data-track-category='CALLS'
                   data-track-name='Whiteboard_Set_Color'
-                  data-track-kind='passive'
                   data-track-metadata={JSON.stringify({ color: item })}
                 />
               ))}
@@ -646,7 +642,6 @@ export function CallWhiteboard({
                 aria-label='Stroke width'
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Set_Stroke_Width'
-                data-track-kind='passive'
               />
 
               <button
@@ -656,7 +651,6 @@ export function CallWhiteboard({
                 title='Close whiteboard'
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Close'
-                data-track-kind='passive'
               >
                 <X className='h-4 w-4' aria-hidden />
               </button>
@@ -671,7 +665,6 @@ export function CallWhiteboard({
               title='Delete whiteboard page'
               data-track-category='CALLS'
               data-track-name='Whiteboard_Delete_Page_Open'
-              data-track-kind='active'
               data-track-metadata={JSON.stringify({ pageId: activePageId })}
             >
               <Trash2 className='h-4 w-4' aria-hidden />
@@ -703,7 +696,6 @@ export function CallWhiteboard({
                 aria-label='Dismiss whiteboard delete notice'
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Delete_Notice_Dismiss'
-                data-track-kind='passive'
               >
                 <X className='h-3.5 w-3.5' aria-hidden />
               </button>
@@ -733,7 +725,6 @@ export function CallWhiteboard({
                     className='rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50'
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Delete_Page_Cancel'
-                    data-track-kind='passive'
                   >
                     Cancel
                   </button>
@@ -745,7 +736,6 @@ export function CallWhiteboard({
                     data-ph-capture-attribute-track-id='whiteboard_delete_page_save_confirm'
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Delete_Page_Save_Confirm'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ pageId: activePageId })}
                   >
                     {isSavingBeforeDelete ? 'Saving...' : 'Save & delete'}
@@ -758,7 +748,6 @@ export function CallWhiteboard({
                     data-ph-capture-attribute-track-id='whiteboard_delete_page_confirm'
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Delete_Page_Confirm'
-                    data-track-kind='active'
                     data-track-metadata={JSON.stringify({ pageId: activePageId })}
                   >
                     Delete
@@ -810,7 +799,6 @@ export function CallWhiteboard({
                     aria-pressed={isActive}
                     data-track-category='CALLS'
                     data-track-name='Whiteboard_Select_Page'
-                    data-track-kind='passive'
                     data-track-metadata={JSON.stringify({ pageId: page.id, index })}
                   >
                     {index + 1}
@@ -826,7 +814,6 @@ export function CallWhiteboard({
                 title={canAddPage ? 'Add whiteboard' : 'Maximum 5 whiteboards'}
                 data-track-category='CALLS'
                 data-track-name='Whiteboard_Add_Page'
-                data-track-kind='active'
               >
                 <Plus className='h-4 w-4' aria-hidden />
               </button>

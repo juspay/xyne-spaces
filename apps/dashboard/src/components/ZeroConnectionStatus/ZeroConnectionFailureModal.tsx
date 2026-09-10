@@ -41,7 +41,6 @@ export const ZeroConnectionFailureModal = ({
             aria-label='Close modal'
             data-track-category='ZERO_CONNECTION'
             data-track-name='CLOSE_CONNECTION_FAILURE_MODAL'
-            data-track-kind='passive'
           >
             <X className='w-5 h-5' />
           </button>
@@ -85,7 +84,6 @@ export const ZeroConnectionFailureModal = ({
           className='w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
           data-track-category='ZERO_CONNECTION'
           data-track-name='RELOAD_APP_ON_CONNECTION_FAILURE'
-          data-track-kind='passive'
         >
           <RefreshCw className='w-5 h-5' strokeWidth={2.5} />
           <span>{isElectron ? 'Reload App' : 'Refresh Connection'}</span>

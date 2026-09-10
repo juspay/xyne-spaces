@@ -45,7 +45,6 @@ export const CitationLink = forwardRef<HTMLAnchorElement, CitationLinkProps>(
           onClick={onClick}
           data-track-category='citation'
           data-track-name='citation-open-external'
-          data-track-kind='passive'
           {...rest}
         >
           {children}
@@ -74,7 +73,6 @@ export const CitationLink = forwardRef<HTMLAnchorElement, CitationLinkProps>(
         onClick={handleClick}
         data-track-category='citation'
         data-track-name='citation-open-internal'
-        data-track-kind='passive'
         {...rest}
       >
         {children}

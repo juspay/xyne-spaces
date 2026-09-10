@@ -295,7 +295,6 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       )}
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
-      data-track-kind='passive'
     >
       <div className='relative py-1'>
         <button
@@ -309,7 +308,6 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'
           data-track-name='JUMP_TO_MESSAGE'
-          data-track-kind='passive'
         >
           <Home size={14} />
         </button>
@@ -340,7 +338,6 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
                         style={{ fontSize: '0.75rem' }}
                         data-track-category='SEARCH_RESULTS'
                         data-track-name='COLLAPSE_MESSAGE'
-                        data-track-kind='passive'
                       >
                         Show less
                       </button>
@@ -364,7 +361,6 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
                     className='mt-1 ml-14 flex items-center gap-1.5 group/replies'
                     data-track-category='SEARCH_RESULTS'
                     data-track-name='OPEN_THREAD_FROM_COUNT'
-                    data-track-kind='passive'
                   >
                     {repliers.length > 0 && <AvatarGroup userIds={repliers} size='sm' count={3} />}
                     <span className='text-xs font-medium text-muted-foreground group-hover/replies:text-foreground group-hover/replies:underline'>

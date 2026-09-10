@@ -111,7 +111,6 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                     onClick={() => r.applyQuickDays(n)}
                     data-track-category='Claw Agents'
                     data-track-name='Digital Twin enable quick days'
-                    data-track-kind='active'
                     className='rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                   >
                     last {n}d
@@ -127,7 +126,6 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
               loading={enableMutation.isPending}
               data-track-category='Claw Agents'
               data-track-name='Digital Twin: enable'
-              data-track-kind='active'
             >
               {!enableMutation.isPending && <Brain className='size-4' />}
               {enableMutation.isPending ? 'Enabling…' : 'Enable & start'}

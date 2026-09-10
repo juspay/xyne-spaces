@@ -5,7 +5,6 @@ import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/Re
 import { useUsers } from '../../../hooks/useUsers';
 import type { RecipientSuggestion } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
 import type { RecipientField as FieldType } from './recipients';
-import type { InteractionKind } from '@xyne/shared';
 
 const RECIPIENT_CHIP_COLLAPSED_COUNT = 4;
 const RECIPIENT_FIELD_EXPANDED_MAX_H_PX = 200;
@@ -40,7 +39,6 @@ interface RecipientFieldProps {
   focusSuggest: (field: FieldType) => void;
   trackCategory?: string;
   trackName?: string;
-  trackKind?: InteractionKind;
   trackMetadata?: Record<string, unknown>;
   /** Optional action controls rendered at the right edge of the row.
    *  Use this for Cc / Bcc toggles and composer-level actions so they
@@ -82,7 +80,6 @@ export const RecipientField = ({
   focusSuggest,
   trackCategory = 'Support',
   trackName,
-  trackKind,
   trackMetadata,
   actions,
   className,
@@ -140,7 +137,6 @@ export const RecipientField = ({
         tabIndex={0}
         data-track-category={trackCategory}
         data-track-name={trackName}
-        data-track-kind={trackKind}
         data-track-metadata={trackMetadata ? JSON.stringify(trackMetadata) : undefined}
       >
         <div
@@ -184,7 +180,6 @@ export const RecipientField = ({
               disabled={disabled}
               data-track-category={trackCategory}
               data-track-name={`Edit${label}Field`}
-              data-track-kind='active'
               data-track-metadata={trackMetadata ? JSON.stringify(trackMetadata) : undefined}
             />
             {hasMore && (
@@ -199,7 +194,6 @@ export const RecipientField = ({
                 className='inline-flex items-center gap-1 bg-muted/80 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
                 data-track-category='Support'
                 data-track-name={`Expand${label}Field`}
-                data-track-kind='passive'
               >
                 +{hiddenCount} more
               </button>
@@ -216,7 +210,6 @@ export const RecipientField = ({
                 className='inline-flex items-center gap-1 bg-muted/80 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0'
                 data-track-category='Support'
                 data-track-name={`Collapse${label}Field`}
-                data-track-kind='passive'
               >
                 Show less
               </button>

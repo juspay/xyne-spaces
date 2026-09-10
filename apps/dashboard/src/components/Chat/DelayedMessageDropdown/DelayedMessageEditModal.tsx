@@ -133,7 +133,6 @@ export const DelayedMessageEditModal = ({
             className='text-sm font-medium px-4 py-2 rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:opacity-50 transition-colors'
             data-track-category='delayed-messages'
             data-track-name='cancel-edit'
-            data-track-kind='passive'
           >
             Cancel
           </button>
@@ -145,7 +144,6 @@ export const DelayedMessageEditModal = ({
             className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors inline-flex items-center gap-2'
             data-track-category='delayed-messages'
             data-track-name='save-edit'
-            data-track-kind='active'
           >
             {isSaving && <Loader2 size={14} className='animate-spin' />}
             Save

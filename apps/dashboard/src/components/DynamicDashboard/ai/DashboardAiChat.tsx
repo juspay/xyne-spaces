@@ -99,7 +99,6 @@ export const DashboardAiChat = ({
               className='px-[12px] py-[6px] rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-[12px] leading-[22px] disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category={trackCategory}
               data-track-name='Pick_Starter_Prompt'
-              data-track-kind='passive'
             >
               {q}
             </button>
@@ -119,7 +118,6 @@ export const DashboardAiChat = ({
           aria-label='New chat'
           data-track-category={trackCategory}
           data-track-name='New_Chat'
-          data-track-kind='active'
         >
           <RotateCcw size={14} className='text-muted-foreground' />
           New chat
@@ -132,7 +130,6 @@ export const DashboardAiChat = ({
             aria-label='Clear chat history'
             data-track-category={trackCategory}
             data-track-name='Clear_Chat'
-            data-track-kind='active'
           >
             <Trash2 size={14} />
           </button>
@@ -144,7 +141,6 @@ export const DashboardAiChat = ({
               aria-label='Close chat'
               data-track-category={trackCategory}
               data-track-name='Close_Chat'
-              data-track-kind='passive'
             >
               <X size={14} />
             </button>
@@ -183,7 +179,6 @@ export const DashboardAiChat = ({
                     aria-label={`Remove ${c.label}`}
                     data-track-category={trackCategory}
                     data-track-name='Chat_Remove_Context_Chip'
-                    data-track-kind='active'
                   >
                     <X size={12} />
                   </button>
@@ -206,7 +201,6 @@ export const DashboardAiChat = ({
           disabled={isStreaming}
           data-track-category={trackCategory}
           data-track-name='Chat_Input_Change'
-          data-track-kind='passive'
           className='w-full text-sm text-foreground caret-foreground placeholder:text-muted-foreground outline-none resize-none bg-transparent'
         />
         <div className='flex items-center justify-end mt-1'>

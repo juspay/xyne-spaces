@@ -57,7 +57,6 @@ export function McpCapabilityRow({
             onClick={suggestions.run}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: retry MCP suggestions'
-            data-track-kind='active'
             className='font-medium text-foreground underline-offset-2 hover:underline'
           >
             Try again
@@ -73,7 +72,6 @@ export function McpCapabilityRow({
         disabled={!suggestions.canRun || loading}
         data-track-category='Claw Agents'
         data-track-name='Create agent v2: suggest MCPs'
-        data-track-kind='active'
         className='flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-xs leading-5 tracking-[-0.24px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
       >
         <Ai01 className='size-3.5 shrink-0' aria-hidden />
@@ -113,7 +111,6 @@ export function McpCapabilityRow({
           aria-label='Browse MCPs'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse MCPs'
-          data-track-kind='active'
           className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />

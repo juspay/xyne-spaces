@@ -180,7 +180,6 @@ const VolumeChart: React.FC<VolumeChartProps> = ({
           className='text-xs border border-border rounded px-2 py-1 bg-background text-foreground'
           data-track-category='Charts'
           data-track-name='VOLUME_CHART_GRANULARITY_CHANGE'
-          data-track-kind='passive'
         >
           <option value='top5'>Top 5</option>
           <option value='top10'>Top 10</option>
@@ -192,7 +191,6 @@ const VolumeChart: React.FC<VolumeChartProps> = ({
               onClick={() => setChartType('bar')}
               data-track-category='Charts'
               data-track-name='VOLUME_CHART_TOGGLE_BAR'
-              data-track-kind='passive'
               className={`px-3 py-1 transition-colors ${
                 chartType === 'bar'
                   ? 'bg-muted text-foreground font-semibold'
@@ -205,7 +203,6 @@ const VolumeChart: React.FC<VolumeChartProps> = ({
               onClick={() => setChartType('pie')}
               data-track-category='Charts'
               data-track-name='VOLUME_CHART_TOGGLE_PIE'
-              data-track-kind='passive'
               className={`px-3 py-1 transition-colors ${
                 chartType === 'pie'
                   ? 'bg-muted text-foreground font-semibold'

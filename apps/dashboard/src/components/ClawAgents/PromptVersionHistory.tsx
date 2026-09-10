@@ -36,7 +36,6 @@ export const PromptVersionHistory = ({
         onClick={() => setOpen(value => !value)}
         data-track-category='Claw Agents'
         data-track-name='Toggle prompt version history'
-        data-track-kind='passive'
         className='flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground'
       >
         {open ? <ChevronDown className='size-4' /> : <ChevronRight className='size-4' />}
@@ -67,7 +66,6 @@ export const PromptVersionHistory = ({
                         }
                         data-track-category='Claw Agents'
                         data-track-name='Expand prompt version'
-                        data-track-kind='passive'
                         className='text-sm font-medium text-foreground'
                       >
                         v{version.version}
@@ -86,7 +84,6 @@ export const PromptVersionHistory = ({
                           onClick={() => void restore(version.version)}
                           data-track-category='Claw Agents'
                           data-track-name='RESTORE_PROMPT_VERSION'
-                          data-track-kind='active'
                           className='ml-auto'
                         >
                           <RotateCcw className='size-3.5' /> Activate
