@@ -4467,11 +4467,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .where(helpers =>
         helpers.cmp('relationType', 'NOT IN', [...SDLC_HUB_GRAPH_EXCLUDED_RELATIONS]),
       )
-      // The flat edge is worth syncing for artifacts and conversations, which
-      // readers here resolve back to a track. Its FOLDER rows are the largest
-      // group in the graph and no reader touches them — the finder gets folders
-      // from getSdlcFoldersByChannel, which matches this edge server-side. Cut by
-      // target rather than by a whitelist, so a new flat target still arrives.
       .where(helpers =>
         helpers.or(
           helpers.cmp('relationType', '!=', SDLC_TRACK_FLAT_RELATION),

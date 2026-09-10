@@ -17,18 +17,12 @@ import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
 
-/**
- * Column width bounds. The minimum is set by the empty state's two buttons: any
- * narrower and "New artifact" and "New folder" wrap onto separate lines.
- */
 const FINDER_MIN_COLUMN_WIDTH = 244;
 const FINDER_MAX_COLUMN_WIDTH = 560;
 const FINDER_DEFAULT_COLUMN_WIDTH = 248;
 
-/** What a column can show. Anything else on the edge is not a tree node. */
 export type SdlcFinderNodeType = 'FOLDER' | 'CANVAS';
 
-/** The edge fields a column reads; the row type is wider than this. */
 interface ContainmentEdge {
   sourceId: string;
   targetType: string;
@@ -40,7 +34,6 @@ export interface SdlcFinderFolder {
   name: string;
 }
 
-/** A rendered row, whichever kind of node it came from. */
 interface FinderRow {
   kind: SdlcFinderNodeType;
   id: string;
@@ -52,7 +45,6 @@ interface FinderRow {
 export interface SdlcFinderCanvas {
   id: string;
   title: string;
-  /** The artifact's type — PRD, Tech Doc — which is its folder in the old sense. */
   typeName: string;
   createdBy: string;
   createdAt: number;
@@ -61,56 +53,29 @@ export interface SdlcFinderCanvas {
   lastEditedAt?: number | undefined;
 }
 
-/** One step down the tree. The track is the first, and is never a folder. */
 export interface SdlcFinderStep {
   type: 'TRACK' | 'FOLDER';
   id: string;
   name: string;
 }
 
-/**
- * One level of the tree: the things directly inside `parent`.
- *
- * Containment is an edge, so a column is the same query at every depth. The
- * component is repeated once per open level and owns exactly one live query,
- * which is what makes the tree lazy — closing a column drops its query rather
- * than keeping the whole hub in sync.
- */
 export function SdlcFinderColumn(props: {
   channelId: string;
   parent: SdlcFinderStep;
-  /** The child on the path below this column, if one is open. */
   selectedId: string | null;
-  /** The deepest selection on the path — the one that is live rather than trail. */
   activeSelectionId: string | null;
   canvasById: Map<string, SdlcFinderCanvas>;
   isLast: boolean;
   onSelectFolder: (folder: { id: string; name: string }) => void;
-  /** A single click: select the artifact so the preview can show it. */
   onSelectCanvas: (canvasId: string) => void;
-  /** A double click, or a modified click that opens in its own window. */
   onOpenCanvas: (canvasId: string, event?: ReactMouseEvent) => void;
-  /** The artifact being previewed, so its row reads as selected. */
   previewCanvasId: string | null;
   onNewFolder: (parent: SdlcFinderStep) => void;
   onNewArtifact: (parent: SdlcFinderStep) => void;
-  /**
-   * Open this column's own folder's conversations. The action is here rather
-   * than on the rows because a row is a button already, and the folder you are
-   * looking into is the one a conversation started here belongs to.
-   */
   onDiscussFolder: (folder: { id: string; name: string }) => void;
-  /** Every folder in the hub, by id — the page owns the one query behind it. */
   folderById: ReadonlyMap<string, SdlcFinderFolder>;
-  /**
-   * The folder whose conversations the right panel is currently showing, so the
-   * browser says which one the panel belongs to. Null whenever the panel is
-   * closed or bound to the track.
-   */
   discussingFolderId: string | null;
-  /** Committing a rename typed into a folder row. */
   onRenameFolder: (folderId: string, name: string) => void;
-  /** Dropping an item on a folder row, or on the column's own parent. */
   onMoveItem: (
     item: { type: SdlcFinderNodeType; id: string },
     parent: { type: 'TRACK' | 'FOLDER'; id: string },
@@ -119,43 +84,27 @@ export function SdlcFinderColumn(props: {
   onDragItem: (item: { type: SdlcFinderNodeType; id: string } | null) => void;
 }): ReactElement {
   const columnWidths = useUserPreference('sdlcFinderColumnWidths');
-  /**
-   * The width mid-drag. Persisting on every pointermove re-rendered every open
-   * column each frame, because the preference is shared; holding it here keeps
-   * the drag to this column and writes once, on release.
-   */
   const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const columnWidth =
-    dragWidth ?? columnWidths[props.parent.id] ?? FINDER_DEFAULT_COLUMN_WIDTH;
+  const columnWidth = dragWidth ?? columnWidths[props.parent.id] ?? FINDER_DEFAULT_COLUMN_WIDTH;
   const groupBy = useUserPreference('sdlcFinderGroupBy');
-  /** The row the pointer is currently over mid-drag, so only it shows a target. */
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  /** The pointer is over this column but not over a row, so the drop lands here. */
   const [columnDragOver, setColumnDragOver] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  /** The folder being renamed in place, and the text so far. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  /** Set when Escape ends a rename, so the blur that follows does not save it. */
   const renameAbandoned = useRef(false);
   const columnRef = useRef<HTMLDivElement | null>(null);
 
-  // Opening a folder puts its column past the right edge when the browser is
-  // already full; bring it into view so a click never appears to do nothing.
-  // `nearest` vertically, so this never scrolls the page itself.
   useEffect(() => {
     if (props.isLast) {
       columnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
     }
   }, [props.isLast, props.parent.id]);
 
-  // A drag that ends anywhere — dropped, cancelled, or left the column — must not
-  // leave a row still marked as the target.
   useEffect(() => {
     if (!props.draggingItem) setDragOverId(null);
   }, [props.draggingItem]);
 
-  /** Drag the divider on this column's right edge; only this column moves. */
   const startColumnResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault();
     event.stopPropagation();
@@ -196,9 +145,6 @@ export function SdlcFinderColumn(props: {
   );
   const edges: ContainmentEdge[] = Array.isArray(edgeRows) ? (edgeRows as ContainmentEdge[]) : [];
 
-  // Names come from the page's one hub-wide folder subscription rather than a
-  // per-column fetch: the columns differ in which edges they read, not in which
-  // folders exist, so one query serves every level and the page besides.
   const folderById = props.folderById;
 
   const rows = useMemo(
@@ -206,11 +152,7 @@ export function SdlcFinderColumn(props: {
       edges.flatMap<FinderRow>(edge => {
         if (edge.targetType === 'FOLDER') {
           const folder = folderById.get(edge.targetId);
-          // An edge whose folder has not arrived yet renders nothing rather than
-          // a blank row; a deleted one never arrives and is skipped the same way.
           if (!folder) return [];
-          // No count line: a folder is one line, and what is inside it is one
-          // click away rather than a number to read.
           return [
             {
               kind: 'FOLDER' as const,
@@ -236,11 +178,6 @@ export function SdlcFinderColumn(props: {
     [edges, folderById, props.canvasById],
   );
 
-  /**
-   * Rows split into labelled groups, or one unlabelled group when grouping is off.
-   * Folders lead: they are the structure, and the artifacts under a type heading
-   * are what the structure holds.
-   */
   const groups = useMemo(() => {
     if (groupBy === 'none') return [{ label: null, rows }];
     const byLabel = new Map<string, FinderRow[]>();
@@ -266,8 +203,6 @@ export function SdlcFinderColumn(props: {
         setColumnDragOver(true);
       }}
       onDragLeave={event => {
-        // dragleave also fires crossing into a child, so only a pointer that has
-        // actually left the column clears the highlight.
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
           setColumnDragOver(false);
         }
@@ -284,10 +219,7 @@ export function SdlcFinderColumn(props: {
       style={props.isLast ? { minWidth: FINDER_MIN_COLUMN_WIDTH } : { width: columnWidth }}
       className={cn(
         'relative flex shrink-0 flex-col border-r border-border transition-colors last:border-r-0',
-        // The open level takes the slack so the columns fill the width.
         props.isLast && 'flex-1',
-        // Where the drop would land, when it is the level itself rather than a
-        // folder in it. A row under the pointer owns the target instead.
         props.draggingItem && columnDragOver && !dragOverId && 'bg-primary/[0.06]',
       )}
     >
@@ -401,9 +333,6 @@ export function SdlcFinderColumn(props: {
               const selected =
                 props.selectedId === row.id ||
                 (row.kind === 'CANVAS' && props.previewCanvasId === row.id);
-              // The deepest selection is the live one; the selections above it only
-              // mark the path taken to get here, so they go quiet rather than
-              // competing with it.
               const activeSelected =
                 selected &&
                 (row.id === props.activeSelectionId || props.previewCanvasId === row.id);
@@ -416,9 +345,6 @@ export function SdlcFinderColumn(props: {
                       props.onSelectFolder({ id: row.id, name: row.name });
                       return;
                     }
-                    // Cmd/Ctrl-click keeps its existing meaning — open in a window —
-                    // so a plain click is free to mean "show me this" as it does in
-                    // a file browser.
                     if (event.metaKey || event.ctrlKey || event.shiftKey) {
                       props.onOpenCanvas(row.id, event);
                       return;
@@ -430,14 +356,8 @@ export function SdlcFinderColumn(props: {
                       props.onOpenCanvas(row.id, event);
                       return;
                     }
-                    // Only a folder already selected: the first click of a
-                    // double-click opens a folder, so renaming an unselected one
-                    // would race with stepping into it.
                     if (selected) {
                       event.preventDefault();
-                      // Escape unmounts the input and React fires no blur for
-                      // an unmounted element, so arm the guard as the editor
-                      // opens rather than clearing it on the way out.
                       renameAbandoned.current = false;
                       setRenameDraft(row.name);
                       setRenamingId(row.id);
@@ -445,15 +365,12 @@ export function SdlcFinderColumn(props: {
                   }}
                   draggable={renamingId !== row.id}
                   onDragStart={event => {
-                    // Firefox starts no drag without a dataTransfer entry, which
-                    // left the whole move-by-drag feature silently inert there.
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', row.id);
                     props.onDragItem({ type: row.kind, id: row.id });
                   }}
                   onDragEnd={() => props.onDragItem(null)}
                   onDragOver={event => {
-                    // Only folders take a drop, and nothing may be dropped on itself.
                     if (
                       row.kind === 'FOLDER' &&
                       props.draggingItem?.id &&
@@ -489,8 +406,6 @@ export function SdlcFinderColumn(props: {
                   data-track-metadata={JSON.stringify({ id: row.id })}
                 >
                   {row.kind === 'FOLDER' ? (
-                    // Filled, so a folder reads as a solid shape beside the outlined
-                    // documents rather than as another line drawing.
                     <Folder
                       className={cn(
                         'size-[18px] shrink-0',
@@ -530,8 +445,6 @@ export function SdlcFinderColumn(props: {
                           renameAbandoned.current = false;
                           return;
                         }
-                        // A folder has to be called something, and renaming it to
-                        // what it already is is not a change worth a round trip.
                         if (next.length > 0 && next !== row.name) {
                           props.onRenameFolder(row.id, next);
                         }
@@ -580,9 +493,6 @@ export function SdlcFinderColumn(props: {
           </div>
         ))}
         {rows.length === 0 && (
-          // Centred in the column rather than perched at the top of it, and it
-          // says what to do next: an empty column is the one place a reader has
-          // nothing to go on.
           <div className='flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center'>
             <div className='grid size-9 place-items-center rounded-lg bg-foreground/[0.05]'>
               <FolderOpen className='size-4 text-muted-foreground' aria-hidden='true' />
@@ -624,16 +534,9 @@ export function SdlcFinderColumn(props: {
   );
 }
 
-/**
- * The preview a single click opens, standing where the next column would be.
- *
- * A file has no children, so the column that would list them says what the file
- * is instead — which is what makes one click worth making in a browser like this.
- */
 export function SdlcFinderPreview(props: {
   canvas: SdlcFinderCanvas;
   onOpen: (canvasId: string, event?: ReactMouseEvent) => void;
-  /** Read it in place, in the side panel, without leaving the browser. */
   onPreview: (canvasId: string) => void;
 }): ReactElement {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -655,8 +558,6 @@ export function SdlcFinderPreview(props: {
   const editedBy = props.canvas.lastEditedBy ?? props.canvas.createdBy;
 
   return (
-    // Fixed and narrow: a preview stretched across the remaining width is mostly
-    // empty, and the facts in it read better in a column than in a banner.
     <div ref={panelRef} className='flex w-[300px] shrink-0 flex-col border-r border-border'>
       <div className='flex shrink-0 items-center border-b border-border bg-foreground/[0.05] px-3 py-1.5'>
         <span className='truncate text-[10px] font-semibold uppercase tracking-[0.11em] text-muted-foreground'>

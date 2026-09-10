@@ -20,20 +20,10 @@ import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelecto
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import { Popover } from '../../components/ui/Popover';
 
-/** Header height, and therefore the height a collapsed section folds down to. */
 const SECTION_HEADER_HEIGHT = 28;
-/** Height a section opens to when neither the reader nor the caller has said. */
 const DEFAULT_SECTION_HEIGHT = 170;
-/** Least an open section may be squeezed to — enough to be worth having open. */
 const MIN_OPEN_SECTION_HEIGHT = 150;
-/** Height of a drag handle. The sections share what is left after these. */
 const SECTION_SEPARATOR_HEIGHT = 7;
-/**
- * The resizable sections, in the order they appear, with the height each opens
- * to before the reader drags it anywhere. They live here rather than at the call
- * site because working out one section's height needs all of them: the space is
- * shared, so the answer is a layout, not four independent decisions.
- */
 export const SDLC_SECTIONS: ReadonlyArray<{ id: string; defaultHeight: number }> = [
   { id: 'sdlc-sidebar-hub', defaultHeight: 180 },
   { id: 'sdlc-sidebar-tracks', defaultHeight: 200 },
@@ -59,11 +49,6 @@ function repositoryHref(repository: SdlcHubRepository): string {
   return repository.canonicalUrl || repository.url;
 }
 
-/**
- * Hub switcher. Repository names ride in the subtitle, which the selector
- * searches — and they need room, so the dropdown is left to size itself to its
- * content rather than being pinned to the trigger's sidebar-narrow width.
- */
 export function SdlcHubPicker(props: {
   hubs: SdlcHubOption[];
   selectedHubId: string;
@@ -175,22 +160,6 @@ export function SdlcHubRepositories(props: {
   );
 }
 
-/**
- * How tall each section should be, given the space there is and what the reader
- * has asked for.
- *
- * When the stored heights fit, they are used as-is. When they do not — a height
- * Whatever is open fills the sidebar between the folded headers, sharing the room
- * in proportion to the heights asked for. Sections are not left at a height that
- * strands empty space below the last one — a folded header belongs against the
- * section under it, not floating with a gap beneath. Only when every section is
- * folded do the headers stack and the space below them go unused.
- *
- * Each open section is first given enough to look open, so none is ever squeezed
- * to its header while its chevron points open, and a sidebar too short for what
- * was asked for shrinks everything a little rather than starving whichever
- * sections happen to come last.
- */
 export function sdlcSectionLayout(
   groupHeight: number,
   collapsedSections: Record<string, boolean>,
@@ -203,9 +172,6 @@ export function sdlcSectionLayout(
   const open = SDLC_SECTIONS.filter(section => !collapsedSections[section.id]);
   if (open.length === 0) return heights;
 
-  // The drag handles between the sections take height too. Leaving them out
-  // scaled every section up by the few percent they occupy, which is a visible
-  // jump the moment a drag ends and the layout is reapplied.
   const available =
     groupHeight -
     (SDLC_SECTIONS.length - 1) * SECTION_SEPARATOR_HEIGHT -
@@ -223,10 +189,6 @@ export function sdlcSectionLayout(
   );
   const wantedTotal = open.reduce((total, section) => total + (wanted.get(section.id) ?? 0), 0);
 
-  // When what the reader asked for fits, they get exactly that, and the last open
-  // section takes up whatever is left over. Sharing the slack across all of them
-  // instead meant folding one section resized every other one, so the whole
-  // sidebar shifted under the pointer to open a single list.
   if (wantedTotal <= available) {
     const last = open[open.length - 1];
     open.forEach(section => {
@@ -236,11 +198,6 @@ export function sdlcSectionLayout(
     return heights;
   }
 
-  // Too tall to fit: everything shrinks a little, in proportion. Straight scaling,
-  // so heights that already fill the sidebar map to themselves — anything that
-  // reshuffles them gives a different answer each time it runs over its own
-  // output, which walks the sections further on every collapse and snaps them
-  // away from where a drag just put them.
   const settled = new Map<string, number>();
   let pool = [...open];
   let remaining = available;
@@ -250,8 +207,6 @@ export function sdlcSectionLayout(
       for (const section of pool) settled.set(section.id, remaining / pool.length);
       break;
     }
-    // A section too small to read as open takes its minimum off the top; the rest
-    // then share what is left, which may push another below the line in turn.
     const starved = pool.filter(
       section => ((wanted.get(section.id) ?? 0) / poolTotal) * remaining < MIN_OPEN_SECTION_HEIGHT,
     );
@@ -269,15 +224,9 @@ export function sdlcSectionLayout(
     if (pool.length === 0) break;
   }
 
-  // Round so the sections still add up to exactly the space there is — otherwise
-  // the leftover pixel lands somewhere on its own and the layout creeps.
   let used = 0;
   open.forEach((section, index) => {
     const exact = settled.get(section.id) ?? MIN_OPEN_SECTION_HEIGHT;
-    // The last section absorbs the rounding, but `available - used` goes negative
-    // when every section has been starved to the minimum and there was never
-    // enough room — a short viewport with four sections open. A negative resize
-    // is worse than overflowing, so the floor wins.
     const height =
       index === open.length - 1
         ? Math.max(MIN_OPEN_SECTION_HEIGHT, available - used)
@@ -288,27 +237,10 @@ export function sdlcSectionLayout(
   return heights;
 }
 
-/**
- * One collapsible, vertically resizable list in the hub sidebar — the VS Code
- * explorer arrangement, where each section keeps a height you can drag and
- * folds down to just its header.
- *
- * Sizing is in pixels and ours, not the group's. The group's own collapse/expand
- * remembers a *percentage*, and since these sections do not fill the sidebar on
- * their own, every fold handed slack to a neighbour and the percentages drifted:
- * one section grew on each cycle until the last one had nothing left to expand
- * into and stayed shut with its chevron pointing open. Pinning each section to a
- * pixel height and letting the trailing slack panel — the one panel left
- * relative — absorb the remainder keeps the heights stable across any number of
- * cycles, and keeps chevron and section in agreement because both read the
- * stored preference.
- */
 export function SdlcSidebarSection(props: {
-  /** Stable across renders — heights and collapse are stored against it. */
   id: string;
   title: string;
   count?: number | undefined;
-  /** The `+` beside the header, when the section can be added to. */
   action?: { label: string; onClick: () => void; trackName: string } | undefined;
   children: ReactNode;
 }): ReactElement {
@@ -322,9 +254,6 @@ export function SdlcSidebarSection(props: {
 
   const collapsed = collapsedSections[props.id] ?? false;
 
-  // The preference is the single source of truth: the chevron renders from it and
-  // the panel is sized from it, so the two cannot disagree. Every section runs the
-  // same layout over the same inputs, so they agree with each other too.
   useEffect(() => {
     const apply = (): void => {
       const element = document.getElementById(props.id);
@@ -333,9 +262,6 @@ export function SdlcSidebarSection(props: {
       const height = sdlcSectionLayout(groupHeight, collapsedSections, sectionHeights)[props.id];
       if (height !== undefined) panel.current?.resize(`${height}px`);
     };
-    // Twice: once now, once after the group has taken this render's minSize. A
-    // section folding to its header is asking for a height below the floor it
-    // had a moment ago, and the first call alone gets clamped short of it.
     apply();
     const frame = requestAnimationFrame(apply);
     return () => cancelAnimationFrame(frame);
@@ -351,12 +277,7 @@ export function SdlcSidebarSection(props: {
     <Panel
       id={props.id}
       panelRef={panel}
-      // Pixels, not percentages — see the note above. The trailing slack panel is
-      // the group's one relative panel and gives up the space these take.
       groupResizeBehavior='preserve-pixel-size'
-      // Folded, a section is its header. Open, a drag stops here — the group
-      // enforces this live, so the section never travels below the floor and
-      // springs back, it simply will not go.
       minSize={`${collapsed ? SECTION_HEADER_HEIGHT : MIN_OPEN_SECTION_HEIGHT}px`}
       defaultSize={`${collapsed ? SECTION_HEADER_HEIGHT : defaultHeight}px`}
       className='flex min-h-0 flex-col'
@@ -405,14 +326,6 @@ export function SdlcSidebarSection(props: {
   );
 }
 
-/**
- * Record the heights a drag just produced, for the group these sections live in.
- *
- * Only a real separator drag counts. Every other layout pass — mount, a window
- * resize, our own `resize()` calls — reports sizes too, and taking those at face
- * value is what previously let the first section record the whole sidebar as its
- * chosen height and squash everything below it.
- */
 export function persistSdlcSectionHeights(meta: { isUserInteraction: boolean }): void {
   if (!meta.isUserInteraction) return;
   const preferences = userPreferencesSnapshot();
@@ -422,29 +335,16 @@ export function persistSdlcSectionHeights(meta: { isUserInteraction: boolean }):
   for (const { id } of SDLC_SECTIONS) {
     const element = document.getElementById(id);
     if (!element) continue;
-    // A folded section's height is its header, not a height to return to.
     if (collapsed[id]) continue;
     const measured = Math.round(element.getBoundingClientRect().height);
     const height = Math.max(MIN_OPEN_SECTION_HEIGHT, measured);
     const previous = preferences.sdlcSidebarSectionHeights[id];
     stored[id] = height;
-    // A drag below the floor republishes even when it lands on a height already
-    // stored: the republish is what re-runs the layout and springs the section
-    // back, and skipping it as a no-op left every drag after the first squashed
-    // where the pointer dropped it.
     if (measured < MIN_OPEN_SECTION_HEIGHT || previous !== height) changed = true;
   }
   if (changed) setUserPreference('sdlcSidebarSectionHeights', stored);
 }
 
-/**
- * The drag handle between two sections.
- *
- * Taller than the line it draws so there is something to actually grab, and the
- * live line is brightest under the middle and fades to nothing at both ends —
- * the same edge treatment the canvas resize handles use, which reads as a grip
- * rather than a border drawn across the sidebar.
- */
 export function SdlcSidebarSectionSeparator(): ReactElement {
   return (
     <Separator

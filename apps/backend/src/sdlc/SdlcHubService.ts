@@ -910,8 +910,6 @@ export class SdlcHubService implements SdlcHub {
             },
           });
           if (input.kind !== 'BASELINE' && input.trackId) {
-            // Containment: a new artifact lands at the track's root, so the
-            // parent on the source side is the track itself.
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
@@ -924,9 +922,6 @@ export class SdlcHubService implements SdlcHub {
                 createdBy: actor.userId,
               },
             });
-            // And the flat edge, which keeps pointing at the track wherever the
-            // artifact is later filed. Written with the artifact so the two
-            // cannot drift apart.
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
@@ -1536,10 +1531,6 @@ export class SdlcHubService implements SdlcHub {
       // Propagate the source artifact's track onto the ticket so the ticket shows
       // under the same track (same TRACK_ITEM entity link we use for PRDs/Tech Docs).
       if (input.targetType === 'TICKET' && input.sourceType === 'CANVAS') {
-        // The flat edge, not containment: once an artifact is filed into a
-        // folder its containment edge is FOLDER -> CANVAS, and a TRACK source
-        // finds nothing — the ticket would be created and silently left off the
-        // track's list. Same lookup, same reason, as entityLinkService.
         const trackLink = await this.prisma.sdlcEntityLink.findFirst({
           where: {
             channelId: repo.channelId,

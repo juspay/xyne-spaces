@@ -28,7 +28,6 @@ interface SdlcChatPanelProps {
   ) => void;
   /** Thread header's Ask AI. Raised so the host can route it past the frame. */
   onAskAI?: (threadInfo?: ThreadInfo) => void;
-  /** Whose conversations these are, named in the panel's own bar. */
   title: string;
   /**
    * Set when the conversations belong to something inside the track rather than

@@ -15,10 +15,6 @@ export class SdlcFoldersACL extends BaseQueryACL<'sdlc_folders'> {
       return denyGuestSelect(query, 'id');
     }
 
-    // A folder carries no scope column; the edge that places it in a track is
-    // what places it in a hub, so visibility follows that edge's channel — the
-    // same shape as SdlcTracksACL. Any edge will do: a folder always has exactly
-    // one containment edge, and it cannot be reached without it.
     return query
       .where('workspaceId', '=', this.ctx.workspaceId)
       .whereExists('sdlcEntityLinks', (link) =>

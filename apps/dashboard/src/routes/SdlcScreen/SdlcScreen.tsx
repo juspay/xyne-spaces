@@ -173,19 +173,9 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'overview', label: 'Overview', icon: Boxes },
   { id: 'wiki', label: 'Wiki', icon: BookOpen },
   { id: 'baseline', label: 'Repo Knowledge', icon: ShieldCheck },
-  // Tracks are the sidebar's own list now, not a page, so they leave this nav.
   { id: 'tickets', label: 'Issues', icon: CircleDot },
 ];
 
-// Artifacts and tracks have no row in the nav above — both are reached from the
-// sidebar's own lists — but their URLs still have to resolve. An id missing here
-// silently falls back to Overview rather than erroring.
-/** How wide the sidebar may be dragged, and the point below which it folds. */
-/**
- * Sizes the rename field to the text it holds, measured rather than estimated.
- * The mirror's content is set here instead of waiting for React so the width
- * tracks the keystroke that caused it.
- */
 function sizeNameFieldToText(input: HTMLInputElement): void {
   const mirror = input.parentElement?.querySelector('[data-name-mirror]');
   if (!(mirror instanceof HTMLElement)) return;
@@ -193,8 +183,6 @@ function sizeNameFieldToText(input: HTMLInputElement): void {
   input.style.width = `${Math.ceil(mirror.getBoundingClientRect().width) + 2}px`;
 }
 
-/** Match the updateTrack mutator's own caps. */
-/** Only priorities worth interrupting a row for; LOW is the default and stays quiet. */
 const TICKET_PRIORITY_LABEL: Record<TicketPriority, string> = {
   [TicketPriority.LOW]: 'Low',
   [TicketPriority.MEDIUM]: 'Medium',
@@ -202,7 +190,6 @@ const TICKET_PRIORITY_LABEL: Record<TicketPriority, string> = {
   [TicketPriority.CRITICAL]: 'Critical',
 };
 
-/** Matches the reader's exit animation, so it unmounts as the panel leaves. */
 const READER_EXIT_MS = 200;
 
 const TRACK_NAME_LIMIT = 120;
@@ -210,28 +197,16 @@ const TRACK_DESCRIPTION_LIMIT = 2000;
 
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 360;
-/** Drag narrower than this and the sidebar folds to its rail instead of resisting. */
 const SIDEBAR_COLLAPSE_AT = 150;
-/** Width of the folded rail, and of the panel it floats out on hover. Both are
- *  fixed: a rail that inherited a 480px drag would cover half the page to show a
- *  few icons' worth of lists. */
 const SIDEBAR_RAIL_WIDTH = 52;
 const SIDEBAR_HOVER_WIDTH = 260;
 
-/** Track status, as the heading pill presents it. */
 const TRACK_STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'Active' },
   { value: 'COMPLETED', label: 'Completed' },
   { value: 'ARCHIVED', label: 'Archived' },
 ] as const;
 
-/**
- * Status colour rides on a dot, not the label. The status tokens are plain hex
- * variables, so Tailwind cannot tint them per theme, and a coloured label ends up
- * either washed out on dark or short of contrast on light. A dot in the token
- * colour beside a `text-foreground` label reads clearly in both, and keeps the
- * status legible without relying on colour to carry it.
- */
 const TRACK_STATUS_DOT: Record<string, string> = {
   ACTIVE: 'bg-status-success',
   COMPLETED: 'bg-status-scheduled',
@@ -351,19 +326,13 @@ export default function SdlcScreen(): ReactElement {
   const [renameTypeName, setRenameTypeName] = useState('');
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
-  // Sidebar shape is the reader's preference, not the workspace's, so it lives
-  // in the preferences machine and comes back from IndexedDB on their next visit.
   const showClosedTracks = useUserPreference('sdlcShowClosedTracks');
   const setShowClosedTracks = (next: boolean): void =>
     setUserPreference('sdlcShowClosedTracks', next);
-  // Collapsed to a rail of icons. Hovering floats the full sidebar over the page
-  // rather than widening the layout, so the reading area keeps every pixel.
   const finderGroupBy = useUserPreference('sdlcFinderGroupBy');
   const railCollapsed = useUserPreference('sdlcSidebarCollapsed');
   const storedRailWidth = useUserPreference('sdlcSidebarWidth');
   const [railHovered, setRailHovered] = useState(false);
-  // Live width while a drag is in flight; the preference is written once, on
-  // release, so a drag is one stored value rather than one per pointer move.
   const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
   const railWidth =
     draggingWidth ?? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, storedRailWidth));
@@ -377,8 +346,6 @@ export default function SdlcScreen(): ReactElement {
 
     const onMove = (moveEvent: globalThis.PointerEvent): void => {
       const raw = startWidth + (moveEvent.clientX - startX);
-      // Dragged in past the fold point, the sidebar gets out of the way rather
-      // than sitting at a width too narrow to read.
       if (raw < SIDEBAR_COLLAPSE_AT) {
         folded = true;
         finish();
@@ -403,8 +370,6 @@ export default function SdlcScreen(): ReactElement {
       }
     }
 
-    // The pointer leaves the handle almost immediately, so the cursor is held on
-    // the body for the length of the drag.
     document.body.style.setProperty('cursor', 'col-resize');
     document.body.style.setProperty('user-select', 'none');
     window.addEventListener('pointermove', onMove);
@@ -428,29 +393,14 @@ export default function SdlcScreen(): ReactElement {
   const [linkDialog, setLinkDialog] = useState(false);
   const [membersDialog, setMembersDialog] = useState(false);
   const [trackStatusOpen, setTrackStatusOpen] = useState(false);
-  /** Null when not editing; the draft text while the description is being written. */
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
-  /** Set when Escape closes the editor, so the blur that follows does not save. */
   const descriptionAbandoned = useRef(false);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const nameAbandoned = useRef(false);
-  /**
-   * The open path down the folder tree, below the track. Column n renders the
-   * children of step n, so this array is both the breadcrumb and the set of
-   * live queries.
-   */
-  /** The artifact a single click is previewing, if any. */
   const [previewCanvasId, setPreviewCanvasId] = useState<string | null>(null);
-  /** The artifact being read in the side panel, if any. */
   const [readerCanvasId, setReaderCanvasId] = useState<string | null>(null);
-  /** True while the reader plays its exit; it stays mounted until that finishes. */
   const [readerClosing, setReaderClosing] = useState(false);
 
-  /**
-   * Dismissing has to outlive the click: unmounting on the spot removes the
-   * element before its exit animation can run, which is why closing used to snap
-   * while opening slid.
-   */
   const closeReader = (): void => {
     setReaderClosing(true);
     window.setTimeout(() => {
@@ -458,22 +408,13 @@ export default function SdlcScreen(): ReactElement {
       setReaderClosing(false);
     }, READER_EXIT_MS);
   };
-  /**
-   * The folder whose conversations the right panel is showing, if any. Folder
-   * discussions share the track's panel rather than opening a surface of their
-   * own, so this is what decides which of the two the panel is bound to.
-   */
   const [folderDiscussion, setFolderDiscussion] = useState<{ id: string; name: string } | null>(
     null,
   );
-  /** Set to the parent a new folder is being created under; null when closed. */
   const [newFolderParent, setNewFolderParent] = useState<SdlcFinderStep | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
-  /** Where a new artifact should land; null when the type chooser is closed. */
   const [newArtifactParent, setNewArtifactParent] = useState<SdlcFinderStep | null>(null);
-  /** A folder a just-created artifact must be filed into, applied after creation. */
   const [pendingArtifactFolder, setPendingArtifactFolder] = useState<string | null>(null);
-  /** The row currently being dragged in the finder, if any. */
   const [draggingItem, setDraggingItem] = useState<{
     type: 'FOLDER' | 'CANVAS';
     id: string;
@@ -525,26 +466,19 @@ export default function SdlcScreen(): ReactElement {
   );
   const selectedTrackId = routeSearchParams.get('track');
   const selectedTrack = tracks.find(track => track.id === selectedTrackId);
-  // Hooks cannot run inside renderTrack, which is only called on the track page,
-  // so the owner is looked up here and read there.
   const trackOwner = useUser(selectedTrack?.createdBy ?? '');
 
   const finderPathByTrack = useUserPreference('sdlcFinderPathByTrack');
   const finderPath: SdlcFinderStep[] = selectedTrackId
     ? (finderPathByTrack[selectedTrackId] ?? [])
     : [];
-  /** Stored per track, so each one remembers where it was left open. */
   const setFinderPath = (next: SdlcFinderStep[]): void => {
     if (!selectedTrackId) return;
     setUserPreference('sdlcFinderPathByTrack', { ...finderPathByTrack, [selectedTrackId]: next });
   };
-  // The preview is per visit, not per track: an artifact selected last time is
-  // not what you asked to see now. The folder path is remembered; this is not.
   useEffect(() => {
     setPreviewCanvasId(null);
   }, [selectedTrackId]);
-  // What the sidebar shows standing: work in flight, with anything finished or
-  // parked folded behind a toggle rather than dropped.
   const openTracks = useMemo(
     () => tracks.filter(track => track.status !== 'COMPLETED' && track.status !== 'ARCHIVED'),
     [tracks],
@@ -787,8 +721,6 @@ export default function SdlcScreen(): ReactElement {
                     link.sourceType === 'TRACK' &&
                     link.sourceId === selectedTrackId &&
                     link.targetType === 'CONVERSATION' &&
-                    // Both edges count: the track's own discussions, and the flat
-                    // rows folders inside it file so their conversations roll up.
                     (link.relationType === 'DISCUSSION' ||
                       link.relationType === SDLC_TRACK_FLAT_RELATION),
                 )
@@ -813,11 +745,6 @@ export default function SdlcScreen(): ReactElement {
         : [],
     [links, folderDiscussion],
   );
-  /**
-   * Every folder in the hub, once. This replaces the per-open-column lookup the
-   * finder used to run, and is what lets a conversation in the track's list name
-   * the folder it came from without a fetch of its own.
-   */
   const [hubFolderRows] = useCachedQuery(
     queries.getSdlcFoldersByChannel({ channelId: channelId || '' }),
     { enabled: Boolean(channelId) },
@@ -826,7 +753,6 @@ export default function SdlcScreen(): ReactElement {
     () => new Map((hubFolderRows ?? []).map(row => [row.id, { id: row.id, name: row.name }])),
     [hubFolderRows],
   );
-  /** Which folder each conversation was started in, for the list's marker. */
   const folderIdByConversationId = useMemo(() => {
     const map = new Map<string, string>();
     for (const link of links) {
@@ -840,7 +766,6 @@ export default function SdlcScreen(): ReactElement {
     }
     return map;
   }, [links]);
-  // A folder belongs to one track, so switching tracks cannot keep its binding.
   useEffect(() => {
     setFolderDiscussion(null);
   }, [selectedTrackId]);
@@ -939,10 +864,6 @@ export default function SdlcScreen(): ReactElement {
     () => discussionIdsForOwner(discussionOwner?.canvasId ?? null, links),
     [discussionOwner, links],
   );
-  /**
-   * The folder binding only holds while the track page is what is on screen: an
-   * open artifact owns the panel itself, and leaving the track drops the folder.
-   */
   const activeFolderDiscussion =
     folderDiscussion && !discussionOwner && section === 'tracks' && selectedTrack
       ? folderDiscussion
@@ -950,8 +871,6 @@ export default function SdlcScreen(): ReactElement {
   const entityLinkScope = useMemo<EntityLinkScope | null>(() => {
     if (discussionOwner) return { sourceType: 'CANVAS', sourceId: discussionOwner.canvasId };
     if (section === 'tracks' && selectedTrack) {
-      // A folder conversation is filed on the folder and, so the track's list
-      // stays complete, on the track as well.
       return activeFolderDiscussion
         ? {
             sourceType: 'FOLDER',
@@ -1218,7 +1137,6 @@ export default function SdlcScreen(): ReactElement {
 
   const openConversations = useCallback((): void => {
     closeExternalDebugger();
-    // The header button is the track's, so it drops any folder binding.
     setFolderDiscussion(null);
     setDiscussionUrl({ open: true, conversationId: null });
   }, [closeExternalDebugger, setDiscussionUrl]);
@@ -1232,19 +1150,12 @@ export default function SdlcScreen(): ReactElement {
     [closeExternalDebugger, setDiscussionUrl],
   );
 
-  /**
-   * The mark on a conversation in the track's list saying which folder it came
-   * from, and taking you to that folder's conversations. Both halves come from
-   * data the page already holds.
-   */
   const renderFolderConversationBadge = useCallback(
     (conversationId: string): ReactNode => {
       const folderId = folderIdByConversationId.get(conversationId);
       const name = folderId ? folderById.get(folderId)?.name : undefined;
       if (!folderId || !name) return null;
       return (
-        // A floor so it never collapses in the sender's line, a ceiling so a long
-        // name cannot push the timestamp out of it, an ellipsis in between.
         <button
           type='button'
           onClick={() => openFolderConversations({ id: folderId, name })}
@@ -1445,8 +1356,6 @@ export default function SdlcScreen(): ReactElement {
   const resetArtifactDialog = (): void => {
     setArtifactDialog(null);
     clearArtifactDialogFields();
-    // Cancelling used to leave the folder behind, so the next artifact created
-    // anywhere on the page was silently filed into it.
     setPendingArtifactFolder(null);
   };
 
@@ -1499,12 +1408,9 @@ export default function SdlcScreen(): ReactElement {
         ...(relatedCanvasIds.length > 0 && { relatedCanvasIds }),
       },
     );
-    // Read before the reset clears it; the move below is what consumes it.
     const fileIntoFolder = pendingArtifactFolder;
     resetArtifactDialog();
     const newCanvasId = response.data.artifact.canvasId;
-    // Creation always files an artifact at the track's root, so one started from
-    // inside a folder is moved there straight after.
     if (fileIntoFolder && channel) {
       await fileNewArtifactIntoFolder(newCanvasId, fileIntoFolder);
     }
@@ -1752,12 +1658,6 @@ export default function SdlcScreen(): ReactElement {
 
   const isDocumentWindow = isSdlcDocumentWindow();
 
-  /**
-   * The page for one track: its artifacts and issues, reached by selecting the
-   * track in the sidebar. The list of tracks that used to sit alongside it is
-   * gone — the sidebar is the list now, so the page only ever shows the one
-   * track that is selected.
-   */
   const setTrackStatusAction = async (trackId: string, status: string): Promise<void> => {
     await runTrackMutation(
       zero.mutate(
@@ -1782,18 +1682,9 @@ export default function SdlcScreen(): ReactElement {
         }),
       ),
     );
-    // The stored path carries names for the column headers, so a rename has to
-    // reach it too or the breadcrumb keeps the old one until a reload.
     setFinderPath(finderPath.map(step => (step.id === folderId ? { ...step, name } : step)));
   };
 
-  /**
-   * Filing a just-created artifact. It was created over HTTP, so its containment
-   * edge reaches the Zero client by replication — usually a moment after this
-   * runs, and moveSdlcItem refuses a move it cannot find an edge for. Waiting for
-   * the row beats reporting a failure the reader can do nothing about; only that
-   * one refusal is retried, since every other is a real answer.
-   */
   const fileNewArtifactIntoFolder = async (canvasId: string, folderId: string): Promise<void> => {
     const attempts = 10;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -1862,8 +1753,6 @@ export default function SdlcScreen(): ReactElement {
       zero.mutate(
         mutators.sdlc.updateTrack({
           trackId,
-          // Cleared to null rather than an empty string, so "no description" is
-          // one value and the heading has one thing to test.
           description: description.length > 0 ? description : null,
           timestamp: Date.now(),
         }),
@@ -1913,9 +1802,6 @@ export default function SdlcScreen(): ReactElement {
                 <button
                   type='button'
                   onClick={() => {
-                    // Escape unmounts the input, and React fires no blur for an
-                    // unmounted element — so the guard is armed here rather than
-                    // cleared on the way out, where it would leak into this edit.
                     nameAbandoned.current = false;
                     setNameDraft(selectedTrack.name);
                   }}
@@ -1955,7 +1841,6 @@ export default function SdlcScreen(): ReactElement {
                         nameAbandoned.current = true;
                         setNameDraft(null);
                       }
-                      // One line, so Enter is the natural way to finish.
                       if (event.key === 'Enter') event.currentTarget.blur();
                     }}
                     onBlur={() => {
@@ -1965,8 +1850,6 @@ export default function SdlcScreen(): ReactElement {
                       }
                       const next = nameDraft.trim();
                       setNameDraft(null);
-                      // A track has to be called something; an empty box reverts
-                      // rather than writing a nameless track.
                       if (next.length > 0 && next !== selectedTrack.name) {
                         void call(
                           `track-name-${selectedTrack.id}`,
@@ -2059,7 +1942,6 @@ export default function SdlcScreen(): ReactElement {
               <button
                 type='button'
                 onClick={() => {
-                  // Armed here for the same reason as the name editor above.
                   descriptionAbandoned.current = false;
                   setDescriptionDraft(selectedTrack.description ?? '');
                 }}
@@ -2084,7 +1966,6 @@ export default function SdlcScreen(): ReactElement {
                   maxLength={TRACK_DESCRIPTION_LIMIT}
                   onChange={event => {
                     setDescriptionDraft(event.target.value);
-                    // Grow with the text rather than scrolling inside a fixed box.
                     event.target.style.height = 'auto';
                     event.target.style.height = `${event.target.scrollHeight}px`;
                   }}
@@ -2098,7 +1979,6 @@ export default function SdlcScreen(): ReactElement {
                   }}
                   onKeyDown={event => {
                     if (event.key === 'Escape') {
-                      // Leave without writing; the blur that follows must not save.
                       descriptionAbandoned.current = true;
                       setDescriptionDraft(null);
                     }
@@ -2250,10 +2130,6 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 previewCanvasId={previewCanvasId}
                 onSelectCanvas={canvasId => {
-                  // Selecting a file closes everything to the right of its own
-                  // column: those levels were reached through a folder that is no
-                  // longer what is selected, and the preview belongs immediately
-                  // after the column the file is in.
                   setFinderPath(steps.slice(1, index + 1));
                   setPreviewCanvasId(canvasId);
                 }}
@@ -2320,17 +2196,10 @@ export default function SdlcScreen(): ReactElement {
               <button
                 key={ticket.id}
                 type='button'
-                // The ticket's own conversation, not just the panel: openConversations
-                // passes a null conversation, which leaves the reader on whichever
-                // thread was last selected rather than the ticket they clicked.
                 onClick={() =>
                   setDiscussionUrl({
                     open: true,
                     conversationId: ticket.conversationId,
-                    // Clicking a ticket is a request to see the ticket, so it
-                    // lands on Details rather than the thread. Details is a
-                    // properties view with no composer — switching to Messages
-                    // brings the reply box back, and the panel remembers that.
                     selectedTab: 'details',
                   })
                 }
@@ -2372,8 +2241,6 @@ export default function SdlcScreen(): ReactElement {
                 {ticket.assignedTo ? (
                   <Avatar userId={ticket.assignedTo} size='xs' showActiveStatus={false} />
                 ) : (
-                  // An unowned ticket is worth seeing at a glance, so the gap
-                  // where an owner would be is drawn rather than left blank.
                   <span
                     className='size-5 shrink-0 rounded-full border border-dashed border-border'
                     title='Unassigned'
@@ -2434,14 +2301,7 @@ export default function SdlcScreen(): ReactElement {
           While collapsed the panel floats above the page on hover, so widening
           it costs the content nothing. */}
       <aside
-        className={cn(
-          // One width for every view. It used to widen for the pages that hung an
-          // extra tree or panel under the lists, but a sidebar that changes size
-          // as you move between pages reads as a glitch, and the content it was
-          // making room for now fits.
-          'relative shrink-0',
-          isDocumentWindow && 'hidden',
-        )}
+        className={cn('relative shrink-0', isDocumentWindow && 'hidden')}
         style={{ width: railCollapsed ? SIDEBAR_RAIL_WIDTH : railWidth }}
         onMouseEnter={() => railCollapsed && setRailHovered(true)}
         onMouseLeave={() => setRailHovered(false)}
@@ -2449,7 +2309,6 @@ export default function SdlcScreen(): ReactElement {
         <div
           className={cn(
             'flex h-full flex-col overflow-x-hidden border-r border-sidebar-border-muted bg-sidebar text-sidebar-foreground',
-            // No width animation mid-drag: the panel has to track the pointer.
             draggingWidth === null && 'transition-[width] duration-150',
             railCollapsed
               ? cn('absolute inset-y-0 left-0 z-30', railHovered && 'shadow-2xl')
@@ -2840,8 +2699,6 @@ export default function SdlcScreen(): ReactElement {
                 </h1>
               </>
             ) : section === 'tracks' && selectedTrack ? (
-              // Tracks left the nav, so the lookup below cannot name this page.
-              // There is no list to go back to either, so the track names itself.
               <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
             ) : (
               <h1 className='font-semibold'>

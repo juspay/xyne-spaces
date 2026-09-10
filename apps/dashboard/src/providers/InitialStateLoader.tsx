@@ -227,7 +227,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           // User is logged in - hydrate their specific database
           await hydrateQueryCacheFromIndexedDB(context.userID, schemaVersion, context.workspaceId);
 
-          // The reader's own preferences ride the same open database.
           await hydrateUserPreferences(context.userID);
 
           const hydrationLatency = Date.now() - hydrationStartTime;

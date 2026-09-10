@@ -31,11 +31,6 @@ export async function ensureLink(
   return { created: result.count > 0 };
 }
 
-/**
- * The track a folder sits in. Read off the flat edge rather than walked up the
- * containment chain: every folder gets one when it is created, so this is a
- * single lookup at any depth.
- */
 export async function resolveFolderTrackId(
   db: Db,
   folderId: string
@@ -149,9 +144,6 @@ export async function linkCreatedEntities(
         },
         actor
       );
-      // The flat edge, not containment: once an artifact is filed into a folder
-      // its containment edge is FOLDER -> CANVAS, and looking for a TRACK source
-      // would find nothing and silently drop the ticket's track.
       const trackEdge = await db.sdlcEntityLink.findFirst({
         where: {
           channelId,
@@ -191,8 +183,6 @@ export async function linkCreatedEntities(
           actor
         );
       }
-      // Tickets are listed per track wherever they were raised, so a folder's
-      // resolve to the track the folder lives in.
       const trackId =
         owner.sourceType === 'FOLDER'
           ? await resolveFolderTrackId(db, owner.sourceId)

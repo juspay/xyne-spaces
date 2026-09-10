@@ -141,17 +141,7 @@ interface ThreadMessagesProps {
   /** Forces the initial active tab, overriding the ?selectedTab URL param. Used by modal hosts to avoid inheriting the outer page's tab state. */
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
-  /**
-   * Render the tabbed layout for a thread that has no ticket. The tab list
-   * already drops Details and RCA without one, leaving Messages and Files —
-   * worth having rather than falling back to a bare message list.
-   */
   tabbedView?: boolean;
-  /**
-   * Keep only the overflow menu in the header actions. For hosts whose own bar
-   * already offers Ask AI, calls and recording, or where the thread is a side
-   * panel too narrow to carry all four.
-   */
   overflowActionsOnly?: boolean;
 }
 
