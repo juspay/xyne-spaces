@@ -17,6 +17,15 @@ import { isElectronApp } from './electronApp';
 const ATTEMPTED_KEY = 'xyne:deeplinkAttempted';
 
 /**
+ * Persistent (localStorage) opt-out. When the user ticks "Always continue in
+ * browser", we store this and never show the interstitial again on this browser
+ * profile. This is OUR setting — distinct from Chrome's own "Always allow … open
+ * in the associated app" toggle, which lives in Chrome's profile Preferences
+ * (protocol_handler.allowed_origin_protocol_pairs), not here.
+ */
+const OPEN_IN_BROWSER_KEY = 'xyne:openInBrowser';
+
+/**
  * After an open attempt, treat the tab becoming hidden within this window as a
  * successful handoff to the desktop app (the app took foreground). Kept generous
  * because the OS "Open Xyne Spaces?" prompt needs a manual click before the app
@@ -103,6 +112,8 @@ interface OverlayHandlers {
 interface OverlayControls {
   overlay: HTMLElement;
   showResult: (confident: boolean) => void;
+  /** Focusable elements inside the card, in tab order (for the focus trap). */
+  focusables: HTMLElement[];
 }
 
 function assign(el: HTMLElement, styles: Partial<CSSStyleDeclaration>): void {
@@ -229,11 +240,44 @@ function buildOverlay(handlers: OverlayHandlers): OverlayControls {
   setPrimary('Open Xyne Spaces', handlers.onOpen);
   setSecondary('Continue in browser', handlers.onContinue);
 
+  // Persistent opt-out: "Always continue in browser". Ticking it stores the
+  // preference so the interstitial never shows again on this browser profile.
+  const rememberRow = document.createElement('label');
+  assign(rememberRow, {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginTop: '18px',
+    fontSize: '13px',
+    opacity: '0.6',
+    cursor: 'pointer',
+  });
+  const rememberCheckbox = document.createElement('input');
+  rememberCheckbox.type = 'checkbox';
+  rememberCheckbox.style.cursor = 'pointer';
+  rememberCheckbox.addEventListener('change', () => {
+    try {
+      if (rememberCheckbox.checked) {
+        window.localStorage.setItem(OPEN_IN_BROWSER_KEY, 'true');
+      } else {
+        window.localStorage.removeItem(OPEN_IN_BROWSER_KEY);
+      }
+    } catch {
+      // ignore storage failures (private mode, etc.)
+    }
+  });
+  const rememberText = document.createElement('span');
+  rememberText.textContent = 'Always continue in browser';
+  rememberRow.appendChild(rememberCheckbox);
+  rememberRow.appendChild(rememberText);
+
   card.appendChild(icon);
   card.appendChild(title);
   card.appendChild(subtitle);
   card.appendChild(primaryBtn);
   card.appendChild(secondaryLink);
+  card.appendChild(rememberRow);
   overlay.appendChild(card);
 
   const makeCheck = (confident: boolean): HTMLElement => {
@@ -275,7 +319,7 @@ function buildOverlay(handlers: OverlayHandlers): OverlayControls {
     }
   };
 
-  return { overlay, showResult };
+  return { overlay, showResult, focusables: [primaryBtn, secondaryLink, rememberCheckbox] };
 }
 
 /**
@@ -290,6 +334,13 @@ export function maybeOpenInDesktopApp(): void {
   // under the bundled-UI custom protocol.
   if (isElectronApp()) return;
   if (window.location.protocol.startsWith('xyne-spaces')) return;
+
+  // Persistent opt-out — the user chose "Always continue in browser".
+  try {
+    if (window.localStorage.getItem(OPEN_IN_BROWSER_KEY) === 'true') return;
+  } catch {
+    // localStorage unavailable — fall through.
+  }
 
   // Only full external loads — an in-tab SPA reload must not re-trigger.
   try {
@@ -342,9 +393,31 @@ export function maybeOpenInDesktopApp(): void {
       }
     };
 
+    const onKeydown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismiss();
+        return;
+      }
+      // Keep keyboard focus inside the card while it's open.
+      if (e.key === 'Tab' && controls && controls.focusables.length > 0) {
+        const { focusables } = controls;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
     const dismiss = (): void => {
       window.clearTimeout(softTimer);
       document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('keydown', onKeydown);
       controls?.overlay.remove();
     };
 
@@ -354,7 +427,10 @@ export function maybeOpenInDesktopApp(): void {
     });
 
     document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('keydown', onKeydown);
     document.body.appendChild(controls.overlay);
+    // Move focus to the primary action so keyboard users can act immediately.
+    controls.focusables[0]?.focus();
 
     // Best-effort silent auto-attempt on load; the interstitial stays either way
     // so the user can click "Open Xyne Spaces" or "Continue in browser".
