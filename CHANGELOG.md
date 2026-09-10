@@ -1,3 +1,10 @@
+## [1.310.1](https://github.com/juspay/xyne-spaces/compare/v1.310.0...v1.310.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* stop Radar assigning items to cc'd users and mis-targeting reassigns ([#1767](https://github.com/juspay/xyne-spaces/issues/1767)) ([accad63](https://github.com/juspay/xyne-spaces/commit/accad6357e5c2daca9c9ae0f478e1f7a5b632bc9))
+
 ## [1.310.0](https://github.com/juspay/xyne-spaces/compare/v1.309.0...v1.310.0) (2026-09-10)
 
 
