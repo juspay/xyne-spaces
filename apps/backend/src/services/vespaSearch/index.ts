@@ -617,6 +617,30 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Ticket tags search — uses Vespa grouping to get distinct tag values.
+    // Short-circuits the normal search pipeline and returns just tag strings.
+    if (String(type).trim() === 'ticket_tags') {
+      const projectIds = projectId ? toFilterValues(projectId, 'projectId') : undefined;
+      const boardIds = board ? toFilterValues(board, 'board') : undefined;
+      const { tags: tagResults, total } = await vespaService.searchService.searchTicketTags(
+        workspaceId,
+        {
+          projectId: projectIds?.[0],
+          boardIds,
+          query: q ? String(q) : undefined,
+          limit: limit ? Number(limit) : 100,
+        },
+      );
+      res.json({
+        success: true,
+        data: {
+          tags: tagResults,
+          total,
+        },
+      });
+      return;
+    }
+
     const isFilterOnlyDynamicFieldSearch =
       filterOnly === 'true' &&
       (dynamicFieldValues !== undefined || dynamicFieldDateRanges !== undefined);
