@@ -982,6 +982,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_TICKET = 'DESK_TICKET',
 }
 
 // @ts-ignore TS1294
