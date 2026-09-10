@@ -92,6 +92,7 @@ import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
   buildToolCatalog,
+  buildAlwaysActivePresentationToolNameSet,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
   type ToolCatalogItem,
@@ -2548,6 +2549,12 @@ export async function processTask(
           ) as unknown as ToolDefinition[]
       : [];
 
+    const alwaysActivePresentationToolNames = buildAlwaysActivePresentationToolNameSet(
+      customToolDefs,
+      toolsConfigEarly?.custom,
+      presentationDefaultOn,
+    );
+
     const fastAlwaysActiveToolNames = new Set([
       ...directTools,
       ...remainingCustomTools,
@@ -2555,6 +2562,7 @@ export async function processTask(
       ...playwrightHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
+      ...customToolDefs.filter((tool) => alwaysActivePresentationToolNames.has(tool.name)),
     ].map((tool) => tool.name));
 
     let allTools = [

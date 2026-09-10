@@ -75,6 +75,35 @@ function isDirectPick(tool: ToolDefinition, directPickSuffixes: string[] | undef
   return directPickSuffixes.some((suffix) => tool.name.endsWith(suffix));
 }
 
+/**
+ * Presentation tools are response-only thread affordances. Keep them
+ * always-active when either:
+ *   - the current Spaces thread surface grants them by default, or
+ *   - the agent explicitly selected them in tools.custom.
+ *
+ * This avoids routing card-rendering tools through the lazy catalog path, where
+ * changing the active tool set from inside `load-tools` can leave the UI with a
+ * running invocation row if the tool end event is not observed. Expensive read
+ * tools still use the lazy catalog; the three presentation cards are tiny and
+ * only exist on thread runs.
+ */
+export function buildAlwaysActivePresentationToolNameSet(
+  customTools: ToolDefinition[] | undefined,
+  selectedCustomSlugs: readonly string[] | undefined,
+  defaultOn: boolean,
+): Set<string> {
+  const selected = new Set(selectedCustomSlugs ?? []);
+  return new Set(
+    (customTools ?? [])
+      .filter((tool) => {
+        const source = customToolSource(tool);
+        if (!isPresentationToolSource(source)) return false;
+        return defaultOn || selected.has(customToolSelectionKey(tool));
+      })
+      .map((tool) => tool.name),
+  );
+}
+
 /** `subagent:github` → `github`; `presentation` → `presentation`. */
 export function catalogNameForSource(source: string): string {
   const idx = source.indexOf(":");
