@@ -35,6 +35,7 @@ interface PREventContext {
   prId: number;
   prUrl: string;
   repoName: string;
+  repoSlug: string;
   repoUrl: string;
   projectName: string;
   workspace: string;
@@ -245,6 +246,7 @@ export class BitbucketWebhookService {
       prId: pr.id,
       prUrl,
       repoName,
+      repoSlug,
       repoUrl,
       projectName,
       workspace: workspaceId, // In Server, project key serves as workspace
@@ -449,7 +451,7 @@ export class BitbucketWebhookService {
           prInternalId: result.pr.id,
           repositoryUrl: context.repoUrl,
           projectKey: context.projectName,
-          repositorySlug: context.repoName,
+          repositorySlug: context.repoSlug,
           vcsProvider: 'bitbucket',
         });
 

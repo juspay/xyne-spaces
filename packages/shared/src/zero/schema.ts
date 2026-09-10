@@ -685,6 +685,7 @@ export const pullRequestsTable = table('pull_requests')
 export const commitTable = table('commits')
   .columns({
     id: string(),
+    workspaceId: string(), // denormalized tenant key (from parent pull_requests)
     commitSha: string(),
     pullRequestId: string(),
     agentSlug: string().optional(),

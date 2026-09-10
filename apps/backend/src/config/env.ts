@@ -146,6 +146,7 @@ const envSchema = Joi.object({
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  ENABLE_COMMIT_ANALYSIS_WORKER: Joi.boolean().default(false),
   SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
   SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
   SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
@@ -796,6 +797,7 @@ export const config = {
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  enableCommitAnalysisWorker: envVars.ENABLE_COMMIT_ANALYSIS_WORKER as boolean,
   sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
   sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
   sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,

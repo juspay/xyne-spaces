@@ -1,4 +1,5 @@
-import type { Context } from '../../schema';
+import type { Query } from '@rocicorp/zero';
+import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 
 export class CommitsACL extends BaseQueryACL<'commits'> {
@@ -6,6 +7,7 @@ export class CommitsACL extends BaseQueryACL<'commits'> {
     super(ctx, 'commits');
   }
 
-  // No canSelect override needed - commits are always accessed via pull_requests
-  // which already have workspace filtering. The backend ACL enforces mutations.
+  canSelect<TReturn>(query: Query<'commits', Schema, TReturn>): Query<'commits', Schema, TReturn> {
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
+  }
 }
