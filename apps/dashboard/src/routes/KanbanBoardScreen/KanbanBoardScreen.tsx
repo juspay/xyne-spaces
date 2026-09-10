@@ -1928,20 +1928,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return undefined;
   }, [myTicketBoardsQuery.data, viewMode]);
 
+  // Fetch board details for workspace views - used for source channels and tags
   const [workspaceSelectedBoards] = useCachedQuery(
-    queries.boardsByIds({ boardIds: filters.boards ?? [] }),
-    {
-      // Enable when dropdown is open (for source channels or filters/tags)
-      enabled:
-        isWorkspaceView &&
-        (isSourceChannelsOpen || isFiltersDropdownOpen) &&
-        (filters.boards?.length ?? 0) > 0,
-    },
-  );
-
-  // Fetch board details for workspace views to get project IDs for tags
-  // This is always enabled for workspace views (unlike workspaceSelectedBoards which is only for dropdowns)
-  const [workspaceBoardsForTags] = useCachedQuery(
     queries.boardsByIds({ boardIds: filters.boards ?? [] }),
     {
       enabled: isWorkspaceView && (filters.boards?.length ?? 0) > 0,
@@ -2009,8 +1997,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       );
     }
     if (isWorkspaceView) {
-      // Use workspaceBoardsForTags which is always enabled for workspace views
-      return uniqueProjectIds(workspaceBoardsForTags ?? []);
+      // Use workspaceSelectedBoards which is always enabled for workspace views
+      return uniqueProjectIds(workspaceSelectedBoards ?? []);
     }
     // Single project view
     const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
@@ -2020,7 +2008,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView,
     filters.boards,
     availableBoardDetails,
-    workspaceBoardsForTags,
+    workspaceSelectedBoards,
     effectiveProjectId,
   ]);
 
