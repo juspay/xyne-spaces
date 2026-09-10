@@ -129,7 +129,14 @@ const kanbanTicketsPageV2ArgsSchema = kanbanTicketsPageArgsSchema.extend({
 
 type KanbanTicketsPageV2Args = z.infer<typeof kanbanTicketsPageV2ArgsSchema>;
 
-const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema;
+const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema.extend({
+  // Far-side bound on createdAt, anchored to the page cursor: a page asks for
+  // [cursor - window, cursor] instead of "everything older than cursor". Without it
+  // the ORDER BY materialises every candidate row below the cursor before the limit
+  // applies. The client widens the window and refetches when a page comes back short,
+  // so nothing is hidden — see useKanbanTicketsPage. V3 only; V2 keeps its shape.
+  createdAfter: z.number().optional(),
+});
 
 type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
 
@@ -1161,7 +1168,17 @@ export const queries: AnyQueryRegistry = defineQueries({
         .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
 
       if (args.start) {
-        query = query.start({ createdAt: args.start.createdAt, id: args.start.id }, { inclusive: false });
+        query =
+          dir === 'forward'
+            ? query.where('createdAt', '<=', args.start.createdAt)
+            : query.where('createdAt', '>=', args.start.createdAt);
+      }
+
+      if (args.createdAfter !== undefined) {
+        query =
+          dir === 'forward'
+            ? query.where('createdAt', '>=', args.createdAfter)
+            : query.where('createdAt', '<=', args.createdAfter);
       }
 
       let finalQuery = query

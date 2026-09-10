@@ -199,6 +199,8 @@ model Ticket {
   @@index([projectId, createdAt(sort: Desc), id])
   @@index([projectId, isArchived, statusV2, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, statusV2, isArchived, rootId, createdAt(sort: Desc), id])
+  @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
