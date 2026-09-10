@@ -1,5 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { canAccessConversation, viewerChannelAccess } from '@/services/radar/radarAcl';
+import { radarScopeFor, scopeKeyFor, type RadarScope } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -38,9 +39,19 @@ interface FeedConversation {
   channelId: string;
   initial_message_md: string | null;
   lastActivityAt: Date;
+  /** Decides whether this conversation is a card of its own or folds into its channel. */
+  scopeType: string | null;
 }
 
 export interface FeedThreadCard {
+  /**
+   * What this card IS: a thread, or a whole DM. Bulk actions address the card
+   * through this, since a DM card spans several conversations and a
+   * conversation-scoped call would clear only one of them.
+   */
+  scopeKey: string;
+  /** Representative conversation — the most recently updated item's. Per-item
+   *  navigation uses the item's own conversationId, not this. */
   conversationId: string;
   channelId: string;
   threadPreview: string | null;
@@ -128,9 +139,33 @@ class RadarFeedService {
         channelId: true,
         initial_message_md: true,
         lastActivityAt: true,
+        channel: { select: { scopeType: true } },
       },
     });
-    return new Map(conversations.map(c => [c.conversationId, c]));
+    return new Map(
+      conversations.map(c => [
+        c.conversationId,
+        { ...c, scopeType: c.channel?.scopeType ?? null },
+      ]),
+    );
+  }
+
+  /**
+   * The parse scope a conversation belongs to. Run logs and the watermark are
+   * keyed by scope, not by conversation, so a DM's debug view has to resolve
+   * its channel before it can find either.
+   */
+  private async scopeOf(conversationId: string): Promise<RadarScope | null> {
+    const conversation = await prisma.conversation.findUnique({
+      where: { conversationId },
+      select: { channelId: true, channel: { select: { scopeType: true } } },
+    });
+    if (!conversation?.channelId) return null;
+    return radarScopeFor(
+      conversation.channel?.scopeType ?? null,
+      conversation.channelId,
+      conversationId,
+    );
   }
 
   /**
@@ -181,13 +216,19 @@ class RadarFeedService {
       ]),
     );
 
+    const itemScope = await this.scopeOf(item.conversationId);
     const [threadState, latestMessage] = await Promise.all([
       prisma.executionThreadState.findUnique({
-        where: { conversationId: item.conversationId },
+        where: { conversationId: itemScope?.key ?? item.conversationId },
         select: { watermarkCreatedAt: true, watermarkMsgId: true, updatedAt: true },
       }),
       prisma.message.findFirst({
-        where: { conversationId: item.conversationId, isDeleted: false },
+        where: {
+          ...(itemScope?.isDmChannel
+            ? { conversation: { channelId: itemScope.channelId } }
+            : { conversationId: item.conversationId }),
+          isDeleted: false,
+        },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
         select: { messageId: true, createdAt: true },
       }),
@@ -216,26 +257,40 @@ class RadarFeedService {
       return null;
     }
 
+    // Runs, watermark and "latest message" are all scope-keyed. For a DM that
+    // is the channel, so a drawer opened on any one of its conversations shows
+    // the whole DM's trail rather than the single message that started it.
+    const scope = await this.scopeOf(conversationId);
+    const scopeKey = scope?.key ?? conversationId;
+    const messageScope = scope?.isDmChannel
+      ? { conversation: { channelId: scope.channelId } }
+      : { conversationId };
+
     const runs = await prisma.executionRunLog.findMany({
-      where: { workspaceId: auth.workspaceId, conversationId },
+      where: { workspaceId: auth.workspaceId, conversationId: scopeKey },
       orderBy: { createdAt: 'desc' },
       take: MAX_DEBUG_RUNS,
     });
 
     const [threadState, latestMessage, items] = await Promise.all([
       prisma.executionThreadState.findUnique({
-        where: { conversationId },
+        where: { conversationId: scopeKey },
         select: { watermarkCreatedAt: true, watermarkMsgId: true, updatedAt: true },
       }),
       prisma.message.findFirst({
-        where: { conversationId, isDeleted: false },
+        where: { ...messageScope, isDeleted: false },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
         select: { messageId: true, createdAt: true, senderId: true, content: true },
       }),
       // Every item the thread ever produced (resolved included), so a debug
       // lookup by thread id can render the full trail set.
       prisma.executionItem.findMany({
-        where: { conversationId, workspaceId: auth.workspaceId },
+        where: {
+          ...(scope?.isDmChannel
+            ? { channelId: scope.channelId }
+            : { conversationId }),
+          workspaceId: auth.workspaceId,
+        },
         orderBy: { createdAt: 'asc' },
         select: { id: true, title: true, status: true },
       }),
@@ -302,18 +357,36 @@ class RadarFeedService {
 
     const cards = new Map<string, FeedThreadCard>();
     for (const item of items) {
-      let card = cards.get(item.conversationId);
+      const conversation = conversations.get(item.conversationId);
+      // Resolved from the conversation, not item.channelId — that column is a
+      // stamp taken at creation and never refreshed.
+      const channelId = conversation?.channelId ?? item.channelId;
+      const scopeKey = scopeKeyFor(conversation?.scopeType, channelId, item.conversationId);
+      const isDmCard = scopeKey !== item.conversationId;
+
+      let card = cards.get(scopeKey);
       if (!card) {
-        const conversation = conversations.get(item.conversationId);
         card = {
+          scopeKey,
           conversationId: item.conversationId,
-          channelId: item.channelId,
-          threadPreview:
-            conversation?.initial_message_md?.slice(0, THREAD_PREVIEW_CHARS) ?? null,
+          channelId,
+          // A DM card spans conversations, so one conversation's opening message
+          // is not the card's subject. The channel label is, and the header
+          // already renders it.
+          threadPreview: isDmCard
+            ? null
+            : (conversation?.initial_message_md?.slice(0, THREAD_PREVIEW_CHARS) ?? null),
           lastActivityAt: conversation?.lastActivityAt ?? null,
           items: [],
         };
-        cards.set(item.conversationId, card);
+        cards.set(scopeKey, card);
+      } else if (
+        conversation?.lastActivityAt &&
+        (!card.lastActivityAt || conversation.lastActivityAt > card.lastActivityAt)
+      ) {
+        // Newest activity across everything the card covers, or a busy DM would
+        // sort by whichever of its conversations happened to be seen first.
+        card.lastActivityAt = conversation.lastActivityAt;
       }
       card.items.push(item);
     }
