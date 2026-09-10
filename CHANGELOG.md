@@ -1,3 +1,10 @@
+## [1.274.0-release-20260904.7](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.6...v1.274.0-release-20260904.7) (2026-09-10)
+
+
+### Bug Fixes
+
+* fixing doc upload when filling stage update forms ([#1510](https://github.com/juspay/xyne-spaces/issues/1510)) ([#1732](https://github.com/juspay/xyne-spaces/issues/1732)) ([63206d2](https://github.com/juspay/xyne-spaces/commit/63206d2e7b5869df5ca0dfecd68167726e06196d))
+
 ## [1.274.0-release-20260904.6](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.5...v1.274.0-release-20260904.6) (2026-09-10)
 
 
