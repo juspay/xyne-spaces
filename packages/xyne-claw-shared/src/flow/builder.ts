@@ -9,6 +9,7 @@
 
 import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
 import type { UserQuestion } from "../tools/types.js";
+import { normalizeUnifiedPatch } from "./unified-patch.js";
 
 // ── Inlined FlowUI types (mirrors @xyne/shared) ──────────────────────────────
 
@@ -560,6 +561,69 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
 }
 
 /**
+ * Scheduled-job channel-post approval card.
+ *
+ * A scheduled job whose result is configured to post as a TOP-LEVEL message in a
+ * channel (`replyMode === "channel"`) is a broadcast — it should never be armed
+ * silently. claw-auth creates such a job in `pending_approval` and posts THIS
+ * card to the thread the request came from. Only the creator may approve; on
+ * Approve the flow-action handler flips the row to `active` and enqueues it in
+ * BullMQ. Decline cancels the row. Nothing is scheduled until Approve.
+ */
+export interface ScheduledJobApprovalFlowParams {
+  scheduledJobId: string;
+  creatorUserId: string;
+  /** Human summary of the schedule, e.g. "Every weekday at 9:00 AM IST" or "Once, in ~2h". */
+  scheduleSummary: string;
+  /** The task/prompt the job will run. */
+  task: string;
+  /** Channel the result would post into (targetChannelId ?? channelId). */
+  targetChannelId: string;
+  /** Optional human channel name for display (falls back to the id). */
+  channelName?: string;
+  /** Optional job label. */
+  label?: string;
+  agentSlug?: string;
+}
+
+export function buildScheduledJobApprovalFlow(params: ScheduledJobApprovalFlowParams): FlowDefinition {
+  const {
+    scheduledJobId, creatorUserId, scheduleSummary, task,
+    targetChannelId, channelName, label, agentSlug,
+  } = params;
+
+  const channelLabel = channelName ? `#${channelName}` : targetChannelId;
+  const taskLine = task.length > 400 ? `${task.slice(0, 400)}…` : task;
+
+  const b = new FlowBuilder(`schedule-approval-${crypto.randomUUID()}`)
+    .setTitle('Scheduled post to a channel — approval needed')
+    .addText('intro', `This scheduled job is set to post its result as a **new message in ${channelLabel}**, visible to everyone in that channel. It will not run until you approve it.`, { variant: 'muted', size: 'sm' })
+    .addDivider('d1')
+    .addText('summary', [
+      label ? `*Job:* ${label}` : null,
+      `*Schedule:* ${scheduleSummary}`,
+      `*Posts to:* ${channelLabel}`,
+      `*Task:* ${taskLine}`,
+    ].filter(Boolean).join('\n'))
+    .addDivider('d2')
+    .addRow('actions', [
+      FlowBuilder.button('approve', '✓  Approve & schedule', { type: 'submit', actionId: 'schedule-approve', successMessage: 'Scheduled' }, { variant: 'primary' }),
+      FlowBuilder.button('decline', '✕  Decline', { type: 'submit', actionId: 'schedule-decline' }, { variant: 'destructive' }),
+    ])
+    .setData({
+      actionType: 'schedule-approval',
+      scheduledJobId,
+      creatorUserId,
+      targetChannelId,
+      ...(channelName ? { channelName } : {}),
+      ...(agentSlug ? { agentSlug } : {}),
+    });
+
+  return b.build();
+}
+
+
+/**
  * User question — radio group with the agent's options + submit button.
  */
 export function buildUserQuestionFlow(
@@ -608,57 +672,6 @@ export function buildUserQuestionFlow(
 }
 
 /**
- * Promote-provider — offer the user the agent's premium provider after the
- * default model (kimi/spaces) failed or soft-refused. Two-button card; tap
- * "Yes, retry with <provider>" → flow-action.ts:promote-provider sets the
- * conversation-scoped escalation flag and re-dispatches the original task
- * with the agent's premium credentials. "No" closes the card without state
- * change. Approval sticks for the lifetime of the conversation.
- *
- * Distinct from buildUserQuestionFlow because the response routing differs
- * (actionType = "promote-provider"), and we need to carry the provider name
- * + original task in flowJSON.data for the re-dispatch.
- */
-export function buildPromoteProviderFlow(
-  provider: string,
-  context: {
-    agentSlug: string;
-    channelId: string;
-    conversationId: string;
-    userId: string;
-    originalTask: string;
-  },
-): FlowDefinition {
-  return new FlowBuilder(`promote-provider-${crypto.randomUUID()}`)
-    .addText(
-      'q',
-      `⚠️ The default model couldn't complete this. Retry with **${provider}**? It will be used for the rest of this conversation.`,
-    )
-    .addButton(
-      'accept',
-      `Yes, retry with ${provider}`,
-      { type: 'submit', actionId: 'promote-provider-accept', successMessage: 'Retrying…' },
-      { variant: 'primary' },
-    )
-    .addButton(
-      'decline',
-      'No',
-      { type: 'submit', actionId: 'promote-provider-decline' },
-      { variant: 'secondary' },
-    )
-    .setData({
-      actionType: 'promote-provider',
-      provider,
-      agentSlug: context.agentSlug,
-      channelId: context.channelId,
-      conversationId: context.conversationId,
-      userId: context.userId,
-      originalTask: context.originalTask,
-    })
-    .build();
-}
-
-/**
  * /goal suggestion — single-button card the agent proposes via the
  * suggest-goal tool. Tapping fires flow-action.ts:start-goal which
  * dispatches the same flow as a user typing `/goal <condition>`.
@@ -670,9 +683,7 @@ export function buildPromoteProviderFlow(
  */
 /**
  * Capacity-retry card. Posted after a run dies because the model provider is
- * over capacity, when there is no alternate provider to promote to (otherwise
- * buildPromoteProviderFlow — switch — is the better offer). Tells the user the
- * run will be retried automatically once the model is serving again, and offers
+ * over capacity. Tells the user the run will be retried automatically once the model is serving again, and offers
  * a manual "Retry now" plus a "Stop" that deschedules the poller.
  *
  * Primitive components only, so it renders on the deployed dashboard with no
@@ -1077,20 +1088,18 @@ export function buildCodeFlow(code: string, language?: string): FlowDefinition {
 }
 
 export function buildDiffFlow(path: string, patch: string): FlowDefinition {
-  const firstMeaningfulLine = patch.split('\n').find((line) => line.trim() !== '') ?? '';
-  const headed =
-    firstMeaningfulLine.startsWith('diff --git ') || firstMeaningfulLine.startsWith('--- ');
-  const headedPatch = headed ? patch : `--- a/${path}\n+++ b/${path}\n${patch}`;
-  const lines = patch.split('\n');
-  const added = lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
-  const removed = lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
+  // Never pass the model's patch through verbatim: bare `@@` headers, missing
+  // file headers and guessed line counts all make @pierre/diffs emit zero hunks
+  // WITHOUT throwing, which shows up as a blank diff card. See unified-patch.ts.
+  const normalized = normalizeUnifiedPatch(path, patch);
+  const { added, removed } = normalized;
   return new FlowBuilder(`diff-${crypto.randomUUID()}`)
     .addComponent({
       id: 'diff',
       type: 'diff',
       props: {
         path,
-        patch: clipArtifact(headedPatch, ' … diff truncated'),
+        patch: clipArtifact(normalized.patch ?? patch, ' … diff truncated'),
       },
     })
     .setData({ kind: 'diff', fallbackText: `${path} · +${added}/−${removed}` })

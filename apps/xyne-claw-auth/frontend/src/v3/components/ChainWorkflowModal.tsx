@@ -56,6 +56,12 @@ import {
   type SpacesTriggerPropertySchema,
 } from "../../lib/api";
 import type { AgentLight } from "../../lib/types";
+import {
+  CHAIN_COMMAND_PRESETS,
+  chainCommandFieldsHaveCustomEntries,
+  isChainCommandPresetActive,
+  toggleChainCommandPreset,
+} from "../../lib/chainCommandPresets";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { useSnackbar } from "./ui/Snackbar";
@@ -207,9 +213,11 @@ interface AgentNodeData extends Record<string, unknown> {
 
 /** Persisted edge config (serialized on save) */
 interface EdgeData extends Record<string, unknown> {
-  mode: "always" | "tools" | "judge";
+  mode: "always" | "tools" | "judge" | "commands";
   toolsMustInclude: string;
   toolsMustExclude: string;
+  commandsMustMatch: string;
+  commandsMustNotMatch: string;
   judgeContext: string;
   taskTemplate: string;
 }
@@ -626,18 +634,21 @@ type EdgeMode = ChainEdgeData["mode"];
 const MODE_OPTIONS: ReadonlyArray<{ value: EdgeMode; label: string }> = [
   { value: "always", label: "Always" },
   { value: "tools", label: "Tools" },
+  { value: "commands", label: "Commands" },
   { value: "judge", label: "Judge" },
 ];
 
 const MODE_ACTIVE: Record<EdgeMode, string> = {
   always: "bg-xyne-surface text-xyne-fg-primary",
   tools: "bg-xyne-info-bg text-xyne-info-fg",
+  commands: "bg-xyne-info-bg text-xyne-info-fg",
   judge: "bg-xyne-brand/15 text-xyne-brand",
 };
 
 const MODE_HINT: Record<EdgeMode, string> = {
-  always: "Always continue to the next agent.",
-  tools: "Continue only when the upstream tool use matches the filters below.",
+  always: "Always continue to the next agent — no condition is checked.",
+  tools: "Continue only when the upstream tool use matches the tool-name filters below.",
+  commands: "Continue only when the upstream tool arguments (e.g. the shell command run by sandbox-run) match the patterns below.",
   judge: "An LLM decides whether to continue, based on the upstream result.",
 };
 
@@ -667,10 +678,20 @@ function ChainConfigEdge({
   }
 
   const { mode, isOpen } = data;
+  const unusedInputs: string[] = [];
+  if (mode !== "tools" && ((data.toolsMustInclude ?? "").trim() || (data.toolsMustExclude ?? "").trim())) {
+    unusedInputs.push("Tool filters");
+  }
+  if (mode !== "commands" && ((data.commandsMustMatch ?? "").trim() || (data.commandsMustNotMatch ?? "").trim())) {
+    unusedInputs.push("Command patterns");
+  }
+  if (mode !== "judge" && (data.judgeContext ?? "").trim()) {
+    unusedInputs.push("Judge context");
+  }
   const modeStyles =
     mode === "always"
       ? "bg-xyne-surface-sunken text-xyne-fg-secondary border border-xyne-border"
-      : mode === "tools"
+      : mode === "tools" || mode === "commands"
         ? "bg-xyne-info-bg text-xyne-info-fg border border-xyne-info-border"
         : "bg-xyne-brand/10 text-xyne-brand border border-xyne-brand/20";
 
@@ -735,7 +756,7 @@ function ChainConfigEdge({
               <div
                 role="radiogroup"
                 aria-label="Chain mode"
-                className="grid grid-cols-3 gap-0.5 rounded-lg border border-xyne-border bg-xyne-surface-sunken p-0.5"
+                className="grid grid-cols-4 gap-0.5 rounded-lg border border-xyne-border bg-xyne-surface-sunken p-0.5"
               >
                 {MODE_OPTIONS.map((opt) => {
                   const active = data.mode === opt.value;
@@ -760,6 +781,20 @@ function ChainConfigEdge({
               <p className="mb-2 mt-1 text-[10px] leading-snug text-xyne-fg-muted">
                 {MODE_HINT[data.mode]}
               </p>
+
+              {data.mode === "always" && (
+                <p className="mb-2 rounded-lg border border-xyne-warning-fg/30 bg-xyne-warning-bg/50 px-2 py-1.5 text-[10px] leading-snug text-xyne-warning-fg">
+                  This edge traverses unconditionally: the next agent runs after every upstream
+                  turn. Pick Commands, Tools or Judge if it should only fire sometimes.
+                </p>
+              )}
+
+              {unusedInputs.length > 0 && (
+                <p className="mb-2 rounded-lg border border-xyne-warning-fg/30 bg-xyne-warning-bg/50 px-2 py-1.5 text-[10px] leading-snug text-xyne-warning-fg">
+                  {unusedInputs.join(", ")} {unusedInputs.length === 1 ? "is" : "are"} filled in but
+                  ignored in {data.mode} mode. It is saved, not discarded — switch mode to use it.
+                </p>
+              )}
 
               <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted">
                 Task template
@@ -802,6 +837,14 @@ function ChainConfigEdge({
                 </>
               )}
 
+              {data.mode === "commands" && (
+                <CommandsPresetEditor
+                  commandsMustMatch={data.commandsMustMatch}
+                  commandsMustNotMatch={data.commandsMustNotMatch}
+                  onChange={(patch) => data.onChange(id, patch)}
+                />
+              )}
+
               {data.mode === "judge" && (
                 <>
                   <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted">
@@ -823,6 +866,98 @@ function ChainConfigEdge({
           )}
         </div>
       </EdgeLabelRenderer>
+    </>
+  );
+}
+
+function CommandsPresetEditor({
+  commandsMustMatch,
+  commandsMustNotMatch,
+  onChange,
+}: {
+  commandsMustMatch: string;
+  commandsMustNotMatch: string;
+  onChange: (patch: { commandsMustMatch?: string; commandsMustNotMatch?: string }) => void;
+}) {
+  const fields = { commandsMustMatch, commandsMustNotMatch };
+  const [advancedOpen, setAdvancedOpen] = useState(() => chainCommandFieldsHaveCustomEntries(fields));
+  const activePresets = CHAIN_COMMAND_PRESETS.filter((preset) => isChainCommandPresetActive(fields, preset));
+
+  return (
+    <>
+      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+        Presets
+      </label>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {CHAIN_COMMAND_PRESETS.map((preset) => {
+          const active = isChainCommandPresetActive(fields, preset);
+          return (
+            <button
+              key={preset.key}
+              type="button"
+              title={preset.description}
+              onClick={() => onChange(toggleChainCommandPreset(fields, preset))}
+              className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
+                active
+                  ? "border-xyne-border-focus bg-xyne-surface-raised text-xyne-fg-primary"
+                  : "border-xyne-border bg-xyne-surface-sunken text-xyne-fg-muted hover:text-xyne-fg-primary"
+              }`}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activePresets.length > 0 && (
+        <ul className="mb-2 space-y-0.5">
+          {activePresets.map((preset) => (
+            <li key={preset.key} className="text-[10px] leading-snug text-xyne-fg-muted">
+              <span className="text-xyne-fg-tertiary">{preset.label}</span> — {preset.description}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setAdvancedOpen((v) => !v)}
+        className="mb-2 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted hover:text-xyne-fg-primary"
+      >
+        {advancedOpen ? "▾ Advanced" : "▸ Advanced"}
+      </button>
+
+      {advancedOpen && (
+        <>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+            commands must match (csv)
+          </label>
+          <input
+            value={commandsMustMatch}
+            onChange={(e) => onChange({ commandsMustMatch: e.target.value })}
+            placeholder="e.g. git commit, /^git (add|commit)\\b/"
+            className="mb-2 w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken px-2 py-1.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none focus:border-xyne-border-focus"
+          />
+
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-xyne-fg-muted">
+            commands must not match (csv)
+          </label>
+          <input
+            value={commandsMustNotMatch}
+            onChange={(e) => onChange({ commandsMustNotMatch: e.target.value })}
+            placeholder="e.g. git push"
+            className="mb-2 w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken px-2 py-1.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder outline-none focus:border-xyne-border-focus"
+          />
+          <p className="mb-2 text-[10px] leading-snug text-xyne-fg-muted">
+            Each entry is matched against every tool call's name plus its command/argument text.
+            Plain text matches as a case-insensitive substring; wrap an entry in slashes (
+            <code className="text-xyne-fg-tertiary">/^git commit/</code>) for a case-insensitive
+            regex. Must-match requires every entry to be hit by some tool call; must-not-match
+            rejects the edge if any entry is hit. Max 200 characters per pattern. Patterns cannot
+            contain commas.
+          </p>
+        </>
+      )}
     </>
   );
 }
@@ -1100,6 +1235,8 @@ function ChainWorkflowModalInner({
         mode: e.mode ?? "always",
         toolsMustInclude: (e.toolsMustInclude ?? []).join(", "),
         toolsMustExclude: (e.toolsMustExclude ?? []).join(", "),
+        commandsMustMatch: (e.commandsMustMatch ?? []).join(", "),
+        commandsMustNotMatch: (e.commandsMustNotMatch ?? []).join(", "),
         judgeContext: e.judgeContext ?? "",
         taskTemplate: e.taskTemplate ?? "{{result}}",
         isOpen: false,
@@ -1169,6 +1306,8 @@ function ChainWorkflowModalInner({
             mode: "always",
             toolsMustInclude: "",
             toolsMustExclude: "",
+            commandsMustMatch: "",
+            commandsMustNotMatch: "",
             judgeContext: "",
             taskTemplate: "{{result}}",
             isOpen: true,
@@ -1259,6 +1398,12 @@ function ChainWorkflowModalInner({
             : {}),
           ...(fromCsv(d.toolsMustExclude ?? "").length > 0
             ? { toolsMustExclude: fromCsv(d.toolsMustExclude ?? "") }
+            : {}),
+          ...(fromCsv(d.commandsMustMatch ?? "").length > 0
+            ? { commandsMustMatch: fromCsv(d.commandsMustMatch ?? "") }
+            : {}),
+          ...(fromCsv(d.commandsMustNotMatch ?? "").length > 0
+            ? { commandsMustNotMatch: fromCsv(d.commandsMustNotMatch ?? "") }
             : {}),
           ...(d.judgeContext?.trim() ? { judgeContext: d.judgeContext.trim() } : {}),
           ...(d.taskTemplate?.trim() ? { taskTemplate: d.taskTemplate.trim() } : {}),

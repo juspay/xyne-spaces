@@ -407,6 +407,10 @@ export function SkillSlideOver({
               <span className="text-xyne-fg-primary">{formatDate(skill.createdAt)}</span>
             </div>
             <div className="flex items-center justify-between py-[8px]">
+              <span className="text-xyne-fg-tertiary">Last updated</span>
+              <span className="text-xyne-fg-primary">{formatDate(skill.updatedAt)}</span>
+            </div>
+            <div className="flex items-center justify-between py-[8px]">
               <span className="text-xyne-fg-tertiary">Size</span>
               <span className="text-xyne-fg-primary">{formatNumber(skill.content?.length ?? 0)} characters</span>
             </div>

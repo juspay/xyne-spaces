@@ -12,7 +12,7 @@
  *
  * `source` is the catalog's grouping key (routes/tools.ts derives customGroups
  * from distinct `custom:*` sources, and the picker humanizes it), so every tool
- * here shares one source and the seven appear together under "Agent Tools".
+ * here shares one source and the authoring tools appear together under "Agent Tools".
  *
  * The update-* tools do NOT self-apply either: the approver may not be the
  * target's owner, so flow-action re-checks edit rights against the row at apply
@@ -96,6 +96,41 @@ export const createAgentTool: ToolDefinition = {
     required: ["name", "description", "systemPrompt"],
   },
   execute: queued("create-agent"),
+};
+
+export const cloneAgentTool: ToolDefinition = {
+  slug: "clone-agent",
+  name: "Clone Agent",
+  description:
+    "Draft a clone of an EXISTING agent and submit it for approval. The user sees an Approve/Decline card; NOTHING is " +
+    "copied until they approve. On approval, the clone becomes a new PERSONAL agent owned by the approving user. " +
+    "The source must already be visible to that user. The clone copies the source prompt, tools, skills, behaviour settings, " +
+    "knowledge-base grants, enabled state and model selection. It never copies sharing, Spaces identity, provider credentials, " +
+    "delegation grants or prompt history. Saved MCP credentials copy only when the approving user owns the source agent; " +
+    "otherwise they must connect their own credentials. Use this when the user asks to clone, copy or duplicate an agent.",
+  source: AGENT_TOOLS_SOURCE,
+  isWriteTool: true,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sourceSlug: {
+        type: "string",
+        description: "Identifier of the existing source agent. Required. Read the agent config/list first; never guess it.",
+      },
+      name: {
+        type: "string",
+        description: "Human-readable name for the new personal copy, e.g. 'Release Notes Writer (Copy)'. Required.",
+      },
+      slug: {
+        type: "string",
+        description:
+          "Optional lowercase-kebab identifier for the copy. Auto-derived from name when omitted. " +
+          "Must be unique in the workspace — approval fails if another agent has taken it.",
+      },
+    },
+    required: ["sourceSlug", "name"],
+  },
+  execute: queued("clone-agent"),
 };
 
 export const updateAgentTool: ToolDefinition = {
@@ -253,6 +288,7 @@ export const createMcpTool: ToolDefinition = {
 
 export const AGENT_TOOL_DEFS: ToolDefinition[] = [
   createAgentTool,
+  cloneAgentTool,
   updateAgentTool,
   createSubagentTool,
   updateSubagentTool,

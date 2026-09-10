@@ -82,13 +82,11 @@ export async function attachArtifactToSessionApp(input: {
   let canonical: Buffer;
   let manifest: unknown;
   let title: string;
-  let icon: string | null;
   try {
     const built = buildReactArtifact(JSON.parse(payload.toString("utf8")) as Record<string, unknown>);
     canonical = Buffer.from(JSON.stringify(built.payload), "utf8");
     manifest = built.manifest;
     title = built.payload.title.slice(0, MAX_TITLE);
-    icon = built.payload.icon ?? null;
   } catch (err) {
     log.warn(`artifact failed validation, not session-scoping: ${String(err)}`);
     return null;
@@ -110,14 +108,13 @@ export async function attachArtifactToSessionApp(input: {
         workspaceId,
         userId,
         title,
-        icon,
         canonical,
         manifest,
         contentHash,
       });
     }
 
-    return await appendSessionVersion({ app: existing, userId, icon, canonical, manifest, contentHash });
+    return await appendSessionVersion({ app: existing, userId, canonical, manifest, contentHash });
   } catch (err) {
     log.error(`failed to session-scope artifact for ${conversationId}: ${String(err)}`);
     return null;
@@ -129,7 +126,6 @@ async function createSessionApp(input: {
   workspaceId: string;
   userId: string;
   title: string;
-  icon: string | null;
   canonical: Buffer;
   manifest: unknown;
   contentHash: string;
@@ -140,7 +136,6 @@ async function createSessionApp(input: {
       ownerUserId: input.userId,
       conversationId: input.conversationId,
       title: input.title,
-      ...(input.icon ? { icon: input.icon } : {}),
       // Created, never shared. Auto-materializing must not auto-publish —
       // publishing stays a deliberate act.
       visibility: "PRIVATE",
@@ -180,11 +175,8 @@ async function createSessionApp(input: {
 }
 
 async function appendSessionVersion(input: {
-  app: { id: string; workspaceId: string; icon: string | null };
+  app: { id: string; workspaceId: string };
   userId: string;
-  /** The agent's pick for THIS build. Adopted only if the app has no icon yet —
-   *  an icon the user chose (or an earlier build set) is never replaced. */
-  icon: string | null;
   canonical: Buffer;
   manifest: unknown;
   contentHash: string;
@@ -237,11 +229,7 @@ async function appendSessionVersion(input: {
 
   await prisma.artifactApp.update({
     where: { id: app.id },
-    data: {
-      headVersionId: version.id,
-      updatedAt: new Date(),
-      ...(!app.icon && input.icon ? { icon: input.icon } : {}),
-    },
+    data: { headVersionId: version.id, updatedAt: new Date() },
   });
 
   log.info(`session app ${app.id} advanced to v${versionNumber}`);

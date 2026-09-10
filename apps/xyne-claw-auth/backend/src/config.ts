@@ -88,14 +88,6 @@ export const CONFIG = {
   cliTokensEnabled: ["1", "true", "on", "yes"].includes(
     (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
-  localHarnessEnabled: ["1", "true", "on", "yes"].includes(
-    (process.env["LOCAL_HARNESS_ENABLED"] ?? "").trim().toLowerCase(),
-  ),
-  localHarnessDefaultAll: ["1", "true", "on", "yes"].includes(
-    (process.env["LOCAL_HARNESS_DEFAULT_ALL"] ?? "").trim().toLowerCase(),
-  ),
-  localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
-  localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
@@ -144,6 +136,10 @@ export const CONFIG = {
   // + instructions are stored under the fixed logical "daily-brief" slug,
   // independent of this, so switching the executing agent never moves user data.
   dailyBriefAgentSlug: process.env["DAILY_BRIEF_AGENT_SLUG"] ?? "ask-ai",
+  webhookHistoryWordLimit: Math.max(1, Number(process.env["WEBHOOK_HISTORY_WORD_LIMIT"] ?? 1500)),
+  attachmentDownloadTimeoutMs: Math.max(1_000, Number(process.env["ATTACHMENT_DOWNLOAD_TIMEOUT_MS"] ?? 60_000)),
+  runAttachmentRefs: process.env["XYNE_RUN_ATTACHMENT_REFS"] === "1",
+  runQueueMaxAttempts: Math.max(1, Number(process.env["RUN_QUEUE_MAX_ATTEMPTS"] ?? 4)),
   dailyBriefConcurrency: Number(process.env["DAILY_BRIEF_CONCURRENCY"] ?? 8),
   // CLUSTER-GLOBAL cap on concurrent brief LLM runs (Redis semaphore), independent
   // of replica count — this, not per-worker concurrency, is the real provider-rate
@@ -362,17 +358,6 @@ export const CONFIG = {
     "<heisenberg-url>"
   ).replace(/\/+$/, ""),
 } as const;
-
-// Prod safety gate: the claw-auth → session-MCP relay and the run callbacks
-// authenticate to xyne-claw with x-s2s-key. If the local harness is enabled in
-// production without that shared secret, every relay/callback would be sent
-// UNAUTHENTICATED — fail fast at boot instead of shipping an open bridge.
-if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.xyneClawS2sKey) {
-  throw new Error(
-    "LOCAL_HARNESS_ENABLED=true in production requires XYNE_CLAW_S2S_KEY to be set " +
-    "(the local-harness MCP relay and run callbacks must be S2S-authenticated).",
-  );
-}
 
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the
 // queues + fix records ride this service's existing Redis).

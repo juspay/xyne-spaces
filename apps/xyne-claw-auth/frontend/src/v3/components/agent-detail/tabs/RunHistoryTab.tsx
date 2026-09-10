@@ -1,17 +1,15 @@
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  CircleDashedIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  MinusCircleIcon,
-  ClockIcon,
-  CaretRightIcon,
-} from "@phosphor-icons/react";
-import { listRuns } from "../../../../lib/api";
-import type { AgentRun } from "../../../../lib/api";
+import { ClockIcon } from "@phosphor-icons/react";
+import { listRunsPaged } from "../../../../lib/api";
+import type { AgentRunListPage, RunUserFacet } from "../../../../lib/api";
 import { Skeleton } from "../../ui/Skeleton";
-import { formatTimeAgo, formatDuration, truncate } from "../../home/homeUtils";
+import { Button } from "../../ui/Button";
+import { SelectField } from "../../ui/SelectField";
+import { RunRow } from "../../runs/RunRow";
+import { RunDateRangeFilter } from "../../runs/RunDateRangeFilter";
+import { RunListFooter } from "../../runs/RunListFooter";
+import { runOwnerLabel, rangeToIso, type RunRangePreset } from "../../../lib/runFormat";
 
 interface Props {
   agentSlug: string;
@@ -19,223 +17,223 @@ interface Props {
   canViewAllRuns: boolean;
 }
 
-// Status icon size bumped from 16 → 22 and switched to filled weight so it
-// reads as a real status anchor (replaces the old text "completed" badge).
-function StatusIcon({ status }: { status: AgentRun["status"] }) {
-  switch (status) {
-    case "running":
-      return <CircleDashedIcon size={22} className="animate-spin text-xyne-info" />;
-    case "completed":
-      return <CheckCircleIcon size={22} weight="fill" className="text-xyne-success" />;
-    case "failed":
-      return <XCircleIcon size={22} weight="fill" className="text-xyne-error" />;
-    case "cancelled":
-      return <MinusCircleIcon size={22} weight="fill" className="text-xyne-fg-muted" />;
-  }
-}
+const PAGE_SIZE = 25;
 
-// Human label for a run's owner — real name/email if the admin All-Runs listing
-// hydrated it, else a short id. Shared by the row and the user-filter dropdown
-// so a user reads the same everywhere.
-function runOwnerLabel(run: AgentRun): string {
-  return run.userName || run.userEmail || `user ${run.userId.slice(0, 8)}`;
-}
-
-function triggerLabel(source: AgentRun["triggerSource"]): string {
-  return source === "spaces"
-    ? "Spaces"
-    : source === "scheduled"
-      ? "Scheduled"
-      : source === "chat"
-        ? "Chat"
-        : source === "automation"
-          ? "Automation"
-          : "API";
-}
-
-function RunRow({ run, showOwner, onOpen }: { run: AgentRun; showOwner?: boolean; onOpen?: () => void }) {
-  const duration =
-    run.completedAt
-      ? formatDuration(run.startedAt, run.completedAt)
-      : run.status === "running"
-        ? "Running…"
-        : null;
-
-  const tokens =
-    run.tokensIn != null || run.tokensOut != null
-      ? `${run.tokensIn ?? 0} → ${run.tokensOut ?? 0} tok`
-      : null;
-
-  // Collected meta facts rendered on the second line with `·` separators
-  // — e.g. "Chat · 1d ago · 7s · 27994 → 336 tok".
-  const metaParts = [
-    // In admin "All Runs" mode, lead with the owning user so runs are
-    // attributable — real name/email when the scope=all listing hydrated it,
-    // falling back to a short id.
-    showOwner ? runOwnerLabel(run) : null,
-    triggerLabel(run.triggerSource),
-    formatTimeAgo(run.startedAt),
-    duration,
-    tokens,
-  ].filter((p): p is string => !!p);
-
-  const clickable = !!onOpen;
-  return (
-    <div
-      onClick={onOpen}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onOpen?.();
-              }
-            }
-          : undefined
-      }
-      className={`group flex items-center gap-3 rounded-lg border border-xyne-border-subtle px-4 py-3 transition-colors hover:bg-xyne-surface-subtle hover:border-xyne-border ${
-        clickable ? "cursor-pointer" : ""
-      }`}
-    >
-      <StatusIcon status={run.status} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[13px] font-medium text-xyne-fg-primary">
-          {truncate(run.task, 80)}
-        </span>
-        <div className="flex items-center flex-wrap gap-x-1.5 text-[11px] text-xyne-fg-tertiary">
-          {metaParts.map((part, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5">
-              {i > 0 && <span className="text-xyne-fg-muted">·</span>}
-              {part}
-            </span>
-          ))}
-        </div>
-      </div>
-      {clickable && (
-        <CaretRightIcon
-          size={16}
-          className="shrink-0 text-xyne-fg-muted opacity-0 transition-opacity group-hover:opacity-100"
-        />
-      )}
-    </div>
-  );
-}
+// Sentinel page so every consumer below reads `page.rows` / `page.total`
+// unconditionally — a nullable page would force a null-guard at each of the
+// four render branches and at the footer.
+const EMPTY_RUN_PAGE: AgentRunListPage = { rows: [], total: 0, limit: PAGE_SIZE, offset: 0 };
 
 export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
   const navigate = useNavigate();
-  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [page, setPage] = useState<AgentRunListPage>(EMPTY_RUN_PAGE);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  // Without this the bare catch below turns every 400/403/5xx into
+  // EMPTY_RUN_PAGE, and the empty-state branches then assert "This agent
+  // hasn't been executed yet" about a request the server REFUSED. On an audit
+  // surface a refusal and a genuinely empty result must never render alike.
+  const [error, setError] = useState("");
   // Elevated view: admins, owners, and contributors can show every user's runs
   // of this agent. The server ACL-filters by usedUserToken, so other users'
   // runs that touched their private token are never returned.
   const [allUsers, setAllUsers] = useState(false);
-  // "All Runs" filters (client-side over the loaded set).
-  const [userFilter, setUserFilter] = useState<string>(""); // "" = every user
+  const [offset, setOffset] = useState(0);
+  const [preset, setPreset] = useState<RunRangePreset>("30d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  // "" = every user. Server-side now: the old client-side variant could only
+  // filter whatever the single fetch happened to have loaded.
+  const [userFilter, setUserFilter] = useState("");
+  const [userOptions, setUserOptions] = useState<RunUserFacet[]>([]);
+  // Free text stays client-side and therefore only ever covers the current page
+  // — A6's hint below says so out loud.
   const [query, setQuery] = useState("");
+
+  // First load paints skeletons; every later filter-driven refetch is "quiet"
+  // so the list doesn't collapse to skeletons on each keystroke of the date
+  // inputs. Ref, not state, so flipping it never schedules a render of its own.
+  const loadedOnce = useRef(false);
 
   useEffect(() => {
     if (canViewAllRuns) return;
     setAllUsers(false);
     setUserFilter("");
     setQuery("");
+    setOffset(0);
+    setUserOptions([]);
   }, [canViewAllRuns]);
 
+  // `isCancelled` is threaded in from the effect rather than read off a ref:
+  // the effect's cleanup runs before the next effect, so the flag it closes
+  // over is exactly "a newer request has started" — without it, toggling
+  // filters quickly can land an older response on top of a newer one.
+  const load = useCallback(
+    async (quiet: boolean, isCancelled: () => boolean) => {
+      if (quiet) setRefreshing(true);
+      else setLoading(true);
+      const { from, to } = rangeToIso(preset, customFrom, customTo);
+      try {
+        const res = await listRunsPaged(userId, {
+          agentSlug,
+          scope: allUsers ? "all" : "own",
+          ...(allUsers && userFilter ? { userId: userFilter } : {}),
+          from,
+          to,
+          limit: PAGE_SIZE,
+          offset,
+          // One extra groupBy, paid only on the first page: the option list is
+          // invariant across pages of the same filter set.
+          ...(allUsers && offset === 0 ? { facets: true } : {}),
+        });
+        if (isCancelled()) return;
+        setPage(res);
+        // Overwrite only when the response actually carried facets, otherwise
+        // paging (or selecting a user, which narrows the counts) would collapse
+        // the dropdown to the single option still present in the result.
+        if (res.facets) setUserOptions(res.facets.users);
+        setError("");
+      } catch (err) {
+        if (isCancelled()) return;
+        setError(err instanceof Error ? err.message : "Failed to load runs");
+        setPage(EMPTY_RUN_PAGE);
+      } finally {
+        if (!isCancelled()) {
+          loadedOnce.current = true;
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [agentSlug, userId, allUsers, offset, preset, customFrom, customTo, userFilter],
+  );
+
   useEffect(() => {
-    setLoading(true);
-    // Pull a bigger pool in All-Runs mode so the user/text filter has something
-    // meaningful to work over (server caps at 200).
-    listRuns(userId, { agentSlug, limit: allUsers ? 200 : 50, allUsers })
-      .then(setRuns)
-      .catch(() => setRuns([]))
-      .finally(() => setLoading(false));
-  }, [agentSlug, userId, allUsers]);
+    let cancelled = false;
+    void load(loadedOnce.current, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
 
-  // Distinct owners present in the loaded rows — drives the dropdown so its
-  // options always match what's actually filterable.
-  const userOptions = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const r of runs) if (!m.has(r.userId)) m.set(r.userId, runOwnerLabel(r));
-    return [...m.entries()]
-      .map(([id, label]) => ({ id, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [runs]);
-
-  // Apply the user + free-text filters (only meaningful in All-Runs mode; the
-  // controls are hidden otherwise so the state stays inert).
+  // Free-text filter over THIS page only — never the full `page.total`.
   const visibleRuns = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return runs.filter((r) => {
-      if (userFilter && r.userId !== userFilter) return false;
-      if (q && !`${r.task} ${runOwnerLabel(r)}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [runs, userFilter, query]);
+    if (!q) return page.rows;
+    return page.rows.filter((r) =>
+      `${r.sessionId} ${r.task} ${runOwnerLabel(r)}`.toLowerCase().includes(q),
+    );
+  }, [page.rows, query]);
 
-  // Elevated toggle — rendered above the body so it's reachable even when YOUR
-  // own runs are empty (the common "No runs yet" case).
-  const allRunsToggle = canViewAllRuns ? (
+  const userSelectOptions = useMemo(
+    () => [
+      { value: "", label: `All users (${userOptions.length})` },
+      ...userOptions.map((u) => ({
+        value: u.userId,
+        label: `${u.name || u.email || `user ${u.userId.slice(0, 8)}`} (${u.count})`,
+      })),
+    ],
+    [userOptions],
+  );
+
+  // Filters live above the body so they're reachable even when the result set
+  // is empty (the common "No runs yet" case).
+  const controls = (
     <div className="flex flex-col gap-2.5 border-b border-xyne-border-subtle px-6 py-2.5">
-      <div className="flex items-center justify-end gap-2">
-        <span className="text-[12px] text-xyne-fg-tertiary">All Runs</span>
-        <label
-          className="flex items-center gap-2 select-none"
-          title="Show every user's runs of this agent. Runs that used a user's private token are hidden."
-        >
-          <input
-            type="checkbox"
-            checked={allUsers}
-            onChange={(e) => {
-              setAllUsers(e.target.checked);
-              if (!e.target.checked) {
-                setUserFilter("");
-                setQuery("");
-              }
-            }}
-            className="h-4 w-4 cursor-pointer accent-xyne-accent"
-            aria-label="Show all users' runs"
-          />
-          <span className="text-[12px] text-xyne-fg-primary">{allUsers ? "On" : "Off"}</span>
-        </label>
+      <div className="flex items-center justify-between gap-3">
+        <RunDateRangeFilter
+          preset={preset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={(next) => {
+            setOffset(0);
+            setPreset(next.preset);
+            setCustomFrom(next.customFrom);
+            setCustomTo(next.customTo);
+          }}
+        />
+        {canViewAllRuns && (
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-[12px] text-xyne-fg-tertiary">All Runs</span>
+            <label
+              className="flex items-center gap-2 select-none"
+              title="Show every user's runs of this agent. Runs that used a user's private token are hidden."
+            >
+              <input
+                type="checkbox"
+                checked={allUsers}
+                onChange={(e) => {
+                  setOffset(0);
+                  setAllUsers(e.target.checked);
+                  if (!e.target.checked) {
+                    setUserFilter("");
+                    setQuery("");
+                    setUserOptions([]);
+                  }
+                }}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent"
+                aria-label="Show all users' runs"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{allUsers ? "On" : "Off"}</span>
+            </label>
+          </div>
+        )}
       </div>
       {allUsers && (
-        <div className="flex items-center gap-2">
-          {/* User filter — the primary "find runs by who ran them" control. */}
-          <select
-            value={userFilter}
-            onChange={(e) => setUserFilter(e.target.value)}
-            className="h-8 min-w-[160px] max-w-[220px] rounded-md border border-xyne-border-subtle bg-xyne-surface px-2 text-[12px] text-xyne-fg-primary focus:border-xyne-border focus:outline-none"
-            aria-label="Filter by user"
-          >
-            <option value="">All users ({userOptions.length})</option>
-            {userOptions.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.label}
-              </option>
-            ))}
-          </select>
-          {/* Free-text — task or owner, so you can also "find anything". */}
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search task or user…"
-            className="h-8 flex-1 rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none"
-            aria-label="Search runs"
-          />
-          {(userFilter || query) && (
-            <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
-              {visibleRuns.length} / {runs.length}
-            </span>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            {/* User filter — the primary "find runs by who ran them" control,
+                backed by server facets so the options are every user with runs
+                in the window, not just those on the current page. */}
+            <SelectField
+              className="w-[220px] shrink-0"
+              value={userFilter}
+              options={userSelectOptions}
+              placeholder="All users"
+              // SelectField emits null when the field is cleared, and "" is a
+              // real selectable option here — coalescing keeps both paths on
+              // the same "every user" value instead of sending userId=null.
+              onValueChange={(v: string | null) => {
+                setOffset(0);
+                setUserFilter(v ?? "");
+              }}
+            />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter this page (session id, task, user)…"
+              className="h-9 flex-1 rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none"
+              aria-label="Filter runs on this page"
+            />
+            {(userFilter || query) && (
+              <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
+                {visibleRuns.length} / {page.rows.length} on this page
+              </span>
+            )}
+          </div>
+          {query && (
+            <p className="text-[11px] text-xyne-fg-muted">
+              Filters the {page.rows.length} runs on this page only — narrow the date range or
+              user filter to search further.
+            </p>
           )}
         </div>
       )}
     </div>
-  ) : null;
+  );
 
   let body: ReactNode;
-  if (loading) {
+  if (error) {
+    // Ahead of the two `page.total === 0` branches on purpose: EMPTY_RUN_PAGE is
+    // also what the catch installs, so an error checked second would be painted
+    // over by "No runs in this range". Same banner as RunsPageV3.
+    body = (
+      <div className="p-6">
+        <div className="rounded-xl bg-red-500/10 text-red-500 p-4 text-[13px]">{error}</div>
+      </div>
+    );
+  } else if (loading) {
     // Skeleton mirrors the real RunRow layout so the transition doesn't jitter.
     body = (
       <div className="flex flex-col gap-2 p-6">
@@ -253,7 +251,31 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
         ))}
       </div>
     );
-  } else if (runs.length === 0) {
+  } else if (page.total === 0 && preset !== "365d") {
+    // Empty *because of the window*, which is the new default failure mode now
+    // that the tab shows 30 days instead of "the last 50 runs, any age" — say
+    // so and offer the widest preset rather than claiming the agent never ran.
+    body = (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 pt-10 pb-28 text-center">
+        <ClockIcon size={32} className="text-xyne-fg-muted" />
+        <p className="text-[14px] font-medium text-xyne-fg-secondary">No runs in this range</p>
+        <p className="max-w-[280px] text-[13px] text-xyne-fg-tertiary">
+          Nothing matched the selected dates{allUsers && userFilter ? " and user" : ""}. Try a wider
+          window.
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            setOffset(0);
+            setPreset("365d");
+          }}
+        >
+          Widen to 1 year
+        </Button>
+      </div>
+    );
+  } else if (page.total === 0) {
     body = (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 pt-10 pb-28 text-center">
         <ClockIcon size={32} className="text-xyne-fg-muted" />
@@ -266,13 +288,14 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
       </div>
     );
   } else if (visibleRuns.length === 0) {
-    // Have runs, but the active user/text filter excluded them all.
+    // Have runs on this page, but the free-text filter excluded them all.
     body = (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 pt-10 pb-28 text-center">
         <ClockIcon size={32} className="text-xyne-fg-muted" />
         <p className="text-[14px] font-medium text-xyne-fg-secondary">No matching runs</p>
         <p className="max-w-[280px] text-[13px] text-xyne-fg-tertiary">
-          No runs match the current filter. Clear the user or search filter to see all runs.
+          No runs on this page match the current filter. Clear the search box, or change the user or
+          date filter to look further.
         </p>
       </div>
     );
@@ -309,8 +332,19 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      {allRunsToggle}
-      {body}
+      {controls}
+      {/* The list scrolls, the footer stays pinned — otherwise the only way to
+          reach Next on a full page is to scroll past 25 rows. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+      <div className="border-t border-xyne-border-subtle px-6 py-3">
+        <RunListFooter
+          total={page.total}
+          limit={PAGE_SIZE}
+          offset={offset}
+          loading={loading || refreshing}
+          onOffsetChange={setOffset}
+        />
+      </div>
     </div>
   );
 }

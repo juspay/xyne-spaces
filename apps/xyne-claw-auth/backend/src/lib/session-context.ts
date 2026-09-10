@@ -144,18 +144,6 @@ export interface SessionContext {
    */
   workspaceId?: string;
   /**
-   * Conversation-scoped "the user opted in to the agent's premium provider"
-   * flag. Set by:
-   *   1. `/upgrade` slash-command in the user's task (immediate auto-escalate)
-   *   2. User clicking "Yes" on the FlowUI escalation prompt after a kimi
-   *      failure or soft refusal (see flow-action.ts promote-provider branch)
-   * When set, the resolution chain in handleWebhook uses this provider instead
-   * of falling through to spaces/LiteLLM. Persists for the lifetime of the
-   * conversation (Redis SESSION_TTL = 24h, keyed by convKey). Clearing it
-   * requires the user to start a new conversation.
-   */
-  escalatedProvider?: string;
-  /**
    * Plan/auto mode gate (distinct from responseMode). 'plan' = the agent
    * proposed a plan and is awaiting approval; 'auto' = normal execution
    * (today's behavior). Absent ⇒ 'auto'. Set to 'plan' at dispatch when
@@ -183,15 +171,15 @@ const CONV_PREFIX = "session-by-conv:";
 // busy slot (tryAcquireSlot) + runtime session lock, not this key.
 export const AUTOMATION_RUN_DEDUP_TTL = Number(process.env["AUTOMATION_RUN_DEDUP_TTL_SEC"] ?? 30);
 
-export function convKey(conversationId: string, agentSlug: string, userScopeId?: string): string {
+export function convKey(conversationId: string, agentSlug: string, twinUserScopeId?: string): string {
   const base = `${CONV_PREFIX}${conversationId}:${agentSlug}`;
   // Digital-twin runs are PER-USER: one claw session per mentioned user in a
   // thread (see buildSandboxStoreKey). So the conv index must be user-scoped
   // too — otherwise two twins mentioned in ONE thread clobber each other's row
   // and the /result conv-index fallback resolves the wrong user. Only the twin
-  // passes userScopeId; every conversation-mode caller keeps the legacy 2-part
+  // passes twinUserScopeId; every conversation-mode caller keeps the legacy 2-part
   // key (backward compatible, unchanged).
-  return agentSlug === "digital-twin" && userScopeId ? `${base}:${userScopeId}` : base;
+  return agentSlug === "digital-twin" && twinUserScopeId ? `${base}:${twinUserScopeId}` : base;
 }
 
 export function automationRunDedupKey(conversationId: string, agentSlug: string): string {
@@ -376,16 +364,14 @@ export async function getSession(sessionId: string): Promise<SessionContext | nu
  * Conversation-keyed context lookup. Returns the most recently saved context
  * for `(conversationId, agentSlug)` — exactly what /result needs when claw
  * minted a new sessionId via a refire path and claw-auth never registered it.
- * Exported so flow-action.ts can read+merge before flipping
- * `escalatedProvider` (promote-provider branch).
  */
 export async function getSessionByConv(
   conversationId: string,
   agentSlug: string,
-  userScopeId?: string,
+  twinUserScopeId?: string,
 ): Promise<SessionContext | null> {
   const redis = redisService.getConnection();
-  const raw = await redis.get(convKey(conversationId, agentSlug, userScopeId));
+  const raw = await redis.get(convKey(conversationId, agentSlug, twinUserScopeId));
   if (!raw) return null;
   return JSON.parse(raw) as SessionContext;
 }
@@ -405,12 +391,12 @@ export async function resolveSessionContext(
   sessionId: string,
   conversationId?: string | null,
   agentSlug?: string | null,
-  userScopeId?: string | null,
+  twinUserScopeId?: string | null,
 ): Promise<SessionContext | null> {
   let ctx = sessionId ? await getSession(sessionId) : null;
   if (!ctx && sessionId) ctx = await getRecoveryContextForSession(sessionId);
   if (!ctx && conversationId && agentSlug) {
-    ctx = await getSessionByConv(conversationId, agentSlug, userScopeId ?? undefined);
+    ctx = await getSessionByConv(conversationId, agentSlug, twinUserScopeId ?? undefined);
     if (ctx && sessionId) await setSession(sessionId, ctx);
   }
   return ctx;

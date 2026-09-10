@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { publishHandoffSignal } from "../handoff-redis.js";
+import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import {
+  decideRunControl,
+  publishRunControl,
+  registerRunControlApplier,
+  type RunControlMessage,
+} from "../run-control.js";
+import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
   pushAttachment,
@@ -41,10 +48,15 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
-import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
+import { packSdlcRunMeta, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
+import {
+  executeRunFromPayload,
+  type InternalRunPayload,
+  type RunExecutionState,
+} from "../run-execution.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -159,7 +171,7 @@ const UNDERSTANDING_SKILL_PATH = "understanding-skills";
 
 const router = Router();
 
-interface ActiveRunControl {
+export interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
@@ -194,6 +206,29 @@ interface ActiveRunControl {
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
+
+export function ensureActiveRun(
+  sessionId: string,
+  payload: { userId?: string; agentSlug?: string; callbackUrl?: string },
+): ActiveRunControl {
+  const existing = activeRuns.get(sessionId);
+  if (existing) return existing;
+  const activeRun: ActiveRunControl = {
+    abortController: new AbortController(),
+    userId: (payload.userId ?? "").trim(),
+    agentSlug: payload.agentSlug ?? "unknown",
+    startedAtMs: Date.now(),
+    hasCallbackUrl: typeof payload.callbackUrl === "string" && !!payload.callbackUrl.trim(),
+  };
+  activeRuns.set(sessionId, activeRun);
+  return activeRun;
+}
+
+export function finishActiveRun(sessionId: string, activeRun: ActiveRunControl): void {
+  if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+  if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
+  activeRuns.delete(sessionId);
+}
 const configuredSseReconnectGraceMs = Number(process.env["SSE_RECONNECT_GRACE_MS"] ?? 180_000);
 const SSE_RECONNECT_GRACE_MS = Number.isFinite(configuredSseReconnectGraceMs) && configuredSseReconnectGraceMs >= 0
   ? configuredSseReconnectGraceMs
@@ -214,7 +249,7 @@ function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<st
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
 }
 
-function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
+export function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const obj = raw as Record<string, unknown>;
   const id = typeof obj["id"] === "string" ? obj["id"].trim() : "";
@@ -300,6 +335,21 @@ export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: stri
 
 export function getActiveRunCount(): number {
   return activeRuns.size;
+}
+
+export function getActiveSessionIds(): string[] {
+  return [...activeRuns.keys()];
+}
+
+/** Ownership fencing (run-queue path only): this pod lost the run-owner key to
+ *  a stalled-job takeover, so its in-flight copy must stop producing output. */
+export function abortRunForOwnershipLoss(sessionId: string): boolean {
+  const active = activeRuns.get(sessionId);
+  if (!active || active.abortController.signal.aborted) return false;
+  clog.warn(`[run] ownership lost — aborting superseded run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"}`);
+  active.drainCancelled = true;
+  active.abortController.abort();
+  return true;
 }
 
 export function cancelActiveRunsForDrain(reason = "server draining"): number {
@@ -492,145 +542,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
-  } = req.body as {
-    userId?: string;
-    userName?: string;
-    userEmail?: string;
-    task?: string;
-    context?: string;
-    conversationId?: string;
-    /** When set, this OVERRIDES conversationId for the persistent-session
-     *  lookup (the PI session JSONL filename). Used by chat branching: the
-     *  conversation row stays the same so the UI keeps one thread, but the
-     *  underlying PI session lives at a branched id like
-     *  `${conversationId}__branch__${assistantMessageId}` so context from the
-     *  selected branch doesn't leak across siblings. */
-    piSessionConversationId?: string;
-    // Optional upstream-provided Spaces thread/conversation ID. Surfaced to
-    // the agent's system metadata so it can construct thread-link citations
-    // even when the agent session's own conversationId is a synthetic one
-    // (e.g. scheduled job IDs). Caller-side wiring: webhook.ts / agent-chat.ts
-    // forward this field when they have a Spaces conversation context.
-    spacesConversationId?: string;
-    callbackUrl?: string;
-    systemPrompt?: string;
-    agentConfig?: Record<string, unknown>;
-    agentSlug?: string;
-    channelId?: string;
-    cwd?: string;
-    eventType?: string;
-    scheduledJobId?: string;
-    traceId?: string;
-    skills?: {
-      slug?: string;
-      name: string;
-      description?: string;
-      content: string;
-      // Bundled skill files (scripts/, assets, …) materialized alongside
-      // SKILL.md by writeSessionSkills. Omitting this here silently dropped a
-      // skill's script folder on the top-level run path.
-      files?: { relativePath: string; content: string; contentType?: string | null }[];
-    }[];
-    provider?: string;
-    // Ordered fallback chain set by the agent owner via the Provider tab.
-    // First entry is the primary parent; subsequent entries are walked on
-    // quota exhaustion before dropping to "spaces" (LiteLLM/Kimi).
-    providerOrder?: string[];
-    subagentProviders?: Record<string, string>;
-    subagentProviderMode?: "parent" | "spaces" | "fast-model";
-    providerConfigs?: Record<
-      string,
-      {
-        apiKey: string;
-        model: string;
-        baseUrl?: string;
-        authType?: string;
-        reasoningEffort?: string;
-      }
-    >;
-    progressUrl?: string;
-    attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
-    recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
-    contextFiles?: Array<{ path: string; content: string }>;
-    /** Set by claw-auth's awakening dispatcher for an unattended run. */
-    awakening?: {
-      kind: string;
-      writePolicy: string;
-      shadow: boolean;
-      injectEnabled?: boolean;
-      windowStartMs?: number;
-      windowEndMs?: number;
-      entryPath?: string;
-    };
-    additionalInstructions?: string;
-    researchContext?: {
-      type: string;
-      id?: string;
-      name: string;
-      repositoryId?: string;
-      productId?: string;
-    };
-    customSubagents?: import("../subagent-tools.js").CustomSubagentSpec[];
-    callableAgents?: Array<CallableAgentSpec | CallableAgentLightSpec>;
-    delegationMode?: "orchestrator";
-    // claw-auth-issued per-run identifiers. sessionId is the URL-bound run id;
-    // sessionToken is an HMAC bearer used on every outbound /sessions/:sessionId/mcp/*
-    // call back to claw-auth. Both REQUIRED in production — required check below.
-    sessionId?: string;
-    sessionToken?: string;
-    ticketIds?: string[];
-    canvasIds?: string[];
-    callIds?: string[];
-    // Stable per-unit-of-work key for run idempotency. Set by the recovery
-    // worker to the rootSessionId so a re-dispatch of an already-completed run
-    // is detected (via the GCS result marker) and NOT re-executed. Absent on
-    // first dispatch (the marker is then keyed by sessionId).
-    idempotencyKey?: string;
-    // `/compact`: force a one-shot compaction of the resumed session before the
-    // first turn runs (only fires when resuming an existing session). Plumbed
-    // into the initial runAttempt below.
-    compactBeforeRun?: boolean;
-    /** Branching: when true, runTask branches the PI session at the last user
-     *  entry so the new assistant turn becomes a sibling of the previous one. */
-    isRegenerate?: boolean;
-    detached?: boolean;
-    fastMode?: boolean;
-    resumedFromHandoff?: boolean;
-    memoryBankId?: string;
-    /** Digital Twin mention flow: real reply destinations the user can post in
-     *  (their accessible channels/threads), built by claw-auth from Spaces
-     *  memberships. Injected into the mandatory twin_deliver tool as a
-     *  provider-constrained enum so the model can't invent a channel id. */
-    twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[];
-    /** Digital Twin mention flow: who @mentioned the user, and the channel name.
-     *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
-     *  the model knows who's asking and where — the thread history only carries a
-     *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
-    senderName?: string;
-    channelName?: string;
-    /** Pipeline mode gate. 'plan' (agent.config.planMode) ⇒ read-only palette +
-     *  terminal propose-plan tool; the agent proposes a plan and STOPS.
-     *  'daily_brief' (agent.config.dailyBriefMode) ⇒ read-only palette + subagents
-     *  + terminal emit_brief tool; the agent gathers, emits the structured brief,
-     *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
-     *  claw-auth, trust-gated on the matching agent config flag. */
-    mode?: "plan" | "auto" | "daily_brief";
-    /** /experiment autonomous exploration mode context, forwarded by claw-auth. */
-    experiment?: {
-      id?: string;
-      epoch?: number;
-      deadlineAt?: string;
-      focus?: string;
-      /** "understanding" = coverage-gated variant: exit on an exhausted
-       *  code-path frontier instead of the deadline. Set by claw-auth. */
-      kind?: "understanding" | "framework" | "security" | "repo-history";
-    };
-    /** True when this run is Turn 2 (auto) dispatched right after a plan was
-     *  approved (or a trivial plan auto-continued). Used only to emit a
-     *  mode_switch debug event; behavior is identical to any other auto run. */
-    planContinuation?: boolean;
-    generateFollowUpSuggestions?: boolean;
-  };
+  } = req.body as InternalRunPayload;
+
   const experiment = normalizeExperimentContext(rawExperiment);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
@@ -1069,67 +982,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  // Process in background
-  processTask(
-    sessionId,
-    sessionToken.trim(),
-    userId.trim(),
-    task.trim(),
-    context,
-    userName,
-    userEmail,
-    conversationId,
-    piSessionConversationId,
-    spacesConversationId,
-    callbackUrl,
-    systemPrompt,
-    agentConfig,
-    agentSlug,
-    channelId,
-    requestCwd,
-    eventType,
-    scheduledJobId,
-    traceId,
-    skills,
-    provider,
-    providerOrder,
-    subagentProviders,
-    subagentProviderMode,
-    providerConfigs,
-    progressUrl,
-    attachments,
-    recordingRefs,
-    contextFiles,
-    additionalInstructions,
-    researchContext,
-    customSubagents,
-    callableAgents,
-    delegationMode,
-    ticketIds,
-    canvasIds,
-    callIds,
-    idempotencyKey,
-    isRegenerate,
-    abortController.signal,
-    () => abortController.abort(),
-    compactBeforeRun,
-    fastMode,
-    resumedFromHandoff,
-    memoryBankId,
-    twinDestinations,
-    senderName,
-    channelName,
-    effectiveMode,
-    experiment,
-    planContinuation,
-    shouldGenerateFollowUpSuggestions,
-    typeof callbackUrl === "string" ? callbackUrl : undefined,
-    awakening,
-  ).finally(() => {
-    if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
-    if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
-    activeRuns.delete(sessionId);
-  });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -1317,63 +1170,58 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-/**
- * Liveness probe for claw-auth's run-recovery watchdog.
- *
- * The watchdog previously inferred death from heartbeat age alone, but a
- * heartbeat only lands on progress events — so a run sitting inside ONE long
- * tool call (a /design browser QA pass, a big sandbox build) looks dead while
- * it is working perfectly. It would then re-dispatch the whole request, and
- * the retry raced the original: two agents, two sandboxes, duplicate
- * deliverables (2026-08-18 /design thread — one request produced four runs and
- * shipped the same HTML twice).
- *
- * `activeRuns` is the authoritative answer to "is this still executing"; it is
- * in-process, which is sound while xyne-claw runs a single replica. If that
- * ever scales out this must move to Redis, otherwise a run on another replica
- * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
- * one boolean about a session id the caller already holds, and it must keep
- * working for recovery paths that have no user context.
- */
-router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
-});
-
-router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-
-  const active = activeRuns.get(sessionId);
-  if (!active) {
-    res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
 
   const callerUserId = req.headers["x-user-id"];
-  if (
-    typeof callerUserId !== "string" ||
-    !callerUserId ||
-    callerUserId !== active.userId
-  ) {
+  const active = activeRuns.get(sessionId);
+  if (!active) {
+    if (typeof callerUserId !== "string" || !callerUserId) {
+      res.json({ success: true, sessionId, status: "not_running" });
+      return;
+    }
+    const decision = await decideRunControl(
+      { type: "interrupt", sessionId, requestedBy: callerUserId },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] interrupt forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
+    res.json({ success: true, sessionId, status: "not_running" });
+    return;
+  }
+
+  if (typeof callerUserId !== "string" || !callerUserId) {
     res
       .status(403)
       .json({ success: false, error: "Not authorized to interrupt this run" });
     return;
   }
+  if (callerUserId !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${sessionId} owner=${active.userId} by=${callerUserId}`,
+    );
+  }
 
-  // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // same-user follow-up wants the active turn to summarize/post what it has, then
-  // let claw-auth drain the queued follow-up as the next user turn. Prefer a
-  // model-generated summary via steering, but keep a bounded hard-abort fallback
-  // so a stuck tool/provider cannot block the new prompt forever.
+  applyGracefulInterrupt(sessionId, active);
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
+});
+
+// This is intentionally NOT userCancelled. /cancel suppresses output; a
+// follow-up in the thread wants the active turn to summarize/post what it has,
+// then let claw-auth drain the queued follow-up as the next user turn. The
+// follow-up may come from ANY user in the conversation, not just the run's
+// owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
+// just needs a caller identity for the audit line above. Prefer a
+// model-generated summary via steering, but keep a bounded hard-abort fallback
+// so a stuck tool/provider cannot block the new prompt forever.
+function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): void {
   active.gracefulInterruptRequested = true;
   if (!active.gracefulInterruptSummaryTimer) {
     const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
@@ -1391,10 +1239,9 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
       active.abortController.abort();
     }
   });
-  res.json({ success: true, sessionId, status: "interrupt_requested" });
-});
+}
 
-router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/cancel", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1403,6 +1250,20 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
 
   const active = activeRuns.get(sessionId);
   if (!active) {
+    const callerId = req.headers["x-user-id"];
+    const decision = await decideRunControl(
+      {
+        type: "cancel",
+        sessionId,
+        ...(typeof callerId === "string" && callerId ? { userId: callerId } : {}),
+      },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] cancel forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
     res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
@@ -1431,6 +1292,30 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
   active.userCancelled = true;
   active.abortController.abort();
   res.json({ success: true, sessionId, status: "cancelled" });
+});
+
+registerRunControlApplier((msg: RunControlMessage): boolean => {
+  const active = activeRuns.get(msg.sessionId);
+  if (!active) return false;
+  if (msg.type === "cancel") {
+    if (!msg.userId || msg.userId !== active.userId) {
+      clog.warn(
+        `[run-control] refusing cancel session=${msg.sessionId} owner=${active.userId} by=${msg.userId ?? "?"}`,
+      );
+      return false;
+    }
+    active.userCancelled = true;
+    active.abortController.abort();
+    return true;
+  }
+  if (!msg.requestedBy) return false;
+  if (msg.requestedBy !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${msg.sessionId} owner=${active.userId} by=${msg.requestedBy}`,
+    );
+  }
+  applyGracefulInterrupt(msg.sessionId, active);
+  return true;
 });
 
 // POST /clone-session — branch a persistent session to a new conversationId
@@ -1495,7 +1380,7 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
     : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
-async function processTask(
+export async function processTask(
   sessionId: string,
   sessionToken: string,
   userId: string,
@@ -1586,12 +1471,10 @@ async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  execution?: RunExecutionState,
 ): Promise<void> {
-  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
-  // the run so the fast-model extractor overlaps the expensive setup that
-  // follows — session restore and the MCP tool listing — instead of adding its
-  // latency in front of the first turn. It is awaited far below, once the tool
-  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  // Started here so the extractor overlaps session restore + MCP listing;
+  // awaited once the tool palette exists. Never rejects (see prefetch.ts).
   const prefetchSpecPromise = prefetchEnabled(agentConfig)
     ? startPrefetchExtraction(task)
     : null;
@@ -1616,58 +1499,6 @@ async function processTask(
       if (active) active.handoffLastTurn = Math.max(active.handoffLastTurn ?? 0, lastTurn);
     },
   };
-  const sendHandoffCallback = async (lastTurn?: number): Promise<void> => {
-    const active = activeRuns.get(sessionId);
-    const resolvedLastTurn = Math.max(0, lastTurn ?? active?.handoffLastTurn ?? 0);
-    log(`Session handoff checkpointed: ${sessionId} lastTurn=${resolvedLastTurn} aborted=${active?.handoffCapFired === true}`);
-    // NEVER deliver handoff over an in-process SSE emitter: during a drain the
-    // bridge is dead (or dying) almost by definition — the first live drill
-    // (2026-07-15, session c304df10) lost the handoff exactly this way. Force
-    // the HTTP /sessions/:id/result fallback (sendCallback builds it when
-    // callbackUrl is null), whose claw-auth handler owns the handoff branch.
-    // Real string callback URLs (scheduled-jobs result etc.) stay as-is —
-    // their handlers have handoff branches too.
-    // PRIMARY channel: Redis. The recovery worker only needs the sessionId —
-    // all run state lives in its Redis registration — and the HTTP hop to
-    // claw-auth failed three different ways in two days (zero-endpoint window,
-    // purge-on-boot, and a version-skew 401 on 2026-07-16 that dropped ~50
-    // handoffs in one drain). One LPUSH has no endpoint, no auth contract,
-    // and no rollout-timing dependency. See handoff-redis.ts.
-    const viaRedis = await publishHandoffSignal(sessionId, resolvedLastTurn);
-    if (viaRedis) {
-      log(`Handoff signal published to Redis for ${sessionId} (lastTurn=${resolvedLastTurn})`);
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId, channel: "redis" });
-      return;
-    }
-    const handoffDest = typeof callbackUrl === "string" ? callbackUrl : undefined;
-    // HTTP FALLBACK (Redis unreachable/unconfigured only). Long retry schedule
-    // (~90s total): when claw and claw-auth roll in the same window, the auth
-    // Service can briefly have ZERO ready endpoints (old pod Terminating, new
-    // pod Pending on node scale-up) and the default ~4s budget drops the
-    // callback — round-6 drill (2026-07-15) lost 3 handoffs exactly this way.
-    // The draining pod has DRAIN_TIMEOUT (900s) / grace (1000s) to live, so
-    // waiting out the endpoint gap is free.
-    const delivered = await sendCallback(
-      handoffDest,
-      sessionToken,
-      {
-        sessionId,
-        userId,
-        conversationId: conversationId ?? null,
-        agentSlug: agentSlug ?? null,
-        fastMode: fastModeForCallback,
-        status: "handoff",
-        lastTurn: resolvedLastTurn,
-      },
-      { backoffsMs: [1_000, 2_000, 5_000, 10_000, 15_000, 15_000, 15_000, 15_000, 15_000] },
-    );
-    if (delivered) {
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId });
-    } else {
-      metric.count("handoff_callback_lost", { agent: agentSlug ?? "unknown", session: sessionId });
-    }
-  };
-
   // Idempotency backstop: only re-dispatches carry idempotencyKey (the recovery
   // rootSessionId). If a terminal-result marker for it already exists in GCS,
   // this run already finished and its completion callback was lost — replay the
@@ -1704,47 +1535,25 @@ async function processTask(
     }
   }
 
-  // Hoisted so the catch handler can recover pendingResponses when
-  // respond-to-user fires the abort (graceful copilot termination).
+  // Terminal tools (respond-to-user, propose-plan, propose-agent, emit_brief)
+  // end the turn via abortRun, so the run lands in the CATCH handler — these
+  // are hoisted so the catch can still recover and forward their results
+  // (signed pendingActions, plans, cards, briefs would otherwise drop silently).
   let customToolsResult: ReturnType<typeof loadCustomTools> | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still forward MCP-layer pendingActions to claw-auth. Without this,
-  // a copilot-mode agent that calls a write tool like spaces-create-ticket
-  // and then ends the turn via respond-to-user has its signed pendingAction
-  // silently dropped — claw-auth never sees it, no Approve/Decline button
-  // gets posted to the user, and the agent's text says "queued for approval"
-  // with nothing to approve. Observed 2026-06-09 with agent "triage-room"
-  // (slug used in prod) running model=claude-sonnet-4.6 via copilot.
   let mcpGetPendingActions: (() => Array<Record<string, unknown>>) | undefined;
-  // Hoisted like mcpGetPendingActions so both the success path and the catch
-  // handler can include files forwarded from MCP tools in the run's attachments.
   let mcpGetAttachments: (() => Attachment[]) | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still surface a goal suggestion the worker queued before the early
-  // abort. Filled by buildSuggestGoalTool's callback when the agent calls
-  // suggest-goal.
   let pendingGoalSuggestion: PendingGoalSuggestion | null = null;
-  // Hoisted so the catch handler can recover the proposed plan: propose-plan
-  // (plan mode's terminal tool) fires abortRun, so the run lands in the catch
-  // — never the success path — and the plan is read from ref.value there and
-  // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
-  // Hoisted for the same reason: propose-agent (agent-authoring's terminal tool)
-  // fires abortRun, so the drafted agent is recovered from ref.value in the catch
-  // block and shipped as `pendingAgentCard` on the callback.
   const proposeAgentRef: ProposeAgentRef = {};
-  // describe-agent is NOT terminal, so this is read on the success path; hoisted
-  // alongside the others so the catch handler can still ship a queued card when
-  // the turn ends some other way.
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
   const blockedConnectors = new Set<string>();
-  // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
-  // fires abortRun, so the brief is recovered from ref.value in the catch block
-  // and shipped as `dailyBrief` on the callback.
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
-  let callbackModel = LITELLM.model;
+  // Seed from THIS run's provider — a hardcoded default made every early
+  // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
+  let callbackModel: string | undefined =
+    provider && provider !== "spaces" ? providerConfigs?.[provider]?.model : LITELLM.model;
   let requiresStructuredDelivery = false;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
   const followUpsEnabled = followUpsEnabledByFlag;
@@ -1931,7 +1740,7 @@ async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"], channelId);
     const {
       groups: mcpGroups,
       cleanup,
@@ -2014,76 +1823,7 @@ async function processTask(
       sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
         ? (sdlcContext as Record<string, unknown>)
         : undefined;
-    const trustedSdlcRepository =
-      trustedSdlcContext?.["repository"] &&
-      typeof trustedSdlcContext["repository"] === "object" &&
-      !Array.isArray(trustedSdlcContext["repository"])
-        ? (trustedSdlcContext["repository"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcExecution =
-      trustedSdlcContext?.["execution"] &&
-      typeof trustedSdlcContext["execution"] === "object" &&
-      !Array.isArray(trustedSdlcContext["execution"])
-        ? (trustedSdlcContext["execution"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcWiki =
-      trustedSdlcContext?.["wiki"] &&
-      typeof trustedSdlcContext["wiki"] === "object" &&
-      !Array.isArray(trustedSdlcContext["wiki"])
-        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
-        : undefined;
-    const isTrustedSdlcWikiRun =
-      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
-    if (trustedSdlcRepository) {
-      if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
-      if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
-      if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
-      if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
-        meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
-      }
-      if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
-        meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
-      }
-      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
-        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
-      }
-      // Runtime credentials are issued per dispatched execution (setup/
-      // artifact/work). Chat-surface runs carry repository context but no
-      // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
-      // execution identifiers so chat runs degrade to baseline-canvas access.
-      if (
-        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
-        typeof trustedSdlcExecution?.["sessionId"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
-      } else if (
-        trustedSdlcContext?.["operation"] === "interactive" &&
-        typeof trustedSdlcContext["interactiveGrant"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
-        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
-      }
-    }
-    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
-      meta["sdlcWikiRun"] = "true";
-      if (typeof trustedSdlcWiki["role"] === "string") {
-        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
-      }
-      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
-        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
-          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
-        );
-      }
-      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
-        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
-      }
-      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
-        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
-      }
-    }
+    Object.assign(meta, packSdlcRunMeta(trustedSdlcContext));
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
@@ -2490,6 +2230,8 @@ async function processTask(
           customSubagents,
           directPickSuffixes,
         );
+
+    directTools.push(buildPublishReviewRoomTool(sessionId));
 
     let fastMetaTools: ToolDefinition[] = [];
 
@@ -4333,7 +4075,18 @@ async function processTask(
     const pendingResponses = getPendingResponses();
     const completedProvider =
       completedAttempt?.provider ?? runtimeProvider ?? "spaces";
-    const completedModel = completedAttempt?.config?.model ?? effectiveModel;
+    // Report the model that the COMPLETED attempt actually used. The old
+    // `?? effectiveModel` leaked one provider's model onto another: the
+    // "spaces" attempt carries config: undefined by design, so a run that fell
+    // back to spaces reported the parent's model (spaces/gpt-5.5), and a codex
+    // run whose config had no model reported LITELLM.model
+    // (codex/private-large-spaces). Both shapes are visible in agent_runs and
+    // sent two prod diagnoses down the wrong path (2026-08-27/28). Only spaces
+    // may default to the platform model; anything else reports undefined
+    // (column left unset) rather than a model that never ran.
+    const completedModel =
+      completedAttempt?.config?.model ??
+      (completedProvider === "spaces" ? LITELLM.model : undefined);
     callbackProvider = completedProvider;
     callbackModel = completedModel;
 
@@ -4696,7 +4449,15 @@ async function processTask(
     }
   } catch (err) {
     if (err instanceof RunHandoffError) {
-      await sendHandoffCallback(err.lastTurn);
+      if (execution?.hooks?.onDrainRequested) {
+        const decision = await execution.hooks.onDrainRequested();
+        if (decision === "reschedule") {
+          execution.outcome = "rescheduled";
+          log(`Run rescheduled for drain: ${sessionId} lastTurn=${err.lastTurn}`);
+          return;
+        }
+      }
+      log(`Run drain-signalled with no reschedule hook: ${sessionId} lastTurn=${err.lastTurn}`);
       return;
     }
     // HA: another pod already owns this conversation's lock. In callback mode
@@ -5128,12 +4889,18 @@ function buildLateFollowUpCallbackUrl(callbackUrl: string): string | undefined {
   }
 }
 
-async function sendCallback(
+export async function sendCallback(
   callbackUrl: ProgressDest,
   sessionToken: string,
   payload: Record<string, unknown>,
   opts?: { backoffsMs?: number[] },
 ): Promise<boolean> {
+  const fencedSid = payload["sessionId"] as string | undefined;
+  if (isFencedSession(fencedSid)) {
+    clog.warn(`[run] suppressing result for superseded run (ownership lost) session=${fencedSid}`);
+    metric.count("run_stale_result_suppressed", { session: fencedSid ?? "unknown" });
+    return false;
+  }
   // SSE mode: the final result is a `done` frame on the in-process emitter, not a POST.
   // The route handler closes the response after this returns.
   if (callbackUrl && typeof callbackUrl !== "string") {
@@ -5226,6 +4993,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    toolInvocations,
   } = req.body as {
     agentResult?: string;
     sourceAgent?: string;
@@ -5233,6 +5001,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate?: string;
     userQuery?: string;
     judgeContext?: string;
+    toolInvocations?: Array<{ toolName?: string; command?: string; isError?: boolean }>;
   };
 
   if (!agentResult || !sourceAgent || !targetAgent) {
@@ -5252,6 +5021,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    Array.isArray(toolInvocations) ? toolInvocations : undefined,
   );
   res.json({ success: true, data: decision });
 });

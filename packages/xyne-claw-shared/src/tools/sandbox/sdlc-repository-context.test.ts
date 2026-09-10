@@ -40,13 +40,24 @@ describe('SDLC sandbox repository context', () => {
     );
   });
 
-  it('rejects dedicated-agent setup when no repository context is attached', async () => {
+  it('tells the agent to pick a repository when none is attached or selected', async () => {
     const result = await sandboxRepoSetup.execute(
       { repoName: 'lamf' },
       context({ requireSdlcRepository: 'true' }),
     );
 
-    expect(result).toContain('Valid SDLC repository context is required');
+    expect(result).toContain('No SDLC repository selected');
+    expect(result).toContain('spaces-sdlc-list-repositories');
+  });
+
+  it('still refuses a static fallback when a selected repository cannot resolve', async () => {
+    const result = await sandboxRepoSetup.execute(
+      { repoName: 'lamf', repoId: 'repo-unreachable' },
+      context({ requireSdlcRepository: 'true', userId: 'user-1', conversationId: 'conv-1' }),
+    );
+
+    expect(result).toContain('Error:');
+    expect(result).not.toContain('No SDLC repository selected');
   });
 
   it('rejects runtime credential bootstrap for every other agent slug before sandbox access', async () => {
