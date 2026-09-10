@@ -5,7 +5,7 @@ This document provides code style guidelines for agentic coding agents working i
 ## Project Structure
 
 This is a monorepo with multiple workspaces:
-- `backend/` - Node.js/Express API server (TypeScript)
+- `backend/` - Node.js/Express API server (TypeScript) 
 - `dashboard/` - React/Vite web dashboard (TypeScript + React)
 - `apps/xyne-spaces/` - React Native mobile app
 - `framework/` - Agentic AI framework library
