@@ -1,3 +1,10 @@
+## [1.300.1](https://github.com/juspay/xyne-spaces/compare/v1.300.0...v1.300.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* open one group row at a time and restore it on back ([#1733](https://github.com/juspay/xyne-spaces/issues/1733)) ([252e359](https://github.com/juspay/xyne-spaces/commit/252e359db7ff3880fafdb5db78917fafc97f3609))
+
 ## [1.300.0](https://github.com/juspay/xyne-spaces/compare/v1.299.1...v1.300.0) (2026-09-10)
 
 
