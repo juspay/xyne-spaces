@@ -1506,7 +1506,7 @@ enum AgentAuditEvent {
   SUBAGENT_UPDATED
   MCP_SERVER_CREATED
   // Subagent-level MCP credential writes. Added by migration
-  // 20260909120000_subagent_mcp_connections (ALTER TYPE ADD VALUE) —
+  // 20260909120500_subagent_mcp_audit_events (ALTER TYPE ADD VALUE) —
   // kept here so a fresh `prisma generate` accepts them.
   SUBAGENT_MCP_UPDATED
   SUBAGENT_MCP_DELETED

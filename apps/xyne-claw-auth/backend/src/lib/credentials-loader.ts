@@ -259,20 +259,47 @@ export async function loadEffectiveCredentials(
   //    no per-row secret to pin, so a subagent pin only applies to
   //    secret-backed servers.
   if (subagentId) {
+    // Org-scope the pin to the CALLER'S org, derived from the authenticated
+    // userId / agentOrgId — NEVER from the request body. The transport only
+    // authenticates the run, not which subagent it claims to be, so a
+    // body-supplied subagentId is untrusted. Constraining every lookup to
+    // `subagent.orgId === callerOrg` means a foreign-org (or forged) id
+    // resolves to nothing and falls through to the normal cascade, instead of
+    // borrowing another org's pinned payment credentials. If the org cannot be
+    // resolved we skip the pin entirely (fail closed).
+    const subagentOrgScope = agentOrgId
+      ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      ?? undefined;
     let subConn = null;
-    if (instanceSlug) {
-      subConn = await prisma.subagentMcpConnection.findFirst({
-        where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType }, slug: instanceSlug },
-      });
-    } else {
-      subConn = await prisma.subagentMcpConnection.findFirst({
-        where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType }, slug: "default" },
-      });
-      if (!subConn) {
+    if (subagentOrgScope) {
+      if (instanceSlug) {
         subConn = await prisma.subagentMcpConnection.findFirst({
-          where: { subagentDefinitionId: subagentId, mcpServer: { type: serverType } },
-          orderBy: { createdAt: "asc" },
+          where: {
+            subagentDefinitionId: subagentId,
+            subagent: { orgId: subagentOrgScope },
+            mcpServer: { type: serverType },
+            slug: instanceSlug,
+          },
         });
+      } else {
+        subConn = await prisma.subagentMcpConnection.findFirst({
+          where: {
+            subagentDefinitionId: subagentId,
+            subagent: { orgId: subagentOrgScope },
+            mcpServer: { type: serverType },
+            slug: "default",
+          },
+        });
+        if (!subConn) {
+          subConn = await prisma.subagentMcpConnection.findFirst({
+            where: {
+              subagentDefinitionId: subagentId,
+              subagent: { orgId: subagentOrgScope },
+              mcpServer: { type: serverType },
+            },
+            orderBy: { createdAt: "asc" },
+          });
+        }
       }
     }
     if (subConn) {

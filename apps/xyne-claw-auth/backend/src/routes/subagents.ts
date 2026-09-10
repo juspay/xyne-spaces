@@ -566,24 +566,30 @@ router.delete(
     const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
     if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
 
-    await prisma.subagentMcpConnection.delete({
+    // deleteMany is idempotent: it removes the row if present and reports the
+    // count, without throwing when the pin does not exist. This avoids the old
+    // `.catch(() => undefined)` which swallowed EVERY error (e.g. a DB outage)
+    // and then emitted a "deleted" audit log that never happened.
+    const { count } = await prisma.subagentMcpConnection.deleteMany({
       where: {
-        subagentDefinitionId_mcpServerId_slug: {
-          subagentDefinitionId: subagent.id,
-          mcpServerId: server.id,
-          slug: instanceSlug,
-        },
+        subagentDefinitionId: subagent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
       },
-    }).catch(() => undefined);
-
-    await writeAuditLog({
-      actorUserId: requesterId,
-      eventType: "SUBAGENT_MCP_DELETED",
-      targetId: subagent.id,
-      description: `Removed MCP "${mcpServerType}" / instance "${instanceSlug}" from subagent "${subagent.name}"`,
     });
 
-    ok(res, { deleted: true });
+    // Only record the audit event when a row was actually removed, so the
+    // audit trail cannot claim a deletion that did not occur.
+    if (count > 0) {
+      await writeAuditLog({
+        actorUserId: requesterId,
+        eventType: "SUBAGENT_MCP_DELETED",
+        targetId: subagent.id,
+        description: `Removed MCP "${mcpServerType}" / instance "${instanceSlug}" from subagent "${subagent.name}"`,
+      });
+    }
+
+    ok(res, { deleted: count > 0 });
   }),
 );
 
