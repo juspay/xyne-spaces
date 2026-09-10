@@ -21,9 +21,21 @@
  * contain a raw '<', so nothing valid is lost.
  */
 export function stripCodeRegions(htmlContent: string): string {
-  return htmlContent
-    .replace(/<pre\b[^<>]*>[\s\S]*?<\/pre>/gi, ' ')
-    .replace(/<code\b[^<>]*>[\s\S]*?<\/code>/gi, ' ');
+  return (
+    htmlContent
+      // Balanced regions: strip just the <pre>…</pre> / <code>…</code> span.
+      .replace(/<pre\b[^<>]*>[\s\S]*?<\/pre>/gi, ' ')
+      .replace(/<code\b[^<>]*>[\s\S]*?<\/code>/gi, ' ')
+      // Unclosed / mismatched openers: a <pre/<code with no matching close is
+      // left untouched by the balanced pass above, so its mention spans would
+      // still be extracted and notify — while the DOM renderer auto-closes the
+      // tag at end-of-input and flattens them (a notify-without-chip
+      // divergence). Mirror the DOM: strip from the dangling opener to
+      // end-of-string. Runs after the balanced pass so well-formed trailing
+      // regions are already removed, and never backtracks (js/polynomial-redos).
+      .replace(/<pre\b[^<>]*>[\s\S]*$/i, ' ')
+      .replace(/<code\b[^<>]*>[\s\S]*$/i, ' ')
+  );
 }
 
 export function extractUserMentions(htmlContent: string): string[] {
