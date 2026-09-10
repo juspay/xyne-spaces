@@ -6,9 +6,12 @@ import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   DESK_AUTOMATION_WORKFLOW_TYPE,
+  parseAutomationConfig,
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
+import { triggerRegistry } from '../triggers/trigger-registry';
+import type { TriggerType } from '../types/trigger-types';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
@@ -33,13 +36,24 @@ class EventRouter {
     for (const workflow of candidates) {
       try {
         const metadata = parseAutomationMetadata(workflow.metadata);
+
+        const triggerImpl = triggerRegistry.has(event.type as TriggerType)
+          ? triggerRegistry.get(event.type as TriggerType)
+          : null;
+        const triggerConfig = (parseAutomationConfig(workflow.context).trigger.config ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const data =
+          triggerImpl?.projectPayload?.(triggerConfig, payload as unknown as Record<string, unknown>) ??
+          payload;
         const initialContext = {
           automation: {
             id: workflow.id,
             workspaceId: workflow.workspaceId,
             createdById: metadata.createdById,
           },
-          trigger: { type: eventType, ...payload, data: payload },
+          trigger: { type: eventType, ...data, data },
           steps: {},
           __meta: { error: null, chain },
         };

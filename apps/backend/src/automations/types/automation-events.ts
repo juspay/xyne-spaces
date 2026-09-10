@@ -44,6 +44,8 @@ export interface MessageReceivedEventPayload {
   channelId: string;
   authorId: string;
   msgType: MessageType;
+  isEdit?: boolean;
+  previousContent?: string;
 }
 
 export interface CallEventPayload {
