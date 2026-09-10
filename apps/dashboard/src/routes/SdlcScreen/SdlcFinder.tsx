@@ -426,12 +426,22 @@ export function SdlcFinderColumn(props: {
                     // would race with stepping into it.
                     if (selected) {
                       event.preventDefault();
+                      // Escape unmounts the input and React fires no blur for
+                      // an unmounted element, so arm the guard as the editor
+                      // opens rather than clearing it on the way out.
+                      renameAbandoned.current = false;
                       setRenameDraft(row.name);
                       setRenamingId(row.id);
                     }
                   }}
                   draggable={renamingId !== row.id}
-                  onDragStart={() => props.onDragItem({ type: row.kind, id: row.id })}
+                  onDragStart={event => {
+                    // Firefox starts no drag without a dataTransfer entry, which
+                    // left the whole move-by-drag feature silently inert there.
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', row.id);
+                    props.onDragItem({ type: row.kind, id: row.id });
+                  }}
                   onDragEnd={() => props.onDragItem(null)}
                   onDragOver={event => {
                     // Only folders take a drop, and nothing may be dropped on itself.

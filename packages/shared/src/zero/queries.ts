@@ -3960,17 +3960,6 @@ export const queries = defineQueries({
         .related('ticket');
     },
   ),
-  sdlcRelatedConversations: defineQuery(
-    z.object({ conversationIds: z.array(z.string()) }),
-    ({ args: { conversationIds } }) =>
-      zql.conversations.where(helpers =>
-        helpers.cmp(
-          'conversationId',
-          'IN',
-          conversationIds.length > 0 ? conversationIds : ['__no_sdlc_related_conversation__'],
-        ),
-      ),
-  ),
   getAllForms: defineQuery(() => {
     return zql.forms
       .related('formFields', q => q.related('globalField'))

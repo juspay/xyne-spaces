@@ -82,7 +82,6 @@ import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Input from '../../components/ui/Input';
 import Textarea from '../../components/ui/Textarea';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
-import {} from '../../components/ui/Select';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -1446,6 +1445,9 @@ export default function SdlcScreen(): ReactElement {
   const resetArtifactDialog = (): void => {
     setArtifactDialog(null);
     clearArtifactDialogFields();
+    // Cancelling used to leave the folder behind, so the next artifact created
+    // anywhere on the page was silently filed into it.
+    setPendingArtifactFolder(null);
   };
 
   const relatedArtifactsForPayload = (): Array<{ canvasId: string; title: string }> =>
@@ -1497,16 +1499,17 @@ export default function SdlcScreen(): ReactElement {
         ...(relatedCanvasIds.length > 0 && { relatedCanvasIds }),
       },
     );
+    // Read before the reset clears it; the move below is what consumes it.
+    const fileIntoFolder = pendingArtifactFolder;
     resetArtifactDialog();
     const newCanvasId = response.data.artifact.canvasId;
     // Creation always files an artifact at the track's root, so one started from
     // inside a folder is moved there straight after.
-    if (pendingArtifactFolder && channel) {
+    if (fileIntoFolder && channel) {
       await moveItemAction(
         { type: 'CANVAS', id: newCanvasId },
-        { type: 'FOLDER', id: pendingArtifactFolder },
+        { type: 'FOLDER', id: fileIntoFolder },
       );
-      setPendingArtifactFolder(null);
     }
     setRelatedSourceId(null);
     // Same search as opening an artifact from the list, so a new artifact lands
@@ -1889,7 +1892,13 @@ export default function SdlcScreen(): ReactElement {
               {nameDraft === null ? (
                 <button
                   type='button'
-                  onClick={() => setNameDraft(selectedTrack.name)}
+                  onClick={() => {
+                    // Escape unmounts the input, and React fires no blur for an
+                    // unmounted element — so the guard is armed here rather than
+                    // cleared on the way out, where it would leak into this edit.
+                    nameAbandoned.current = false;
+                    setNameDraft(selectedTrack.name);
+                  }}
                   className='-mx-1 min-w-0 truncate rounded px-1 text-left text-[26px] font-bold leading-tight tracking-tight transition-colors hover:bg-muted/50'
                   title='Rename track'
                   data-track-category='SdlcHub'
@@ -2029,7 +2038,11 @@ export default function SdlcScreen(): ReactElement {
             {descriptionDraft === null ? (
               <button
                 type='button'
-                onClick={() => setDescriptionDraft(selectedTrack.description ?? '')}
+                onClick={() => {
+                  // Armed here for the same reason as the name editor above.
+                  descriptionAbandoned.current = false;
+                  setDescriptionDraft(selectedTrack.description ?? '');
+                }}
                 className='-mx-1 block max-w-[918px] rounded px-1 text-left text-[13.5px] leading-relaxed text-muted-foreground transition-colors hover:bg-muted/50'
                 data-track-category='SdlcHub'
                 data-track-name='TrackDescriptionEditOpened'
