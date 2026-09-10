@@ -11,13 +11,17 @@
  * (`from: [avatar] Alice`), per the design. It still reports its text through
  * `getTextContent()`, so the pill's combined text is unchanged (`from: Alice`).
  *
- * `$createFilterChip(mentionData)` builds the whole pill; `FilterChipPlugin`
- * demotes it to plain text on the first edit so the filter stays parseable
- * downstream.
+ * `$createFilterChip(mentionData)` builds the whole pill and
+ * `$spliceFilterChip()` puts it into the editor in place of the text that summoned it —
+ * the one splice shared by every chip source, whether the value was picked from a
+ * typeahead (`MentionPlugin`) or typed and committed by a keystroke (`EntityChipPlugin`).
+ * `FilterChipPlugin` demotes a chip back to plain text on the first edit so the filter
+ * stays parseable downstream.
  */
 
 import React from 'react';
 import {
+  $createTextNode,
   $getRoot,
   $isElementNode,
   DecoratorNode,
@@ -539,6 +543,58 @@ export function $createFilterChip(
     );
   }
   return container;
+}
+
+export interface ChipSpliceOptions {
+  // `| undefined` explicitly: under exactOptionalPropertyTypes a caller whose own
+  // `currentUserID` prop is optional could not otherwise forward it as a property.
+  currentUserId?: string | undefined;
+  /**
+   * Text node left after the LAST chip, and where the caret lands. Defaults to a plain
+   * space; a caller that re-arms its own trigger passes e.g. `' entity:'` so the user can
+   * keep typing the next value.
+   */
+  trailingText?: string;
+}
+
+/**
+ * Replaces `node`'s `[start, end)` with `chips` — the one splice every chip source needs,
+ * however the value was obtained (picked from a typeahead, or typed and committed by a
+ * keystroke). Each chip is followed by a space so the pills read as separate filters;
+ * whatever followed `end` is preserved after the trailing text, and the caret is placed
+ * at the end of that trailing node.
+ *
+ * Must run inside an `editor.update()`. Returns the trailing text node the caret ends up
+ * in, or null when there is nothing to insert.
+ */
+export function $spliceFilterChip(
+  node: TextNode,
+  start: number,
+  end: number,
+  chips: ChipData[],
+  { currentUserId, trailingText = ' ' }: ChipSpliceOptions = {},
+): TextNode | null {
+  if (chips.length === 0) return null;
+
+  const text = node.getTextContent();
+  const textAfter = text.slice(end);
+  node.setTextContent(text.slice(0, start));
+
+  let cursor: LexicalNode = node;
+  let trailing: TextNode | null = null;
+  for (const [index, chipData] of chips.entries()) {
+    const chip = $createFilterChip(chipData, currentUserId);
+    cursor.insertAfter(chip);
+    // Only the last separator is the caller's to choose — the caret ends up there.
+    trailing = $createTextNode(index === chips.length - 1 ? trailingText : ' ');
+    chip.insertAfter(trailing);
+    cursor = trailing;
+  }
+  if (!trailing) return null;
+
+  if (textAfter) trailing.insertAfter($createTextNode(textAfter));
+  trailing.selectEnd();
+  return trailing;
 }
 
 // ---- Priority chip helpers ----

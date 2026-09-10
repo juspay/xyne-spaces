@@ -5,8 +5,9 @@
  * boards, priorities, dates), so `MentionPlugin` drives them all through one
  * trigger → typeahead → insert path. Entity names have no such list — the backend matches
  * the name itself — so the value can only come from what the user typed, and the chip is
- * committed by a keystroke instead of a selection. That is a different mechanism, hence a
- * separate plugin rather than another branch in MentionPlugin.
+ * committed by a keystroke instead of a selection. Only that *trigger* differs: the splice
+ * itself is `$spliceFilterChip` from FilterChipNode, the same one MentionPlugin uses,
+ * so this file holds nothing but the entity-specific scan and the two commit keys.
  *
  * The chip needs no callback: `LexicalSearchInput`'s change handler walks the tree and
  * reports every FilterChipNode, so inserting the node is what puts it in the palette's
@@ -23,7 +24,6 @@
 import { useEffect } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
-  $createTextNode,
   $getSelection,
   $isRangeSelection,
   COMMAND_PRIORITY_HIGH,
@@ -31,7 +31,7 @@ import {
   TextNode,
 } from 'lexical';
 
-import { $createFilterChip } from './FilterChipNode';
+import { $spliceFilterChip } from './FilterChipNode';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
 export interface EntityChipPluginProps {
@@ -58,8 +58,6 @@ export function EntityChipPlugin({
       if (!pending) return false;
 
       const { node, start, caret, value } = pending;
-      const text = node.getTextContent();
-      const textAfter = text.slice(caret);
 
       const chipData: ChipData = {
         id: value,
@@ -68,14 +66,11 @@ export function EntityChipPlugin({
         prefix: ENTITY_PREFIX,
       };
 
-      node.setTextContent(text.slice(0, start));
-      const chip = $createFilterChip(chipData, currentUserID);
       // Re-arming leaves the next trigger already typed, so the caret can keep going.
-      const trailing = $createTextNode(reArm ? ` ${ENTITY_PREFIX}` : ' ');
-      node.insertAfter(chip);
-      chip.insertAfter(trailing);
-      if (textAfter) trailing.insertAfter($createTextNode(textAfter));
-      trailing.selectEnd();
+      $spliceFilterChip(node, start, caret, [chipData], {
+        currentUserId: currentUserID,
+        trailingText: reArm ? ` ${ENTITY_PREFIX}` : ' ',
+      });
 
       return true;
     };
