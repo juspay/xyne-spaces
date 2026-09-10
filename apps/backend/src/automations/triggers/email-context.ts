@@ -75,6 +75,15 @@ interface EmailRow {
   externalMessageId: string;
   createdAt: Date;
   hasAttachments?: boolean;
+  attachments?: EmailAttachmentRef[];
+}
+
+/** What a step needs to fetch and attach a file the triggering email carried. */
+interface EmailAttachmentRef {
+  id: string;
+  filename: string;
+  mimetype: string;
+  size: number;
 }
 
 async function loadTicketContextForEmail(
@@ -132,6 +141,7 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     externalMessageId: email.externalMessageId,
     createdAt: email.createdAt,
     hasAttachments: email.hasAttachments,
+    attachments: email.attachments,
   };
 }
 
@@ -150,14 +160,24 @@ export async function hydrateEmailReceivedPayload(
   }
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
-  const hasAttachments = await repositories.messageAttachments
-    .hasEmailAttachment(email.id)
+  // One query serves both the boolean filter and the descriptors a step needs
+  // to forward the files; a failure still lets the automation fire, as before.
+  const attachments = await repositories.messageAttachments
+    .findByEmailIds([email.id])
+    .then(rows =>
+      rows.map(row => ({
+        id: row.id,
+        filename: row.originalFilename,
+        mimetype: row.mimetype,
+        size: row.size,
+      })),
+    )
     .catch(error => {
       logger.warn(
         `[automations] failed to hydrate attachment state for email=${email.id}`,
         error,
       );
-      return false;
+      return [];
     });
   const emailUrl = buildEmailUrl({
     ticketUrl: ticketContext?.ticket.url,
@@ -168,7 +188,14 @@ export async function hydrateEmailReceivedPayload(
 
   return {
     ...payload,
-    email: { ...emailRowToOutput({ ...email, hasAttachments } as EmailRow), url: emailUrl },
+    email: {
+      ...emailRowToOutput({
+        ...email,
+        hasAttachments: attachments.length > 0,
+        attachments,
+      } as EmailRow),
+      url: emailUrl,
+    },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),

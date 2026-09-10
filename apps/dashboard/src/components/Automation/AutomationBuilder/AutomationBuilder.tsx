@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AutomationIdContext } from './AutomationIdContext';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import {
@@ -1221,94 +1222,96 @@ export function AutomationBuilder({
           >
             <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
 
-            {config.steps.map((step, index) => {
-              const isLast = index === config.steps.length - 1;
-              const variableSources = buildVariableSources(
-                triggerSchema,
-                config.trigger.config,
-                config.steps,
-                stepSchemaCache,
-                index,
-                formFieldNameMap,
-              );
-              const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
-
-              const card =
-                step.type === CONDITIONAL_STEP_TYPE ? (
-                  <ConditionalCard
-                    step={step as ConditionalStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : step.type === SWITCH_STEP_TYPE ? (
-                  <SwitchCard
-                    step={step as SwitchStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : (
-                  <StepCard
-                    step={step as ActionStepConfig}
-                    catalogItem={
-                      stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
-                    }
-                    schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
-                    schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
-                    index={index + 1}
-                    total={config.steps.length}
-                    variableSources={variableSources}
-                    onConfigChange={cfg => handleStepConfigChange(index, cfg)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}].config.`}
-                    readOnly={!editMode}
-                  />
+            <AutomationIdContext.Provider value={savedId ?? undefined}>
+              {config.steps.map((step, index) => {
+                const isLast = index === config.steps.length - 1;
+                const variableSources = buildVariableSources(
+                  triggerSchema,
+                  config.trigger.config,
+                  config.steps,
+                  stepSchemaCache,
+                  index,
+                  formFieldNameMap,
                 );
+                const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
 
-              return (
-                <div key={step.id} className='flex flex-col'>
-                  {card}
-                  {!isLast && (
-                    <AddStepRow
+                const card =
+                  step.type === CONDITIONAL_STEP_TYPE ? (
+                    <ConditionalCard
+                      step={step as ConditionalStepConfig}
                       catalog={stepCatalog}
-                      onPick={type => handleAddStep(type, index + 1)}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
                     />
-                  )}
-                </div>
-              );
-            })}
+                  ) : step.type === SWITCH_STEP_TYPE ? (
+                    <SwitchCard
+                      step={step as SwitchStepConfig}
+                      catalog={stepCatalog}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
+                    />
+                  ) : (
+                    <StepCard
+                      step={step as ActionStepConfig}
+                      catalogItem={
+                        stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
+                      }
+                      schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
+                      schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
+                      index={index + 1}
+                      total={config.steps.length}
+                      variableSources={variableSources}
+                      onConfigChange={cfg => handleStepConfigChange(index, cfg)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}].config.`}
+                      readOnly={!editMode}
+                    />
+                  );
+
+                return (
+                  <div key={step.id} className='flex flex-col'>
+                    {card}
+                    {!isLast && (
+                      <AddStepRow
+                        catalog={stepCatalog}
+                        onPick={type => handleAddStep(type, index + 1)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </AutomationIdContext.Provider>
 
             {config.steps.length > 0 && (
               <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
