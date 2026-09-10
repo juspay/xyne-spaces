@@ -206,6 +206,66 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return result;
   }
 
+  /**
+   * One conversations write for a thread reply.
+   *
+   * The reply count bump, the replies_md append and the lastActivityAt patch
+   * used to be three separate commits against the same row. Each conversations write is replayed
+   * through every subscribed Zero pipeline, so collapsing them cuts the fan-out
+   * per reply by three. replyCount uses an atomic increment rather than the
+   * previous read-then-write, which also removes a lost-update race between
+   * concurrent replies.
+   */
+  async findRepliesMd(conversationId: string): Promise<string | null> {
+    const row = await this.db.conversation.findUnique({
+      where: { conversationId },
+      select: { replies_md: true },
+    });
+    return row?.replies_md ?? null;
+  }
+
+  async applyThreadReply(params: {
+    conversationId: string;
+    repliesMd: string | null;
+    lastActivityAt: Date;
+    replyCreatedAt?: Date | null;
+    markParticipantsRead?: boolean;
+  }): Promise<Conversation> {
+    const { conversationId, repliesMd, lastActivityAt, replyCreatedAt, markParticipantsRead } =
+      params;
+
+    const result = await this.db.conversation.update({
+      where: { conversationId },
+      data: {
+        replyCount: { increment: 1 },
+        lastActivityAt,
+        replies_md: repliesMd,
+      },
+    });
+
+    if (replyCreatedAt) {
+      await this.db.conversationParticipant.updateMany({
+        where: {
+          conversationId,
+          OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: replyCreatedAt } }],
+        },
+        data: { lastReplyAt: replyCreatedAt },
+      });
+
+      if (markParticipantsRead) {
+        await this.db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: replyCreatedAt } }],
+          },
+          data: { lastReadAt: replyCreatedAt },
+        });
+      }
+    }
+
+    return result;
+  }
+
   async decrementReplyCount(conversationId: string): Promise<Conversation> {
     const conversation = await this.findById(conversationId);
     if (!conversation) {

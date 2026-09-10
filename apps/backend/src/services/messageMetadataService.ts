@@ -70,29 +70,10 @@ export class MessageMetadataService {
     return hasReactions;
   }
 
-  /**
-   * Add a reply to conversation's replies_md
-   * Called when a thread reply is created
-   */
-  async addReply(conversationId: string, replierUserId: string): Promise<void> {
-    const conversation = await this.prisma.conversation.findUnique({
-      where: { conversationId },
-      select: { replies_md: true }
-    });
-
-    const data = parseRepliesMd(conversation?.replies_md);
-    const updatedData = addReplyToData(data, replierUserId);
-    const updatedMd = serializeRepliesMd(updatedData);
-
-    await this.prisma.conversation.update({
-      where: { conversationId },
-      data: { replies_md: updatedMd }
-    });
-
-    logger.info('[MessageMetadataService] Added reply to replies_md', {
-      conversationId, replierUserId
-    });
+  buildRepliesMdAfterReply(currentMd: string | null | undefined, replierUserId: string): string | null {
+    return serializeRepliesMd(addReplyToData(parseRepliesMd(currentMd), replierUserId));
   }
+
 
   /**
    * Rebuild replies_md from remaining replies in the conversation
