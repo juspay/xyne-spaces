@@ -1881,8 +1881,6 @@ export const mutators = defineMutators({
             createdBy: ctx.userID,
             createdAt: now,
           });
-          // A folder's discussion is filed on its track too, so the track's
-          // conversation list is everything discussed anywhere inside it.
           if (entityLinkContext.trackRollUp) {
             await tx.mutate.sdlc_entity_links.insert({
               id: entityLinkContext.trackRollUp.linkId,
@@ -8197,10 +8195,6 @@ export const mutators = defineMutators({
         if (!participant) {
           throw new Error('Hub membership required');
         }
-        // Membership was checked against the channelId the caller sent, so the
-        // folder has to actually be in that hub — its flat placement edge is what
-        // says which one. Without this, being in any hub let you rename a folder
-        // in any other.
         const placement = await tx.run(
           zql.sdlc_entity_links
             .where('channelId', args.channelId)
@@ -8244,10 +8238,6 @@ export const mutators = defineMutators({
         if (args.itemType === 'FOLDER' && args.itemId === args.parentId) {
           throw new Error('A folder cannot contain itself');
         }
-        // Containment moves; the flat edge does not. So the destination has to be
-        // in the same track, or the two would disagree about where the item lives
-        // and the finder would show it under a tree its track edge never names.
-        // Resolving the parent's track also proves the parent exists in this hub.
         const parentTrackId =
           args.parentType === 'TRACK'
             ? args.parentId
@@ -8291,8 +8281,6 @@ export const mutators = defineMutators({
         if (existing.sourceId === args.parentId) {
           return;
         }
-        // Walk up from the new parent: dropping a folder inside its own subtree
-        // would detach that subtree from the track with nothing pointing at it.
         if (args.itemType === 'FOLDER') {
           let cursor: string | null = args.parentType === 'FOLDER' ? args.parentId : null;
           for (let depth = 0; cursor && depth < 64; depth += 1) {
@@ -8348,11 +8336,6 @@ export const mutators = defineMutators({
         if (!participant) {
           throw new Error('Hub membership required');
         }
-        // A folder nests under a folder in the same track, never a stray id.
-        // The track has to be one of this hub's. Its placement edge is the only
-        // thing that says so — sdlc_tracks carries no scope column — and without
-        // this the flat edge below could name a track in another hub, which
-        // resolveFolderTrackId would then report for every downstream decision.
         const trackEdge = await tx.run(
           zql.sdlc_entity_links
             .where('channelId', args.channelId)
@@ -8365,8 +8348,6 @@ export const mutators = defineMutators({
           throw new Error('Track not found in this hub');
         }
         if (args.parentType === 'FOLDER') {
-          // Existence is not enough: a parent from another track would put the
-          // folder in a tree its own flat edge never mentions.
           const parentTrack = await tx.run(
             zql.sdlc_entity_links
               .where('channelId', args.channelId)

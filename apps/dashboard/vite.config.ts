@@ -29,13 +29,6 @@ export default defineConfig(({ command, mode }) => {
   const isSdlcSurface = env.VITE_XYNE_SURFACE === 'sdlc';
   const devPort = Number(env.VITE_DEV_PORT) || (isSdlcSurface ? 5175 : 5173);
 
-  // Dev only: resolve @xyne/shared to its TypeScript source rather than to the
-  // dist/ its exports map points at. Built output is a dependency Vite neither
-  // watches nor invalidates, so rebuilding the package changed nothing until the
-  // server was restarted — and with two dev servers, restarting one and not the
-  // other served two different versions of the same module. Source is inside the
-  // module graph, so an edit to the package is an HMR update like any other.
-  // Builds are untouched and keep resolving through the package's exports.
   const sharedSrc = path.resolve(__dirname, '../../packages/shared/src');
   const isDev = command === 'serve';
 
@@ -72,8 +65,6 @@ export default defineConfig(({ command, mode }) => {
     ...(isSdlcSurface ? { cacheDir: 'node_modules/.vite-sdlc' } : {}),
     plugins: [
       react(),
-      // The package's own relative imports name built files ("./types.js"), which
-      // exist only as .ts in source. Rewrite those, and only those.
       ...(isDev
         ? [
             {

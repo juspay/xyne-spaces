@@ -125,8 +125,6 @@ async function conversationLocation(conversationId: string): Promise<SdlcLocatio
     return { section: 'tracks', trackId: owner.sourceId, discussionId: conversationId };
   }
   if (owner.sourceType === 'FOLDER') {
-    // A folder has no route of its own, and its conversations roll up to the
-    // track it lives in — which is where the reader will find this one.
     const trackId = await resolveFolderTrackId(db, owner.sourceId);
     return trackId ? { section: 'tracks', trackId, discussionId: conversationId } : null;
   }

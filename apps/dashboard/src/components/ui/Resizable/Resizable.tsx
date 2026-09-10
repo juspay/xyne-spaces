@@ -46,8 +46,6 @@ const PersistedGroup = ({
     onlySaveAfterUserInteractions: true,
   });
 
-  // Saving the layout is this wrapper's job, so a caller's own handler runs
-  // alongside it rather than replacing it.
   const handleLayoutChanged = (layout: Layout, meta: LayoutChangedMeta): void => {
     onLayoutChanged(layout, meta);
     onLayoutChangedProp?.(layout, meta);
