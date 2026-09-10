@@ -772,10 +772,14 @@ export class ConversationService {
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
+        initial_message_md: buildInitialMessageMd({
+          ...message,
+          msgType: message.msgType as MessageType,
+          createdAt: message.createdAt.getTime(),
+        }),
         parentMessageId: conversation.initialMessageId,
         pinned: false,
       });
-      await messageMetadataService.syncInitialMessageMd(childConversationId);
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
