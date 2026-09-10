@@ -19,7 +19,11 @@ import * as Switch from '@radix-ui/react-switch';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
 import { ActivityClassification, UserType } from '@xyne/shared';
-import { Bot, UserUser02 } from '@xyne/icons';
+import { Bot, ChevronUp, UserUser02 } from '@xyne/icons';
+import { ActivityActorPicker } from '../ActivityActorPicker';
+import Avatar from '../../ui/Avatar/Avatar';
+import { useUsersById } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { groupActivities, insertDateSeparators, type ActivityFeedItem } from '../activityGrouping';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
@@ -133,10 +137,24 @@ const ACTOR_FILTER_OPTIONS: Array<{
   value: ActorFilter;
   label: string;
   icon?: ComponentType<{ size?: number; className?: string }>;
+  anyoneLabel?: string;
+  searchPlaceholder?: string;
 }> = [
   { value: 'all', label: 'All' },
-  { value: 'user', label: 'User', icon: UserUser02 },
-  { value: 'agent', label: 'Agent', icon: Bot },
+  {
+    value: 'user',
+    label: 'User',
+    icon: UserUser02,
+    anyoneLabel: 'Anyone',
+    searchPlaceholder: 'Search people',
+  },
+  {
+    value: 'agent',
+    label: 'Agent',
+    icon: Bot,
+    anyoneLabel: 'Any agent',
+    searchPlaceholder: 'Search agents',
+  },
 ];
 
 const TABS: TabConfig[] = [
@@ -236,6 +254,9 @@ const ActivityListView = (): ReactElement => {
     const stored = window.localStorage.getItem('activity_actor_filter');
     return stored === 'all' || stored === 'user' || stored === 'agent' ? stored : 'all';
   });
+  const [actorUserId, setActorUserId] = useState<string | null>(null);
+  const [actorPickerOpen, setActorPickerOpen] = useState(false);
+  const usersById = useUsersById();
 
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(() => {
     const unread = window.localStorage.getItem('activity_unread_toggle');
@@ -303,6 +324,8 @@ const ActivityListView = (): ReactElement => {
 
   const handleActorFilterChange = useCallback((next: ActorFilter): void => {
     setActorFilter(next);
+    setActorUserId(null);
+    setActorPickerOpen(false);
     window.localStorage.setItem('activity_actor_filter', next);
   }, []);
 
@@ -399,7 +422,7 @@ const ActivityListView = (): ReactElement => {
     setHasMore(true);
     setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
-  }, [activeTab, showUnreadOnly, actorFilter]);
+  }, [activeTab, showUnreadOnly, actorFilter, actorUserId]);
 
   const getClassificationFilter = (tab: ActivityTab): ActivityClassification[] | undefined => {
     switch (tab) {
@@ -424,8 +447,17 @@ const ActivityListView = (): ReactElement => {
         classification: classificationFilter,
         ...(showUnreadOnly ? { isRead: false } : {}),
         ...(ACTOR_FILTER_TYPES[actorFilter] ? { actorTypes: ACTOR_FILTER_TYPES[actorFilter] } : {}),
+        ...(actorUserId ? { actorId: actorUserId } : {}),
       }),
-    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly, actorFilter],
+    [
+      PAGE_SIZE,
+      fetchCursor,
+      currentTypes,
+      classificationFilter,
+      showUnreadOnly,
+      actorFilter,
+      actorUserId,
+    ],
   );
 
   const [activitiesPage, activitiesDetails, activitiesMeta] = useCachedQuery(activitiesQuery, {
@@ -958,15 +990,21 @@ const ActivityListView = (): ReactElement => {
                 const isActive = option.value === actorFilter;
                 const Icon = option.icon;
                 const showLabel = isActive || !Icon;
+                const actorTypes = ACTOR_FILTER_TYPES[option.value];
+                const isPickable = isActive && actorTypes !== undefined;
+                const pickedActor =
+                  isPickable && actorUserId ? usersById.get(actorUserId) : undefined;
 
-                return (
+                const button = (
                   <button
                     key={option.value}
                     type='button'
                     role='radio'
                     aria-checked={isActive}
                     aria-label={option.label}
-                    onClick={() => handleActorFilterChange(option.value)}
+                    onClick={() => {
+                      if (!isPickable) handleActorFilterChange(option.value);
+                    }}
                     className={cn(
                       'flex items-center rounded-[10px] pl-2 pr-2.5 py-1',
                       'transition-[background-color,color,box-shadow] duration-300 ease-in-out',
@@ -980,7 +1018,11 @@ const ActivityListView = (): ReactElement => {
                     data-track-metadata={JSON.stringify({ filter_value: option.value })}
                     data-testid={`activity-actor-filter-${option.value}`}
                   >
-                    {Icon && <Icon size={14} className='shrink-0' />}
+                    {pickedActor ? (
+                      <Avatar userId={pickedActor.id} size='xs' className='shrink-0' />
+                    ) : (
+                      Icon && <Icon size={14} className='shrink-0' />
+                    )}
                     <span
                       className={cn(
                         'grid overflow-hidden transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out',
@@ -990,11 +1032,36 @@ const ActivityListView = (): ReactElement => {
                           : 'grid-cols-[0fr] opacity-0 ml-0',
                       )}
                     >
-                      <span className='min-w-0 overflow-hidden whitespace-nowrap text-xs font-medium tracking-[-0.28px]'>
-                        {option.label}
+                      <span className='min-w-0 max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium tracking-[-0.28px]'>
+                        {pickedActor ? getUserDisplayName(pickedActor) : option.label}
                       </span>
                     </span>
+                    {isPickable && (
+                      <ChevronUp
+                        size={12}
+                        className={cn(
+                          'ml-1 shrink-0 transition-transform duration-200 ease-in-out',
+                          !actorPickerOpen && 'rotate-180',
+                        )}
+                      />
+                    )}
                   </button>
+                );
+
+                if (!isPickable || !actorTypes) return button;
+
+                return (
+                  <ActivityActorPicker
+                    key={option.value}
+                    open={actorPickerOpen}
+                    onOpenChange={setActorPickerOpen}
+                    userTypes={actorTypes}
+                    selectedUserId={actorUserId}
+                    onSelect={setActorUserId}
+                    anyoneLabel={option.anyoneLabel ?? 'Anyone'}
+                    searchPlaceholder={option.searchPlaceholder ?? 'Search'}
+                    trigger={button}
+                  />
                 );
               })}
             </div>
