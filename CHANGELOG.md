@@ -1,3 +1,10 @@
+## [1.304.2](https://github.com/juspay/xyne-spaces/compare/v1.304.1...v1.304.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* moving the node to baked docker image ([#1739](https://github.com/juspay/xyne-spaces/issues/1739)) ([b6ea22b](https://github.com/juspay/xyne-spaces/commit/b6ea22bfa6c32402fbe09696ab37ae9fe95ea098))
+
 ## [1.304.1](https://github.com/juspay/xyne-spaces/compare/v1.304.0...v1.304.1) (2026-09-10)
 
 
