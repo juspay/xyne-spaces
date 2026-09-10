@@ -19,6 +19,11 @@ export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
 
   hydratePayload?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 
+  projectPayload?(
+    config: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown>;
+
   matchFilters(filter: Record<string, unknown>, payload: Record<string, unknown>): boolean {
     void filter;
     void payload;

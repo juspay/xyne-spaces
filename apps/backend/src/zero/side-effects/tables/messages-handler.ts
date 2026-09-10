@@ -2173,7 +2173,27 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.conversationId,
         previousValue.isThreadReply,
       );
-    } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+    }
+
+    if (
+      !currentMessage.isDeleted &&
+      previousValue.content !== undefined &&
+      currentMessage.content !== previousValue.content &&
+      !previousValue.isThreadReply &&
+      previousValue.channelId
+    ) {
+      void emitMessageReceived({
+        messageId: previousValue.messageId,
+        conversationId: previousValue.conversationId,
+        channelId: previousValue.channelId,
+        msgType: previousValue.msgType as MessageType,
+        userId: previousValue.senderId,
+        isEdit: true,
+        previousContent: previousValue.content,
+      });
+    }
+
+    if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
       if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_EDITED,
