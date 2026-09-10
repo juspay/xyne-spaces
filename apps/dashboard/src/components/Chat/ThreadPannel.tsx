@@ -812,7 +812,15 @@ export const ThreadMessages = ({
 
   const showSubTicketsTab = isDeskChannelType(channel?.type);
   // The panel is reused across threads, so this tab can vanish while still selected.
-  const currentTab = !showSubTicketsTab && activeTab === 'subtickets' ? 'thread' : activeTab;
+  // A tab can be selected and then vanish, because the panel is reused across
+  // threads: subtickets when the channel type changes, and details/rca when the
+  // next thread has no ticket. Both leave the strip with nothing selected and an
+  // empty body, so they fall back to the one tab every thread has.
+  const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca';
+  const currentTab =
+    (!showSubTicketsTab && activeTab === 'subtickets') || (!derivedTicketId && ticketOnlyTab)
+      ? 'thread'
+      : activeTab;
 
   const tabs = useMemo(() => {
     const allTabs = [

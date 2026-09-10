@@ -8197,9 +8197,21 @@ export const mutators = defineMutators({
         if (!participant) {
           throw new Error('Hub membership required');
         }
-        const folder = await tx.run(zql.sdlc_folders.where('id', args.folderId).one());
-        if (!folder) {
-          throw new Error('Folder not found');
+        // Membership was checked against the channelId the caller sent, so the
+        // folder has to actually be in that hub — its flat placement edge is what
+        // says which one. Without this, being in any hub let you rename a folder
+        // in any other.
+        const placement = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('sourceType', 'TRACK')
+            .where('targetType', 'FOLDER')
+            .where('targetId', args.folderId)
+            .where('relationType', SDLC_TRACK_FLAT_RELATION)
+            .one(),
+        );
+        if (!placement) {
+          throw new Error('Folder not found in this hub');
         }
         await tx.mutate.sdlc_folders.update({
           id: args.folderId,
@@ -8231,6 +8243,39 @@ export const mutators = defineMutators({
         }
         if (args.itemType === 'FOLDER' && args.itemId === args.parentId) {
           throw new Error('A folder cannot contain itself');
+        }
+        // Containment moves; the flat edge does not. So the destination has to be
+        // in the same track, or the two would disagree about where the item lives
+        // and the finder would show it under a tree its track edge never names.
+        // Resolving the parent's track also proves the parent exists in this hub.
+        const parentTrackId =
+          args.parentType === 'TRACK'
+            ? args.parentId
+            : ((
+                await tx.run(
+                  zql.sdlc_entity_links
+                    .where('channelId', args.channelId)
+                    .where('sourceType', 'TRACK')
+                    .where('targetType', 'FOLDER')
+                    .where('targetId', args.parentId)
+                    .where('relationType', SDLC_TRACK_FLAT_RELATION)
+                    .one(),
+                )
+              )?.sourceId ?? null);
+        if (!parentTrackId) {
+          throw new Error('Destination folder not found in this hub');
+        }
+        const itemTrackEdge = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('sourceType', 'TRACK')
+            .where('targetType', args.itemType)
+            .where('targetId', args.itemId)
+            .where('relationType', SDLC_TRACK_FLAT_RELATION)
+            .one(),
+        );
+        if (!itemTrackEdge || itemTrackEdge.sourceId !== parentTrackId) {
+          throw new Error('An item can only be moved within its own track');
         }
         const existing = await tx.run(
           zql.sdlc_entity_links
@@ -8304,10 +8349,35 @@ export const mutators = defineMutators({
           throw new Error('Hub membership required');
         }
         // A folder nests under a folder in the same track, never a stray id.
+        // The track has to be one of this hub's. Its placement edge is the only
+        // thing that says so — sdlc_tracks carries no scope column — and without
+        // this the flat edge below could name a track in another hub, which
+        // resolveFolderTrackId would then report for every downstream decision.
+        const trackEdge = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('targetType', 'TRACK')
+            .where('targetId', args.trackId)
+            .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
+            .one(),
+        );
+        if (!trackEdge) {
+          throw new Error('Track not found in this hub');
+        }
         if (args.parentType === 'FOLDER') {
-          const parent = await tx.run(zql.sdlc_folders.where('id', args.parentId).one());
-          if (!parent) {
-            throw new Error('Parent folder not found');
+          // Existence is not enough: a parent from another track would put the
+          // folder in a tree its own flat edge never mentions.
+          const parentTrack = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', args.channelId)
+              .where('sourceType', 'TRACK')
+              .where('targetType', 'FOLDER')
+              .where('targetId', args.parentId)
+              .where('relationType', SDLC_TRACK_FLAT_RELATION)
+              .one(),
+          );
+          if (!parentTrack || parentTrack.sourceId !== args.trackId) {
+            throw new Error('Parent folder belongs to another track');
           }
         } else if (args.parentId !== args.trackId) {
           throw new Error('A root folder belongs to the track it is created in');
