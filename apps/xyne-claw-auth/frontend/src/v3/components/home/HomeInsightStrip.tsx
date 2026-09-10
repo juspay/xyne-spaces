@@ -21,10 +21,8 @@ import type { UserDashboardAgentRow } from "../../../lib/api";
 import type { AgentRunLight as AgentRun } from "../../../lib/api";
 import type { AgentLight } from "../../../lib/types";
 import { formatTimeAgo, truncate } from "./homeUtils";
+import { spacesThreadUrl } from "../../../lib/spacesLink";
 
-const SPACES_APP_URL =
-  import.meta.env.VITE_XYNE_BACKEND_URL ||
-  (import.meta.env.DEV ? "http://localhost:5173" : window.location.origin);
 
 interface HomeInsightStripProps {
   topAgentToday: UserDashboardAgentRow | null;
@@ -138,7 +136,7 @@ export function HomeInsightStrip({
     if (!lastRun) return;
     if (lastRun.channelId && lastRun.conversationId) {
       window.open(
-        `${SPACES_APP_URL}/chat/dir/${encodeURIComponent(lastRun.channelId)}/${encodeURIComponent(lastRun.conversationId)}`,
+        spacesThreadUrl(lastRun.channelId, lastRun.conversationId),
         "_blank",
       );
     } else {

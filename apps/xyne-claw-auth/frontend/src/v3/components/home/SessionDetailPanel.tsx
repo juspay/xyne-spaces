@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { spacesThreadUrl } from "../../../lib/spacesLink";
 import {
   XIcon,
   ArrowSquareOutIcon,
@@ -22,9 +23,6 @@ import type { AgentRunLight as AgentRun } from "../../../lib/api";
 import { exportSessionUrl } from "../../../lib/api";
 import { formatTimeAgo } from "./homeUtils";
 
-const SPACES_APP_URL =
-  import.meta.env.VITE_XYNE_BACKEND_URL ||
-  (import.meta.env.DEV ? "http://localhost:5173" : window.location.origin);
 
 const AGENT_COLORS = [
   "#00E5FF","#00FF7F","#FFD700","#FF6B35",
@@ -96,7 +94,7 @@ export function SessionDetailPanel({ session, onClose }: SessionDetailPanelProps
     const run = session.first;
     if (run.channelId && run.conversationId) {
       window.open(
-        `${SPACES_APP_URL}/chat/dir/${encodeURIComponent(run.channelId)}/${encodeURIComponent(run.conversationId)}`,
+        spacesThreadUrl(run.channelId, run.conversationId),
         "_blank",
       );
     }

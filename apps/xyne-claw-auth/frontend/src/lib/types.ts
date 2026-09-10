@@ -3,6 +3,10 @@ export interface User {
   readonly email: string;
   readonly name: string;
   readonly googleId: string;
+  /** Workspace the user is currently scoped to. Returned by GET /api/auth/validate
+   *  (see xyne-spaces/apps/backend/src/routes/auth.ts). Used to build Spaces
+   *  thread links that require the /:workspaceId route segment. */
+  readonly workspaceId?: string;
 }
 
 export interface McpServer {
