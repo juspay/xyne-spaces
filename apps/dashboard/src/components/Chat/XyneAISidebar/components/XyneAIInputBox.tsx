@@ -57,7 +57,12 @@ import { usePlatform } from '../../../../hooks/usePlatform';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type {
+  ThreadInfo,
+  CanvasInfo,
+  SelectionInfo,
+  WorkflowInfo,
+} from '../../../../machines/xyneAIMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
@@ -112,6 +117,8 @@ export interface XyneAIInputBoxProps {
   showChannelTag?: boolean;
   threadInfo?: ThreadInfo | null | undefined;
   canvasInfo?: CanvasInfo | null | undefined;
+  workflowInfo?: WorkflowInfo | null | undefined;
+  onRemoveWorkflowInfo?: ((e: React.MouseEvent) => void) | undefined;
   selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -218,6 +225,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       scopeType: _scopeType,
       threadInfo,
       canvasInfo,
+      workflowInfo,
+      onRemoveWorkflowInfo,
       selectionInfos = EMPTY_SELECTION_INFOS,
       inputValue,
       onInputChange,
@@ -1681,6 +1690,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onThreadClick={handleThreadPillClick}
           onRemoveThread={handleRemoveThreadInfo}
           canvasInfo={activeCanvasInfo}
+          workflowInfo={workflowInfo ?? null}
+          onRemoveWorkflowInfo={onRemoveWorkflowInfo ?? ((): void => {})}
           onCanvasInfoClick={handleCanvasPillClick}
           onRemoveCanvasInfo={handleRemoveCanvasInfo}
           selectionInfos={activeSelectionInfos}
