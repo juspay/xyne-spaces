@@ -1013,6 +1013,22 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           </div>
         )}
 
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Streams</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Arrange channels, boards, tickets and threads side by side in one scrolling deck. Off
+              while it is new — turning it on adds Streams to the Toolbar list, where you can put it
+              in the sidebar.
+            </p>
+          </div>
+          <Switch
+            id='show-streams'
+            checked={state.showStreams}
+            onCheckedChange={state.setShowStreams}
+          />
+        </div>
+
         {detectReactNativeWebView() && (
           <Button
             type='button'

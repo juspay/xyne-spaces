@@ -172,9 +172,10 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
-// Streams is here rather than in REQUIRED so it appears in the rail out of the
-// box but can still be toggled off — it is new, and nothing else depends on it.
-export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS, '/streams'];
+// Streams is deliberately absent: enabling it in Preferences > Developer puts it
+// in this list unchecked, so it reaches the sidebar only if the user asks for it
+// there too. Being new, it should not claim rail space on the way in.
+export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
 
 // Whether a path is locked into the toolbar (cannot be toggled off).
 export const isRequiredToolbarPath = (path: string): boolean =>
