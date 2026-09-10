@@ -217,6 +217,11 @@ export class ExternalSourceRepository {
    * Same ordering as findByChannelId (active first, then newest); pass
    * requireActive to only consider active sources. Returns null when the
    * channel has no source of the requested types.
+   *
+   * DL member-sync rows are excluded: they are channel-bound, active and
+   * google/microsoft while a sync runs, so they would outrank the real
+   * mailbox here — but they hold one member's personal credentials and are
+   * only ever meant to be driven by their own `isDlMemberSync` job.
    */
   async findChannelSource(
     channelId: string,
@@ -226,6 +231,7 @@ export class ExternalSourceRepository {
       where: {
         channelId,
         sourceType: { in: opts.sourceTypes },
+        NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
         ...(opts.requireActive ? { isActive: true } : {}),
       },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
@@ -241,7 +247,7 @@ export class ExternalSourceRepository {
       where: {
         channelId,
         sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
-        NOT: { name: { startsWith: 'google-dl-sync' } },
+        NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
         ...(opts?.activeOnly ? { isActive: true } : {}),
       },
       orderBy: { createdAt: 'asc' },

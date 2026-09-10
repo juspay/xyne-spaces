@@ -232,7 +232,7 @@ class EmailFetchWorker {
 
   private async notifySuccess(
     data: EmailFetchJobData,
-    result: { processed: number; newTickets: number; skipped: number; errors?: string[] },
+    result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
   ): Promise<void> {
     try {
       const newCount = result.newTickets;
@@ -242,9 +242,13 @@ class EmailFetchWorker {
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
-        : (newCount > 0
-          ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-          : 'Inbox is up to date');
+        : result.partial
+          ? (newCount > 0
+            ? `Partially fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'} — rerun Fetch to continue`
+            : 'Partially fetched — rerun Fetch to continue')
+          : (newCount > 0
+            ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
+            : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`

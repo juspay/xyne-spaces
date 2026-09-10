@@ -4,6 +4,11 @@ import { toast } from 'sonner';
 import { apiInstance } from '../services/clients/apiClient';
 import { fetchGooglePlayReviews } from '../services/clients/socialMediaDeskApi';
 
+export interface RefetchSkippedSource {
+  sourceId: string;
+  sourceType: string;
+  reason: string;
+}
 export interface RefetchResponseInline {
   success: boolean;
   queued?: false;
@@ -11,6 +16,7 @@ export interface RefetchResponseInline {
   newTickets: number;
   skipped: number;
   errors: string[];
+  skippedUnsupported?: RefetchSkippedSource[];
 }
 export interface RefetchQueuedJob {
   sourceId: string;
@@ -21,6 +27,7 @@ export interface RefetchResponseQueued {
   success: boolean;
   queued: true;
   jobs: RefetchQueuedJob[];
+  skippedUnsupported?: RefetchSkippedSource[];
 }
 export interface SocialMediaRefetchResponse {
   synced: number;
@@ -59,7 +66,7 @@ export const useRefetchExternalSource = (
 
   const mutation = useMutation<
     RefetchResponse,
-    Error & { status?: number },
+    Error & { status?: number; responseData?: unknown },
     { range?: RefetchRange | undefined; target?: RefetchTarget | undefined }
   >({
     mutationFn: async ({ range, target }) => {
@@ -90,6 +97,12 @@ export const useRefetchExternalSource = (
         { range, target },
         {
           onSuccess: result => {
+            const skipped = 'skippedUnsupported' in result ? result.skippedUnsupported : undefined;
+            if (skipped?.length) {
+              toast.warning(`Skipped ${skipped.length} source${skipped.length === 1 ? '' : 's'}`, {
+                description: skipped.map(s => s.reason).join('; '),
+              });
+            }
             if ('synced' in result) {
               toast.success(
                 result.synced > 0
@@ -129,7 +142,10 @@ export const useRefetchExternalSource = (
             }
           },
           onError: err => {
-            if (err.status === 403) {
+            const needsReauth =
+              err.status === 403 &&
+              (err.responseData as { needsReauth?: boolean } | undefined)?.needsReauth === true;
+            if (needsReauth) {
               toast.error('Reconnect required', {
                 description: 'Your email account needs to be reconnected.',
               });
