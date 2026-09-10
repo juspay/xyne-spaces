@@ -600,6 +600,15 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+// Defense-in-depth: the mock Desk provider stores captured mail in process
+// memory and short-circuits real outbound send. It must never be reachable in
+// production, where enabling it would silently swallow real customer mail.
+if (envVars.DESK_MOCK_ENABLED && envVars.NODE_ENV === 'production') {
+  throw new Error(
+    'DESK_MOCK_ENABLED must not be true when NODE_ENV=production: the in-memory mock Desk provider would silently capture real outbound mail instead of sending it.'
+  );
+}
+
 export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
