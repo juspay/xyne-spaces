@@ -92,6 +92,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   tags,
   onClick,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -124,6 +127,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         tags={tags}
         onClick={onClick}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -145,14 +151,17 @@ const VirtualizedStageList: React.FC<{
   stageTickets: Ticket[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
-  onLoadMore?: () => void;
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onLoadMore?: (() => void) | undefined;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stageId,
@@ -164,6 +173,9 @@ const VirtualizedStageList: React.FC<{
   onTicketsChange,
   onAddTicket,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -245,6 +257,9 @@ const VirtualizedStageList: React.FC<{
                   ticketId: m.ticketId,
                 }))}
                 availableTags={availableTags}
+                onLoadMoreTags={onLoadMoreTags}
+                hasMoreTags={hasMoreTags}
+                onSearchTags={onSearchTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
                 {...(activeTicketId !== undefined && { activeTicketId })}
@@ -280,13 +295,16 @@ const PaginatedStageList: React.FC<{
   paginationArgs: KanbanTicketsPageBaseArgs;
   columnType: 'stage' | 'status';
   allKnownTickets: Ticket[];
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stage,
@@ -296,6 +314,9 @@ const PaginatedStageList: React.FC<{
   allKnownTickets,
   onTicketsChange,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -318,11 +339,29 @@ const PaginatedStageList: React.FC<{
     // When using direct Vespa rows, trust the results - they're already filtered
     // by group-specific Vespa filters (dynamic field tokens, assignee, priority, etc.)
     if (isUsingDirectVespaRows) {
-      // Merge with cached tickets for optimistic updates if available
-      if (allKnownTickets.length > 0) {
-        const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
-        return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+      // If Vespa returned tickets, merge with cached tickets for optimistic updates
+      if (tickets.length > 0) {
+        if (allKnownTickets.length > 0) {
+          const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+          return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+        }
+        return tickets;
       }
+      // Vespa returned 0 tickets. This could be:
+      // 1. A valid empty result (filters matched nothing) - respect it
+      // 2. Vespa segregation filtered out tickets due to stage mismatch - use allKnownTickets
+      //
+      // To distinguish: if allKnownTickets has tickets that belong to this column,
+      // use them (case 2). Otherwise, trust the empty result (case 1).
+      if (allKnownTickets.length > 0) {
+        const columnTickets = allKnownTickets.filter(ticket =>
+          ticketBelongsToColumn(ticket, columnType, columnValue, columnStatus),
+        );
+        if (columnTickets.length > 0) {
+          return columnTickets;
+        }
+      }
+      // No tickets match - return empty (this is a valid filtered result)
       return tickets;
     }
 
@@ -345,7 +384,15 @@ const PaginatedStageList: React.FC<{
     // In group by mode without direct Vespa rows, use allKnownTickets as source of truth.
     // This path is used when Zero query provides the tickets.
     if (allKnownTickets.length === 0) {
-      // Grouping not ready yet - return empty to prevent showing wrong tickets
+      // When allKnownTickets is empty but we have tickets from the hook, use them directly.
+      // This prevents the view from being empty when filtering in group-by mode,
+      // especially for priority grouping where the chicken-and-egg problem can occur:
+      // - allKnownTickets comes from kanbanTicketsForGrouping
+      // - kanbanTicketsForGrouping is built from tickets reported by columns
+      // - But columns can't report tickets if they don't render any
+      if (tickets.length > 0) {
+        return tickets;
+      }
       return [];
     }
 
@@ -408,6 +455,9 @@ const PaginatedStageList: React.FC<{
         isLoadingMore={isLoadingMore}
         onLoadMore={loadMore}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -441,6 +491,12 @@ interface KanbanColumnsProps {
   /** Scopes the saved layout: status columns carry the same ids on every board. */
   layoutScope?: string;
   availableTags?: string[];
+  /** Callback to load more tags */
+  onLoadMoreTags?: () => void;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean;
+  /** Callback for server-side tag search */
+  onSearchTags?: (query: string) => void;
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
   paginatedColumnConfig?: {
@@ -497,6 +553,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   layoutScope = '',
   containerClassName,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -781,6 +840,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       allKnownTickets={knownTicketsForOptimisticMerge}
                       {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
+                      onLoadMoreTags={onLoadMoreTags}
+                      hasMoreTags={hasMoreTags}
+                      onSearchTags={onSearchTags}
                       visibleColumns={visibleColumns}
                       {...(activeTicketId !== undefined && { activeTicketId })}
                       {...(showEmailReads !== undefined && { showEmailReads })}
@@ -798,6 +860,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                         stageTickets={stageTickets}
                         {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                         availableTags={availableTags}
+                        onLoadMoreTags={onLoadMoreTags}
+                        hasMoreTags={hasMoreTags}
+                        onSearchTags={onSearchTags}
                         visibleColumns={visibleColumns}
                         {...(activeTicketId !== undefined && { activeTicketId })}
                         {...(showEmailReads !== undefined && { showEmailReads })}

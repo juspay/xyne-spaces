@@ -692,4 +692,94 @@ export class SearchService {
       throw error;
     }
   };
+
+  /**
+   * Search for distinct ticket tags from Vespa.
+   * Uses grouping to aggregate unique tag values from ticket documents.
+   *
+   * @param workspaceId - Workspace ID for isolation
+   * @param options - Search options (projectId, boardIds, query prefix, limit)
+   * @returns Array of distinct tag strings sorted alphabetically
+   */
+  async searchTicketTags(
+    workspaceId: string,
+    options: {
+      projectId?: string;
+      boardIds?: string[];
+      query?: string;
+      limit?: number;
+    } = {},
+  ): Promise<{ tags: string[]; total: number }> {
+    const { projectId, boardIds, query, limit = 100 } = options;
+
+    // Build WHERE conditions
+    const conditions: string[] = [
+      `docType contains "ticket"`,
+      `workspaceId contains "${workspaceId}"`,
+    ];
+
+    if (projectId) {
+      conditions.push(`projectId contains "${projectId}"`);
+    }
+
+    if (boardIds && boardIds.length > 0) {
+      const boardConditions = boardIds.map(id => `boardId contains "${id}"`).join(' or ');
+      conditions.push(`(${boardConditions})`);
+    }
+
+    // If query is provided, filter tags that contain the search term
+    // This is done post-grouping since Vespa doesn't support substring filtering on array elements in WHERE
+    const queryLower = query?.trim().toLowerCase();
+
+    // YQL with grouping on the tags array
+    // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
+
+    try {
+      const response = await this.vespa.search<VespaSearchResponse>({
+        yql,
+        hits: 0, // We only want grouping results, not individual docs
+        timeout: '10s',
+      } as any);
+
+      // Parse grouped results
+      const tags: string[] = [];
+      const root = (response?.root ?? {}) as any;
+      const rootChildren = (root?.children ?? []) as Array<any>;
+
+      // Navigate the grouping structure: group:root -> grouplist:tags -> group:string:* -> value
+      for (const rootChild of rootChildren) {
+        // First level: group:root:0
+        if (rootChild.id?.startsWith('group:root:')) {
+          const groupListChildren = rootChild.children ?? [];
+          for (const groupList of groupListChildren) {
+            // Second level: grouplist:tags
+            if (groupList.id?.startsWith('grouplist:')) {
+              const groups = groupList.children ?? [];
+              for (const group of groups) {
+                // Third level: group:string:tagname
+                if (group.id?.startsWith('group:')) {
+                  const tagValue = group.value;
+                  if (typeof tagValue === 'string' && tagValue.trim()) {
+                    // Apply substring filter if query provided
+                    if (!queryLower || tagValue.toLowerCase().includes(queryLower)) {
+                      tags.push(tagValue);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Sort alphabetically
+      tags.sort((a, b) => a.localeCompare(b));
+
+      return { tags, total: tags.length };
+    } catch (error) {
+      this.logger.error(`Error searching ticket tags: ${getErrorMessage(error)}`);
+      return { tags: [], total: 0 };
+    }
+  }
 }
