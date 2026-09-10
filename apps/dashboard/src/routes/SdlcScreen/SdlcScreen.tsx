@@ -473,8 +473,11 @@ export default function SdlcScreen(): ReactElement {
     ? (finderPathByTrack[selectedTrackId] ?? [])
     : [];
   const setFinderPath = (next: SdlcFinderStep[]): void => {
-    if (!selectedTrackId) return;
-    setUserPreference('sdlcFinderPathByTrack', { ...finderPathByTrack, [selectedTrackId]: next });
+    // Keyed by a track we know, never by the ?track= value directly: the param is
+    // reader-supplied, and it would otherwise name any property it liked.
+    const track = tracks.find(item => item.id === selectedTrackId);
+    if (!track) return;
+    setUserPreference('sdlcFinderPathByTrack', { ...finderPathByTrack, [track.id]: next });
   };
   useEffect(() => {
     setPreviewCanvasId(null);
