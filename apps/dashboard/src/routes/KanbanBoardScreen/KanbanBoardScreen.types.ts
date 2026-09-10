@@ -26,13 +26,19 @@ export interface Stage {
 export interface SortableTicketCardProps {
   ticket: Ticket;
   tags: TicketTag[];
-  availableTags?: string[];
+  availableTags?: string[] | undefined;
+  /** Callback to load more tags */
+  onLoadMoreTags?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean | undefined;
+  /** Callback for server-side tag search */
+  onSearchTags?: ((query: string) => void) | undefined;
   onClick: (e: React.MouseEvent | KeyboardEvent) => void;
   visibleColumns?: Set<string> | undefined;
-  activeTicketId?: string;
-  showEmailReads?: boolean;
+  activeTicketId?: string | undefined;
+  showEmailReads?: boolean | undefined;
   /** SLA policies pre-fetched by the parent; forwarded to TicketCard to avoid per-card fetches. */
-  slaPolicies?: BoardSlaPolicy[];
+  slaPolicies?: BoardSlaPolicy[] | undefined;
 }
 
 export interface DroppableStageProps {

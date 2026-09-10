@@ -76,6 +76,7 @@ import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColu
 import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
+import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
   useChannel,
@@ -1936,12 +1937,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return undefined;
   }, [myTicketBoardsQuery.data, viewMode]);
 
+  // Fetch board details for workspace views - used for source channels and tags
   const [workspaceSelectedBoards] = useCachedQuery(
     queries.boardsByIds({ boardIds: filters.boards ?? [] }),
     {
-      enabled: isWorkspaceView && isSourceChannelsOpen && (filters.boards?.length ?? 0) > 0,
+      enabled: isWorkspaceView && (filters.boards?.length ?? 0) > 0,
     },
   );
+
   const sourceChannelProjectIds = useMemo(() => {
     if (isMyTicketsView) {
       const selected = filters.boards ?? [];
@@ -1991,11 +1994,130 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
-  const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: tagsProjectId || '' }),
-    { enabled: !!tagsProjectId },
+  // Determine project IDs for tag search
+  // For my-tickets and workspace views, we may have multiple projects
+  const tagsProjectIds = useMemo(() => {
+    if (isMyTicketsView) {
+      const selected = filters.boards ?? [];
+      const details = availableBoardDetails ?? [];
+      // No board selected -> all projects; otherwise only selected boards' projects
+      return uniqueProjectIds(
+        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
+      );
+    }
+    if (isWorkspaceView) {
+      // Use workspaceSelectedBoards which is always enabled for workspace views
+      return uniqueProjectIds(workspaceSelectedBoards ?? []);
+    }
+    // Single project view
+    const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
+    return singleProjectId ? [singleProjectId] : [];
+  }, [
+    isMyTicketsView,
+    isWorkspaceView,
+    filters.boards,
+    availableBoardDetails,
+    workspaceSelectedBoards,
+    effectiveProjectId,
+  ]);
+
+  // For my-tickets and workspace views, always use multi-project query
+  // This ensures proper tag fetching across all selected boards/projects
+  const shouldUseMultiProjectQuery = isMyTicketsView || isWorkspaceView;
+  const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
+
+  // State for tag search query (debounced value passed to Vespa)
+  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
+
+  // Pagination state for Zero query tags
+  const TAGS_PAGE_SIZE = 20;
+  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
+  const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
+  const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
+
+  // Reset pagination when project IDs change or search starts
+  const tagsProjectIdsKey = tagsProjectIds.join(',');
+  useEffect(() => {
+    setTagsCursor(null);
+    setAccumulatedTags([]);
+    setHasMoreZeroTags(true);
+  }, [tagsProjectIdsKey, tagsSearchQuery]);
+
+  // Fetch tags via Zero query for single project (for initial load without search)
+  // Only used for regular board views (not my-tickets or workspace views)
+  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({
+      projectId: tagsProjectIds[0] || '',
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseSingleProjectQuery && !tagsSearchQuery.trim() },
   );
+
+  // Fetch tags via Zero query for multiple projects (for initial load without search)
+  // Used for my-tickets, workspace views, and any multi-project scenarios
+  const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectIds({
+      projectIds: tagsProjectIds,
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 && !tagsSearchQuery.trim() },
+  );
+
+  // Combine Zero query results
+  const currentPageTags = shouldUseSingleProjectQuery ? singleProjectTags : multiProjectTags;
+  const projectTagsDetails = shouldUseSingleProjectQuery
+    ? singleProjectTagsDetails
+    : multiProjectTagsDetails;
+
+  // Accumulate tags from pagination
+  useEffect(() => {
+    if (!currentPageTags || currentPageTags.length === 0) {
+      if (tagsCursor !== null) {
+        // No more results from this page
+        setHasMoreZeroTags(false);
+      }
+      return;
+    }
+
+    // Check if we got less than page size (no more pages)
+    if (currentPageTags.length < TAGS_PAGE_SIZE) {
+      setHasMoreZeroTags(false);
+    }
+
+    // Append new tags, avoiding duplicates
+    setAccumulatedTags(prev => {
+      const existingIds = new Set(prev.map(t => t.id));
+      const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
+      return [...prev, ...newTags];
+    });
+  }, [currentPageTags, tagsCursor]);
+
+  // Combine accumulated tags for display
+  const projectTags = accumulatedTags;
+
+  // Handle load more tags (pagination)
+  const handleLoadMoreTags = useCallback(() => {
+    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
+    const lastTag = accumulatedTags[accumulatedTags.length - 1];
+    if (lastTag) {
+      setTagsCursor({ name: lastTag.name, id: lastTag.id });
+    }
+  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
+
+  // Fetch tags via Vespa search (only when there's a search query)
+  const { tags: vespaTags } = useVespaTagSearch({
+    projectId: tagsProjectIds[0],
+    searchQuery: tagsSearchQuery,
+    enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
+    limit: 20,
+  });
+
+  // Handle tag search callback
+  const handleSearchTags = useCallback((query: string) => {
+    setTagsSearchQuery(query);
+  }, []);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -3209,11 +3331,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
+  // Compute availableTags: use Vespa when searching, Zero query otherwise
+  // Fallback to client-side filtering if Vespa returns no results
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+    const zeroTags =
+      projectTags && projectTags.length > 0
+        ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
+        : [];
+
+    // If there's a search query, prefer Vespa results
+    if (tagsSearchQuery.trim()) {
+      // If Vespa has results, use them
+      if (vespaTags && vespaTags.length > 0) {
+        return vespaTags;
+      }
+      // Fallback to client-side filtering on Zero tags
+      const lower = tagsSearchQuery.toLowerCase();
+      const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
+      return filtered.length > 0 ? filtered : undefined;
+    }
+
+    // No search - return Zero query results
+    return zeroTags.length > 0 ? zeroTags : undefined;
+  }, [tagsSearchQuery, vespaTags, projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3812,6 +3952,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
+              onSearchTags={handleSearchTags}
+              onLoadMoreTags={handleLoadMoreTags}
+              hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
               availableStages={availableStages}
               hasPrReviewers={hasPrReviewers}
               hasQaAssigned={hasQaAssigned}
@@ -5421,6 +5564,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
+                          onLoadMoreTags={handleLoadMoreTags}
+                          hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                          onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
                           layoutScope={kanbanLayoutScope}
                           searchActive={hasSearchTerm}
@@ -5467,6 +5613,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   tags={tagsByTicketId.get(activeTicket.id) || []}
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
+                  onLoadMoreTags={handleLoadMoreTags}
+                  hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                  onSearchTags={handleSearchTags}
                   slaPolicies={kanbanSlaPolicies}
                 />
               )}
