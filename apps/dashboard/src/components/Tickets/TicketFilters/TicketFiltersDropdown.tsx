@@ -119,6 +119,7 @@ export const TicketFiltersDropdown = ({
   availableTags,
   onLoadMoreTags,
   hasMoreTags,
+  onSearchTags,
   availableStages,
   hideAssigneeFilter = false,
   hasPrReviewers,
@@ -657,6 +658,7 @@ export const TicketFiltersDropdown = ({
             availableTags={availableTags || []}
             onLoadMore={onLoadMoreTags}
             hasMore={hasMoreTags}
+            onSearch={onSearchTags}
           />
         );
       case 'stages':

@@ -727,13 +727,13 @@ export class SearchService {
       conditions.push(`(${boardConditions})`);
     }
 
-    // If query is provided, filter tags that match the prefix using regexp
-    // This is done post-grouping since Vespa doesn't support prefix filtering on array elements in WHERE
-    const queryPrefix = query?.trim().toLowerCase();
+    // If query is provided, filter tags that contain the search term
+    // This is done post-grouping since Vespa doesn't support substring filtering on array elements in WHERE
+    const queryLower = query?.trim().toLowerCase();
 
-    // YQL with grouping on each element of the tags array
-    // This returns each unique tag value with its count
-    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(each(tags)) max(${limit}) order(-count()) each(output(count())))`;
+    // YQL with grouping on the tags array
+    // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
 
     try {
       const response = await this.vespa.search<VespaSearchResponse>({
@@ -745,19 +745,27 @@ export class SearchService {
       // Parse grouped results
       const tags: string[] = [];
       const root = (response?.root ?? {}) as any;
-      const children = (root?.children ?? []) as Array<any>;
+      const rootChildren = (root?.children ?? []) as Array<any>;
 
-      // Navigate the grouping structure: grouplist -> group -> value
-      for (const child of children) {
-        if (child.id?.startsWith('grouplist:')) {
-          const groups = child.children ?? [];
-          for (const group of groups) {
-            if (group.id?.startsWith('group:')) {
-              const tagValue = group.value;
-              if (typeof tagValue === 'string' && tagValue.trim()) {
-                // Apply prefix filter if query provided
-                if (!queryPrefix || tagValue.toLowerCase().startsWith(queryPrefix)) {
-                  tags.push(tagValue);
+      // Navigate the grouping structure: group:root -> grouplist:tags -> group:string:* -> value
+      for (const rootChild of rootChildren) {
+        // First level: group:root:0
+        if (rootChild.id?.startsWith('group:root:')) {
+          const groupListChildren = rootChild.children ?? [];
+          for (const groupList of groupListChildren) {
+            // Second level: grouplist:tags
+            if (groupList.id?.startsWith('grouplist:')) {
+              const groups = groupList.children ?? [];
+              for (const group of groups) {
+                // Third level: group:string:tagname
+                if (group.id?.startsWith('group:')) {
+                  const tagValue = group.value;
+                  if (typeof tagValue === 'string' && tagValue.trim()) {
+                    // Apply substring filter if query provided
+                    if (!queryLower || tagValue.toLowerCase().includes(queryLower)) {
+                      tags.push(tagValue);
+                    }
+                  }
                 }
               }
             }

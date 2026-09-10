@@ -74,6 +74,7 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
+import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
   useChannel,
@@ -1937,6 +1938,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         (filters.boards?.length ?? 0) > 0,
     },
   );
+
+  // Fetch board details for workspace views to get project IDs for tags
+  // This is always enabled for workspace views (unlike workspaceSelectedBoards which is only for dropdowns)
+  const [workspaceBoardsForTags] = useCachedQuery(
+    queries.boardsByIds({ boardIds: filters.boards ?? [] }),
+    {
+      enabled: isWorkspaceView && (filters.boards?.length ?? 0) > 0,
+    },
+  );
+
   const sourceChannelProjectIds = useMemo(() => {
     if (isMyTicketsView) {
       const selected = filters.boards ?? [];
@@ -1986,99 +1997,130 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  // Determine if we're in single-project or multi-project mode for tags
-  const isMultiProjectView = !effectiveProjectId && sourceChannelProjectIds.length > 0;
-  const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
-
-  // State for cursor-based tag pagination
-  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
-  const [allLoadedTags, setAllLoadedTags] = useState<Array<{ name: string; id: string }>>([]);
-  const [hasMoreTags, setHasMoreTags] = useState(true);
-  const tagsLimitPerPage = 20;
-
-  // Fetch project tags for single project view (paginated with cursor)
-  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({
-      projectId: tagsProjectId || '',
-      limit: tagsLimitPerPage,
-      start: tagsCursor,
-      direction: 'forward',
-    }),
-    { enabled: !!tagsProjectId && !isMultiProjectView, cursorEnabled: true },
-  );
-
-  // Fetch project tags for multi-project views (paginated with cursor)
-  const [multiProjectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectIds({
-      projectIds: sourceChannelProjectIds,
-      limit: tagsLimitPerPage,
-      start: tagsCursor,
-      direction: 'forward',
-    }),
-    { enabled: isMultiProjectView, cursorEnabled: true },
-  );
-
-  // Combine tags from either query
-  const currentPageTags = isMultiProjectView ? multiProjectTags : singleProjectTags;
-  const currentPageDetails = isMultiProjectView ? projectTagsDetails : singleProjectTagsDetails;
-
-  // Track processed cursor to avoid re-processing same page
-  const lastProcessedCursorRef = useRef<string>('initial');
-  const isLoadingMoreRef = useRef(false);
-
-  // Accumulate tags as pages load
-  useEffect(() => {
-    if (currentPageDetails?.type === 'complete' && currentPageTags) {
-      const newTags = currentPageTags as Array<{ name: string; id: string }>;
-      const cursorKey = tagsCursor ? `${tagsCursor.id}` : 'initial';
-
-      // For first page (cursor null), always process
-      if (tagsCursor === null) {
-        // Only update if tags actually changed
-        const newTagIds = newTags.map(t => t.id).join(',');
-        const existingTagIds = allLoadedTags.map(t => t.id).join(',');
-        if (newTagIds !== existingTagIds) {
-          setAllLoadedTags(newTags);
-        }
-        setHasMoreTags(newTags.length >= tagsLimitPerPage);
-        lastProcessedCursorRef.current = 'initial';
-        isLoadingMoreRef.current = false;
-      } else if (isLoadingMoreRef.current && lastProcessedCursorRef.current !== cursorKey) {
-        // Subsequent page - only process if we're actively loading more and cursor changed
-        setAllLoadedTags(prev => {
-          const existingIds = new Set(prev.map(t => t.id));
-          const uniqueNew = newTags.filter(t => !existingIds.has(t.id));
-          if (uniqueNew.length === 0) {
-            return prev;
-          }
-          return [...prev, ...uniqueNew];
-        });
-        setHasMoreTags(newTags.length >= tagsLimitPerPage);
-        lastProcessedCursorRef.current = cursorKey;
-        isLoadingMoreRef.current = false;
-      }
+  // Determine project IDs for tag search
+  // For my-tickets and workspace views, we may have multiple projects
+  const tagsProjectIds = useMemo(() => {
+    if (isMyTicketsView) {
+      const selected = filters.boards ?? [];
+      const details = availableBoardDetails ?? [];
+      // No board selected -> all projects; otherwise only selected boards' projects
+      return uniqueProjectIds(
+        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
+      );
     }
-  }, [currentPageTags, currentPageDetails, tagsCursor, tagsLimitPerPage, allLoadedTags]);
+    if (isWorkspaceView) {
+      // Use workspaceBoardsForTags which is always enabled for workspace views
+      return uniqueProjectIds(workspaceBoardsForTags ?? []);
+    }
+    // Single project view
+    const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
+    return singleProjectId ? [singleProjectId] : [];
+  }, [
+    isMyTicketsView,
+    isWorkspaceView,
+    filters.boards,
+    availableBoardDetails,
+    workspaceBoardsForTags,
+    effectiveProjectId,
+  ]);
 
-  // Reset tags when project changes
-  const tagsProjectKey = tagsProjectId || sourceChannelProjectIds.join(',');
+  // For my-tickets and workspace views, always use multi-project query
+  // This ensures proper tag fetching across all selected boards/projects
+  const shouldUseMultiProjectQuery = isMyTicketsView || isWorkspaceView;
+  const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
+
+  // State for tag search query (debounced value passed to Vespa)
+  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
+
+  // Pagination state for Zero query tags
+  const TAGS_PAGE_SIZE = 20;
+  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
+  const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
+  const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
+
+  // Reset pagination when project IDs change or search starts
+  const tagsProjectIdsKey = tagsProjectIds.join(',');
   useEffect(() => {
     setTagsCursor(null);
-    setAllLoadedTags([]);
-    setHasMoreTags(true);
-    lastProcessedCursorRef.current = 'initial';
-    isLoadingMoreRef.current = false;
-  }, [tagsProjectKey]);
+    setAccumulatedTags([]);
+    setHasMoreZeroTags(true);
+  }, [tagsProjectIdsKey, tagsSearchQuery]);
 
-  // Load more tags callback
+  // Fetch tags via Zero query for single project (for initial load without search)
+  // Only used for regular board views (not my-tickets or workspace views)
+  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({
+      projectId: tagsProjectIds[0] || '',
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseSingleProjectQuery && !tagsSearchQuery.trim() },
+  );
+
+  // Fetch tags via Zero query for multiple projects (for initial load without search)
+  // Used for my-tickets, workspace views, and any multi-project scenarios
+  const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectIds({
+      projectIds: tagsProjectIds,
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 && !tagsSearchQuery.trim() },
+  );
+
+  // Combine Zero query results
+  const currentPageTags = shouldUseSingleProjectQuery ? singleProjectTags : multiProjectTags;
+  const projectTagsDetails = shouldUseSingleProjectQuery
+    ? singleProjectTagsDetails
+    : multiProjectTagsDetails;
+
+  // Accumulate tags from pagination
+  useEffect(() => {
+    if (!currentPageTags || currentPageTags.length === 0) {
+      if (tagsCursor !== null) {
+        // No more results from this page
+        setHasMoreZeroTags(false);
+      }
+      return;
+    }
+
+    // Check if we got less than page size (no more pages)
+    if (currentPageTags.length < TAGS_PAGE_SIZE) {
+      setHasMoreZeroTags(false);
+    }
+
+    // Append new tags, avoiding duplicates
+    setAccumulatedTags(prev => {
+      const existingIds = new Set(prev.map(t => t.id));
+      const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
+      return [...prev, ...newTags];
+    });
+  }, [currentPageTags, tagsCursor]);
+
+  // Combine accumulated tags for display
+  const projectTags = accumulatedTags;
+
+  // Handle load more tags (pagination)
   const handleLoadMoreTags = useCallback(() => {
-    if (!hasMoreTags || allLoadedTags.length === 0 || isLoadingMoreRef.current) return;
-    const lastTag = allLoadedTags[allLoadedTags.length - 1];
+    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
+    const lastTag = accumulatedTags[accumulatedTags.length - 1];
     if (lastTag) {
-      isLoadingMoreRef.current = true;
       setTagsCursor({ name: lastTag.name, id: lastTag.id });
     }
-  }, [hasMoreTags, allLoadedTags]);
+  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
+
+  // Fetch tags via Vespa search (only when there's a search query)
+  const { tags: vespaTags } = useVespaTagSearch({
+    projectId: tagsProjectIds[0],
+    searchQuery: tagsSearchQuery,
+    enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
+    limit: 20,
+  });
+
+  // Handle tag search callback
+  const handleSearchTags = useCallback((query: string) => {
+    setTagsSearchQuery(query);
+  }, []);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -3295,22 +3337,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
-  // Compute availableTags directly from query results to avoid state timing issues
-  // For initial load, use query results directly; for pagination, use accumulated state
+  // Compute availableTags: use Vespa when searching, Zero query otherwise
+  // Fallback to client-side filtering if Vespa returns no results
   const availableTags = useMemo(() => {
-    // Use allLoadedTags if it has data (from pagination accumulation)
-    // Otherwise fall back to currentPageTags for immediate display
-    const tagsSource =
-      allLoadedTags.length > 0
-        ? allLoadedTags
-        : (currentPageTags as Array<{ name: string; id: string }> | undefined);
+    const zeroTags =
+      projectTags && projectTags.length > 0
+        ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
+        : [];
 
-    if (!tagsSource || tagsSource.length === 0) {
-      return undefined;
+    // If there's a search query, prefer Vespa results
+    if (tagsSearchQuery.trim()) {
+      // If Vespa has results, use them
+      if (vespaTags && vespaTags.length > 0) {
+        return vespaTags;
+      }
+      // Fallback to client-side filtering on Zero tags
+      const lower = tagsSearchQuery.toLowerCase();
+      const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
+      return filtered.length > 0 ? filtered : undefined;
     }
-    const uniqueTags = new Set(tagsSource.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [allLoadedTags, currentPageTags]);
+
+    // No search - return Zero query results
+    return zeroTags.length > 0 ? zeroTags : undefined;
+  }, [tagsSearchQuery, vespaTags, projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3878,8 +3927,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
+              onSearchTags={handleSearchTags}
               onLoadMoreTags={handleLoadMoreTags}
-              hasMoreTags={hasMoreTags}
+              hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
               availableStages={availableStages}
               hasPrReviewers={hasPrReviewers}
               hasQaAssigned={hasQaAssigned}
@@ -5449,6 +5499,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
+                          onLoadMoreTags={handleLoadMoreTags}
+                          hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                          onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
                           layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
                           searchActive={hasSearchTerm}
@@ -5495,6 +5548,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   tags={tagsByTicketId.get(activeTicket.id) || []}
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
+                  onLoadMoreTags={handleLoadMoreTags}
+                  hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                  onSearchTags={handleSearchTags}
                   slaPolicies={kanbanSlaPolicies}
                 />
               )}
