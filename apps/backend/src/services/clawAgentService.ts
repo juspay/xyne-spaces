@@ -96,6 +96,11 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowContext?: {
+    workflowId?: string | null;
+    executionId?: string | null;
+    stepId?: string | null;
+  };
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
@@ -632,6 +637,15 @@ export async function runClawAgentStream(
       ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
       ...(request.focusedComponentId && {
         SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId,
+      }),
+      ...(request.workflowContext?.workflowId && {
+        SPACES_WORKFLOW_ID: request.workflowContext.workflowId,
+      }),
+      ...(request.workflowContext?.executionId && {
+        SPACES_WORKFLOW_EXECUTION_ID: request.workflowContext.executionId,
+      }),
+      ...(request.workflowContext?.stepId && {
+        SPACES_WORKFLOW_STEP_ID: request.workflowContext.stepId,
       }),
     },
     ...(additionalInstructions && { additionalInstructions }),
