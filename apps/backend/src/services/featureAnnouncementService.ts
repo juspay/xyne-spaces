@@ -21,8 +21,14 @@ import {
 
 const { MAX_SEEN_COUNT, SESSION_GAP_MS } = FEATURE_ANNOUNCEMENT_LIMITS;
 
-/** Cap on how many announcements one response may carry, newest first. */
-export const PENDING_BATCH_LIMIT = 1;
+/**
+ * Cap on how many announcements one response may carry, newest first.
+ *
+ * The card walks the whole batch in one sitting, so this is a readable-queue size rather
+ * than a delivery rate: three is short enough to clear without it reading as a chore.
+ * Anything beyond it waits for the next fetch.
+ */
+export const PENDING_BATCH_LIMIT = 3;
 
 /**
  * Path relative to the API root, not an absolute URL. The client fetches it through the

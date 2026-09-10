@@ -1,5 +1,13 @@
 import { ReactElement, useEffect, useState } from 'react';
-import { Settings, Mail, ChevronLeft, UserCheck, GitBranch, LayoutGrid, Megaphone } from 'lucide-react';
+import {
+  Settings,
+  Mail,
+  ChevronLeft,
+  UserCheck,
+  GitBranch,
+  LayoutGrid,
+  Megaphone,
+} from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';

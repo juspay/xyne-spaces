@@ -16,8 +16,9 @@ import { isAnnouncementRoute } from './announcementRoutes';
 const FEATURE_ANNOUNCEMENTS_ENABLED = true;
 
 /**
- * Anchors the card bottom-left. The exact position is a design decision that is not
- * settled yet, so it lives here rather than being spread through the card.
+ * Anchors the card bottom-left, over the sidebar. Measured off the `Inbox` frame
+ * (5011:26289), where the card sits at left 19.5 / bottom 65.56 in a 1730×1039 window —
+ * its right edge landing on the sidebar's boundary and clearing the Ask Xyne bar.
  */
 export function FeatureAnnouncementHost(): ReactElement | null {
   const { pathname } = useLocation();
@@ -43,13 +44,12 @@ export function FeatureAnnouncementHost(): ReactElement | null {
   // Gating the hook too, so a suppressed route does not fetch or mark anything as seen.
   const { announcements, markSeen, clickCta, dismissAll } = useFeatureAnnouncements(allowed);
 
-  const announcement = announcements[0];
-  if (!allowed || !announcement || inCall) return null;
+  if (!allowed || announcements.length === 0 || inCall) return null;
 
   return createPortal(
-    <div className='pointer-events-none fixed bottom-4 left-4 z-40'>
+    <div className='pointer-events-none fixed bottom-[66px] left-5 z-40'>
       <FeatureAnnouncementCard
-        announcement={announcement}
+        announcements={announcements}
         onSeen={markSeen}
         onCta={clickCta}
         onDismiss={dismissAll}

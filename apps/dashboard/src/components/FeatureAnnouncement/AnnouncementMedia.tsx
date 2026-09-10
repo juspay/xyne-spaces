@@ -8,6 +8,38 @@ export interface LoadedMedia {
   isVideo: boolean;
 }
 
+/**
+ * Paths already warmed this session, so a re-render cannot re-issue a request.
+ *
+ * Published media is served `public, max-age=31536000, immutable` (see `streamMediaFor` in
+ * featureAnnouncementController.ts), so warming the browser's HTTP cache is enough: the
+ * component's own fetch for the same path is then served from disk instead of the network,
+ * which is the whole of the latency worth hiding.
+ *
+ * Deliberately warms that cache rather than holding blobs in a module-level map. Nothing
+ * ends up owning an object URL that may never be claimed, so there is no revocation
+ * bookkeeping, and dismissing the card mid-queue cannot strand a downloaded 8MB clip in
+ * memory. The cost is one extra decode when the page is actually opened.
+ */
+const warmedMediaPaths = new Set<string>();
+
+/**
+ * Warms one media path ahead of the page that needs it. Call it for the NEXT slide only —
+ * an announcement's video may be up to 8MB and downloads in full before its first frame,
+ * so warming a whole batch would cost far more than it saves.
+ */
+export function prefetchAnnouncementMedia(path: string | null | undefined): void {
+  // A blob: URL is already local bytes; admin drafts are served `no-store` and cannot be
+  // warmed at all, so there is nothing to gain from either.
+  if (!path || path.startsWith('blob:') || warmedMediaPaths.has(path)) return;
+  warmedMediaPaths.add(path);
+  void apiInstance.get(path, { responseType: 'blob' }).catch(() => {
+    // A failed warm is not an error — the component's own fetch will surface it. Drop the
+    // marker so a later attempt is not suppressed by this one.
+    warmedMediaPaths.delete(path);
+  });
+}
+
 export interface AnnouncementMediaProps {
   /** Path relative to the API root, as returned by the server. */
   path: string | null;
