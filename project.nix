@@ -376,7 +376,9 @@ in
         period_seconds = 10;
         timeout_seconds = 3;
         success_threshold = 1;
-        failure_threshold = 5;
+        # First boot installs Python wheels before the health server can start.
+        # Do not kill that install after only one minute on a fresh machine.
+        failure_threshold = 90;
       };
       
       namespace = "ai.transcription-agent";

@@ -60,7 +60,9 @@ data**; use them only when you intend to start from an empty database.
   of the Nix store. Existing custom keys are preserved.
 - On Linux, the transcription process gets the C++ runtime and zlib library paths
   needed by native Python wheels. The first launch installs its Python dependencies
-  and may take several minutes.
+  and may take several minutes; its readiness probe allows up to 15 minutes for
+  this initial setup. Zero creates its replica directory itself, including when
+  started directly by the smoke test.
 
 ## Verification
 
