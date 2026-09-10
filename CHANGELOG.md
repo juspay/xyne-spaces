@@ -1,3 +1,10 @@
+## [1.299.1](https://github.com/juspay/xyne-spaces/compare/v1.299.0...v1.299.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* Call invite sharing with HTML formatting ([#1591](https://github.com/juspay/xyne-spaces/issues/1591)) ([ccaab14](https://github.com/juspay/xyne-spaces/commit/ccaab142b11f5984cd8b310c57e23d88e5f2c7d0))
+
 ## [1.299.0](https://github.com/juspay/xyne-spaces/compare/v1.298.0...v1.299.0) (2026-09-10)
 
 
