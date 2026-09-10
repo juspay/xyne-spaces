@@ -81,6 +81,7 @@ import {
   useCanvasLabelMapResult,
 } from '../useCanvasLabels';
 import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
+import { getCanvasDisplayTitle, useCanvasTitleIcon } from '../canvasTitleIcon';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -92,6 +93,39 @@ type CanvasEmptyStateCopy = {
   title: string;
   description: string;
 };
+
+const CanvasListItemTitle: React.FC<{ canvas: Canvas; isSelected: boolean }> = ({
+  canvas,
+  isSelected,
+}) => {
+  const titleIcon = useCanvasTitleIcon(canvas);
+  const displayTitle = getCanvasDisplayTitle(canvas.title, titleIcon) || 'Untitled Canvas';
+
+  return (
+    <Tooltip
+      content={displayTitle}
+      side='top'
+      align='start'
+      delayDuration={400}
+      className='max-w-xs break-words'
+    >
+      <h3
+        className={cn(
+          'truncate text-[13px] font-semibold leading-4',
+          isSelected
+            ? 'text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground/80 group-hover:text-sidebar-accent-foreground',
+        )}
+      >
+        {titleIcon && (
+          <span className='mr-1 inline-block text-xs leading-none align-[-1px]'>{titleIcon}</span>
+        )}
+        {displayTitle}
+      </h3>
+    </Tooltip>
+  );
+};
+
 type ChannelSourcePaginationState = {
   cursor: CanvasCursor | null;
   nextCursor: CanvasCursor | null;
@@ -941,7 +975,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [sharedBySearchQuery, setSharedBySearchQuery] = useState('');
   const [selectedSharedByUserId, setSelectedSharedByUserId] = useState<string | null>(null);
   const [isSharedByDropdownOpen, setIsSharedByDropdownOpen] = useState(false);
-  const [searchScope, setSearchScope] = useState<CanvasSearchScope>('direct');
+  const [searchScope, setSearchScope] = useState<CanvasSearchScope>('all');
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const [scopeMenuView, setScopeMenuView] = useState<CanvasSearchScopeMenuView>('main');
   const [scopeChannelSearchQuery, setScopeChannelSearchQuery] = useState('');
@@ -1968,24 +2002,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
         <div className='min-w-0 flex-1 pr-10'>
           <div className='flex min-w-0 items-center gap-1 pt-0.5'>
-            <Tooltip
-              content={canvas.title || 'Untitled Canvas'}
-              side='top'
-              align='start'
-              delayDuration={400}
-              className='max-w-xs break-words'
-            >
-              <h3
-                className={cn(
-                  'truncate text-[13px] font-semibold leading-4',
-                  isSelected
-                    ? 'text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/80 group-hover:text-sidebar-accent-foreground',
-                )}
-              >
-                {canvas.title || 'Untitled Canvas'}
-              </h3>
-            </Tooltip>
+            <CanvasListItemTitle canvas={canvas} isSelected={isSelected} />
             {canvas.visibility !== CanvasVisibility.PUBLIC && (
               <Lock className='size-3 shrink-0 text-sidebar-foreground/40' strokeWidth={2.1} />
             )}

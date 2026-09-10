@@ -37,6 +37,7 @@ import {
   GitCompare,
   Loader2,
   MessageSquare,
+  Plus,
   RotateCcw,
 } from 'lucide-react';
 import {
@@ -106,6 +107,13 @@ import {
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import { useScope } from '../../../shortcuts';
+import { SectionEmojiPicker } from '../../Chat/SectionEmojiPicker';
+import {
+  buildCanvasTitleWithIcon,
+  getCanvasDisplayTitle,
+  getCanvasTitleIcon,
+  setOptimisticCanvasTitleIcon,
+} from '../canvasTitleIcon';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -220,6 +228,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     setOpenCommentCount(0);
   }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
+  const [currentTitleIcon, setCurrentTitleIcon] = useState<string | null>(null);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
@@ -368,8 +377,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       }
       setSelectedCanvas(canvasFromState);
       if (isNewCanvas) {
-        setCurrentTitle(canvasFromState.title);
-        titleRef.current = canvasFromState.title;
+        const titleIcon = getCanvasTitleIcon(canvasFromState.title);
+        const displayTitle = getCanvasDisplayTitle(canvasFromState.title, titleIcon);
+        setCurrentTitleIcon(titleIcon);
+        setCurrentTitle(displayTitle);
+        titleRef.current = displayTitle;
         setCurrentContent(canvasFromState.content);
         latestContentRef.current = canvasFromState.content;
         lastSavedContentRef.current = JSON.stringify(canvasFromState.content || []);
@@ -453,8 +465,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const isNewCanvas = initializedCanvasIdRef.current !== canvas.id;
       if (isNewCanvas) {
-        setCurrentTitle(canvas.title);
-        titleRef.current = canvas.title;
+        const titleIcon = getCanvasTitleIcon(canvas.title);
+        const displayTitle = getCanvasDisplayTitle(canvas.title, titleIcon);
+        setCurrentTitleIcon(titleIcon);
+        setCurrentTitle(displayTitle);
+        titleRef.current = displayTitle;
         setCurrentContent(canvas.content);
         latestContentRef.current = canvas.content;
         lastSavedContentRef.current = JSON.stringify(canvas.content || []);
@@ -586,6 +601,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
           queueTitleAutoFocus(newCanvasId);
           setSelectedCanvas(newCanvas);
+          setCurrentTitleIcon(null);
           setCurrentTitle(title);
           titleRef.current = title;
           setCurrentContent(content);
@@ -645,6 +661,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const handleCreateCanvas = (): void => {
     setIsCreating(true);
     setSelectedCanvas(null);
+    setCurrentTitleIcon(null);
     setCurrentTitle('Untitled Canvas');
     setCurrentContent(undefined);
     latestContentRef.current = undefined;
@@ -792,7 +809,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       isSavingRef.current = true;
 
       // Always read the latest title from ref to prevent stale state
-      const titleToSave = titleRef.current;
+      const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
       const saveStartedAt = performance.now();
 
       logger.info(Event.CANVAS_SAVE_STARTED, {
@@ -856,7 +873,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         }
       }
     },
-    [z],
+    [canvasId, currentTitleIcon, z],
   );
 
   const getDefaultVersionCanvas = useCallback(() => selectedCanvasRef.current, []);
@@ -884,17 +901,37 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   );
 
   const handleTitleSave = useCallback((): void => {
-    if (!selectedCanvas?.id || !canEdit || currentTitle === selectedCanvas.title) return;
+    if (!selectedCanvas?.id || !canEdit) return;
+
+    const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
+    if (titleToSave === selectedCanvas.title) return;
 
     logger.info(Event.CANVAS_TITLE_SAVED, { canvasId: selectedCanvas.id });
     z.mutate(
       mutators.canvas.update({
         id: selectedCanvas.id,
-        title: titleRef.current,
+        title: titleToSave,
         timestamp: Date.now(),
       }),
     );
-  }, [canEdit, currentTitle, selectedCanvas, z]);
+  }, [canEdit, currentTitleIcon, selectedCanvas, z]);
+
+  const handleTitleIconChange = useCallback(
+    (icon: string): void => {
+      if (!selectedCanvas?.id || !canEdit) return;
+
+      setCurrentTitleIcon(icon);
+      setOptimisticCanvasTitleIcon(selectedCanvas.id, icon);
+      z.mutate(
+        mutators.canvas.update({
+          id: selectedCanvas.id,
+          title: buildCanvasTitleWithIcon(titleRef.current, icon),
+          timestamp: Date.now(),
+        }),
+      );
+    },
+    [canEdit, selectedCanvas?.id, z],
+  );
 
   const persistCanvasExitContent = useCallback(
     (content: PartialBlock[], canvasToSave: Canvas): void => {
@@ -1279,6 +1316,51 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const headerIconButtonClass =
     'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
+  const renderCanvasPageTitle = (editable: boolean): ReactElement => (
+    <div className='canvas-page-title-header mx-auto w-full max-w-[900px] px-6 pb-3 pt-8 md:px-14 lg:px-20'>
+      <div className='flex min-w-0 items-center gap-2'>
+        <SectionEmojiPicker
+          value={currentTitleIcon}
+          disabled={!editable}
+          onChange={handleTitleIconChange}
+          trackCategory='CANVAS'
+          trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
+          ariaLabel={currentTitleIcon ? 'Change canvas icon' : 'Add canvas icon'}
+          triggerClassName='size-10'
+          iconClassName='text-2xl md:text-[28px]'
+          fallbackIcon={<Plus className='size-4' />}
+          allowCustomEmojis={false}
+        />
+        <h1 className='min-w-0 flex-1'>
+          <Input
+            type='text'
+            aria-label='Canvas page title'
+            value={currentTitle}
+            onChange={event => {
+              const newTitle = event.target.value;
+              setCurrentTitle(newTitle);
+              titleRef.current = newTitle;
+            }}
+            readOnly={!editable}
+            onBlur={handleTitleSave}
+            className={cn(
+              'h-auto min-w-0 border-none bg-transparent px-0 py-0 text-3xl font-bold leading-tight text-foreground shadow-none placeholder:text-muted-foreground/80 focus:ring-0 focus-visible:border-none focus-visible:ring-0 md:text-[40px] md:leading-[48px]',
+              !editable && 'cursor-default',
+            )}
+            placeholder='Add page title'
+            data-testid='canvas-page-title-input'
+            data-track-category='CANVAS'
+            data-track-name='EDIT_CANVAS_PAGE_TITLE'
+            data-track-metadata={JSON.stringify({
+              canvasId: selectedCanvas?.id,
+              channelId: selectedCanvas?.channelId || state?.channelId,
+            })}
+          />
+        </h1>
+      </div>
+    </div>
+  );
+
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
       {/* Main Content Area */}
@@ -1315,6 +1397,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
                       {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
+                      {currentTitleIcon && (
+                        <span className='shrink-0 text-sm leading-none'>{currentTitleIcon}</span>
+                      )}
                       <Input
                         type='text'
                         aria-label='Canvas title'
@@ -1725,6 +1810,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             {previewVersion && showVersionDiff && hasVersionDiff && (
               <CanvasVersionDiffPanel parts={versionDiffParts} />
             )}
+
+            {selectedCanvas && !isCreating && renderCanvasPageTitle(canEdit && !previewVersion)}
 
             {/* Canvas Editor */}
             <div
