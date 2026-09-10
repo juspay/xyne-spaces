@@ -322,11 +322,29 @@ const PaginatedStageList: React.FC<{
     // When using direct Vespa rows, trust the results - they're already filtered
     // by group-specific Vespa filters (dynamic field tokens, assignee, priority, etc.)
     if (isUsingDirectVespaRows) {
-      // Merge with cached tickets for optimistic updates if available
-      if (allKnownTickets.length > 0) {
-        const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
-        return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+      // If Vespa returned tickets, merge with cached tickets for optimistic updates
+      if (tickets.length > 0) {
+        if (allKnownTickets.length > 0) {
+          const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+          return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+        }
+        return tickets;
       }
+      // Vespa returned 0 tickets. This could be:
+      // 1. A valid empty result (filters matched nothing) - respect it
+      // 2. Vespa segregation filtered out tickets due to stage mismatch - use allKnownTickets
+      //
+      // To distinguish: if allKnownTickets has tickets that belong to this column,
+      // use them (case 2). Otherwise, trust the empty result (case 1).
+      if (allKnownTickets.length > 0) {
+        const columnTickets = allKnownTickets.filter(ticket =>
+          ticketBelongsToColumn(ticket, columnType, columnValue, columnStatus),
+        );
+        if (columnTickets.length > 0) {
+          return columnTickets;
+        }
+      }
+      // No tickets match - return empty (this is a valid filtered result)
       return tickets;
     }
 
@@ -349,7 +367,15 @@ const PaginatedStageList: React.FC<{
     // In group by mode without direct Vespa rows, use allKnownTickets as source of truth.
     // This path is used when Zero query provides the tickets.
     if (allKnownTickets.length === 0) {
-      // Grouping not ready yet - return empty to prevent showing wrong tickets
+      // When allKnownTickets is empty but we have tickets from the hook, use them directly.
+      // This prevents the view from being empty when filtering in group-by mode,
+      // especially for priority grouping where the chicken-and-egg problem can occur:
+      // - allKnownTickets comes from kanbanTicketsForGrouping
+      // - kanbanTicketsForGrouping is built from tickets reported by columns
+      // - But columns can't report tickets if they don't render any
+      if (tickets.length > 0) {
+        return tickets;
+      }
       return [];
     }
 

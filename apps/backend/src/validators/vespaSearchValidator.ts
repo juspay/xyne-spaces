@@ -31,11 +31,11 @@ export const vespaSearchQuerySchema = Joi.object({
     'number.max': 'Offset cannot exceed 1000',
   }),
 
-  limit: Joi.number().integer().min(1).max(200).default(20).messages({
+  limit: Joi.number().integer().min(1).max(400).default(20).messages({
     'number.base': 'Limit must be a number',
     'number.integer': 'Limit must be an integer',
     'number.min': 'Limit must be at least 1',
-    'number.max': 'Limit cannot exceed 200'
+    'number.max': 'Limit cannot exceed 400'
   }),
 
   // Rank profile
