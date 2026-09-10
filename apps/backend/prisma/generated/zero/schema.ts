@@ -757,6 +757,25 @@ export const pullRequestsTable = table("pull_requests")
     updatedAt: number(),
     status: string(),
     ticketId: string().optional(),
+    botCommitCount: number().optional(),
+    humanCommitCount: number().optional(),
+    unknownCommitCount: number().optional(),
+    commitAnalysisStatus: string().optional(),
+    commitAnalysisError: string().optional(),
+    commitAnalyzedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const commitTable = table("commits")
+  .columns({
+    id: string(),
+    commitSha: string(),
+    pullRequestId: string(),
+    agentSlug: string().optional(),
+    authorName: string(),
+    authorEmail: string(),
+    committedAt: number(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -1501,7 +1520,6 @@ export const activityTable = table("activities")
     channelId: string().optional(),
     pullRequestId: string().optional(),
     canvasId: string().optional(),
-    trackId: string().optional(),
     blockId: string().optional(),
     actorId: string(),
     classification: string(),
@@ -1870,6 +1888,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1886,6 +1905,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2634,6 +2654,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
     fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3821,11 +3853,24 @@ export const aclAuditLogTableRelationships = relationships(aclAuditLogTable, ({ 
   })
 }));
 
-export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
+export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one, many }) => ({
   workflowExecution: one({
     sourceField: ["workflowExecutionId"],
     destField: ["id"],
     destSchema: workflowExecutionTable,
+  }),
+  commits: many({
+    sourceField: ["id"],
+    destField: ["pullRequestId"],
+    destSchema: commitTable,
+  })
+}));
+
+export const commitTableRelationships = relationships(commitTable, ({ one }) => ({
+  pullRequest: one({
+    sourceField: ["pullRequestId"],
+    destField: ["id"],
+    destSchema: pullRequestsTable,
   })
 }));
 
@@ -4853,12 +4898,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5092,6 +5150,7 @@ export const schema = createSchema(
       resourceAccessTable,
       aclAuditLogTable,
       pullRequestsTable,
+      commitTable,
       prThreadLinkTable,
       teamIntelligenceIngestionBatchV2Table,
       teamIntelligenceUserIngestionV2Table,
@@ -5204,6 +5263,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5267,6 +5327,7 @@ export const schema = createSchema(
       resourceAccessTableRelationships,
       aclAuditLogTableRelationships,
       pullRequestsTableRelationships,
+      commitTableRelationships,
       teamIntelligenceIngestionBatchV2TableRelationships,
       teamIntelligenceUserIngestionV2TableRelationships,
       teamIntelligenceTeamSummaryV2TableRelationships,
@@ -5327,6 +5388,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5396,6 +5458,7 @@ export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
+export type Commit = Row<typeof schema.tables.commits>;
 export type PrThreadLink = Row<typeof schema.tables.pr_thread_links>;
 export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
 export type TeamIntelligenceUserIngestionV2 = Row<typeof schema.tables.team_intelligence_user_ingestions_v2>;
@@ -5508,6 +5571,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;

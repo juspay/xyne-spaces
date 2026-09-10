@@ -61,9 +61,6 @@ import {
   normalizeFlowPlan,
   flowGateOf,
   FLOW_STAGE_NAMES,
-  deriveEtaManagementView,
-  parseTicketEtaManagement,
-  parseBoardEtaManagement,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -82,8 +79,8 @@ import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
-import { TicketPriorityIcon } from '../../../assets/icons';
-import { StageIndicator } from '../../../utils/board/stageStatusIcon';
+import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -104,6 +101,7 @@ import {
   formatReferenceLabel,
   useTicketReferences,
 } from '../../../hooks/useTicketReferences';
+import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
@@ -169,6 +167,18 @@ interface StageInfo {
   formId?: string | null;
   eta: number | null;
 }
+
+const getStageProgress = (
+  currentStageName: string | null | undefined,
+  stages: StageInfo[] | undefined,
+): number => {
+  if (!stages || stages.length === 0 || !currentStageName) return 0;
+
+  const currentStage = stages.find(stage => stage.name === currentStageName);
+  if (!currentStage) return 0;
+
+  return Math.round((currentStage.sequenceNumber / stages.length) * 100);
+};
 
 const PRIORITY_OPTIONS: TicketPriority[] = [
   TicketPriority.LOW,
@@ -452,8 +462,6 @@ interface TicketDetailsProps {
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
-  /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
-  subTicketsOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -568,7 +576,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   expandedView = false,
   onFillRCA,
   stageReadOnly = false,
-  subTicketsOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -798,64 +805,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     !isNonLinearBoard &&
     ((boardData?.metadata as BoardMetadata | null | undefined)?.showNextStageFormInTicketDetails ??
       false) === true;
-
-  // ETA risk/overdue display state. The banner/badge is shown to everyone; the backend
-  // (`canUserModifyTicketControl`, wired into `acknowledgeEtaRisk`) is the sole authority
-  // on who may act, and rejects an unauthorized attempt with a clear error.
-  const etaManagementView = useMemo(() => {
-    if (!ticket) return null;
-    return deriveEtaManagementView({
-      ticketEtaManagement: parseTicketEtaManagement(ticket.metadata),
-      boardEtaManagement: parseBoardEtaManagement(
-        boardData?.metadata ?? null,
-        boardData?.boardType ?? BoardType.DEFAULT,
-      ),
-      ticketEta: ticket.eta ?? null,
-      ticketStatus: ticket.statusV2,
-      now: Date.now(),
-    });
-  }, [ticket, boardData]);
-
-  const [acknowledgeReason, setAcknowledgeReason] = useState('');
-  const [showAcknowledgeInput, setShowAcknowledgeInput] = useState(false);
-  const [submittingAcknowledge, setSubmittingAcknowledge] = useState(false);
-
-  const handleAcknowledgeRisk = useCallback(async () => {
-    if (!ticket || !acknowledgeReason.trim()) return;
-    const ticketEtaManagement = parseTicketEtaManagement(ticket.metadata);
-    const fingerprint = ticketEtaManagement.planningRisk.fingerprint;
-    if (!fingerprint) return;
-    setSubmittingAcknowledge(true);
-    try {
-      const result = zero.mutate(
-        mutators.ticket.acknowledgeEtaRisk({
-          ticketId: ticket.id,
-          expectedFingerprint: fingerprint,
-          reason: acknowledgeReason.trim(),
-          clientTimestamp: Date.now(),
-        }),
-      );
-      const res = await result.server;
-      if (res.type === 'error') {
-        toast.error('Failed to acknowledge planning risk', {
-          description:
-            res.error.message || 'The risk state may have changed - refresh and try again.',
-          duration: 6000,
-        });
-      } else {
-        toast.success('Planning risk acknowledged');
-        setShowAcknowledgeInput(false);
-        setAcknowledgeReason('');
-      }
-    } catch (error) {
-      toast.error('Failed to acknowledge planning risk', {
-        description: error instanceof Error ? error.message : 'An unexpected error occurred.',
-        duration: 6000,
-      });
-    } finally {
-      setSubmittingAcknowledge(false);
-    }
-  }, [ticket, acknowledgeReason, zero]);
 
   // Plan-node titles for FLOW boards — form values are scoped by planNodeId,
   // so submissions/activity resolve their label through this map.
@@ -2952,6 +2901,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = relatedTicket?.boardId
       ? stagesByBoardId.get(relatedTicket.boardId)
       : undefined;
+    const stageProgress = getStageProgress(relatedTicket?.stageName, boardStages);
+    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const assigneeId = relatedTicket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
     const priorityIcon = relatedTicket?.priority ? getPriorityIcon(relatedTicket.priority) : null;
 
@@ -2994,7 +2945,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
         <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
           <div className='flex items-center gap-3 min-w-0'>
-            <StageIndicator stages={boardStages} stageName={relatedTicket?.stageName} size={18} />
+            <TicketStageIcon progressPercentage={displayProgress} size={18} />
             <div className='flex items-center gap-4 min-w-0'>
               <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
                 {relatedTicket?.xyneId || relatedTicket?.id || '—'}
@@ -3108,6 +3059,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = mappedTicket?.boardId
       ? stagesByBoardId.get(mappedTicket.boardId)
       : undefined;
+    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
+    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const priority = mappedTicket?.priority;
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
@@ -3251,11 +3204,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
             {boardStages && boardStages.length > 0 && (
               <div className='flex items-center gap-1.5'>
-                <StageIndicator
-                  stages={boardStages}
-                  stageName={mappedTicket?.stageName}
-                  size={18}
-                />
+                <TicketStageIcon progressPercentage={displayProgress} size={18} />
                 <span className='text-xs font-medium text-foreground whitespace-nowrap'>
                   {boardStages.findIndex(stage => stage.name === mappedTicket?.stageName) + 1}/
                   {boardStages.length}
@@ -3419,24 +3368,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      <div
-        className={cn(
-          'relative',
-          // Hide the sibling sections instead of re-parenting the sub-tickets one.
-          subTicketsOnly &&
-            '[&>*:not([data-testid=sub-tickets-section]):not(.archived-guard)]:hidden',
-        )}
-      >
+      <div className='relative'>
         {/* Archived overlay - blocks all interactions on content */}
         {ticket?.isArchived && (
           <div
-            className='archived-guard absolute inset-0 z-50 cursor-not-allowed'
+            className='absolute inset-0 z-50 cursor-not-allowed'
             style={{ backgroundColor: 'transparent' }}
           />
         )}
 
         {ticket?.isArchived && (
-          <div className='archived-guard mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
+          <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
             <Archive className='w-5 h-5 text-muted-foreground shrink-0' />
             <div className='flex-1'>
               <p className='text-sm font-medium text-foreground'>
@@ -3869,12 +3811,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <StageIndicator
-                        stages={stages}
-                        stageName={ticket.stageName}
-                        fallbackStatus={ticket.statusV2}
-                        isNonLinearBoard={isNonLinearBoard}
-                      />
+                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3884,20 +3821,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
                       icon={
-                        <StageIndicator
-                          stages={stages}
-                          stageName={ticket.stageName}
-                          fallbackStatus={ticket.statusV2}
-                          isNonLinearBoard={isNonLinearBoard}
-                        />
+                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
                       }
-                      getItemIcon={item => (
-                        <StageIndicator
-                          stages={stages}
-                          stageName={item.name}
-                          isNonLinearBoard={isNonLinearBoard}
-                        />
-                      )}
+                      getItemIcon={item =>
+                        (() => {
+                          const stage = selectorStages.find(s => s.name === item.name);
+                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
+                          return (
+                            <TicketStatusIcon
+                              size={14}
+                              color={getTicketStatusColor(itemStatusV2)}
+                            />
+                          );
+                        })()
+                      }
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
@@ -4073,95 +4010,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           Overdue
                         </span>
                       )}
-                    {etaManagementView?.severity === 'PLANNING_RISK' && (
-                      <span
-                        className='inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded'
-                        title='The current stage deadline is later than this due date'
-                      >
-                        <AlertCircle size={11} />
-                        Planning Risk{etaManagementView.isPaused ? ' (paused)' : ''}
-                      </span>
-                    )}
-                    {etaManagementView?.forecastStatus === 'INCOMPLETE' && (
-                      <span
-                        className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground rounded'
-                        title={
-                          etaManagementView.forecastIncompleteReason ?? 'Missing a stage estimate'
-                        }
-                      >
-                        Estimate Incomplete
-                      </span>
-                    )}
                   </div>
                 )
               }
             />
-            {etaManagementView?.severity === 'PLANNING_RISK' &&
-              etaManagementView.planningRiskState === 'ACTIVE' && (
-                <div className='mx-0 mb-2 px-3 py-2.5 rounded-md border border-amber-200 bg-amber-50 text-sm'>
-                  <div className='flex items-start justify-between gap-2'>
-                    <div className='text-amber-800'>
-                      <p className='font-medium'>Planning risk</p>
-                      <p className='text-xs text-amber-700 mt-0.5'>
-                        The current stage deadline
-                        {etaManagementView.stageDeadline
-                          ? ` (${formatETADisplay(etaManagementView.stageDeadline)})`
-                          : ''}{' '}
-                        is later than the ticket due date
-                        {etaManagementView.ticketDue
-                          ? ` (${formatETADisplay(etaManagementView.ticketDue)})`
-                          : ''}
-                        .
-                        {etaManagementView.autoEnabled
-                          ? ' Automatic recalculation is active for this board.'
-                          : ' Automatic recalculation is off for this board.'}
-                      </p>
-                    </div>
-                    {!showAcknowledgeInput && (
-                      <Button
-                        variant='secondary'
-                        onClick={() => setShowAcknowledgeInput(true)}
-                        data-track-category='TicketDetails'
-                        data-track-name='OpenAcknowledgeEtaRisk'
-                      >
-                        Acknowledge
-                      </Button>
-                    )}
-                  </div>
-                  {showAcknowledgeInput && (
-                    <div className='mt-2 flex items-center gap-2'>
-                      <input
-                        type='text'
-                        value={acknowledgeReason}
-                        onChange={e => setAcknowledgeReason(e.target.value)}
-                        placeholder='Reason for keeping the current dates...'
-                        className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
-                        data-testid='acknowledge-eta-risk-reason'
-                        data-track-category='TicketDetails'
-                        data-track-name='AcknowledgeEtaRiskReasonInput'
-                      />
-                      <Button
-                        variant='secondary'
-                        onClick={() => void handleAcknowledgeRisk()}
-                        disabled={submittingAcknowledge || !acknowledgeReason.trim()}
-                        data-track-category='TicketDetails'
-                        data-track-name='SubmitAcknowledgeEtaRisk'
-                      >
-                        {submittingAcknowledge ? 'Saving...' : 'Confirm'}
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        onClick={() => {
-                          setShowAcknowledgeInput(false);
-                          setAcknowledgeReason('');
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
             {/* Status Deadline - only show if current stage has eta configured */}
             {currentStageInfo?.eta && (
               <TicketKeyValuePair
@@ -4910,6 +4762,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   : undefined;
                 const stageIndex =
                   boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
+                const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
+                const displayProgress = stageProgress === 0 ? 1 : stageProgress;
                 const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
                 const navigateToParentTicket = (): void => {
                   const channelType = channelTypeMap.get(parentTicket.channelId);
@@ -4984,11 +4838,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       </Tooltip>
                       {boardStages && boardStages.length > 0 && (
                         <div className='flex items-center gap-1.5'>
-                          <StageIndicator
-                            stages={boardStages}
-                            stageName={parentTicket.stageName}
-                            size={18}
-                          />
+                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
                           <span className='whitespace-nowrap text-xs font-medium text-foreground'>
                             {stageIndex + 1}/{boardStages.length}
                           </span>

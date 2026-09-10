@@ -1,5 +1,4 @@
 import { apiInstance } from '../clients/apiClient';
-import { callScopedPath } from './recordingService';
 
 export const RECORDING_EMAIL_ATTACHMENT_KINDS = [
   'transcript',
@@ -48,23 +47,16 @@ interface GoogleRecordingEmailConnectionResponse {
 }
 
 class RecordingEmailService {
-  async getComposeContext(
-    callId: string,
-    isRecording = true,
-  ): Promise<RecordingEmailComposeContext> {
+  async getComposeContext(callId: string): Promise<RecordingEmailComposeContext> {
     const response = await apiInstance.get<RecordingEmailComposeContext>(
-      `/calls/${callScopedPath(callId, isRecording)}/email-compose-context`,
+      `/calls/recordings/${callId}/email-compose-context`,
     );
     return response.data;
   }
 
-  async send(
-    callId: string,
-    input: SendRecordingEmailInput,
-    isRecording = true,
-  ): Promise<SendRecordingEmailResponse> {
+  async send(callId: string, input: SendRecordingEmailInput): Promise<SendRecordingEmailResponse> {
     const response = await apiInstance.post<SendRecordingEmailResponse>(
-      `/calls/${callScopedPath(callId, isRecording)}/send-email`,
+      `/calls/recordings/${callId}/send-email`,
       input,
     );
     return response.data;

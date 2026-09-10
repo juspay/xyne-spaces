@@ -37,17 +37,6 @@ interface SearchParticipantsProps {
    * still applies.
    */
   disableClientFiltering?: boolean;
-  /**
-   * Options used ONLY to render the pills for already-selected values — never
-   * offered in the dropdown.
-   *
-   * `options` is now a bounded, query-ranked slice (see `useParticipantCandidates`),
-   * so a selected participant who does not match the current query is simply absent
-   * from it. Without a resolvable option their pill silently disappears while they
-   * stay selected. Callers that prefill a selection (edit-mode calls, thread-scoped
-   * invites) pass the resolved options for their selected values here.
-   */
-  prefilledOptions?: ParticipantOptions[];
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -66,7 +55,6 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   exclusiveSelection = true,
   lockedValues,
   disableClientFiltering = false,
-  prefilledOptions,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -84,43 +72,19 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     return selectedValues.some(v => v.startsWith('user:'));
   }, [selectedValues]);
 
-  // value -> option, so resolving a selection is O(1) instead of a linear scan of
-  // `options` per selected value. `options` wins over `prefilledOptions` on conflict:
-  // a live ranked row is fresher than a prefilled one.
-  const optionByValue = useMemo(() => {
-    const map = new Map<string, ParticipantOptions>();
-    for (const option of prefilledOptions ?? []) map.set(option.value, option);
-    for (const option of options) map.set(option.value, option);
-    return map;
-  }, [options, prefilledOptions]);
-
-  const prefilledValues = useMemo(
-    () => new Set((prefilledOptions ?? []).map(opt => opt.value)),
-    [prefilledOptions],
-  );
-
-  // Fallback cache so a selected option still renders a pill after it drops out of
-  // the (bounded, query-ranked) `options` slice.
-  //
-  // Values the caller resolves via `prefilledOptions` are skipped: they are already
-  // reachable through `optionByValue`, so caching them would be pure churn. That
-  // matters because the builders mint fresh objects on every keystroke — an
-  // identity check alone can never bail out, and returning a new Map each time
-  // forced a second render per character typed.
+  // Cache selected options so they remain visible even when filtered out of options
   useEffect(() => {
-    const uncached = selectedValues.filter(
-      value => !prefilledValues.has(value) && optionByValue.has(value),
-    );
-    if (uncached.length === 0) return;
     setSelectedOptionsMap(prev => {
       const next = new Map(prev);
-      for (const value of uncached) {
-        const option = optionByValue.get(value);
-        if (option) next.set(value, option);
-      }
+      selectedValues.forEach(value => {
+        const option = options.find(opt => opt.value === value);
+        if (option) {
+          next.set(value, option);
+        }
+      });
       return next;
     });
-  }, [selectedValues, optionByValue, prefilledValues]);
+  }, [selectedValues, options]);
 
   const hasGroupSelected = useMemo(() => {
     return exclusiveSelection && selectedValues.some(v => v.startsWith('user_group:'));
@@ -156,9 +120,15 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
 
   const selectedOptions = useMemo(() => {
     return selectedValues
-      .map(value => optionByValue.get(value) ?? selectedOptionsMap.get(value))
+      .map(value => {
+        const currentOption = options.find(opt => opt.value === value);
+        if (currentOption) return currentOption;
+
+        // Fallback to cached option
+        return selectedOptionsMap.get(value);
+      })
       .filter((opt): opt is ParticipantOptions => opt !== undefined);
-  }, [optionByValue, selectedValues, selectedOptionsMap]);
+  }, [options, selectedValues, selectedOptionsMap]);
 
   const hasChannelSelected = useMemo(() => {
     return exclusiveSelection && selectedValues.some(v => v.startsWith('channel:'));
@@ -217,7 +187,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     }
 
     if (exclusiveSelection && isChannel && !selectedValues.includes(value)) {
-      const option = optionByValue.get(value);
+      const option = options.find(opt => opt.value === value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
@@ -230,7 +200,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     if (selectedValues.includes(value)) {
       void onMultiSelect(selectedValues.filter(v => v !== value));
     } else {
-      const option = optionByValue.get(value);
+      const option = options.find(opt => opt.value === value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }

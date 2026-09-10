@@ -3,7 +3,6 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { validateS2SKey } from '@/middleware/validateS2SKey';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
-import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const router = Router();
 
@@ -81,24 +80,19 @@ async function sendVarysWebhook(
   webhookUrl: string,
   payload: PRCheckRequestedPayload,
 ): Promise<void> {
-  const { url, headers, isInternal } = await prepareAppWebhookDispatch(webhookUrl, {
+  const { url, headers } = await prepareAppWebhookDispatch(webhookUrl, {
     'Content-Type': 'application/json',
     'X-Xyne-Event': 'PR_CHECK_REQUESTED',
   });
 
-  const init: RequestInit = {
+  const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
     redirect: 'manual',
     // Fail fast if Varys stalls — this runs inside a user-facing request.
     signal: AbortSignal.timeout(10_000),
-  };
-  // Internal = trusted-config pod URL (plain client); external = user-supplied,
-  // so validate + pin the connection (rebinding-safe).
-  const response = isInternal
-    ? await fetch(url, init)
-    : await safeWebhookFetch(url, init);
+  });
 
   if (!response.ok) {
     throw new Error(`Webhook failed with status ${response.status}: ${await response.text()}`);

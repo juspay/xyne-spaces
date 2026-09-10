@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -20,7 +20,6 @@ import {
 import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
 import { DateRangeFilter, type DateRangeValue } from '../../../ui/DateRangeFilter/DateRangeFilter';
-import { loadRunFilters, saveRunFilters } from '../../AutomationsList/AutomationFiltersBar/filters';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
 import type { RunHistoryProps } from './RunHistory.types';
@@ -61,24 +60,8 @@ export function RunHistory({
   onOpenRun,
   onBack,
 }: RunHistoryProps): React.ReactElement {
-  const [saved] = useState(() => loadRunFilters(automationId));
-  const [statusFilter, setStatusFilter] = useState(saved.status as StatusFilterValue);
-  const [dateRange, setDateRange] = useState<DateRangeValue | null>(saved.dateRange);
-
-  // The route reuses this component across automations; without this the previous
-  // automation's filters would be saved over the new one's.
-  const [loadedFor, setLoadedFor] = useState(automationId);
-  if (loadedFor !== automationId) {
-    const next = loadRunFilters(automationId);
-    setLoadedFor(automationId);
-    setStatusFilter(next.status as StatusFilterValue);
-    setDateRange(next.dateRange);
-  }
-
-  useEffect(() => {
-    if (loadedFor !== automationId) return;
-    saveRunFilters(automationId, statusFilter, dateRange);
-  }, [automationId, loadedFor, statusFilter, dateRange]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
+  const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } =
     useInfiniteQuery({

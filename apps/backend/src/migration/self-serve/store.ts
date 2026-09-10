@@ -38,8 +38,7 @@ function encodePatch(patch: Partial<MigrationJob>): { set: Record<string, string
         break;
       }
       case 'stopRequested':
-      case 'refreshRequested':
-        set[k] = v ? '1' : '0';
+        set.stopRequested = v ? '1' : '0';
         break;
       case 'checkpoint':
       case 'channelInput':
@@ -298,12 +297,6 @@ function decode(h: Record<string, string>): MigrationJob {
     updatedAt: numReq('updatedAt'),
     completedAt: numOpt('completedAt'),
     ingestStartedAt: numOpt('ingestStartedAt'),
-    collectedAt: numOpt('collectedAt'),
-    refreshRequested: h.refreshRequested === '1',
-    lastRefreshedAt: numOpt('lastRefreshedAt'),
-    refreshCount: numOpt('refreshCount'),
-    refreshDone: numOpt('refreshDone'),
-    refreshTotal: numOpt('refreshTotal'),
     error: opt('error'),
     issues: h.issues ? (JSON.parse(h.issues) as MigrationIssue[]) : undefined,
   };

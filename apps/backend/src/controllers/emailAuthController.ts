@@ -12,7 +12,6 @@ import {
   isClientPasswordHash,
   normalizeClientPasswordHash,
   verifyEmailPassword,
-  DUMMY_PASSWORD_HASH,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -123,10 +122,33 @@ export class EmailAuthController {
         return;
       }
 
-      // Every failed attempt — unknown email, no password set, or wrong password —
-      // ends here, so the attempt counter, the lockout and the response are identical
-      // whichever it was, keeping registered and unregistered emails indistinguishable.
-      const rejectLogin = async (): Promise<void> => {
+      // 1. Look up orgMember (the source of truth for email auth)
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { email: normalizedEmail },
+      });
+
+      if (!orgMember || orgMember.leftAt) {
+        // Keep this response identical to the wrong-password response below.
+        logger.warn(`${tag()} Email login rejected (reason=invalid_credentials)`);
+        res.status(401).json({
+          error: 'Invalid credentials',
+          message: 'Email or password is incorrect',
+        });
+        return;
+      }
+
+      if (!orgMember.passwordHash) {
+        logger.warn(`${tag()} Email login rejected (reason=invalid_credentials)`);
+        res.status(401).json({
+          error: 'Invalid credentials',
+          message: 'Email or password is incorrect',
+        });
+        return;
+      }
+
+      // 2. Verify password against orgMember.passwordHash
+      const isValid = await verifyEmailPassword(password, orgMember.passwordHash);
+      if (!isValid) {
         const redis = redisService.getClient();
         const failedAttempts = await redis.incr(loginAttemptKey);
         if (failedAttempts === 1) {
@@ -152,27 +174,6 @@ export class EmailAuthController {
           error: 'Invalid credentials',
           message: 'Email or password is incorrect',
         });
-      };
-
-      // 1. Look up orgMember (the source of truth for email auth)
-      const orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: normalizedEmail },
-      });
-
-      const storedHash = orgMember && !orgMember.leftAt ? orgMember.passwordHash : null;
-
-      // 2. Verify the password. With no account (or no password on it) the check runs
-      // against a dummy hash of the same form so the request takes as long as a real
-      // wrong-password attempt, and the result is discarded.
-      let isValid = false;
-      if (storedHash) {
-        isValid = await verifyEmailPassword(password, storedHash);
-      } else {
-        await verifyEmailPassword(password, DUMMY_PASSWORD_HASH);
-      }
-
-      if (!isValid || !orgMember) {
-        await rejectLogin();
         return;
       }
 

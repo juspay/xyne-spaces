@@ -70,13 +70,13 @@ router.post(
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await canAccessSocialMediaChannel(
+        !(await authorizeSocialMediaManager(
           req.params.channelId,
           req.user!.id,
-          workspaceId
+          workspaceId,
+          res
         ))
       ) {
-        res.status(404).json({ error: 'Social media desk not found' });
         return;
       }
 

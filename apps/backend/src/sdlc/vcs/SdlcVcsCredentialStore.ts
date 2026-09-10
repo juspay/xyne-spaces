@@ -14,6 +14,8 @@ export interface StoredSdlcVcsCredential {
   token: string | null;
   revision: number;
   identityLogin: string | null;
+  resourceOwner: string | null;
+  fingerprint: string | null;
   validationStatus: string;
   validatedAt: string | null;
   validationErrorCode: string | null;

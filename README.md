@@ -16,7 +16,10 @@ Automations · Customer Support Desk · Chat · Canvas · Tickets — adopted as
 choose, where your team can do the work directly. Work done in them lands straight in the same context store —
 with each read and write filtered through the same permission model.
 
-[![Xyne Spaces](docs/assets/spaces-badge.svg)](https://spaces.xyne.ai) [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![CI](https://github.com/juspay/xyne-spaces/actions/workflows/CI-push.yml/badge.svg?branch=main)](https://github.com/juspay/xyne-spaces/actions/workflows/CI-push.yml) [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/) [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml/badge.svg)](https://github.com/juspay/xyne-spaces/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 </div>
 

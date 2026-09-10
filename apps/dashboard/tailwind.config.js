@@ -102,8 +102,6 @@ export default {
         },
         activity: {
           'sidebar-primary': 'var(--activity-sidebar-primary)',
-          chip: 'var(--activity-chip)',
-          'chip-hover': 'var(--activity-chip-hover)',
         },
         desk: {
           helper: 'var(--desk-helper-foreground)',

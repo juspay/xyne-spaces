@@ -12,12 +12,13 @@ interface CredentialMetadata {
   status: string;
   revision: number;
   identityLogin: string | null;
-  repositoryOwner: string | null;
-  repositoryCount: number | null;
+  resourceOwner: string | null;
+  fingerprint: string | null;
   validationStatus: string;
   validatedAt: string | null;
   validationErrorCode: string | null;
   validationErrorMessage: string | null;
+  attachedRepositoryCount: number;
   canManage: boolean;
 }
 
@@ -27,6 +28,7 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [token, setToken] = useState('');
+  const [resourceOwner, setResourceOwner] = useState('');
   const canManage = self?.role === WorkspaceRole.OWNER || self?.role === WorkspaceRole.ADMIN;
 
   const load = useCallback(async (): Promise<void> => {
@@ -48,10 +50,13 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
   }, [isActive, load]);
 
   const save = async (): Promise<void> => {
-    if (!token.trim()) return;
+    if (!token.trim() || !resourceOwner.trim()) return;
     setBusy('save');
     try {
-      await apiInstance.put('/sdlc/vcs/credentials/github', { token: token.trim() });
+      await apiInstance.put('/sdlc/vcs/credentials/github', {
+        token: token.trim(),
+        resourceOwner: resourceOwner.trim(),
+      });
       setToken('');
       toast.success('GitHub credential validated and saved');
       await load();
@@ -120,13 +125,11 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
           <p className='mt-6 text-sm text-muted-foreground'>Loading credential status…</p>
         ) : credential?.status === 'CONNECTED' ? (
           <div className='mt-6 space-y-4'>
-            <dl className='grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3'>
-              <Metadata label='GitHub account' value={credential.identityLogin || 'Unknown'} />
-              <Metadata label='Token for' value={credential.repositoryOwner || 'Unknown'} />
-              <Metadata
-                label='Repos it can access'
-                value={credential.repositoryCount?.toString() ?? 'Unknown'}
-              />
+            <dl className='grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4'>
+              <Metadata label='Identity' value={credential.identityLogin || 'Unknown'} />
+              <Metadata label='Resource owner' value={credential.resourceOwner || 'Unknown'} />
+              <Metadata label='Fingerprint' value={credential.fingerprint || 'Unavailable'} />
+              <Metadata label='Attached repos' value={String(credential.attachedRepositoryCount)} />
             </dl>
             <p className='text-xs text-muted-foreground'>
               {credential.validationStatus === 'VALID'
@@ -171,9 +174,11 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
         ) : canManage ? (
           <CredentialForm
             token={token}
+            resourceOwner={resourceOwner}
             replacing={credential?.status === 'REPLACING'}
             busy={busy === 'save'}
             onToken={setToken}
+            onOwner={setResourceOwner}
             onSubmit={() => void save()}
           />
         ) : (
@@ -188,9 +193,11 @@ export function RepositoryCredentialsTab({ isActive }: { isActive: boolean }): R
 
 function CredentialForm(props: {
   token: string;
+  resourceOwner: string;
   replacing: boolean;
   busy: boolean;
   onToken: (value: string) => void;
+  onOwner: (value: string) => void;
   onSubmit: () => void;
 }): ReactElement {
   return (
@@ -202,13 +209,26 @@ function CredentialForm(props: {
       }}
     >
       <div className='rounded-lg bg-muted p-4 text-sm text-muted-foreground'>
-        Paste a fine-grained PAT. Grant repository <strong>Contents: read/write</strong>,{' '}
-        <strong>Pull requests: read/write</strong>, and <strong>Workflows: read/write</strong>.
-        GitHub requires Workflows permission when a task changes files under{' '}
-        <code>.github/workflows</code>. Metadata read access is added automatically. Do not grant
-        administration or branch-protection bypass.
+        Create one fine-grained PAT for one GitHub resource owner. Grant repository{' '}
+        <strong>Contents: read/write</strong>, <strong>Pull requests: read/write</strong>, and{' '}
+        <strong>Workflows: read/write</strong>. GitHub requires Workflows permission when a task
+        changes files under <code>.github/workflows</code>. Metadata read access is added
+        automatically. Do not grant administration or branch-protection bypass.
       </div>
-      <div className='grid gap-4'>
+      <div className='grid gap-4 sm:grid-cols-2'>
+        <label className='text-sm font-medium' htmlFor='sdlc-vcs-resource-owner'>
+          Resource owner
+          <Input
+            id='sdlc-vcs-resource-owner'
+            className='mt-2'
+            value={props.resourceOwner}
+            onChange={event => props.onOwner(event.target.value)}
+            placeholder='github-org-or-user'
+            data-track-category='workspace-management'
+            data-track-name='EDIT_GITHUB_RESOURCE_OWNER'
+            required
+          />
+        </label>
         <label className='text-sm font-medium' htmlFor='sdlc-vcs-token'>
           Fine-grained PAT
           <Input
@@ -226,7 +246,7 @@ function CredentialForm(props: {
       <Button
         type='submit'
         loading={props.busy}
-        disabled={!props.token.trim()}
+        disabled={!props.token.trim() || !props.resourceOwner.trim()}
         data-track-category='workspace-management'
         data-track-name='SAVE_GITHUB_CREDENTIAL'
       >

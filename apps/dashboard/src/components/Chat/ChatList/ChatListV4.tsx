@@ -226,12 +226,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
-  const isDmScope =
-    channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
-  // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
-  // treat an opened DM/group-DM as a member so ConversationsACL loads messages (its participant
-  // check still re-verifies real membership — a non-participant gets nothing, not a leak).
-  const isMember = !!channelParticipation || isDmScope;
+  const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
@@ -349,14 +344,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
-  // Require resolved participation: while it's undefined, `?.conversationSeenCutoffAt !== null`
-  // is spuriously true and — now that DMs default isMember to true — would route to the cutoff
-  // path with a null anchor, skipping both load paths and leaving the list stuck empty.
   const shouldUseCutoffQuery =
-    !!channelParticipation &&
-    channelParticipation.conversationSeenCutoffAt !== null &&
-    isMember &&
-    !linkedConversationId;
+    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
 
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.

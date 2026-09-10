@@ -12,14 +12,13 @@ export class CallsACL extends BaseQueryACL<
   }
 
   /**
-   * Ids of calls shared with `ctx.userId` via `entity_access`, directly or through a
-   * userGroup/channel they belong to, split by entity type: recordings share as
-   * NOTE_TAKER and regular calls as CALL, so neither can widen the other's audience.
-   * `entityId` has no FK to `calls.id` (polymorphic), so this can't be expressed as a
-   * Prisma relation and is resolved as a separate lookup instead — mirrors the
-   * Zero-side `CallsACL.canSelect` `exists('shares', ...)` clauses.
+   * Ids of calls (headless recordings) shared with `ctx.userId` via `entity_access`
+   * (NOTE_TAKER), directly or through a userGroup/channel they belong to. `entityId`
+   * has no FK to `calls.id` (polymorphic), so this can't be expressed as a Prisma
+   * relation and is resolved as a separate lookup instead — mirrors the Zero-side
+   * `CallsACL.canSelect` `exists('shares', ...)` clause.
    */
-  private async getSharedCallIds(): Promise<{ recordingIds: string[]; callIds: string[] }> {
+  private async getSharedCallIds(): Promise<string[]> {
     const [groupMappings, channelParticipations] = await Promise.all([
       this.prisma.userGroupMapping.findMany({
         where: { userId: this.ctx.userId },
@@ -36,9 +35,7 @@ export class CallsACL extends BaseQueryACL<
     const shares = await this.prisma.entityAccess.findMany({
       where: {
         workspaceId: this.ctx.workspaceId,
-        shareableEntityType: {
-          in: [ShareableEntityType.NOTE_TAKER, ShareableEntityType.CALL],
-        },
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
         entityUserAccess: { not: EntityUserAccess.REVOKED },
         OR: [
           { userId: this.ctx.userId },
@@ -46,16 +43,9 @@ export class CallsACL extends BaseQueryACL<
           ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
         ],
       },
-      select: { entityId: true, shareableEntityType: true },
+      select: { entityId: true },
     })
-    return {
-      recordingIds: shares
-        .filter((s) => s.shareableEntityType === ShareableEntityType.NOTE_TAKER)
-        .map((s) => s.entityId),
-      callIds: shares
-        .filter((s) => s.shareableEntityType === ShareableEntityType.CALL)
-        .map((s) => s.entityId),
-    }
+    return shares.map((s) => s.entityId)
   }
 
   async getWhereClause(): Promise<Prisma.CallWhereInput> {
@@ -71,7 +61,7 @@ export class CallsACL extends BaseQueryACL<
       }
     }
 
-    const { recordingIds, callIds } = await this.getSharedCallIds()
+    const sharedCallIds = await this.getSharedCallIds()
 
     return {
       AND: [
@@ -80,11 +70,8 @@ export class CallsACL extends BaseQueryACL<
             { createdByUserId: this.ctx.userId },
             { participants: { some: { userId: this.ctx.userId } } },
             { channel: { participants: { some: { userId: this.ctx.userId } } } },
-            ...(recordingIds.length
-              ? [{ callType: CallType.HEADLESS, id: { in: recordingIds } }]
-              : []),
-            ...(callIds.length
-              ? [{ callType: { not: CallType.HEADLESS }, id: { in: callIds } }]
+            ...(sharedCallIds.length
+              ? [{ callType: CallType.HEADLESS, id: { in: sharedCallIds } }]
               : []),
             { callType: CallType.HEADLESS, visibility: CallVisibility.PUBLIC },
           ],

@@ -59,18 +59,16 @@ router.post('/items/:itemId/dismiss', async (req: Request<{ itemId: string }>, r
   }
 });
 
-// The param is a SCOPE key, not always a conversation id: a DM card covers its
-// whole channel, so "all" has to mean everything that card shows.
 router.post(
-  '/threads/:scopeKey/dismiss-all',
-  async (req: Request<{ scopeKey: string }>, res: Response) => {
+  '/threads/:conversationId/dismiss-all',
+  async (req: Request<{ conversationId: string }>, res: Response) => {
     try {
       const auth = getAuthContext(req);
       if (!auth) {
         sendUnauthorized(res);
         return;
       }
-      const result = await radarManualActions.dismissAllInScope(auth, req.params.scopeKey);
+      const result = await radarManualActions.dismissAllInThread(auth, req.params.conversationId);
       res.json({ success: true, data: result });
     } catch (err) {
       if (err instanceof RadarActionError) {
@@ -83,18 +81,16 @@ router.post(
   },
 );
 
-// The param is a SCOPE key, not always a conversation id: a DM card covers its
-// whole channel, so "all" has to mean everything that card shows.
 router.post(
-  '/threads/:scopeKey/resolve-all',
-  async (req: Request<{ scopeKey: string }>, res: Response) => {
+  '/threads/:conversationId/resolve-all',
+  async (req: Request<{ conversationId: string }>, res: Response) => {
     try {
       const auth = getAuthContext(req);
       if (!auth) {
         sendUnauthorized(res);
         return;
       }
-      const result = await radarManualActions.resolveAllInScope(auth, req.params.scopeKey);
+      const result = await radarManualActions.resolveAllInThread(auth, req.params.conversationId);
       res.json({ success: true, data: result });
     } catch (err) {
       if (err instanceof RadarActionError) {

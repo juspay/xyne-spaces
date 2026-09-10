@@ -7,7 +7,6 @@ import { CanvasRole } from '@xyne/shared';
 import { HoverCard } from '../../ui/HoverCard/HoverCard';
 import Button from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
-import { getCanvasMentionDisplayText } from '../../../utils/canvasMentionUtils';
 
 function formatCanvasRoleLabel(role: CanvasRole): string {
   return role.charAt(0) + role.slice(1).toLowerCase();
@@ -109,7 +108,7 @@ const MentionAvatar = ({
 
 const MentionRender = ({ inlineContent }: MentionRenderProps) => {
   const props = inlineContent.props;
-  const displayName = getCanvasMentionDisplayText(props);
+  const displayName = props.groupId && props.groupName ? props.groupName : props.username || '';
   const {
     canGrantAccess,
     canGrantOwnerAccess,

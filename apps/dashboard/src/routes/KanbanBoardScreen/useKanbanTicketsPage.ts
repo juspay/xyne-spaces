@@ -384,8 +384,6 @@ export const useKanbanTicketsPage = (
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
   const overdueReferenceTimeRef = useRef<number | null>(null);
-  // Already the final query: any quotes were typed into the search box, and the backend
-  // reads exactness off them (`isExactMatch` in the Vespa searchService).
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
@@ -575,41 +573,7 @@ export const useKanbanTicketsPage = (
       !shouldUseDirectVespaRows &&
       (!requiresVespaTicketIds || vespaTicketSearch.searchResults !== null),
   });
-  // Overlay live Zero fields onto direct-Vespa payload rows. Vespa is an async
-  // search index, so a row's statusV2/stageName can lag a just-applied status
-  // change; rendering that stale stage places the card in its OLD kanban column
-  // (ticket 61697: status changed to B but card stays in A/C until reindex).
-  // Hydrating the live stage/status by id from the Zero store keeps column
-  // membership correct immediately, before Vespa catches up.
-  const [liveDirectRows] = useCachedQuery(
-    queries.ticketsByIds({
-      ticketIds: shouldUseDirectVespaRows ? (vespaTicketIds ?? []) : [],
-    }),
-    { enabled: shouldUseDirectVespaRows && (vespaTicketIds?.length ?? 0) > 0 },
-  );
-  const liveDirectRowsById = useMemo(() => {
-    const byId = new Map<string, Ticket>();
-    for (const row of liveDirectRows ?? []) byId.set(row.id, row as Ticket);
-    return byId;
-  }, [liveDirectRows]);
-  const overlaidDirectVespaPage = useMemo(() => {
-    if (!shouldUseDirectVespaRows || directVespaPage === null) return directVespaPage;
-    if (liveDirectRowsById.size === 0) return directVespaPage;
-    return directVespaPage.map(ticket => {
-      const live = liveDirectRowsById.get(ticket.id);
-      if (!live) return ticket;
-      return {
-        ...ticket,
-        statusV2: live.statusV2,
-        stageName: live.stageName,
-        boardId: live.boardId,
-        priority: live.priority,
-        assignedTo: live.assignedTo,
-      };
-    });
-  }, [shouldUseDirectVespaRows, directVespaPage, liveDirectRowsById]);
-
-  const effectivePage = shouldUseDirectVespaRows ? overlaidDirectVespaPage : page;
+  const effectivePage = shouldUseDirectVespaRows ? directVespaPage : page;
   const effectivePageDetailsType = shouldUseDirectVespaRows
     ? directVespaPage === null
       ? 'unknown'

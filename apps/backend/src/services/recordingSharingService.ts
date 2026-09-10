@@ -17,8 +17,6 @@ import {
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
-import { isRecording } from '@/utils/callTypeUtils';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
 import {
@@ -62,8 +60,6 @@ interface LoadedRecording {
   externalId: string;
   title: string | null;
   metadata: Prisma.JsonValue;
-  callType: string;
-  channelId: string | null;
   createdByUserId: string;
   startedAt: Date;
   endedAt: Date | null;
@@ -80,9 +76,6 @@ const RECORDING_SHARE_INTENT = {
   DIRECT_SHARE: 'direct_share',
   TICKET_LINK: 'ticket_link',
 } as const satisfies Record<string, RecordingShareIntent>;
-
-const shareEntityTypeFor = (callType: string): string =>
-  callType === CallType.HEADLESS ? ShareableEntityType.NOTE_TAKER : ShareableEntityType.CALL;
 
 export class RecordingSharingError extends Error {
   constructor(
@@ -176,7 +169,6 @@ export class RecordingSharingService {
   ): Promise<RecordingSharingResult> {
     await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
-      this.assertRecordingOnly(recording, 'Link access');
       if (recording.createdByUserId !== actor.userId) {
         throw new RecordingSharingError(
           'Only the recording creator can change link access',
@@ -290,8 +282,7 @@ export class RecordingSharingService {
   ): Promise<SharePost> {
     const conversationId = randomUUID();
     const messageId = randomUUID();
-    const title =
-      recording.title?.trim() || (isRecording(recording) ? 'Untitled Recording' : 'Untitled Call');
+    const title = recording.title?.trim() || 'Untitled Recording';
     // Store the recording title as the anchor content.
     const durationMs = recording.endedAt
       ? recording.endedAt.getTime() - recording.startedAt.getTime()
@@ -302,15 +293,11 @@ export class RecordingSharingService {
       : undefined;
     const now = new Date();
     const metadata = {
+      messageSubtype: 'recording_share_post',
       callId: recording.externalId,
+      isRecordingMessage: true,
+      operation: 'recording_ended',
       durationMs,
-      ...(isRecording(recording)
-        ? {
-            messageSubtype: 'recording_share_post',
-            isRecordingMessage: true,
-            operation: 'recording_ended',
-          }
-        : { messageSubtype: 'call_share_post', isCallShareMessage: true, callRowId: recording.id }),
       ...(sanitizedMessageContent ? { messageContent: sanitizedMessageContent } : {}),
     };
 
@@ -480,7 +467,7 @@ export class RecordingSharingService {
       for (const target of uniqueTargets) {
         const existing = await this.findShare(
           tx,
-          recording,
+          recording.id,
           actor.workspaceId,
           target,
           RECORDING_SHARE_INTENT.DIRECT_SHARE,
@@ -534,7 +521,6 @@ export class RecordingSharingService {
   ): Promise<RecordingSharingResult> {
     const transactionResult = await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
-      this.assertRecordingOnly(recording, 'Ticket linking');
       const metadata = asMetadata(recording.metadata);
       const existingTicketId = metadata['linkedTicketId'];
       const existingMessageId = metadata['linkedTicketMessageId'];
@@ -689,7 +675,6 @@ export class RecordingSharingService {
 
     await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
-      this.assertRecordingOnly(recording, 'Ticket linking');
       await this.removeLinkedTicket(tx, recording, actor);
     });
 
@@ -759,7 +744,7 @@ export class RecordingSharingService {
     const target: RecordingShareTarget = { type: 'channel', id: ticket.channelId };
     const existingShare = await this.findShare(
       tx,
-      recording,
+      recording.id,
       actor.workspaceId,
       target,
       RECORDING_SHARE_INTENT.TICKET_LINK,
@@ -863,40 +848,29 @@ export class RecordingSharingService {
         title: true,
         metadata: true,
         callType: true,
-        channelId: true,
         workspaceId: true,
         createdByUserId: true,
         startedAt: true,
         endedAt: true,
       },
     });
-    if (!call || (call.workspaceId !== null && call.workspaceId !== actor.workspaceId)) {
+    if (
+      !call ||
+      call.callType !== CallType.HEADLESS ||
+      (call.workspaceId !== null && call.workspaceId !== actor.workspaceId)
+    ) {
       throw new RecordingSharingError('Recording not found', 404);
     }
-    if (call.createdByUserId === actor.userId) return call;
-    const canManage =
-      (await this.hasActiveShare(tx, call, actor)) ||
-      (!isRecording(call) && (await callShareService.isCallAudience(call, actor.userId)));
-    if (!canManage) {
-      throw new RecordingSharingError(
-        isRecording(call)
-          ? 'Only the recording creator or people it is shared with can manage sharing'
-          : 'Only people in this call, or people it is shared with, can share it',
-        403,
-      );
+    if (call.createdByUserId !== actor.userId) {
+      const hasAccess = await this.hasActiveShare(tx, call.id, actor);
+      if (!hasAccess) {
+        throw new RecordingSharingError(
+          'Only the recording creator or people it is shared with can manage sharing',
+          403,
+        );
+      }
     }
     return call;
-  }
-
-  /**
-   * Link visibility and ticket linking read and write recording-shaped state
-   * (Call.visibility, Call.metadata canvas pointers) that a regular call does not
-   * have, so they stay recordings-only rather than silently no-op'ing.
-   */
-  private assertRecordingOnly(recording: LoadedRecording, feature: string): void {
-    if (!isRecording(recording)) {
-      throw new RecordingSharingError(`${feature} is only available for recordings`, 400);
-    }
   }
 
   /**
@@ -906,7 +880,7 @@ export class RecordingSharingService {
    */
   private async hasActiveShare(
     tx: Prisma.TransactionClient,
-    call: Pick<LoadedRecording, 'id' | 'callType'>,
+    recordingId: string,
     actor: RecordingSharingActor,
   ): Promise<boolean> {
     const groupMappings = await tx.userGroupMapping.findMany({
@@ -923,8 +897,8 @@ export class RecordingSharingService {
     const share = await tx.entityAccess.findFirst({
       where: {
         workspaceId: actor.workspaceId,
-        shareableEntityType: shareEntityTypeFor(call.callType),
-        entityId: call.id,
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
+        entityId: recordingId,
         entityUserAccess: { not: EntityUserAccess.REVOKED },
         OR: [
           { userId: actor.userId },
@@ -963,10 +937,7 @@ export class RecordingSharingService {
     for (const target of targets) {
       if (target.type === 'user') {
         if (target.id === recording.createdByUserId) {
-          throw new RecordingSharingError(
-            `The ${isRecording(recording) ? 'recording' : 'call'} owner already has access`,
-            400,
-          );
+          throw new RecordingSharingError('The recording owner already has access', 400);
         }
         const user = await tx.user.findFirst({
           where: { id: target.id, workspaceId, leftAt: null },
@@ -991,7 +962,7 @@ export class RecordingSharingService {
 
   private async findShare(
     tx: Prisma.TransactionClient,
-    call: Pick<LoadedRecording, 'id' | 'callType'>,
+    recordingId: string,
     workspaceId: string,
     target: RecordingShareTarget,
     intent: RecordingShareIntent,
@@ -999,8 +970,8 @@ export class RecordingSharingService {
     const shares = await tx.entityAccess.findMany({
       where: {
         workspaceId,
-        shareableEntityType: shareEntityTypeFor(call.callType),
-        entityId: call.id,
+        shareableEntityType: ShareableEntityType.NOTE_TAKER,
+        entityId: recordingId,
         ...targetWhere(target),
       },
     });
@@ -1015,7 +986,7 @@ export class RecordingSharingService {
     access: GrantableEntityUserAccess,
     intent: RecordingShareIntent,
   ): Promise<AccessChange> {
-    const existing = await this.findShare(tx, recording, workspaceId, target, intent);
+    const existing = await this.findShare(tx, recording.id, workspaceId, target, intent);
     const activated = !existing || existing.entityUserAccess === EntityUserAccess.REVOKED;
     const share = existing
       ? await tx.entityAccess.update({
@@ -1032,7 +1003,7 @@ export class RecordingSharingService {
           data: {
             id: randomUUID(),
             workspaceId,
-            shareableEntityType: shareEntityTypeFor(recording.callType),
+            shareableEntityType: ShareableEntityType.NOTE_TAKER,
             entityId: recording.id,
             entityUserAccess: access,
             metadata: { intent },
@@ -1081,7 +1052,7 @@ export class RecordingSharingService {
         const remainingAccess = await tx.entityAccess.findFirst({
           where: {
             workspaceId,
-            shareableEntityType: shareEntityTypeFor(recording.callType),
+            shareableEntityType: ShareableEntityType.NOTE_TAKER,
             entityId: recording.id,
             entityUserAccess: { not: EntityUserAccess.REVOKED },
             ...targetWhere(target),

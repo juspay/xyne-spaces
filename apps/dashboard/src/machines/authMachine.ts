@@ -189,27 +189,6 @@ const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
   return output?.workspaces || [];
 };
 
-// Domain-conflict fields arrive as URL params on the web callback (processingOAuthCallback) and
-// on the OAUTH_CALLBACK_COMPLETE event from the Electron IPC / React Native bridge. Both paths
-// end in a creatingOrg transition, so both must translate them into the request-to-join context.
-const getEnterpriseJoinContext = (
-  output?: OAuthCallbackOutput,
-): { error: string | null; enterpriseJoinTarget: EnterpriseJoinTarget | null } => {
-  return {
-    error: output?.domainConflictError ?? output?.publicEmailDomainError ?? null,
-    enterpriseJoinTarget:
-      output?.enterpriseJoinOrgName && output.enterpriseJoinWorkspaces
-        ? {
-            orgName: output.enterpriseJoinOrgName,
-            workspaces: JSON.parse(output.enterpriseJoinWorkspaces) as Array<{
-              id: string;
-              name: string;
-            }>,
-          }
-        : null,
-  };
-};
-
 export const authMachine = createMachine(
   {
     /** @xstate-layout N4IgpgJg5mDOIC5QEMCuAXAFgWWQY0wEsA7MAOgLDwGsSoBlOWQge2IGIBtABgF1FQABxbN0rYgJAAPRACYAjAE4yANgAsADjXaArIsUaA7AGZ1AGhABPRJuUbjew9xUbZa7muOGAvt4tosXAISckoaOkZYZjYueX4kEGFRcUkZBAVldS1dfSNTNQtrBHUVMmN5WR1TDRVueyrffwwcfCJSCkwqWmIGJnEuWXihEUIxNlS5JVVNbTU9AxNzK0QNeTIdbk35eTmVY25FY1lGkACW4PbBACcWPD6egHkAQWaAYWQAGw+AI3xqdggbHIJAAbixqOQzkE2uRrrd7lBnm9Pj8-ghQbdkGNiDxeLjJElRikEmlDAoyGodnVjHMFCpZCpCjYNNwynp3HolIYdOoTlDWiEyHC7lE6EisO8vr8aOwwFcblchR8sQAzFhXAC2ZH5F1hNxFzEeLwlKOl1HRxDBeCx4lx+IShOxEwQZLWlPc9lp8npjOWCGMNTIimcskMuxqbkUfOa0MFIM+hAgNp6ABVwWAOID2hiIdqYwL2vGPonk1A0xDiBarTa2Ha+ASRk6SYgyaywyp5M5uDo1Io5homf7uGtKjoeWGdLI6jUVNHAgXyEWS2JU+mOHKFUrVeqtTqYWQl0mV2W11XMdi60NEo3iaBSeT3dSvT7B1PWZstvIZ6YlGo5+d9zODMxGtdBIHYAAZB4AHEHgAVRTe1hmScZmwQbZTApbINh0bljEOAc-Q7VkFAOQwtA0CiaX-WN2lQYggOIECsXA2CYIggBRAB9egAEloIAOV4gSkOvFCJDQipyLIbhZAcOoPEUQxDAqQdJzUIMtADRx6gMGiFzIejGOYsCIHYV5OKeAAlLiOKsqyHis0THVvaREAqRQ1iqScFBMXydEIoo1FkDR1nKSoVD7KcaWMXw-BAYgWAgOBJD3EIG3E50AFpfSKLKdCDfQlI0HRvQULRPP03UOi6CI+lQ5CiQatyEGCwc1HUdYSsUDsOrDDQ9PitLLn1BFxUwSVURoDKmoku8bA2GT5B5H95AcBwx3azqAr0SKAoDDteSG-NqsPUtywzGam3m-1DFKBxvQCkKKlqQxXzDdYVHI5a9iMCpjmO+dquMwhQMgK7XLSAw21Wcp5CcYN+sHPZjFUIwx20b76R8QGAMFIzmmA0GWIgCHmrSCpA25cjai8Gk7uRhkKS8UqNh2Fwxzi7wgA */
@@ -880,7 +859,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  ...getEnterpriseJoinContext(output),
+                  error: null,
                 };
               }),
             },
@@ -983,7 +962,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  ...getEnterpriseJoinContext(output),
+                  error: null,
                 };
               }),
             },
@@ -1067,7 +1046,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  ...getEnterpriseJoinContext(output),
+                  error: null,
                 };
               }),
             },

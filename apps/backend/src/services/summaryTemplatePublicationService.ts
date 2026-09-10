@@ -114,7 +114,7 @@ export class SummaryTemplatePublicationService {
     return { ...updated, canEdit: updated.createdBy === actor.userId, isSystem: false };
   }
 
-  async isAdmin(workspaceId: string, userId: string): Promise<boolean> {
+  private async isAdmin(workspaceId: string, userId: string): Promise<boolean> {
     return (await this.getAdmins(workspaceId)).some((admin) => admin.id === userId);
   }
 

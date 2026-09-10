@@ -1,25 +1,23 @@
-import { ChannelScopeType } from '@xyne/shared';
-import type { VisibleChannel } from '@xyne/shared/hooks';
-import { X } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { Hash, Lock, Users, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useSelf, useActiveUsers, useUsersById } from '../../../hooks/useUsers';
-import { useParticipantCandidates } from '../../../hooks/useParticipantCandidates';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
+import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import {
   parseParticipants,
   matchParticipants,
   looksLikeBulkEntry,
 } from '../../../utils/participantUtils';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
+import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
-import {
-  buildChannelParticipantOption,
-  buildUserGroupParticipantOption,
-  buildUserParticipantOption,
-} from '../participantOptions';
+import { ParticipantOptionContent } from '../ParticipantOptionContent';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -39,11 +37,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [notFoundUsers, setNotFoundUsers] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Full roster — used ONLY by the bulk-paste matcher below, which runs on Enter
-  // rather than per keystroke. Reading the array is free; nothing maps over it.
   const activeUsers = useActiveUsers();
-  const usersById = useUsersById();
-  const allVisibleChannels = useAllVisibleChannels();
+  const allUsers = useUsers();
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {
@@ -54,51 +49,86 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     }
   }, [isOpen]);
 
-  const excludedUserIds = useMemo(
-    () => (user?.id ? new Set([user.id]) : new Set<string>()),
-    [user?.id],
+  const allVisibleChannels = useAllVisibleChannels();
+  const userGroups = useUserGroupSearch(searchQuery, 10);
+
+  // Filter for DEFAULT public channels only (not DMs)
+  const channels = useMemo(() => {
+    return allVisibleChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT);
+  }, [allVisibleChannels]);
+
+  const inviteUserOrChannelOptions = useMemo(() => {
+    const userOptions =
+      activeUsers
+        .filter(u => u.id !== user?.id)
+        .map(user => ({
+          ...user,
+          label: user.name ?? user.email,
+          value: `user:${user.id}`,
+          icon: (
+            <Avatar
+              userId={user.id}
+              size={'sm'}
+              showActiveStatus={false}
+              className='rounded-md size-[18px] flex items-center justify-center bg-background'
+            />
+          ),
+          children: (
+            <ParticipantOptionContent
+              icon={
+                <Avatar
+                  userId={user.id}
+                  size='sm'
+                  showActiveStatus={false}
+                  className='rounded-md size-[18px] flex items-center justify-center bg-background'
+                />
+              }
+              label={getUserDisplayName(user)}
+              subtitle={user.email}
+              isDeactivated={isUserDeactivated(user)}
+            />
+          ),
+          type: 'user' as const,
+        })) || [];
+
+    const channelOptions = channels.map(channel => ({
+      ...channel,
+      label: channel.name,
+      value: `channel:${channel.id}`,
+      icon:
+        channel.visibility === ChannelVisibility.PRIVATE ? (
+          <Lock className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
+        ) : (
+          <Hash className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
+        ),
+      type: 'channel' as const,
+    }));
+
+    const userGroupOptions = userGroups.map(group => ({
+      ...group,
+      label: group.name,
+      value: `user_group:${group.id}`,
+      icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
+      subtitle: group.alias || group.description,
+      children: (
+        <ParticipantOptionContent
+          icon={<Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />}
+          label={group.name}
+          subtitle={group.alias || group.description}
+        />
+      ),
+      type: 'user_group' as const,
+    }));
+
+    return [...userOptions, ...channelOptions, ...userGroupOptions].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [activeUsers, channels, userGroups, allUsers, user?.id]);
+
+  const rankedParticipantOptions = useMemo(
+    () => rankParticipantOptions(inviteUserOrChannelOptions, searchQuery),
+    [inviteUserOrChannelOptions, searchQuery],
   );
-
-  // DEFAULT-scope channels only (no DMs, no group DMs).
-  const channelFilter = useCallback(
-    (channel: VisibleChannel) => channel.scopeType === ChannelScopeType.DEFAULT,
-    [],
-  );
-
-  // Bounded + ranked candidates. Only these get turned into rows, so a keystroke
-  // decorates ~40 entities instead of the whole workspace.
-  const { users, userGroups, channels } = useParticipantCandidates({
-    query: searchQuery,
-    excludeUserIds: excludedUserIds,
-    channelFilter,
-  });
-
-  const participantOptions = useMemo(
-    () => [
-      ...users.map(buildUserParticipantOption),
-      ...channels.map(buildChannelParticipantOption),
-      ...userGroups.map(buildUserGroupParticipantOption),
-    ],
-    [users, channels, userGroups],
-  );
-
-  // Pills for the current selection. Bulk paste can add people the ranked slice
-  // never contained, and a picked channel drops out of the list as soon as the
-  // query changes — both would leave a selected value with no renderable pill.
-  const selectedOptions = useMemo(() => {
-    const channelsById = new Map(allVisibleChannels.map(c => [c.id, c]));
-    return selectedParticipants.flatMap(value => {
-      if (value.startsWith('user:')) {
-        const found = usersById.get(value.slice('user:'.length));
-        return found ? [buildUserParticipantOption(found)] : [];
-      }
-      if (value.startsWith('channel:')) {
-        const found = channelsById.get(value.slice('channel:'.length));
-        return found ? [buildChannelParticipantOption(found)] : [];
-      }
-      return [];
-    });
-  }, [selectedParticipants, usersById, allVisibleChannels]);
 
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
@@ -218,8 +248,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <div className='space-y-2'>
               <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
               <SearchParticipants
-                options={participantOptions}
-                prefilledOptions={selectedOptions}
+                options={rankedParticipantOptions}
                 selectedValues={selectedParticipants}
                 onMultiSelect={handleMultiSelect}
                 searchQuery={searchQuery}

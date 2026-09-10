@@ -5,4 +5,3 @@ export { generateFilePath, normalizeStoragePath, sanitizeFilename } from './path
 export { GCSService } from './gcsService.js';
 export { GCSAdapter } from './gcsAdapter.js';
 export { S3StorageService } from './s3StorageService.js';
-export { AzureBlobStorageService } from './azureBlobStorageService.js';

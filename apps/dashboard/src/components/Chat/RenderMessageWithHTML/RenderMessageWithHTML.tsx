@@ -31,7 +31,6 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
-import { LinkHoverCard } from '../LinkHoverCard/LinkHoverCard';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
@@ -57,8 +56,6 @@ interface RenderMessageWithHTMLProps {
   showEdited?: boolean;
   isSystemMessage?: boolean;
   breakLongLinks?: boolean;
-  /** Render URLs/links as inert plain text (activity sidebar: a click opens the activity, not the link). */
-  disableLinks?: boolean;
   /** Needed to render embedded FlowScreenManager widgets */
   messageId?: string;
   conversationId?: string;
@@ -867,7 +864,6 @@ const parseNode = (
   conversationId?: string,
   preserveThreadRoute = false,
   slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
-  disableLinks = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -891,16 +887,7 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      if (disableLinks) {
-        parts.push(
-          <span
-            key={`${keyPrefix}-url-${offset}`}
-            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
-          >
-            {url}
-          </span>,
-        );
-      } else if (parseInternalXyneLink(url)) {
+      if (parseInternalXyneLink(url)) {
         const external = isExternalUrl(url);
         const linkProps = getAnchorTargetProps(url);
 
@@ -1130,7 +1117,6 @@ const parseNode = (
       conversationId,
       preserveThreadRoute,
       slashCommandArtifactContext,
-      disableLinks,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1265,14 +1251,6 @@ const parseNode = (
     }
   }
 
-  if (tag === 'a' && disableLinks) {
-    return (
-      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary hover:underline'>
-        {children}
-      </span>
-    );
-  }
-
   if (tag === 'a') {
     let href = el.getAttribute('href');
     if (href && isValidURL(href)) {
@@ -1332,16 +1310,6 @@ const parseNode = (
       props['data-track-category'] = 'MESSAGE';
       props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
       props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
-
-      const label = (el.textContent ?? '').trim().replace(/\/+$/, '');
-      if (isExternal && label !== href.replace(/\/+$/, '')) {
-        const { key, ...anchorProps } = props;
-        return (
-          <LinkHoverCard key={key as string} href={href}>
-            {React.createElement(tag, anchorProps, ...children)}
-          </LinkHoverCard>
-        );
-      }
     }
   }
 
@@ -1377,7 +1345,6 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   showEdited = false,
   isSystemMessage = false,
   breakLongLinks = false,
-  disableLinks = false,
   messageId,
   conversationId,
   preserveThreadRoute = false,
@@ -1427,7 +1394,6 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           conversationId,
           preserveThreadRoute,
           slashCommandArtifactContext,
-          disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1441,7 +1407,6 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     keyPrefix,
     navigate,
     breakLongLinks,
-    disableLinks,
     messageId,
     conversationId,
     preserveThreadRoute,

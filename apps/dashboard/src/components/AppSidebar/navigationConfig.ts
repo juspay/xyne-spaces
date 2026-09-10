@@ -29,7 +29,6 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
-  GitBranch,
   type PikaIconProps,
   Tag,
 } from '@xyne/icons';
@@ -96,7 +95,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
-  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
   {
@@ -165,6 +163,8 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
+  '/guide',
+  '/releaseManager',
 ];
 
 // Paths shown in the toolbar by default (before any user customization).

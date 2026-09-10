@@ -117,35 +117,17 @@ const handleNativeSignInResult = (
     return;
   }
 
-  // Zero workspaces still goes to the machine when the backend reported a domain conflict, so
-  // the enterprise request-to-join UI renders instead of falling through to the session bootstrap.
-  const nativeHasDomainConflict = !!(payload.domainConflictError || payload.publicEmailDomainError);
-  if (
-    payload.email &&
-    ((payload.workspaces && payload.workspaces.length > 0) || nativeHasDomainConflict)
-  ) {
+  if (payload.workspaces && payload.workspaces.length > 0 && payload.email) {
     authActor.send({
       type: 'OAUTH_CALLBACK_COMPLETE',
       output: {
-        workspaces: (payload.workspaces ?? []) as Workspace[],
+        workspaces: payload.workspaces as Workspace[],
         pendingUserData: {
           email: payload.email,
           name: payload.name ?? '',
           ...(payload.picture ? { picture: payload.picture } : {}),
         },
         userExistsButRemoved: payload.userExistsButRemoved || false,
-        ...(payload.domainConflictError
-          ? { domainConflictError: payload.domainConflictError }
-          : {}),
-        ...(payload.publicEmailDomainError
-          ? { publicEmailDomainError: payload.publicEmailDomainError }
-          : {}),
-        ...(payload.enterpriseJoinOrgName
-          ? { enterpriseJoinOrgName: payload.enterpriseJoinOrgName }
-          : {}),
-        ...(payload.enterpriseJoinWorkspaces
-          ? { enterpriseJoinWorkspaces: payload.enterpriseJoinWorkspaces }
-          : {}),
       },
     });
     return;
@@ -296,18 +278,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 ...(data.picture ? { picture: data.picture } : {}),
               },
               userExistsButRemoved: data.userExistsButRemoved || false,
-              ...(data.domainConflictError
-                ? { domainConflictError: data.domainConflictError }
-                : {}),
-              ...(data.publicEmailDomainError
-                ? { publicEmailDomainError: data.publicEmailDomainError }
-                : {}),
-              ...(data.enterpriseJoinOrgName
-                ? { enterpriseJoinOrgName: data.enterpriseJoinOrgName }
-                : {}),
-              ...(data.enterpriseJoinWorkspaces
-                ? { enterpriseJoinWorkspaces: data.enterpriseJoinWorkspaces }
-                : {}),
             },
           });
         } else {

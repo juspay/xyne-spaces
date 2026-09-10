@@ -153,7 +153,6 @@ export class SendMessageStep extends BaseActionStep<
           isBot,
           isMarkdown: true,
           uploadedFiles: deliveryFiles,
-          emitsMessageReceivedViaSideEffects: true,
         });
       } catch (error) {
         await removeUnclaimedAutomationDeliveryFiles(deliveryFiles);

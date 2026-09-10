@@ -36,7 +36,6 @@ import { ArtifactCodeView } from './ArtifactCodeView';
 import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataBridge';
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
-import { useArtifactRequestBridge } from './useArtifactRequestBridge';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
 import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
@@ -144,11 +143,6 @@ const ArtifactSandpack = memo(
     // resolves them with the app's own helpers rather than letting generated
     // code join a user table and get it wrong.
     useArtifactDirectoryBridge({ currentUserId, previewRef });
-
-    // Runs the app's backend SDK / storage fetches as the current viewer: the
-    // app tunnels them here (it has no cookie), the host performs the real
-    // same-origin fetch, allow-listed to /api/sdk and /claw.
-    useArtifactRequestBridge({ previewRef, ...(appId ? { appId } : {}) });
 
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(

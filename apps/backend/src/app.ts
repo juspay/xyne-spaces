@@ -47,7 +47,6 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -139,7 +138,6 @@ import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
-import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -166,7 +164,6 @@ import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
-import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -179,6 +176,7 @@ import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
+import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
@@ -205,7 +203,6 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
-import { encryptedFieldsConfig } from '@xyne/shared';
 
 
 export class App {
@@ -374,8 +371,6 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
-
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
     this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
@@ -489,7 +484,6 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
-    this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
       '/api/agent-tools-mappings',
@@ -615,27 +609,7 @@ export class App {
       validateS2SKey,
       handleSdlcClawCallback,
     );
-    // Claw's completion callback for a parked RUN_AGENT step. The session — not
-    // the node path — identifies which attempt reported back; the handler
-    // resolves the gate from it.
-    this.app.post(
-      '/api/internal/workflows-v2/claw-callback/:executionId',
-      validateS2SKey,
-      handleWorkflowClawCallback,
-    );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
-
-    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
-    // encryption service fetches this and caches it instead of importing @xyne/shared.
-    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
-      const encryptedFields = Object.fromEntries(
-        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
-          table,
-          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
-        ]),
-      );
-      res.json({ encryptedFields });
-    });
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -958,6 +932,14 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
+    // Commit analysis queue worker (enabled only on generic worker pods)
+    if (config.enableCommitAnalysisWorker) {
+      logger.info('Initializing commit analysis queue worker...');
+      await commitAnalysisQueue.initialize();
+    } else {
+      logger.info('Commit analysis queue worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false)');
+    }
+
     logger.info('Initializing SDLC queue (producer)...');
     await sdlcQueue.initialize();
 
@@ -1010,11 +992,6 @@ export class App {
 
     logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
-
-    // Outbound side of the same story: scheduling a call here enqueues a push
-    // onto the organizer's calendar, drained by the worker.
-    logger.info('Initializing call calendar push queue (producer)...');
-    await callCalendarPushQueue.initialize();
 
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
     logger.info('Initializing unified watch renewal queue...');
@@ -1081,9 +1058,6 @@ export class App {
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
 
-    const { initWorkflows } = await import('@/workflowsV2/runtime');
-    await initWorkflows();
-
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();
     const workspaces = await dbClient.workspace.findMany({ select: { id: true } });
@@ -1149,7 +1123,6 @@ export class App {
       // Close calendar sync queues
       await microsoftCalendarSyncQueue.close();
       await googleCalendarSyncQueue.close();
-      await callCalendarPushQueue.close();
       await watchRenewalQueue.close();
 
       // Close warm user registry queue

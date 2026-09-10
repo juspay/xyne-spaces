@@ -144,7 +144,6 @@ export interface SelectableRow {
   channelId: string;
   conversationId: string;
   stageName?: string | null;
-  statusV2?: string | null;
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
@@ -787,7 +786,6 @@ export const TicketListView = function TicketListView({
                       channelId: row.channelId ?? '',
                       conversationId: row.conversationId ?? '',
                       stageName: row.stageName,
-                      statusV2: row.statusV2,
                       priority: row.priority,
                       assignedTo: row.assignedTo,
                       userGroupId: row.userGroupId,
@@ -820,7 +818,6 @@ export const TicketListView = function TicketListView({
       channelId: t.channelId ?? '',
       conversationId: t.conversationId ?? '',
       stageName: t.stageName,
-      statusV2: t.statusV2,
       priority: t.priority,
       assignedTo: t.assignedTo,
       userGroupId: t.userGroupId,

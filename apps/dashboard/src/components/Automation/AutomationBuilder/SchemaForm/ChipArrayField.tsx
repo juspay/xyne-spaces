@@ -7,7 +7,6 @@ interface ChipArrayFieldProps {
   onChange: (next: string[]) => void;
   placeholder?: string;
   error?: boolean;
-  mode?: 'token' | 'phrase';
 }
 
 export function ChipArrayField({
@@ -15,13 +14,12 @@ export function ChipArrayField({
   onChange,
   placeholder,
   error,
-  mode = 'phrase',
 }: ChipArrayFieldProps): React.ReactElement {
   const [draft, setDraft] = useState('');
 
   const commit = (raw: string): void => {
     const parts = raw
-      .split(mode === 'token' ? /[,\s]+/ : /[\r\n]+/)
+      .split(/[,\s]+/)
       .map(s => s.trim())
       .filter(s => s.length > 0);
     if (parts.length === 0) return;
@@ -71,7 +69,7 @@ export function ChipArrayField({
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onKeyDown={e => {
-          if (e.key === 'Enter' || (e.key === ',' && mode === 'token')) {
+          if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();
             commit(draft);
             return;

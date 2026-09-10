@@ -179,16 +179,6 @@ function isApiErrorResponse(data: unknown): data is ApiErrorResponse {
 // SERVICE CLASS
 // ============================================================================
 
-export type CallShareTarget =
-  | { type: 'user'; id: string }
-  | { type: 'user_group'; id: string }
-  | { type: 'channel'; id: string };
-
-export interface CallSharingResult {
-  action: 'grant' | 'revoke';
-  shares?: Array<{ id: string; target: CallShareTarget; access: string }>;
-}
-
 export class CallService {
   /**
    * Replace a call's labels. Returns the resolved Tag ids — raw text typed in the
@@ -200,42 +190,6 @@ export class CallService {
       { labels },
     );
     return response.data.labels;
-  }
-
-  /**
-   * Rewrite the call's detailed summary with the chosen summary template.
-   */
-  async regenerateSummary(callId: string, summaryTemplateId: string): Promise<void> {
-    await apiInstance.post(`/calls/${callId}/generate-summary`, { summaryTemplateId });
-  }
-
-  /**
-   * Share a call with people, groups or channels, optionally with a note. Each
-   * target also gets a card posted into the channel (or a DM, for a user target).
-   */
-  async grantCallAccess(
-    callId: string,
-    targets: CallShareTarget[],
-    messageContent?: string,
-  ): Promise<CallSharingResult> {
-    const response = await apiInstance.post<{ success: true } & CallSharingResult>(
-      `/calls/${callId}/sharing`,
-      {
-        action: 'grant',
-        targets,
-        ...(messageContent?.trim() ? { messageContent: messageContent.trim() } : {}),
-      },
-    );
-    return response.data;
-  }
-
-  /** Removes a target's access and deletes the card the share posted for it. */
-  async revokeCallAccess(callId: string, targets: CallShareTarget[]): Promise<CallSharingResult> {
-    const response = await apiInstance.post<{ success: true } & CallSharingResult>(
-      `/calls/${callId}/sharing`,
-      { action: 'revoke', targets },
-    );
-    return response.data;
   }
 
   async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {

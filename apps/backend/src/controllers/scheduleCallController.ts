@@ -18,7 +18,6 @@ import {
   sendCallInvitationReply,
 } from '@/services/callInvitationEmailService';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
-import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
@@ -442,10 +441,6 @@ export class ScheduleCallController {
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduleCallControllerCreateScheduledCall });
 
-      // Put the call on the organizer's Google Calendar (and, as attendees, on
-      // every participant's) so it is visible to people who never open Xyne.
-      queueCallCalendarPush(callId, 'scheduleCall');
-
       // Send immediate notifications + create activities for all participants (excluding organizer)
       try {
         await scheduledCallNotificationService.sendScheduledCallNotifications({
@@ -675,8 +670,6 @@ export class ScheduleCallController {
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
-
-      queueCallCalendarPush(call.id, 'updateScheduledCall');
 
       if (newlyAddedExternalInvitees.length > 0) {
         const inviteStartsAt = updatedCall.startsAt ?? call.startsAt;
@@ -1114,14 +1107,6 @@ export class ScheduleCallController {
             });
           }
         }
-
-        // Title / time / participant edits cascaded above; mirror them out.
-        // (The regeneration branch is covered by recurringCallService, which
-        // pushes the new instances and withdraws the superseded ones.)
-        queueCallCalendarPushMany(
-          allScheduledInstances.map((instance) => instance.id),
-          'updateRecurringSeries',
-        );
       }
 
       if (newlyAddedExternalInvitees.length > 0) {
@@ -1237,9 +1222,6 @@ export class ScheduleCallController {
 
       // Mark the instance as CANCELLED (preserve record)
       await repositories.scheduledCalls.cancelCall(call.id);
-
-      // Withdraw the mirrored calendar event so attendees' calendars clear too.
-      queueCallCalendarPush(call.id, 'cancelScheduledCall');
 
       logger.info(`Call ${externalId} cancelled by organizer ${userId}`);
 

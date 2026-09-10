@@ -17,14 +17,6 @@ export function formatCallHeldOn(startedAt: Timestamp): string | null {
   return `${format(date, 'EEE MMM d, yyyy')} · ${format(date, 'h:mm a')}`;
 }
 
-export function callSummaryFormat(aiSummary: string | null | undefined): 'markdown' | 'html' {
-  const summary = aiSummary?.trim();
-  if (!summary) return 'markdown';
-  const hasHtmlTags = /<[^>]+>/i.test(summary);
-  const startsWithMarkdown = /^##?\s/.test(summary);
-  return !hasHtmlTags || startsWithMarkdown ? 'markdown' : 'html';
-}
-
 /**
  * Compact call length for the meta line, e.g. "22 min", "1 hr 5 min".
  * Sub-minute calls round up so a 12s call doesn't read as "0 min".

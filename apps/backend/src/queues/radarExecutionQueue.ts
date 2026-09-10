@@ -2,21 +2,14 @@ import Bull from 'bull';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import { scopeKeyFor } from '@/services/radar/radarScope';
-import { ChannelScopeType } from '@xyne/shared';
 
 export interface RadarExecutionJobData {
   conversationId: string;
-  channelId: string;
-  /** ChannelScopeType of the conversation's channel; decides the scope key. */
-  scopeType: string | null;
 }
 
-/** Per-scope quiet period before a window is parsed: how fast Radar reacts, and
- *  how many messages one parse covers. A DM waits longer — its gate lets every
- *  message through, so this is what bounds the parse rate there. */
+/** Per-thread quiet period before a window is parsed: how fast Radar reacts,
+ *  and how many messages one parse covers. */
 const DEBOUNCE_MS = config.radar.debounceMs;
-const DM_DEBOUNCE_MS = config.radar.dmDebounceMs;
 
 export function isRadarExecutionEnabled(): boolean {
   return config.radar.enabled;
@@ -42,8 +35,8 @@ class RadarExecutionQueue {
           backoff: { type: 'exponential', delay: 5000 },
           removeOnComplete: true,
           // Deviates from the repo's removeOnFail:false convention on purpose:
-          // jobId is a stable, reused scope key, so a retained failed job
-          // would silently block that scope's enqueues forever (Bull ignores
+          // jobId is a stable, reused conversationId, so a retained failed job
+          // would silently block that thread's enqueues forever (Bull ignores
           // adds whose jobId exists in any state). Failures are logged by the
           // 'failed' listener below instead.
           removeOnFail: true,
@@ -67,18 +60,14 @@ class RadarExecutionQueue {
   }
 
   /**
-   * Enqueue a "something happened here" signal. Fire-and-forget by contract:
-   * never throws, so the chat write path can never be blocked.
+   * Enqueue a "something happened in this thread" signal. Fire-and-forget by
+   * contract: never throws, so the chat write path can never be blocked.
    *
-   * jobId = scope key + delay gives per-scope debounce: while a job for this
-   * scope is delayed/waiting/active, further adds are no-ops, and the worker
-   * reads everything above the scope's watermark when the job runs.
-   *
-   * The scope key is what makes the debounce work in a DM at all. Keyed by
-   * conversation, every DM message is its own job — ten fast replies are ten
-   * parses of one message each. Keyed by channel, they coalesce into one.
+   * jobId = conversationId + delay gives per-thread debounce: while a job for
+   * this thread is delayed/waiting/active, further adds are no-ops, and the
+   * worker reads everything above the thread's watermark when the job runs.
    */
-  async enqueueThread(data: RadarExecutionJobData): Promise<void> {
+  async enqueueThread(conversationId: string): Promise<void> {
     if (!isRadarExecutionEnabled()) return;
 
     try {
@@ -87,14 +76,13 @@ class RadarExecutionQueue {
       }
       if (!this.queue) return;
 
-      const jobId = scopeKeyFor(data.scopeType, data.channelId, data.conversationId);
-      await this.queue.add(data, {
-        jobId,
-        delay: data.scopeType === ChannelScopeType.DM ? DM_DEBOUNCE_MS : DEBOUNCE_MS,
-      });
+      await this.queue.add(
+        { conversationId },
+        { jobId: conversationId, delay: DEBOUNCE_MS },
+      );
     } catch (error) {
       logger.error('[RADAR-EXECUTION-QUEUE] Failed to enqueue thread:', {
-        conversationId: data.conversationId,
+        conversationId,
         error,
       });
     }

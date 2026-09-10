@@ -34,7 +34,7 @@ export class MigrationWorkers {
     // the fanned-out conversation jobs for cross-process parallelism.
     const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
     if (isPrimary) {
-      this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.refreshRequested ? this.refresh(j) : this.collect(j)));
+      this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => this.collect(j)));
       this.queues.process(QueueName.INGESTION, (id) => this.guard(id, (j) => this.ingest(j)));
       const timer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
       timer.unref?.();
@@ -61,7 +61,7 @@ export class MigrationWorkers {
         }
         continue;
       }
-      const running = job.status === MigrationStatus.COLLECTING || job.status === MigrationStatus.REFRESHING || job.status === MigrationStatus.INGESTING;
+      const running = job.status === MigrationStatus.COLLECTING || job.status === MigrationStatus.INGESTING;
       if (!running) continue;
       // Status says running — but is a worker actually processing it? If Bull has it sitting in the wait/delayed
       // queue (bumped back by a restart/stall, or a resume jumped ahead), the "Collecting/Ingesting" status is
@@ -132,7 +132,6 @@ export class MigrationWorkers {
     }
 
     const done = new Set(job.checkpoint.collectedConversationIds);
-    const cursors = await this.engine.readCursors(job.gcsPrefix); // per-conversation last-collected ts → the delta cursor for refresh
     const PROGRESS_EVERY = 25;
     let collected = 0, messages = 0, skipped = 0, truncated = 0;
     // A channel is a single conversation (conversation bar meaningless) and Slack gives no message total, so report progress
@@ -155,7 +154,6 @@ export class MigrationWorkers {
         return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
       }
       if (done.has(conv.id)) continue;
-      if (conv.isEmpty) { await this.store.addCollected(job.id, conv.id, 0); collected += 1; continue; } // Slack says no messages ever → skip the history call
       const result = await this.engine.collectConversation(
         token, conv, job.gcsPrefix, job.channelInput?.startDate,
         isChannel
@@ -171,7 +169,6 @@ export class MigrationWorkers {
         continue;
       }
       await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); // channel count already live via setChannelProgress
-      if (result.newestTs > 0) cursors[conv.id] = result.newestTs; // remember the newest ts so refresh only fetches the delta
       collected += 1;
       messages += result.messages;
       if (result.outcome === 'truncated') {
@@ -183,81 +180,11 @@ export class MigrationWorkers {
       }
     }
 
-    await this.engine.writeCursors(job.gcsPrefix, cursors).catch(() => undefined);
-    // Collection done → approval gate. Keep the token (encrypted) through the approval window so "Get latest messages"
-    // can re-collect; it's dropped when ingestion starts (see ingest()).
-    await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, collectedAt: Date.now() });
+    // Collection done → approval gate; drop the token immediately (§5.7).
+    await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, encryptedToken: undefined });
     logger.info('[SlackMigration] collection complete → awaiting approval', {
       id: job.id, conversations: conversations.length, collected, messages, skipped, truncated,
     });
-  }
-
-  /**
-   * "Get latest messages": incremental DELTA re-collection while AWAITING_APPROVAL. Re-lists conversations (catches new
-   * DMs → full collect into base), and for each existing conversation writes only messages/replies newer than its cursor
-   * to a SNAPSHOT file (base untouched, so a partial refresh can't lose data). Old-thread replies within the 30-day
-   * lookback are caught. Ingest reads base + snapshots as a union and dedups. Returns to AWAITING_APPROVAL.
-   */
-  private async refresh(job: MigrationJob): Promise<void> {
-    if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING].includes(job.status)) return;
-    let token: string;
-    try { token = this.engine.decryptToken(job); }
-    catch { await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, refreshRequested: false, error: 'Refresh needs the Slack token, which is no longer available. Re-submit to migrate newer messages.' }); return; }
-    // Keep refreshRequested set through the run so an orphaned refresh (pod died) is re-dispatched as a refresh, not a collect.
-    await this.store.update(job.id, { status: MigrationStatus.REFRESHING });
-    logger.info('[SlackMigration] refresh started', { id: job.id, type: job.type });
-
-    const existing = await this.engine.readManifest(job.gcsPrefix).catch(() => [] as CollectedConversation[]);
-    const current = await this.engine.listConversations(token, job.type, job.channelInput);
-    const knownIds = new Set(existing.map((c) => c.id));
-    const merged = [...existing, ...current.filter((c) => !knownIds.has(c.id))];
-    if (merged.length !== existing.length) await this.engine.writeManifest(job.gcsPrefix, merged);
-
-    const freshEmpty = new Map(current.map((c) => [c.id, c.isEmpty])); // FRESH is_empty from this listing — never trust the stale manifest for skipping
-    const cursors = await this.engine.readCursors(job.gcsPrefix);
-    const directory = await this.engine.readDirectory(job.gcsPrefix).catch(() => ({} as Record<string, DirUser>));
-    const isChannel = job.type === MigrationType.CHANNEL;
-    const labelFor = (conv: CollectedConversation): string => {
-      if (isChannel) return `#${job.slackChannelName ?? conv.id}`;
-      const names = conv.members.filter((m) => m !== job.ownerSlackId).map((m) => directory[m]?.real_name || directory[m]?.display_name || m);
-      return names.length ? `DM with ${names.join(', ')}` : `DM ${conv.id}`;
-    };
-    const runTs = Date.now();
-    const windowStart = job.channelInput?.startDate ? Math.floor(Date.parse(job.channelInput.startDate) / 1000) : (job.slackChannelCreated ?? 0);
-    let refreshedConvs = 0, newMessages = 0, newConvs = 0;
-    await this.store.update(job.id, { refreshTotal: merged.length, refreshDone: 0 });
-    for (const [i, conv] of merged.entries()) {
-      if (await this.store.isStopRequested(job.id)) return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
-      if ((i + 1) % 10 === 0 || i + 1 === merged.length) await this.store.update(job.id, { refreshDone: i + 1 });
-      if (freshEmpty.get(conv.id) === true) continue; // Slack says still no messages ever → nothing to refresh, skip the history call
-      const isNew = !knownIds.has(conv.id);
-      // Existing conv → delta snapshot from its cursor; new conv → full collect into base (sinceTs 0).
-      const destPath = isNew ? undefined : this.engine.conversationRefreshPath(job.gcsPrefix, conv.id, runTs);
-      const sinceTs = isNew ? 0 : (cursors[conv.id] ?? 0);
-      const result = await this.engine.collectConversation(
-        token, conv, job.gcsPrefix, job.channelInput?.startDate,
-        isChannel
-          ? (p) => this.store.setChannelProgress(job.id, { messages: p.messages, start: windowStart, end: p.newestTs, through: p.oldestTs })
-          : () => this.store.markProgress(job.id),
-        destPath, sinceTs,
-      );
-      if (result.outcome === 'skipped') {
-        if (!isNew) continue; // existing conv now inaccessible: keep what we have, don't record a new issue
-        await this.store.addIssue(job.id, { conversationId: conv.id, label: labelFor(conv), kind: 'skipped', reason: result.reason ?? 'Inaccessible on Slack.' });
-        continue;
-      }
-      if (result.newestTs > 0) cursors[conv.id] = Math.max(cursors[conv.id] ?? 0, result.newestTs);
-      newMessages += result.messages;
-      if (result.messages > 0) refreshedConvs += 1;
-      if (isNew) { newConvs += 1; await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); }
-    }
-
-    await this.engine.writeCursors(job.gcsPrefix, cursors).catch(() => undefined);
-    await this.store.update(job.id, {
-      status: MigrationStatus.AWAITING_APPROVAL, refreshRequested: false, lastRefreshedAt: Date.now(), refreshCount: (job.refreshCount ?? 0) + 1,
-      checkpoint: { ...job.checkpoint, totalConversations: merged.length },
-    });
-    logger.info('[SlackMigration] refresh complete → awaiting approval', { id: job.id, refreshedConvs, newConvs, newMessages });
   }
 
   /**
@@ -268,8 +195,8 @@ export class MigrationWorkers {
   private async ingest(job: MigrationJob): Promise<void> {
     // Idempotency: never re-plan a completed job (its GCS data is already deleted).
     if ([MigrationStatus.SUBMITTED, MigrationStatus.COLLECTING, MigrationStatus.COMPLETED].includes(job.status)) return;
-    // Stamp the ingest start once (kept across resume). Drop the token now — no collection/refresh happens after ingest begins.
-    await this.store.update(job.id, { status: MigrationStatus.INGESTING, encryptedToken: undefined, ...(job.ingestStartedAt ? {} : { ingestStartedAt: Date.now() }) });
+    // Stamp the ingest start once (kept across resume) so the completion log/UI can report how long ingestion took.
+    await this.store.update(job.id, { status: MigrationStatus.INGESTING, ...(job.ingestStartedAt ? {} : { ingestStartedAt: Date.now() }) });
     let conversations;
     try {
       conversations = await this.engine.readManifest(job.gcsPrefix);

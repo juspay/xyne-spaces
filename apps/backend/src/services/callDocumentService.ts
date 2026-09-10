@@ -31,11 +31,10 @@ import {
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
-import { getMandatorySummarySectionState } from './summaryTemplateSections';
 import {
   DEFAULT_RECORDING_SUMMARY_TEMPLATE,
   DEFAULT_RECORDING_SUMMARY_FIELDS,
-  buildRecordingDetailedSummaryPrompt,
+  RECORDING_DETAILED_SUMMARY_PROMPT,
 } from './recordingSummaryTemplates';
 import {
   extractMarkedItemsFromRecordingSummary,
@@ -1053,16 +1052,13 @@ export class CallDocumentService {
       return null;
     }
 
-    // A Scribe admin may have switched off Decisions / Action Items on this template;
-    // the prompt must then stop asking for those sections and their annotations.
-    const mandatorySections = getMandatorySummarySectionState(template.sections);
     const rawSummary = await this.generateDetailedSummary(
       transcript,
       callId,
       template.autoTriggerPrompt ?? undefined,
       formatSummaryTemplateSections(template.sections),
       template.systemPrompt,
-      buildRecordingDetailedSummaryPrompt(mandatorySections),
+      RECORDING_DETAILED_SUMMARY_PROMPT,
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
         ? accumulated => onDelta(
@@ -1077,13 +1073,9 @@ export class CallDocumentService {
     if (!rawSummary) return null;
 
     const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
-    const markedItems = (
-      citationSegments
-        ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
-        : []
-    ).filter((item) =>
-      item.type === 'decision' ? mandatorySections.decisions : mandatorySections.actionItems,
-    );
+    const markedItems = citationSegments
+      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
+      : [];
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
@@ -1707,8 +1699,6 @@ MANDATORY OUTPUT CONTRACT:
         callStartedAt
       );
 
-      await this.linkDetailedSummaryCanvasToCall(callId, updatedCanvasId);
-
       return {
         canvasId: updatedCanvasId,
         version: existingCanvas.version + 1,
@@ -1729,41 +1719,10 @@ MANDATORY OUTPUT CONTRACT:
       workspaceIdOverride
     );
 
-    await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
-
     return {
       canvasId,
       version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
     };
-  }
-
-  /**
-   * Put the summary canvas id on the Call row, so the summary can be found from the call alone
-   */
-  private async linkDetailedSummaryCanvasToCall(
-    callExternalId: string,
-    canvasId: string | null
-  ): Promise<void> {
-    if (!canvasId) return;
-    try {
-      const call = await repositories.calls.findByExternalId(callExternalId);
-      if (!call) return;
-      const metadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
-          : {};
-      if (typeof metadata['detailedSummaryCanvasId'] === 'string') return;
-      await repositories.calls.update(call.id, {
-        metadata: { ...metadata, detailedSummaryCanvasId: canvasId },
-      });
-    } catch (error) {
-      // A missing pointer degrades sharing and deep links, it does not invalidate
-      // the summary that was just written. Never fail generation over it.
-      logger.error(
-        `[CallDocumentService] Failed to link detailed summary canvas ${canvasId} to call ${callExternalId}:`,
-        error
-      );
-    }
   }
 
   /**
@@ -2412,7 +2371,6 @@ A comprehensive detailed summary has been generated from this call.
             });
 
           newCanvasId = canvasId;
-          await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
           renderedMarkdown = firstMarkdown;
           canvasUrl = getCanvasUrl(canvasId);
           postedCanvasTitle = buildCanvasTitle(resolvedCallTitle);

@@ -50,7 +50,6 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           eventType: SOCIAL_MEDIA_INTERACTION_TYPES.REVIEW,
           timestamp: review.occurredAt,
           source: 'social-media',
-          fromEmailAddress: review.authorName ?? source.displayName,
         },
         ticketCustomFields: [
           {

@@ -44,19 +44,14 @@ function formatDocTimestamp(createdAt: string, style: 'date' | 'relative'): stri
 
 const LABEL_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.4px] text-muted-foreground';
 
-const connectPrompt = (entityLabel: string): string =>
-  `Connect Google Docs to create a document from this ${entityLabel}.`;
-
-type GoogleDocSource = Pick<RecordingDetail, 'externalId' | 'title' | 'googleDocs'>;
+const CONNECT_PROMPT = 'Connect Google Docs to create a document from this recording.';
 
 interface GoogleDocPreviewModalProps {
-  recording: GoogleDocSource;
+  recording: RecordingDetail;
   onClose: () => void;
   /** Creates the doc; `title` names it. Rejects so this modal can surface the reason. */
   onExport: (title?: string) => Promise<void>;
   isExporting: boolean;
-  isRecording?: boolean;
-  trackCategory?: string;
 }
 
 export function GoogleDocPreviewModal({
@@ -64,22 +59,17 @@ export function GoogleDocPreviewModal({
   onClose,
   onExport,
   isExporting,
-  isRecording = true,
-  trackCategory = 'RecordingDetailV2',
 }: GoogleDocPreviewModalProps): ReactElement {
-  const entityLabel = isRecording ? 'recording' : 'call';
   const [context, setContext] = useState<RecordingGoogleDocComposeContext | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [title, setTitle] = useState(
-    () => recording.title?.trim() || (isRecording ? 'Untitled Recording' : 'Untitled Call'),
-  );
+  const [title, setTitle] = useState(() => recording.title?.trim() || 'Untitled Recording');
   const [earlierOpen, setEarlierOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void recordingService
-      .getGoogleDocComposeContext(recording.externalId, isRecording)
+      .getGoogleDocComposeContext(recording.externalId)
       .then(next => !cancelled && setContext(next))
       .catch(error => {
         if (cancelled) return;
@@ -91,18 +81,14 @@ export function GoogleDocPreviewModal({
     return (): void => {
       cancelled = true;
     };
-  }, [recording.externalId, isRecording]);
+  }, [recording.externalId]);
 
   const connectGoogleDoc = async (): Promise<void> => {
     setIsConnecting(true);
     try {
       const currentPath = `${window.location.pathname}${window.location.search}`;
       const returnPath =
-        currentPath.startsWith('/') && !currentPath.startsWith('//')
-          ? currentPath
-          : isRecording
-            ? '/recordings'
-            : '/calls';
+        currentPath.startsWith('/') && !currentPath.startsWith('//') ? currentPath : '/recordings';
       const isElectron = typeof window.electronAPI?.openExternal === 'function';
       const authUrl = await recordingService.connectGoogleDoc(
         returnPath,
@@ -177,7 +163,7 @@ export function GoogleDocPreviewModal({
             Export to Google Doc
           </h2>
           <p className='mt-0.5 text-[12.5px] text-muted-foreground'>
-            Review the {entityLabel} summary before creating the document.
+            Review the recording summary before creating the document.
           </p>
         </div>
         <button
@@ -186,7 +172,7 @@ export function GoogleDocPreviewModal({
           disabled={isExporting || isConnecting}
           className='inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50'
           aria-label='Close Google Docs preview'
-          data-track-category={trackCategory}
+          data-track-category='RecordingDetailV2'
           data-track-name='close_google_doc_preview'
         >
           <X className='size-[15px]' aria-hidden='true' />
@@ -223,7 +209,7 @@ export function GoogleDocPreviewModal({
               title='Copy link'
               aria-label='Copy document link'
               className='inline-flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground'
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='copy_recording_google_doc_link'
             >
               <LinkIcon className='size-[15px]' aria-hidden='true' />
@@ -234,7 +220,7 @@ export function GoogleDocPreviewModal({
               rel='noopener noreferrer'
               onClick={event => openDoc(event, latestDoc.url)}
               className='inline-flex shrink-0 items-center gap-[7px] rounded-[9px] bg-foreground px-3 py-2 text-[12.5px] font-semibold text-background hover:opacity-90'
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='open_recording_google_doc'
             >
               Open doc
@@ -250,7 +236,7 @@ export function GoogleDocPreviewModal({
               onClick={() => setEarlierOpen(open => !open)}
               className={`flex items-center gap-1.5 pb-2 ${LABEL_CLASS} hover:text-foreground`}
               aria-expanded={earlierOpen}
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='toggle_earlier_google_doc_exports'
             >
               <ChevronDown
@@ -280,7 +266,7 @@ export function GoogleDocPreviewModal({
                       rel='noopener noreferrer'
                       onClick={event => openDoc(event, doc.url)}
                       className='inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted'
-                      data-track-category={trackCategory}
+                      data-track-category='RecordingDetailV2'
                       data-track-name='open_recording_google_doc'
                     >
                       Open
@@ -320,14 +306,14 @@ export function GoogleDocPreviewModal({
           <>
             <p className='flex min-w-0 flex-1 items-start gap-2 text-[11.5px] text-amber-700 dark:text-amber-200'>
               <LockKeyhole className='mt-px size-3.5 shrink-0' aria-hidden='true' />
-              <span>{context?.unavailableReason ?? connectPrompt(entityLabel)}</span>
+              <span>{context?.unavailableReason ?? CONNECT_PROMPT}</span>
             </p>
             <Button
               className='bg-foreground text-background hover:bg-foreground/90'
               onClick={() => void connectGoogleDoc()}
               disabled={isConnecting}
               loading={isConnecting}
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='recording_google_doc_connect_calendar'
             >
               Connect Google Docs
@@ -343,7 +329,7 @@ export function GoogleDocPreviewModal({
             <Button
               variant='outline'
               onClick={onClose}
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='cancel_google_doc_export'
               disabled={isExporting}
             >
@@ -359,7 +345,7 @@ export function GoogleDocPreviewModal({
               onClick={() => void createGoogleDoc()}
               disabled={!context?.canExport || !!contextError || isTitleEmpty}
               loading={isExporting}
-              data-track-category={trackCategory}
+              data-track-category='RecordingDetailV2'
               data-track-name='create_recording_google_doc'
             >
               {latestDoc ? (

@@ -41,9 +41,7 @@ export class RecordingSharingNotificationService {
 
   private async publishOne(actorId: string, change: RecordingAccessActivity): Promise<void> {
     const share = await db.entityAccess.findUnique({ where: { id: change.shareId } });
-    const isRecordingShare = share?.shareableEntityType === ShareableEntityType.NOTE_TAKER;
-    const isCallShare = share?.shareableEntityType === ShareableEntityType.CALL;
-    if (!share || (!isRecordingShare && !isCallShare)) return;
+    if (!share || share.shareableEntityType !== ShareableEntityType.NOTE_TAKER) return;
 
     const isRevoked = share.entityUserAccess === EntityUserAccess.REVOKED;
     if (
@@ -77,8 +75,7 @@ export class RecordingSharingNotificationService {
 
     const actor = await repositories.users.findById(actorId);
     const actorName = actor?.name || 'Someone';
-    const subject = isRecordingShare ? 'recording' : 'call';
-    const recordingTitle = call.title || `a ${subject}`;
+    const recordingTitle = call.title || 'a recording';
 
     await Promise.all([
       activityService.createActivities(
@@ -99,7 +96,6 @@ export class RecordingSharingNotificationService {
         actorId,
         actorName,
         change.action,
-        subject,
       ),
     ]);
   }

@@ -43,7 +43,6 @@ export interface MessageActionsDrawerProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
-  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onEditMessage?: () => void;
   onDeleteMessage?: () => void;
@@ -78,7 +77,6 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
-  showSubscription,
   onCreateTicket,
   onEditMessage,
   onDeleteMessage,
@@ -340,7 +338,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   )}
 
                   {/* Conversation Subscription */}
-                  {open && showSubscription && conversationId && (
+                  {open && onReplyInThread && conversationId && (
                     <ConversationSubscription
                       conversationId={conversationId}
                       {...(conversation && { conversation })}

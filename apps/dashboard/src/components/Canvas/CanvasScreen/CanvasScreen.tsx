@@ -104,7 +104,6 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { useScope } from '../../../shortcuts';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -144,14 +143,6 @@ const getDirectoryFromPath = (filePath: string): string => {
   const lastSlashIndex = normalizedPath.lastIndexOf('/');
   return lastSlashIndex > -1 ? normalizedPath.slice(0, lastSlashIndex) : filePath;
 };
-
-const isSameSelectedCanvasState = (previous: Canvas | null, next: Canvas): boolean =>
-  previous?.id === next.id &&
-  previous.title === next.title &&
-  previous.updatedAt === next.updatedAt &&
-  previous.isArchived === next.isArchived &&
-  previous.accessLevel === next.accessLevel &&
-  previous.content === next.content;
 
 const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
@@ -212,8 +203,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   const [selectedCanvas, setSelectedCanvas] = useState<Canvas | null>(null);
   const [openCommentCount, setOpenCommentCount] = useState(0);
-  useScope('canvas', Boolean(canvasId));
-
   useEffect(() => {
     setOpenCommentCount(0);
   }, [selectedCanvas?.id]);
@@ -408,13 +397,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         ...(accessLevel ? { accessLevel } : {}),
       };
 
-      setSelectedCanvas(previous =>
-        isSameSelectedCanvasState(previous, canvas) ? previous : canvas,
-      );
-
-      if (canvas.id !== lastCanvasId) {
-        setLastCanvasId(canvas.id);
-      }
+      setSelectedCanvas(canvas);
 
       const isNewCanvas = initializedCanvasIdRef.current !== canvas.id;
       if (isNewCanvas) {
@@ -449,7 +432,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }
   }, [
     singleCanvas,
-    singleCanvasDetails.type,
     user?.id,
     canvasId,
     state,
@@ -457,9 +439,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     currentUserChannelIds,
     adminChannelIds,
     queryClient,
-    lastCanvasId,
-    setLastCanvasId,
-    singleCanvasDetails.type,
   ]);
 
   useEffect(() => {

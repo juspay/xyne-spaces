@@ -3,7 +3,6 @@ export const GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES = [
   'SDLC_SETUP',
   'SDLC_WORK',
   'SDLC_WIKI',
-  'Workflow',
 ] as const;
 
 export function isGenericWorkflowRecoveryType(workflowType: string | null): boolean {

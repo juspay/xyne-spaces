@@ -1,66 +1,4 @@
-import type { MandatorySummarySectionState } from './summaryTemplateSections';
-
-/**
- * Build the recording summary prompt. The Decisions and Action Items sections are
- * normally mandatory, but a Scribe admin can disable either on a template; when
- * that happens every instruction that would make the model produce, annotate, or
- * cite that section is dropped so it never shows up in the summary.
- */
-export function buildRecordingDetailedSummaryPrompt(
-  mandatorySections: MandatorySummarySectionState = { decisions: true, actionItems: true },
-): string {
-  const { decisions, actionItems } = mandatorySections;
-  const markedLabel =
-    decisions && actionItems
-      ? 'MARKED DECISIONS AND ACTIONS'
-      : decisions
-        ? 'MARKED DECISIONS'
-        : 'MARKED ACTIONS';
-  const headingRules = [
-    decisions &&
-      'Render the Decisions heading with a yellow dot (`### 🟡 Decisions`), replacing any existing emoji on that heading.',
-    actionItems &&
-      'Render the Action Items heading with an orange dot (`### 🟠 Action Items`), replacing any existing emoji on that heading.',
-    (decisions || actionItems) && 'Keep the dots on the headings, not on individual bullets.',
-  ].filter(Boolean);
-  const headingException =
-    decisions && actionItems
-      ? ', except for the Decisions and Action Items headings described below'
-      : decisions
-        ? ', except for the Decisions heading described below'
-        : actionItems
-          ? ', except for the Action Items heading described below'
-          : '';
-  const omittedSections = [
-    !decisions &&
-      '- This template intentionally has NO Decisions section. Do not add one, do not add any heading about decisions, and never use the `[xyne-decision]` annotation.',
-    !actionItems &&
-      '- This template intentionally has NO Action Items section. Do not add one, do not add any heading about action items or next steps, and never use the `[xyne-action]` annotation.',
-  ].filter(Boolean);
-  const annotationRules = [
-    decisions &&
-      '- Prefix every concrete decision bullet with the exact private annotation `[xyne-decision]` immediately after the bullet marker.',
-    actionItems &&
-      '- Prefix every concrete action-item bullet with the exact private annotation `[xyne-action]` immediately after the bullet marker.',
-    '- Every annotated bullet MUST end with at least one supporting transcript citation. The first citation must identify the moment most closely associated with that ' +
-      (decisions && actionItems ? 'decision or action' : decisions ? 'decision' : 'action') +
-      '.',
-    '- Never use these annotations for takeaways, discussion points, open questions, blockers, or other bullets.',
-    '- The annotations are internal metadata and will be removed before the summary is displayed.',
-    '- Examples:',
-    decisions && '  - `- [xyne-decision] The team approved the consolidated pipeline [clf-12]`',
-    actionItems && '  - `- [xyne-action] @Mayank Bansal will update the backend [clf-18]`',
-  ].filter(Boolean);
-  const annotatedBulletLabel =
-    decisions && actionItems ? 'Decision and action bullets' : decisions ? 'Decision bullets' : 'Action bullets';
-  const annotatedBulletMoment =
-    decisions && actionItems
-      ? 'the decision was actually made or the task actually assigned'
-      : decisions
-        ? 'the decision was actually made'
-        : 'the task was actually assigned';
-
-  return `You are creating a clear, structured meeting summary that follows the provided template.
+export const RECORDING_DETAILED_SUMMARY_PROMPT = `You are creating a clear, structured meeting summary that follows the provided template.
 LANGUAGE: Generate this entire summary in English, regardless of the transcript language.
 
 BRAND NAME CORRECTION:
@@ -79,14 +17,14 @@ INSUFFICIENT TRANSCRIPT (check this first, before anything else below):
 FORMATTING:
 - Use Markdown headings, short paragraphs, and bullet lists. DO NOT use markdown tables anywhere.
 - Never leave a bare paragraph line as the last line of a section, directly above a \`---\` separator — Markdown turns it into a setext heading. Write such content as a bullet instead.
-- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji${headingException}.
-${headingRules.map((rule) => `- ${rule}`).join('\n')}
+- Preserve every section heading from the MARKDOWN TEMPLATE exactly, including its leading \`###\` marker and emoji, except for the Decisions and Action Items headings described below.
+- Render the Decisions heading with a yellow dot (\`### 🟡 Decisions\`) and the Action Items heading with an orange dot (\`### 🟠 Action Items\`), replacing any existing emoji on those two headings. Keep the dots on the headings, not on individual bullets.
 - Never convert a template heading into plain text, bold text, or a list item.
 - Keep bullets concise; put supporting detail inline after an em dash.
 
 STRUCTURE:
 - Fill the sections defined in the MARKDOWN TEMPLATE below, directly from the transcript. Follow that structure exactly — do not rename, add, or reorder sections.
-${omittedSections.map((rule) => `${rule}\n`).join('')}- CHAPTERS (long calls only): Only if this is a LONG call — roughly 30+ minutes or a long transcript — add a "### 📍 Chapters" section that breaks the conversation into 4–7 chapters by topic shift. For short or medium calls, DO NOT add a Chapters section at all — just fill the template sections.
+- CHAPTERS (long calls only): Only if this is a LONG call — roughly 30+ minutes or a long transcript — add a "### 📍 Chapters" section that breaks the conversation into 4–7 chapters by topic shift. For short or medium calls, DO NOT add a Chapters section at all — just fill the template sections.
 - When included, place the Chapters section immediately after the first overview/takeaways section, using this format per chapter:
     #### [Chapter title — e.g. "Activation flow is fragmented"]
     [1-2 sentence summary]
@@ -102,7 +40,7 @@ CALL PARTICIPANTS (Correct Names):
 IMPORTANT - NAME ACCURACY:
 - The transcript may contain misspelled or incorrectly transcribed participant names
 - If a name in the transcript seems close to a participant name, use the correct version from the list
-${actionItems ? '- For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)' : ''}
+- For @mentions in Action Items, use the full correct name (e.g., @Mayank Bansal)
 
 INSTRUCTIONS:
 - Capture ACTUAL content from the transcript - no generic placeholders
@@ -111,20 +49,19 @@ INSTRUCTIONS:
 - Keep all template section titles as level-three Markdown headings (\`###\`)
 - Skip sections that have no relevant content — write the single bullet \`- Not discussed\` rather than inventing detail. It MUST be a bullet: a bare \`Not discussed\` line sits directly above the template's \`---\` separator, which Markdown then parses as a setext heading and renders in huge heading text.
 - Add Chapters ONLY for long calls, per the STRUCTURE rule above; never force chapters onto a short or medium call
-${
-  actionItems
-    ? `- In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
+- In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
-`
-    : ''
-}
-${
-  decisions || actionItems
-    ? `${markedLabel}:
-${annotationRules.join('\n')}
-`
-    : ''
-}
+
+MARKED DECISIONS AND ACTIONS:
+- Prefix every concrete decision bullet with the exact private annotation \`[xyne-decision]\` immediately after the bullet marker.
+- Prefix every concrete action-item bullet with the exact private annotation \`[xyne-action]\` immediately after the bullet marker.
+- Every annotated bullet MUST end with at least one supporting transcript citation. The first citation must identify the moment most closely associated with that decision or action.
+- Never use these annotations for takeaways, discussion points, open questions, blockers, or other bullets.
+- The annotations are internal metadata and will be removed before the summary is displayed.
+- Examples:
+  - \`- [xyne-decision] The team approved the consolidated pipeline [clf-12]\`
+  - \`- [xyne-action] @Mayank Bansal will update the backend [clf-18]\`
+
 CITATIONS (ACCURACY IS CRITICAL):
 - Each transcript line is prefixed with its segment number: "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
 - A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
@@ -135,12 +72,8 @@ CITATIONS (ACCURACY IS CRITICAL):
 - Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
 - For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
 - An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
-${
-  decisions || actionItems
-    ? `- ${annotatedBulletLabel} MUST carry a citation (see ${markedLabel}). For those, pick the segment where ${annotatedBulletMoment}, and word the bullet to match that segment — do not fall back to a loose citation.
-`
-    : ''
-}- Copy N exactly. Never invent segment numbers, never use ranges like [clf-8-11], never cite a line that has no bracketed number. Write only the bare token — no links, URLs, footnotes, or a separate "Citations"/"Sources" section.
+- Decision and action bullets MUST carry a citation (see MARKED DECISIONS AND ACTIONS). For those, pick the segment where the decision was actually made or the task actually assigned, and word the bullet to match that segment — do not fall back to a loose citation.
+- Copy N exactly. Never invent segment numbers, never use ranges like [clf-8-11], never cite a line that has no bracketed number. Write only the bare token — no links, URLs, footnotes, or a separate "Citations"/"Sources" section.
 - FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
 
 Only output valid Markdown (headings, paragraphs, and bullet lists only — no tables).
@@ -150,11 +83,7 @@ TRANSCRIPT:
 {transcript}
 
 FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
-`.replace(/\n{3,}/g, '\n\n');
-}
-
-/** Prompt with both mandatory sections enabled (the default template). */
-export const RECORDING_DETAILED_SUMMARY_PROMPT = buildRecordingDetailedSummaryPrompt();
+`;
 
 // AI Title prompt for headless recordings (Xyne Scribe) — separate from the
 // regular call title prompt (transcriptService.ts's CALL_TITLE_PROMPT) so the

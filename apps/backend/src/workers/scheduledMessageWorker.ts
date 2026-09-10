@@ -119,7 +119,6 @@ class ScheduledMessageWorker {
       content: formattedMessage,
       msgType: MessageType.BOT,
       isBot: true,
-      emitsMessageReceivedViaSideEffects: true,
     });
 
     try {

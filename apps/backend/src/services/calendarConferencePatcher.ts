@@ -23,13 +23,21 @@ import {
   patchGoogleEvent,
   GoogleCalendarPatchConflictError,
 } from '@/services/googleCalendarApi';
-import { escapeHtmlAttribute } from '@/services/calendarEventPayload';
 import { logger } from '@/utils/logger';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][CONFERENCE_PATCHER]';
 
 const MANAGED_DESCRIPTION_START = '<!-- xyne-call:start -->';
 const MANAGED_DESCRIPTION_END = '<!-- xyne-call:end -->';
+
+/** Escapes a URL for safe use inside an HTML attribute in the event description. */
+export function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 function buildManagedBlock(roomLink: string): string {
   // Google Calendar's description field renders a small safe subset of HTML

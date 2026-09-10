@@ -96,9 +96,6 @@ router.post('/:callId/generate-prd', callController.generatePRD);
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
-// Rewrite a call's detailed summary with a chosen summary template
-router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
-
 // Invite users to call (creates call_participants for notifications)
 router.post('/:callId/invite', callController.inviteUsers);
 
@@ -119,15 +116,6 @@ router.get('/:callId/chat-history', callController.getCallChatHistory);
 
 // Update a call's labels (the call's audience; recordings use /recordings/:callId)
 router.patch('/:callId/labels', callController.updateCallLabels);
-
-// Share a call with people, groups or channels.
-router.post('/:callId/sharing', recordingSharingController.manage);
-
-// Draft a follow-up email and export to Google Docs.
-router.get('/:callId/email-compose-context', recordingEmailController.getComposeContext);
-router.post('/:callId/send-email', recordingEmailController.sendRecordingEmail);
-router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
-router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);

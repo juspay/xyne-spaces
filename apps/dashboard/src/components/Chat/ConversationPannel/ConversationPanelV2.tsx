@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useRef, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import {
@@ -91,7 +91,6 @@ const ConversationPanelV2 = ({
   skipMarkAsRead = false,
   conversationIds,
   onOpenThread,
-  useLocalTabState = false,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -107,10 +106,6 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
-  // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
-  // for the doc-type filter), keep the active tab in local state instead of the URL —
-  // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
-  useLocalTabState?: boolean;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -153,25 +148,17 @@ const ConversationPanelV2 = ({
       ? activityNavigationState.linkedCutoffCreatedAt
       : null;
 
-  const [localTab, setLocalTab] = useState<string>(getDefaultTab());
-  const urlTab = searchParams.get('tab');
-  const urlTabOrDefault = urlTab && isValidTab(urlTab) ? urlTab : getDefaultTab();
-  const tab = useLocalTabState ? localTab : urlTabOrDefault;
+  const tab = searchParams.get('tab') || getDefaultTab();
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
   const canvasId = searchParams.get('canvasId');
 
   const participationStatus = useGetChannelUserStatus(channelId);
-  // A closed/not-open DM is absent from the status map, so participation is briefly undefined;
-  // treat a DM/group-DM as member here too — otherwise the linked-message lookup returns nothing
-  // and the panel is stuck on "Messages are loading…". The query's ACL re-verifies real membership.
-  const isDmScope =
-    channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
   const [initialMessageById] = useCachedQuery(
     queries.getConversationByIdWithChannel({
       conversationId: urlConversationId || '',
       channelId: channelId || '',
-      isMember: !!participationStatus || isDmScope,
+      isMember: !!participationStatus,
     }),
     { enabled: !!urlConversationId && !urlCreatedAtMatch && stateLinkedItemCreatedAt === null },
   );
@@ -229,14 +216,11 @@ const ConversationPanelV2 = ({
   // (context consumers) on each panel render.
   const handleTabChange = useCallback(
     (tab: string, e?: React.MouseEvent): void => {
-      if (!isValidTab(tab)) return;
-      if (useLocalTabState) {
-        setLocalTab(tab);
-      } else {
+      if (isValidTab(tab)) {
         standaloneNavigate(navigate, `${baseRoute}/${channelId}?tab=${tab}`, { event: e });
       }
     },
-    [isValidTab, navigate, baseRoute, channelId, useLocalTabState],
+    [isValidTab, navigate, baseRoute, channelId],
   );
 
   const conversationTabContextValue = useMemo(

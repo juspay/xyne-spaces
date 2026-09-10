@@ -17,13 +17,6 @@ export interface CallNotificationData {
   callerPicture?: string;
   /** Precomputed body from the renderer; falls back to the legacy line. */
   body?: string;
-  /**
-   * Set when the renderer has decided this call rings silently — the user is
-   * already on a call, recording, or in an external meeting. Muting the in-app
-   * ringtone alone is not enough: this notification is a second, independent
-   * sound source.
-   */
-  silent?: boolean;
 }
 
 // Keep references to prevent garbage collection
@@ -100,7 +93,7 @@ export function showCallNotification(
     const notification = new Notification({
       title: 'Incoming call',
       body: data.body ?? `${data.callerName} is calling you`,
-      silent: data.silent ?? false,
+      silent: false,
       urgency: 'critical',
       hasReply: false,
       timeoutType: 'never', 
@@ -147,8 +140,6 @@ export function showCallNotification(
 
     notification.show();
 
-    // Deliberately not gated on `data.silent`: a silenced call still earns the
-    // peripheral visual cue, it just must not make a sound.
     if (process.platform === 'darwin' && !mainWindow?.isFocused()) {
       app.dock?.bounce('critical');
     }

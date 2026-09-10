@@ -117,7 +117,7 @@ const envSchema = Joi.object({
   // decision, not a config one. Toggling loses nothing — watermarks persist,
   // so the next enqueue replays everything above them.
   ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
-  RADAR_PARSER_MODEL: Joi.string().default('open-fast-sa'),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
   RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Kept as a knob deliberately: this is the hard ceiling on how much text can
@@ -126,10 +126,6 @@ const envSchema = Joi.object({
   RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
   RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
   RADAR_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(30_000),
-  // Longer than a thread's. A DM has no threading convention, so once its gate
-  // opens every message reaches the parser — the debounce is the only thing
-  // bounding that, and one job per minute per active DM is the ceiling.
-  RADAR_DM_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(60_000),
   RADAR_MAX_CONSECUTIVE_FAILURES: Joi.number().integer().min(1).max(20).default(3),
   RADAR_MAX_MESSAGE_TEXT_CHARS: Joi.number().integer().min(100).max(20_000).default(5_000),
   RADAR_RATE_LIMIT_MAX_RETRIES: Joi.number().integer().min(0).max(3).default(3),
@@ -146,6 +142,7 @@ const envSchema = Joi.object({
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
   ENABLE_SDLC_WORKER: Joi.boolean().default(false),
+  ENABLE_COMMIT_ANALYSIS_WORKER: Joi.boolean().default(false),
   SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
   SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
   SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
@@ -280,12 +277,6 @@ const envSchema = Joi.object({
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
-
-  // @xyne/workflow-sdk
-  ENABLE_WORKFLOWS_WORKER: Joi.boolean().default(false),
-  WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
-  WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
-  WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -578,14 +569,6 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
-  // 'shadow' records what archive inspection would refuse without blocking it;
-  // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
-  UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
-  // When true (default), the webhook SSRF guard allows private / internal
-  // destinations but still refuses loopback and link-local / cloud-metadata
-  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
-  // are unaffected either way (always strict).
-  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
 
 }).unknown();
@@ -619,20 +602,9 @@ export const config = {
     : '',
   host: envVars.HOST,
   cors: {
-    // The CORS allow-list (CORS_ORIGIN) plus the app's own frontend origin
-    // (FRONTEND_URL). The frontend is always a legitimate client for both HTTP and
-    // WebSockets, so it is accepted even when CORS_ORIGIN does not list it — e.g.
-    // when the frontend and API share a host and never needed a CORS entry.
-    origin: (() => {
-      const list = envVars.CORS_ORIGIN.split(',')
-        .map((origin: string) => origin.trim())
-        .filter(Boolean);
-      try {
-        const own = new URL(envVars.FRONTEND_URL as string).origin;
-        if (own && !list.includes(own)) list.push(own);
-      } catch { /* FRONTEND_URL unset or not a URL: nothing to add */ }
-      return list;
-    })(),
+    origin: envVars.CORS_ORIGIN.split(',')
+      .map((origin: string) => origin.trim())
+      .filter(Boolean),
     allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',')
       .map((origin: string) => origin.trim())
       .filter(Boolean),
@@ -768,7 +740,6 @@ export const config = {
     // forever.
     maxOpenItems: envVars.RADAR_MAX_OPEN_ITEMS as number,
     debounceMs: envVars.RADAR_DEBOUNCE_MS as number,
-    dmDebounceMs: envVars.RADAR_DM_DEBOUNCE_MS as number,
     maxConsecutiveFailures: envVars.RADAR_MAX_CONSECUTIVE_FAILURES as number,
     maxMessageTextChars: envVars.RADAR_MAX_MESSAGE_TEXT_CHARS as number,
     rateLimitMaxRetries: envVars.RADAR_RATE_LIMIT_MAX_RETRIES as number,
@@ -796,6 +767,7 @@ export const config = {
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
+  enableCommitAnalysisWorker: envVars.ENABLE_COMMIT_ANALYSIS_WORKER as boolean,
   sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
   sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
   sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
@@ -1010,13 +982,6 @@ export const config = {
   },
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
-
-  workflows: {
-    workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
-    workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
-    lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
-    baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
-  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
@@ -1243,11 +1208,5 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
-  },
-  uploads: {
-    archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
-  },
-  webhooks: {
-    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
 };

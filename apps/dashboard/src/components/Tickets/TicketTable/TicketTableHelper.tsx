@@ -1,16 +1,20 @@
 import { TicketPriority, TicketStatusV2, UserStatus } from '@xyne/shared';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
+import { TicketStatusIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
-import { Tag, UserDefault as UserIcon } from '@xyne/icons';
 import {
-  STAGE_STATUS_META,
-  StageIndicator,
-  StageStatusIcon,
-} from '../../../utils/board/stageStatusIcon';
+  CheckTickCircle as CircleCheck,
+  CircleDashed,
+  CircleDot,
+  MultipleCrossCancelCircle as CircleX,
+  Tag,
+  UserDefault as UserIcon,
+  PauseCircle,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
-import { EntityOption, StageOptionSource, StatusEntityOption } from './TicketTableTypes';
+import { EntityOption, StatusEntityOption } from './TicketTableTypes';
 import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
@@ -25,24 +29,43 @@ export const TAG_COLORS = [
   'bg-indigo-500',
 ];
 
-const STATUS_OPTION_ORDER = [
-  TicketStatusV2.TODO,
-  TicketStatusV2.STARTED,
-  TicketStatusV2.PAUSED,
-  TicketStatusV2.CANCELLED,
-  TicketStatusV2.COMPLETED,
+export const StatusOptions: StatusEntityOption[] = [
+  {
+    label: 'Todo',
+    value: TicketStatusV2.TODO,
+    icon: <CircleDashed strokeWidth={2.5} className='w-3.5 h-3.5 text-orange-500' />,
+    bgColor: 'bg-orange-500/15',
+    textColor: 'text-orange-600',
+  },
+  {
+    label: 'Started',
+    value: TicketStatusV2.STARTED,
+    icon: <CircleDot strokeWidth={2.5} className='w-3.5 h-3.5 text-blue-500' />,
+    bgColor: 'bg-blue-500/15',
+    textColor: 'text-blue-600',
+  },
+  {
+    label: 'Paused',
+    value: TicketStatusV2.PAUSED,
+    icon: <PauseCircle strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
+    bgColor: 'bg-teal-500/15',
+    textColor: 'text-teal-600',
+  },
+  {
+    label: 'Cancelled',
+    value: TicketStatusV2.CANCELLED,
+    icon: <CircleX strokeWidth={2.5} className='w-3.5 h-3.5 text-red-500' />,
+    bgColor: 'bg-red-500/15',
+    textColor: 'text-red-600',
+  },
+  {
+    label: 'Completed',
+    value: TicketStatusV2.COMPLETED,
+    icon: <CircleCheck strokeWidth={2.5} className='w-3.5 h-3.5 text-green-500' />,
+    bgColor: 'bg-green-500/15',
+    textColor: 'text-green-600',
+  },
 ];
-
-export const StatusOptions: StatusEntityOption[] = STATUS_OPTION_ORDER.map(value => {
-  const meta = STAGE_STATUS_META[value];
-  return {
-    label: meta.label,
-    value,
-    icon: <StageStatusIcon status={value} />,
-    bgColor: meta.bgColor,
-    textColor: meta.textColor,
-  };
-});
 
 export const PriorityOptions: EntityOption[] = [
   { label: 'Low', value: TicketPriority.LOW, icon: getPriorityIcon(TicketPriority.LOW) },
@@ -132,11 +155,13 @@ export const UNASSIGNED_OPTION: EntityOption = {
   ),
 };
 
-export const getStageOptions = (stages: StageOptionSource[] = []): EntityOption[] => {
+export const getStageOptions = (
+  stages: Array<{ id: string; name: string }> = [],
+): EntityOption[] => {
   return stages.map(stage => ({
     value: stage.name,
     label: stage.name,
-    icon: <StageIndicator stages={stages} stageName={stage.name} />,
+    icon: <TicketStatusIcon size={14} />,
   }));
 };
 
@@ -179,6 +204,6 @@ export const useAssigneeOptions = (
   }, [users, userGroups, memberIds, selfId]);
 };
 
-export const useStageOptions = (stages: StageOptionSource[] = []) => {
+export const useStageOptions = (stages: Array<{ id: string; name: string }> = []) => {
   return useMemo(() => getStageOptions(stages), [stages]);
 };

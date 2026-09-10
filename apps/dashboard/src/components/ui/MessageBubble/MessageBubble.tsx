@@ -77,7 +77,6 @@ import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { RecordingBubble } from './RecordingBubble';
-import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
@@ -494,7 +493,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelId,
   conversation,
   contentOnly = false,
-  disableLinks = false,
   onClick,
   threadInfo,
   channelScopeType,
@@ -573,7 +571,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
   // buttons, etc).
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
-  const isCallShareMessage = metadata?.['isCallShareMessage'] === true;
   // Only live recording anchors use the system-style sender.
   const isHeadlessRecordingAnchor =
     isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
@@ -1197,12 +1194,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
-            <CallShareBubble message={{ content: message.content, metadata }} />
-          ) : isRecordingMessage &&
-            metadata?.callId &&
-            !isForwardedMessage &&
-            !message.isDeleted ? (
+          {isRecordingMessage && metadata?.callId && !isForwardedMessage && !message.isDeleted ? (
             <RecordingBubble
               message={{
                 messageId: message.messageId,
@@ -1268,7 +1260,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <RenderMessageWithHTML
-                        disableLinks={disableLinks}
                         message={noteHtml}
                         showEdited={message.edited}
                         messageId={message.messageId}
@@ -1352,7 +1343,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
-                            disableLinks={disableLinks}
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
                             preserveThreadRoute={context === 'thread'}
@@ -1415,7 +1405,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               />
                             ) : (
                               <RenderMessageWithHTML
-                                disableLinks={disableLinks}
                                 message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1456,7 +1445,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
-                                disableLinks={disableLinks}
                                 message={resolvedForwardedContent}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1516,7 +1504,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
-                            disableLinks={disableLinks}
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}

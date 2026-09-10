@@ -5,82 +5,75 @@ import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
 import { EntitySelector } from '../../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../../components/ui/EntitySelector/EntitySelector.types';
-import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
-import { useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
-
-/**
- * Rows actually offered per keystroke. The filter targets a participant id that
- * the recordings query resolves server-side, so the candidate pool is the whole
- * workspace — but only the top-ranked slice ever becomes an option.
- */
-const PEOPLE_LIMIT = 20;
+import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
 
 interface RecordingPeopleFilterProps {
+  creators: User[];
   currentUserId?: string | undefined;
   selectedUserId: string | null;
   onUserChange: (userId: string | null) => void;
 }
 
-/**
- * Participant filter for the recordings list.
- *
- * Candidates come from `useRankedActivePeople` — the same token-match → MFU
- * affinity → DM-recency recipe the recording share modal and the call pickers
- * use — capped at `PEOPLE_LIMIT` *before* anything is decorated.
- *
- * That ordering is the fix. This filter used to be handed the complete workspace
- * roster and, on every keystroke, substring-filter it and map every survivor into
- * an option object carrying its own `<Avatar>` element — thousands of React
- * elements per character typed, rendered into an unvirtualized dropdown. Ranking
- * and slicing first means the work per keystroke is bounded by what is on screen,
- * and the browse state now opens on frequent contacts instead of raw roster order.
- */
 export function RecordingPeopleFilter({
+  creators,
   currentUserId,
   selectedUserId,
   onUserChange,
 }: RecordingPeopleFilterProps): ReactElement {
   const [searchValue, setSearchValue] = useState('');
 
-  const rankedPeople = useRankedActivePeople(searchValue.trim(), PEOPLE_LIMIT);
-  // Resolved from the full roster (not the ranked slice): the trigger label and
-  // the checkmark must survive a query the selected person does not match, and a
-  // participant may since have been deactivated.
-  const selectedUser = useUser(selectedUserId ?? '');
-  const hasPeople = useActiveUsers().length > 0;
-
   const options = useMemo<SelectorOption[]>(() => {
-    const toOption = (user: User): SelectorOption => ({
-      value: user.id,
-      label: `${getUserDisplayName(user)}${user.id === currentUserId ? ' (you)' : ''}`,
+    const query = searchValue.trim().toLowerCase();
+    const matchedCreators = query
+      ? creators.filter(creator => matchesUserQuery(creator, searchValue))
+      : creators;
+
+    const creatorOptions = matchedCreators.map(creator => ({
+      value: creator.id,
+      label: `${getUserDisplayName(creator)}${creator.id === currentUserId ? ' (you)' : ''}`,
       icon: (
         <Avatar
-          userId={user.id}
+          userId={creator.id}
           size='sm'
           showActiveStatus={false}
           className='size-4 rounded-md flex items-center justify-center'
         />
       ),
-      subtitle: user.email ?? null,
-    });
+      subtitle: creator.email ?? null,
+    }));
 
-    const rows = rankedPeople.map(toOption);
-    if (selectedUser && !rankedPeople.some(person => person.id === selectedUser.id)) {
-      rows.unshift(toOption(selectedUser));
+    const selectedCreator = creators.find(creator => creator.id === selectedUserId);
+    if (selectedCreator && !creatorOptions.some(option => option.value === selectedCreator.id)) {
+      return [
+        {
+          value: selectedCreator.id,
+          label: `${getUserDisplayName(selectedCreator)}${selectedCreator.id === currentUserId ? ' (you)' : ''}`,
+          icon: (
+            <Avatar
+              userId={selectedCreator.id}
+              size='sm'
+              showActiveStatus={false}
+              className='size-4 rounded-md flex items-center justify-center'
+            />
+          ),
+          subtitle: selectedCreator.email ?? null,
+        },
+        ...creatorOptions,
+      ];
     }
-    return rows;
-  }, [rankedPeople, selectedUser, currentUserId]);
 
-  if (!hasPeople) {
+    return creatorOptions;
+  }, [creators, currentUserId, searchValue, selectedUserId]);
+
+  if (creators.length === 0) {
     return (
       <Button
         type='button'
         variant='outline'
         disabled
         className='h-9 gap-1 rounded-xl border-border px-3 font-medium shadow-none'
-        aria-label='People filter unavailable because there are no people to filter by'
+        aria-label='People filter unavailable because there are no recordings'
       >
         People
         <ChevronDown className='size-4' aria-hidden='true' />

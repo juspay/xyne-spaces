@@ -8,20 +8,21 @@ export const StatusIndicator = ({
   stageIndex,
   totalNonCancelledStages,
 }: StatusIndicatorProps): ReactElement => {
+  // Define color and ring color based on status
   const getStatusConfig = (s: TicketStatusV2): { color: string; ringColor: string } => {
     switch (s) {
       case TicketStatusV2.TODO:
-        return { color: 'var(--status-new)', ringColor: 'var(--status-new)' };
+        return { color: '#9CA3AF', ringColor: '#9CA3AF' }; // Gray
       case TicketStatusV2.STARTED:
-        return { color: 'var(--status-scheduled)', ringColor: 'var(--status-scheduled)' };
+        return { color: '#3B82F6', ringColor: '#3B82F6' }; // Blue
       case TicketStatusV2.PAUSED:
-        return { color: 'var(--status-paused)', ringColor: 'var(--status-paused)' };
+        return { color: '#EAB308', ringColor: '#EAB308' }; // Yellow
       case TicketStatusV2.COMPLETED:
-        return { color: 'var(--status-success)', ringColor: 'var(--status-success)' };
+        return { color: '#22C55E', ringColor: '#22C55E' }; // Green
       case TicketStatusV2.CANCELLED:
-        return { color: 'var(--status-failure)', ringColor: 'var(--status-failure)' };
+        return { color: '#EF4444', ringColor: '#EF4444' }; // Red
       default:
-        return { color: 'var(--status-new)', ringColor: 'var(--status-new)' };
+        return { color: '#9CA3AF', ringColor: '#9CA3AF' };
     }
   };
 

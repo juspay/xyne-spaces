@@ -20,14 +20,14 @@ import {
   useAssigneeOptions,
   useStageOptions,
 } from './TicketTableHelper';
-import type { ActiveMenu, StageOptionSource } from './TicketTableTypes';
+import type { ActiveMenu } from './TicketTableTypes';
 import { TagSelector } from './TagSelector';
 
 interface BulkActionToolbarProps {
   selectedCount: number;
   users?: User[];
   userGroups?: UserGroup[];
-  stages?: StageOptionSource[];
+  stages?: Array<{ id: string; name: string }>;
   onAssigneeChange: (assignee: string | null) => void;
   onStatusChange: (status: TicketStatusV2) => void;
   onPriorityChange: (priority: TicketPriority | null) => void;

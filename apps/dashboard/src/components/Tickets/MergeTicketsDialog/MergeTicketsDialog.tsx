@@ -21,7 +21,6 @@ interface MergeTicket {
   title?: string | null | undefined;
   xyneId?: string | null | undefined;
   stageName?: string | null | undefined;
-  statusV2?: string | null | undefined;
   priority?: TicketPriority | string | null | undefined;
   assignedTo?: string | null | undefined;
   userGroupId?: string | null | undefined;
@@ -259,7 +258,6 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                       {ticket.stageName !== undefined && (
                         <TicketStatusWithStages
                           currentStageName={ticket.stageName}
-                          statusV2={ticket.statusV2}
                           showLeadingDot={false}
                           labelClassName='max-w-[120px] truncate'
                         />

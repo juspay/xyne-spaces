@@ -48,25 +48,3 @@ export const clearViewDraft = (viewKey: string): void => {
     /* storage unavailable */
   }
 };
-
-const columnsKey = (viewKey: string): string => `view-columns-${viewKey}`;
-
-export const readViewColumns = (viewKey: string): string[] | null => {
-  try {
-    const raw = sessionStorage.getItem(columnsKey(viewKey));
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    return parsed.filter((key): key is string => typeof key === 'string');
-  } catch {
-    return null;
-  }
-};
-
-export const writeViewColumns = (viewKey: string, columns: string[]): void => {
-  try {
-    sessionStorage.setItem(columnsKey(viewKey), JSON.stringify(columns));
-  } catch {
-    /* storage unavailable */
-  }
-};

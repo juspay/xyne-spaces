@@ -56,6 +56,7 @@ import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
 import {
   automationTriggerIconName,
+  DEFAULT_AUTOMATION_SORT,
   formatRelative,
   sortAutomations,
   statusPillClasses,
@@ -66,12 +67,10 @@ import {
 } from './AutomationsList.utils';
 import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
 import {
-  automationViewKey,
+  DEFAULT_AUTOMATION_FILTERS,
   filterAutomations,
   hasActiveFilters,
   isVisibleToUser,
-  loadAutomationView,
-  saveAutomationView,
   type AutomationFilters,
 } from './AutomationFiltersBar/filters';
 
@@ -83,25 +82,22 @@ export function AutomationsList({
   onClone,
   onEditFork,
 }: AutomationsListProps): React.ReactElement {
-  const { workspaceId } = useAuthContextValues();
-  // Desk settings shares the workspace's saved view and only pins the channel on top of it.
-  const deskChannelIds = initialChannelIds?.length ? initialChannelIds : null;
-  const isDesk = deskChannelIds !== null;
-  const storeKey = automationViewKey(workspaceId);
-  const [saved] = useState(() => loadAutomationView(storeKey));
-  const [query, setQuery] = useState(saved.query);
+  const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<AutomationFilters>(() =>
-    deskChannelIds ? { ...saved.filters, channelIds: deskChannelIds } : saved.filters,
+    initialChannelIds?.length
+      ? { ...DEFAULT_AUTOMATION_FILTERS, channelIds: initialChannelIds }
+      : DEFAULT_AUTOMATION_FILTERS,
   );
-  const [sort, setSort] = useState<AutomationSort>(saved.sort);
+  const [sort, setSort] = useState<AutomationSort>(DEFAULT_AUTOMATION_SORT);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(saved.pageSize);
+  const [pageSize, setPageSize] = useState(100);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
   const zero = useZero();
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
+  const { workspaceId } = useAuthContextValues();
 
   const triggerCatalogQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers'],
@@ -206,11 +202,6 @@ export function AutomationsList({
   );
 
   useEffect(() => setPage(1), [query, filters, sort]);
-  useEffect(() => {
-    // The desk's pinned channel is not the user's channel filter — leave that one as stored.
-    const channelIds = isDesk ? saved.filters.channelIds : filters.channelIds;
-    saveAutomationView(storeKey, { query, filters: { ...filters, channelIds }, sort, pageSize });
-  }, [storeKey, isDesk, saved, query, filters, sort, pageSize]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageItems = useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -260,9 +251,7 @@ export function AutomationsList({
             <AutomationFiltersBar
               query={query}
               filters={filters}
-              onChange={next =>
-                setFilters(deskChannelIds ? { ...next, channelIds: deskChannelIds } : next)
-              }
+              onChange={setFilters}
               onClearQuery={() => setQuery('')}
               items={visibleItems}
             />

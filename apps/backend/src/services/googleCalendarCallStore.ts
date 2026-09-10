@@ -11,7 +11,6 @@ import { logger } from '@/utils/logger';
 import { type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
 import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
-import { isXyneOriginatedEvent } from '@/services/calendarEventPayload';
 import {
   buildCalendarExternalId,
   buildCalendarExternalIdPrefix,
@@ -106,11 +105,6 @@ export async function storeGCalEventAsCall(
   userEmail: string
 ): Promise<void> {
   if (!event.id) return;
-
-  // Xyne's own outbound mirror of a call scheduled inside Xyne. The Call row
-  // already exists and Xyne owns it; storing this event too would produce a
-  // second, calendar-origin duplicate of the same meeting.
-  if (isXyneOriginatedEvent(event.extendedProperties?.private)) return;
 
   const now = new Date();
   const calendarOwnerEmail = normalizeCalendarOwnerEmail(userEmail);

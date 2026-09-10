@@ -358,6 +358,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
+    // Radar execution engine: fire-and-forget thread signal. enqueueThread
+    // never throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can
+    // never block or fail the message path.
+    void radarExecutionQueue.enqueueThread(message.conversationId);
+
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
     if (message.content && message.msgType === MessageType.USER) {
@@ -373,24 +378,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
-        initialMessageId: true,
-        // Radar keys a DM's window on its channel, and the queue needs that
-        // key at add time — read here rather than costing the message path
-        // a second lookup.
-        channel: { select: { scopeType: true } },
+        initialMessageId: true
       },
     });
-
-    // Radar execution engine: fire-and-forget signal. enqueueThread never
-    // throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can never
-    // block or fail the message path.
-    if (conversation?.channelId) {
-      void radarExecutionQueue.enqueueThread({
-        conversationId: message.conversationId,
-        channelId: conversation.channelId,
-        scopeType: conversation.channel?.scopeType ?? null,
-      });
-    }
 
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,

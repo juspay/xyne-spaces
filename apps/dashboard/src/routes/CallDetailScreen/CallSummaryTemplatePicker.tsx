@@ -3,18 +3,18 @@
  * trigger; the menu inside is the shared `SummaryTemplateMenu`, the same one the
  * recording detail screen hangs off its summary tab.
  *
- * Picking a template rewrites the call's detailed summary through
- * `POST /calls/:callId/generate-summary` — the same handler the recordings
- * screen reaches under `/recordings/:callId`, mounted a second time for calls
- * (see calls.ts, which does exactly this for `/sharing` too). Generation is
- * owned by the parent screen, which watches the call's live row for the
- * resulting status; this component only renders the menu and reports the pick.
+ * Browsing, creating and editing templates all work here; **applying** one does
+ * not. Regeneration goes through `POST /calls/recordings/:callId/generate-summary`,
+ * which rejects anything that isn't `CallType.HEADLESS`, and writes its canvas to
+ * `call.metadata.detailedSummaryCanvasId` rather than the call message metadata
+ * this screen reads. Until a call-side path exists, selecting a template says so
+ * instead of firing a request that would 404.
  */
 
 import { useState, type ReactElement } from 'react';
-import { ChevronBigDown, Spinner } from '@xyne/icons';
+import { toast } from 'sonner';
+import { ChevronBigDown } from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
-import { Tooltip } from '../../components/ui/Tooltip';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import {
   SummaryTemplateGlyph,
@@ -31,8 +31,6 @@ import {
   getTemplateIcon,
 } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { cn } from '../../utils/classNames';
@@ -43,6 +41,8 @@ const DEFAULT_TEMPLATE_OPTION: SummaryTemplateOption = {
   icon: '✨',
 };
 
+const UNSUPPORTED_MESSAGE = "Summary templates aren't available for calls yet";
+
 interface CallSummaryTemplatePickerProps {
   /** Template the call's existing summary was written with, when one is recorded. */
   selectedTemplateId?: string | null;
@@ -50,10 +50,6 @@ interface CallSummaryTemplatePickerProps {
   isActive: boolean;
   /** Called when an inactive pill is clicked, to switch to the summary pane. */
   onSelect: () => void;
-  onRegenerate?: ((templateId: string, templateName: string) => void) | undefined;
-  isRegenerating?: boolean;
-  regeneratingTemplateId?: string | undefined;
-  regeneratingTemplateName?: string | undefined;
   /** Pill classes from the parent, so this matches the other tabs exactly. */
   className?: string;
 }
@@ -62,10 +58,6 @@ export function CallSummaryTemplatePicker({
   selectedTemplateId,
   isActive,
   onSelect,
-  onRegenerate,
-  isRegenerating = false,
-  regeneratingTemplateId,
-  regeneratingTemplateName,
   className,
 }: CallSummaryTemplatePickerProps): ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -75,13 +67,6 @@ export function CallSummaryTemplatePicker({
 
   const { templates, isLoading: templatesLoading } = useSummaryTemplates(
     shouldLoadTemplates || templatesModalMode !== null,
-  );
-  const storedTemplateId = selectedTemplateId ?? '';
-  const [storedTemplate] = useCachedQuery(
-    queries.summaryTemplateById({ templateId: storedTemplateId }),
-    {
-      enabled: storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id,
-    },
   );
 
   const templateOptions: SummaryTemplateOption[] = [
@@ -95,31 +80,14 @@ export function CallSummaryTemplatePicker({
       })),
   ];
 
-  const storedTemplateOption: SummaryTemplateOption | undefined =
-    storedTemplate && storedTemplate.id === selectedTemplateId
-      ? {
-          id: storedTemplate.id,
-          name: storedTemplate.name,
-          icon: getTemplateIcon(storedTemplate.name),
-        }
-      : undefined;
-
-  const selectedTemplate: SummaryTemplateOption =
-    templateOptions.find(template => template.id === selectedTemplateId) ??
-    storedTemplateOption ??
-    DEFAULT_TEMPLATE_OPTION;
+  const selectedTemplate =
+    templateOptions.find(template => template.id === selectedTemplateId) ?? DEFAULT_TEMPLATE_OPTION;
 
   const fullLabel = getSummaryTemplateLabel(selectedTemplate);
   const label = truncateTemplateName(fullLabel);
-  const regeneratingTooltip = regeneratingTemplateName
-    ? `Generating ${regeneratingTemplateName} summary`
-    : 'Generating summary';
 
-  const regenerate = (templateId: string): void => {
-    const name =
-      templates.find(template => template.id === templateId)?.name ??
-      (templateId === DEFAULT_TEMPLATE_OPTION.id ? 'Default' : 'Call');
-    onRegenerate?.(templateId, name);
+  const notifyUnsupported = (): void => {
+    toast.info(UNSUPPORTED_MESSAGE);
   };
 
   const trigger = (
@@ -127,35 +95,16 @@ export function CallSummaryTemplatePicker({
       type='button'
       role='tab'
       aria-selected={isActive}
-      aria-busy={isRegenerating}
       onClick={() => {
         if (!isActive) onSelect();
       }}
-      title={isRegenerating ? regeneratingTooltip : fullLabel}
+      title={fullLabel}
       data-track-category='CallDetail'
       data-track-name='open_summary_templates'
-      className={cn('max-w-[200px]', isRegenerating && 'cursor-wait', className)}
+      className={cn('max-w-[200px]', className)}
     >
-      {isRegenerating ? (
-        <Spinner
-          strokeWidth={2}
-          className='size-4 shrink-0 animate-spin text-primary'
-          aria-hidden='true'
-        />
-      ) : (
-        <SummaryTemplateGlyph template={selectedTemplate} size='trigger' className='shrink-0' />
-      )}
+      <SummaryTemplateGlyph template={selectedTemplate} size='trigger' className='shrink-0' />
       <span className='truncate'>{label}</span>
-      {isRegenerating && (
-        <Tooltip content={regeneratingTooltip} side='top'>
-          <span
-            className='flex size-3 shrink-0 items-center justify-center'
-            aria-label={regeneratingTooltip}
-          >
-            <Spinner size={12} className='animate-spin text-muted-foreground' />
-          </span>
-        </Tooltip>
-      )}
       {isActive && (
         <ChevronBigDown strokeWidth={2} className='size-3.5 shrink-0' aria-hidden='true' />
       )}
@@ -182,11 +131,8 @@ export function CallSummaryTemplatePicker({
           selectedTemplate={selectedTemplate}
           templates={templateOptions}
           isLoading={templatesLoading}
-          isRegenerating={isRegenerating}
-          regeneratingTemplateId={regeneratingTemplateId}
-          canRegenerate={Boolean(onRegenerate)}
-          onSelectTemplate={regenerate}
-          onRegenerate={() => regenerate(selectedTemplate.id)}
+          onSelectTemplate={notifyUnsupported}
+          onRegenerate={notifyUnsupported}
           onOpenTemplates={() => setTemplatesModalMode('browse')}
           onNewTemplate={() => setTemplatesModalMode('new')}
           onRequestClose={() => setIsMenuOpen(false)}
@@ -211,14 +157,10 @@ export function CallSummaryTemplatePicker({
             currentUserName={getUserDisplayName(currentUser)}
             startWithNewTemplate={templatesModalMode === 'new'}
             onClose={() => setTemplatesModalMode(null)}
-            {...(onRegenerate
-              ? {
-                  onApply: (template: { id: string }): void => {
-                    setTemplatesModalMode(null);
-                    regenerate(template.id);
-                  },
-                }
-              : {})}
+            onApply={() => {
+              setTemplatesModalMode(null);
+              toast.info(UNSUPPORTED_MESSAGE);
+            }}
           />
         </Dialog>
       )}

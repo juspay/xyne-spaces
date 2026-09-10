@@ -82,20 +82,10 @@ export const ReactionAddedActivityV2 = ({
       isExpanded={isExpanded}
     >
       {isExpanded ? (
-        <MessageBubble
-          message={message}
-          showAvatar={false}
-          contentOnly={true}
-          disableLinks={true}
-          variant='default'
-        />
+        <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />
       ) : (
         (getFlowJsonPreviewText(reactionPreview) ?? (
-          <RenderMessageWithHTML
-            message={reactionPreview}
-            showEdited={message.edited}
-            disableLinks
-          />
+          <RenderMessageWithHTML message={reactionPreview} showEdited={message.edited} />
         ))
       )}
     </ActivityItemCard>

@@ -1436,110 +1436,6 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   return json.data.filter((a) => a.enabled);
 }
 
-/**
- * A slug that names no agent this caller can reach.
- *
- * Distinct from the generic failures around it because the caller's fix is
- * different: not "retry", but "pick a slug from `listAgents`". An HTTP surface
- * maps this to 404 rather than letting it surface as an unexplained 500.
- */
-export class ClawAgentNotAvailableError extends Error {
-  constructor(readonly agentSlug: string) {
-    super(`Agent "${agentSlug}" is not available to this user.`);
-    this.name = 'ClawAgentNotAvailableError';
-  }
-}
-
-/** Identity a scoped Claw call acts as. Every field comes from the verified session. */
-export interface ScopedClawIdentity {
-  /** Spaces user id — claw-auth resolves visibility against this. */
-  userId: string;
-  /** Org the caller belongs to. Sent as `x-org-id`; without it claw-auth cannot
-   *  narrow the roster to one org and the same agent surfaces once per org. */
-  orgId?: string;
-  workspaceId?: string;
-  /** Forwarded when the caller had one. Absent under bearer auth, which is why
-   *  `orgId` is passed explicitly rather than left to claw-auth to derive. */
-  cookie?: string;
-}
-
-/**
- * Agents this specific user can reach, rather than every agent that exists.
- *
- * The difference from `listS2SClawAgents` is one query parameter, and it is the
- * whole point: `?userId=` makes claw-auth's `listVisible` return global ∪ owned
- * ∪ shared for that user, so private agents appear and other orgs' agents do
- * not. Without it the caller gets the unscoped roster — the same agent repeated
- * once per org, and dispatches that fail later because the chosen agent has no
- * app installed in the caller's workspace.
- *
- * `x-org-id` completes the narrowing. The dashboard gets it for free because it
- * forwards a session cookie and claw-auth's `requireAuth` derives the org from
- * it; a bearer-authenticated caller has no cookie, so the org is sent directly.
- *
- * Returns the same `S2SClawAgent` shape as the unscoped list — claw-auth's
- * default `light` projection carries `spacesAppId` and `spacesAppUserId`, so a
- * dispatch can still resolve its install from this result.
- */
-export async function listScopedClawAgents(
-  identity: ScopedClawIdentity,
-): Promise<S2SClawAgent[]> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(identity.userId)}`;
-  const res = await fetch(url, {
-    headers: {
-      ...getS2SHeaders(),
-      ...extractUserIdHeader(identity.userId, identity.workspaceId),
-      ...(identity.orgId ? { 'x-org-id': identity.orgId } : {}),
-      ...(identity.cookie ? { Cookie: identity.cookie } : {}),
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!res.ok) {
-    const body = await safeReadText(res);
-    throw new Error(`[ClawAgentService] listScopedClawAgents: HTTP ${res.status} — ${body}`);
-  }
-
-  const json = (await res.json()) as { success: boolean; data?: S2SClawAgent[]; error?: string };
-  if (!json.success || !Array.isArray(json.data)) {
-    throw new Error(
-      `[ClawAgentService] listScopedClawAgents: bad response shape — ${JSON.stringify(json)}`
-    );
-  }
-  return json.data.filter((a) => a.enabled);
-}
-
-/**
- * Dispatch a run as a specific user, resolving the agent from that user's own
- * roster.
- *
- * Identical to `runS2SClawAgent` in everything after the lookup — same webhook,
- * same signature, same `{ sessionId }` — and different in the one place that
- * matters: the agent is resolved through `listScopedClawAgents`, so a slug can
- * only ever match an agent this user can actually reach. Picking from the
- * unscoped roster is what let a dispatch select an agent whose Spaces app is
- * installed in a different workspace, which then failed at the signing-secret
- * lookup with an error that named neither cause.
- */
-export async function runScopedClawAgent(
-  req: S2SRunAgentRequest & { identity: ScopedClawIdentity },
-): Promise<S2SRunAgentResponse> {
-  const agents = await listScopedClawAgents(req.identity);
-  const agent = agents.find((candidate) => candidate.slug === req.agentSlug);
-  if (!agent) {
-    throw new ClawAgentNotAvailableError(req.agentSlug);
-  }
-  if (!agent.spacesAppId) {
-    throw new Error(
-      `[ClawAgentService] runScopedClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
-    );
-  }
-  // Dispatched with the agent object already resolved, not by slug again: going
-  // back through the unscoped lookup could match a different agent of the same
-  // slug in another org, which is the bug this function exists to close.
-  return dispatchClawAgent(req, agent.spacesAppId, 'runScopedClawAgent');
-}
-
 /** Run a claw agent via S2S (non-streaming, callback-based). Mirrors legacy clawClient.runAgent(). */
 export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAgentResponse> {
   const agent = (await listS2SClawAgents()).find((candidate) => candidate.slug === req.agentSlug);
@@ -1548,23 +1444,6 @@ export async function runS2SClawAgent(req: S2SRunAgentRequest): Promise<S2SRunAg
       `[ClawAgentService] runS2SClawAgent: agent "${req.agentSlug}" has no registered Spaces app`
     );
   }
-  return dispatchClawAgent(req, agent.spacesAppId, 'runS2SClawAgent');
-}
-
-/**
- * Sign and post one run to claw-auth's webhook.
- *
- * The half of a dispatch that does not depend on how the agent was found, so
- * the scoped and unscoped entry points share it byte for byte and can only
- * differ in which agent they resolve. `caller` only names the function in error
- * messages, so a failure says which path produced it.
- */
-async function dispatchClawAgent(
-  req: S2SRunAgentRequest,
-  spacesAppId: string,
-  caller: string,
-): Promise<S2SRunAgentResponse> {
-  const agent = { spacesAppId };
   const app = await db.apps.findFirst({
     where: {
       id: agent.spacesAppId,
@@ -1574,7 +1453,7 @@ async function dispatchClawAgent(
   });
   if (!app?.signingSecret) {
     throw new Error(
-      `[ClawAgentService] ${caller}: no app signing secret for agent "${req.agentSlug}"`
+      `[ClawAgentService] runS2SClawAgent: no app signing secret for agent "${req.agentSlug}"`
     );
   }
 
@@ -1619,14 +1498,14 @@ async function dispatchClawAgent(
     });
   } catch (err) {
     throw new Error(
-      `[ClawAgentService] ${caller}: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`
+      `[ClawAgentService] runS2SClawAgent: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
   const json = (await res.json().catch(() => ({}))) as S2SRunAgentResponse;
   if (!res.ok || !json.success) {
     throw new Error(
-      `[ClawAgentService] ${caller}: webhook rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`
+      `[ClawAgentService] runS2SClawAgent: webhook rejected the run (HTTP ${res.status}, error=${json.error ?? 'unknown'})`
     );
   }
   return { success: true, sessionId: json.sessionId ?? sessionId };

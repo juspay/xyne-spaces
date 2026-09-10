@@ -107,7 +107,7 @@ export class GroupDmParticipantService {
       };
     }
 
-    const newUsers = await this.loadActiveUsers(newUserIds, workspaceId);
+    const newUsers = await this.loadActiveUsers(newUserIds);
     const allParticipantIds = [...new Set([...currentUserIds, ...newUserIds])].sort();
 
     if (allParticipantIds.length > MAX_DM_PARTICIPANTS) {
@@ -237,19 +237,11 @@ export class GroupDmParticipantService {
     }
   }
 
-  private async loadActiveUsers(
-    userIds: string[],
-    workspaceId: string,
-  ): Promise<User[]> {
-    // Scope each participant to the caller's workspace so a caller-supplied id
-    // cannot reference a user outside it.
-    const users: User[] = [];
-    for (const userId of userIds) {
-      const user = await this.userRepository.findByIdInWorkspace(userId, workspaceId);
-      if (!user || user.status !== 'ACTIVE') {
-        throw new AppError('One or more participants not found or inactive', 404);
-      }
-      users.push(user);
+  private async loadActiveUsers(userIds: string[]): Promise<User[]> {
+    const { users, missingUserId } = await this.userRepository.findActiveByIds(userIds);
+
+    if (missingUserId) {
+      throw new AppError('One or more participants not found or inactive', 404);
     }
 
     return users;

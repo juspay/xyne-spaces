@@ -1,21 +1,11 @@
 import type { ActivityWithRelated } from '../../types/activity';
-import { isToday } from 'date-fns';
-import { formatDatePill } from '../../utils/dateUtils';
 
 export interface ActivityGroup {
   type: 'group';
   activities: ActivityWithRelated[];
 }
 
-export interface ActivityDateSeparator {
-  type: 'date';
-  key: string;
-  dateText: string;
-}
-
-export type ActivityRowItem = { type: 'single'; activity: ActivityWithRelated } | ActivityGroup;
-
-export type ActivityFeedItem = ActivityRowItem | ActivityDateSeparator;
+export type ActivityFeedItem = { type: 'single'; activity: ActivityWithRelated } | ActivityGroup;
 
 const TICKET_ACTIVITY_PREFIX = 'ticket_';
 const GROUP_WINDOW_MS = 30 * 1000; // 30 seconds
@@ -30,10 +20,10 @@ const GROUP_WINDOW_MS = 30 * 1000; // 30 seconds
  * - Time gap between consecutive activities must be ≤ 30s
  * - Any non-ticket activity or different actor/ticket breaks the group
  */
-export function groupActivities(activities: ActivityWithRelated[]): ActivityRowItem[] {
+export function groupActivities(activities: ActivityWithRelated[]): ActivityFeedItem[] {
   if (activities.length === 0) return [];
 
-  const result: ActivityRowItem[] = [];
+  const result: ActivityFeedItem[] = [];
   let currentGroup: ActivityWithRelated[] = [];
 
   function flushGroup(): void {
@@ -80,30 +70,5 @@ export function groupActivities(activities: ActivityWithRelated[]): ActivityRowI
   }
 
   flushGroup();
-  return result;
-}
-
-export function insertDateSeparators(items: ActivityRowItem[]): ActivityFeedItem[] {
-  const result: ActivityFeedItem[] = [];
-  let lastKey: string | null = null;
-
-  for (const item of items) {
-    const activity = item.type === 'single' ? item.activity : item.activities[0];
-    const timestamp = activity?.updatedAt ?? activity?.createdAt;
-
-    if (timestamp) {
-      const date = new Date(timestamp);
-      const key = date.toDateString();
-      if (key !== lastKey) {
-        if (!isToday(date)) {
-          result.push({ type: 'date', key, dateText: formatDatePill(date) });
-        }
-        lastKey = key;
-      }
-    }
-
-    result.push(item);
-  }
-
   return result;
 }

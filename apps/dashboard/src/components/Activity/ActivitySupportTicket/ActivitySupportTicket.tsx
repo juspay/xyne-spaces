@@ -23,13 +23,6 @@ const EMPTY_TICKET_FILTER = {
   createdAtEnd: undefined,
 } as const;
 
-interface ActivitySupportTicketProps {
-  // Show the in-list navigation chrome (back-to-list button + prev/next controls). The search
-  // pane sets this false: it has its own close header, no ticket list to page, and archive /
-  // mark-unread there must leave the pane in place rather than navigate away.
-  showAdjacentNav?: boolean;
-}
-
 /**
  * Renders a Support/Desk ticket detail INSIDE the Activity panel outlet, so
  * clicking a desk-channel mention in the Activity list keeps the list on the
@@ -41,9 +34,7 @@ interface ActivitySupportTicketProps {
  *    redirect to the `:ticketId` form.
  *  - `ticket/:channelId/:ticketId`  — render `<SupportTicketDetail>` directly.
  */
-const ActivitySupportTicket = ({
-  showAdjacentNav = true,
-}: ActivitySupportTicketProps): ReactElement => {
+const ActivitySupportTicket = (): ReactElement => {
   const navigate = useNavigate();
   const { workspaceId, channelId, ticketId } = useParams<{
     workspaceId?: string;
@@ -69,14 +60,6 @@ const ActivitySupportTicket = ({
     return <ActivityTicketResolver channelId={channelId} ticketBase={ticketBase} />;
   }
 
-  // On the Activity screen, back (and the post-archive / mark-unread return) goes to the activity
-  // list. In the search pane there's no list to return to and those actions must not dismiss the
-  // pane, so back is a no-op — SupportTicketDetail still needs a defined handler, otherwise
-  // goBackToTicketList falls through and navigates away.
-  const handleBack = showAdjacentNav
-    ? (): void => void navigate(activityBase)
-    : (): void => undefined;
-
   return (
     <SupportTicketDetail
       ticketFilter={EMPTY_TICKET_FILTER}
@@ -85,8 +68,9 @@ const ActivitySupportTicket = ({
       channelPreference={channelPreferenceRows?.[0]}
       channelPreferenceLoaded={channelPreferenceDetails.type === 'complete'}
       navBasePath={ticketBase}
-      onBack={handleBack}
-      showAdjacentNav={showAdjacentNav}
+      onBack={() => {
+        void navigate(activityBase);
+      }}
     />
   );
 };

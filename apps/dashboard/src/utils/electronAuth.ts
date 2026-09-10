@@ -4,10 +4,6 @@ export interface ElectronAuthData {
   name: string;
   picture?: string;
   userExistsButRemoved: boolean;
-  domainConflictError?: string;
-  publicEmailDomainError?: string;
-  enterpriseJoinOrgName?: string;
-  enterpriseJoinWorkspaces?: string;
 }
 
 export const isElectron = (): boolean => {

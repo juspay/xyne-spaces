@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
+import { SsrfBlockedError } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { decrypt } from '@/services/encryptionService';
@@ -134,11 +134,9 @@ export class FlowController {
         'X-Source': 'XyneSpaces',
       };
       let dispatchUrl: string;
-      let dispatchIsInternal = false;
       try {
         const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
         dispatchUrl = prepared.url;
-        dispatchIsInternal = prepared.isInternal;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
@@ -149,18 +147,14 @@ export class FlowController {
         return;
       }
 
-      // 6. Call the app backend synchronously. Internal = trusted-config pod URL
-      // (plain client); external = user-supplied, so pin the connection (rebinding-safe).
-      const dispatchInit: RequestInit = {
+      // 6. Call the app backend synchronously.
+      const appResponse = await fetch(dispatchUrl, {
         method: 'POST',
         headers: dispatchHeaders,
         body,
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
-      };
-      const appResponse = dispatchIsInternal
-        ? await fetch(dispatchUrl, dispatchInit)
-        : await safeWebhookFetch(dispatchUrl, dispatchInit);
+      });
 
       if (!appResponse.ok) {
         const text = await appResponse.text().catch(() => 'unknown error');

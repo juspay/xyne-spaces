@@ -605,7 +605,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
-              statusV2={ticket.statusV2}
               showLeadingDot={false}
               labelClassName='max-w-[120px] truncate'
             />
@@ -654,18 +653,12 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 <span className='text-xs font-medium text-muted-foreground font-mono'>
                   {ticket.xyneId}
                 </span>
-                {!isCompact && (
-                  <TicketStatusWithStages
-                    currentStageName={ticket.stageName}
-                    statusV2={ticket.statusV2}
-                  />
-                )}
+                {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
                 {isCompact && (
                   <StagePicker
                     ticketId={ticket.id}
                     stageName={ticket.stageName}
                     stageLabel={ticket.stageName || 'To Do'}
-                    statusV2={ticket.statusV2}
                     boardId={ticket.boardId}
                   />
                 )}
@@ -952,7 +945,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     <div className='flex items-center gap-2'>
                       <TicketStatusWithStages
                         currentStageName={ticket.stageName}
-                        statusV2={ticket.statusV2}
                         showLeadingDot={false}
                         iconOnly
                       />

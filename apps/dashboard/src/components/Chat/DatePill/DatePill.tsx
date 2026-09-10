@@ -1,20 +1,13 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import Badge from '../../ui/Badge';
-import { cn } from '../../../utils/classNames';
 
 export interface DatePillProps {
   dateText: string;
-  className?: string;
-  staticRule?: boolean;
 }
 
-export const DatePill = ({
-  dateText,
-  className,
-  staticRule = false,
-}: DatePillProps): ReactElement => {
+export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
   // Default false for rendering grey horizontal rule
-  const [showLines, setShowLines] = useState(staticRule);
+  const [showLines, setShowLines] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -23,7 +16,6 @@ export const DatePill = ({
 
   // This workaround is particularly to introduce grey horizontal rule for DatePills at the start of a day in a conversation
   useEffect(() => {
-    if (staticRule) return;
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
@@ -63,7 +55,7 @@ export const DatePill = ({
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, [staticRule]);
+  }, []);
 
   return (
     <div
@@ -78,7 +70,7 @@ export const DatePill = ({
       />
 
       <div className='relative'>
-        <Badge variant='outline' className={cn('bg-background', className)}>
+        <Badge variant='outline' className='bg-background'>
           {dateText}
         </Badge>
       </div>

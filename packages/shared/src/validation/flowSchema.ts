@@ -205,7 +205,6 @@ export const buttonComponentSchema = baseComponentSchema.extend({
     variant: z.enum(['primary', 'secondary', 'destructive', 'ghost', 'outline']).optional(),
     size: z.enum(['sm', 'md', 'lg']).optional(),
     icon: z.string().optional(),
-    url: z.string().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });

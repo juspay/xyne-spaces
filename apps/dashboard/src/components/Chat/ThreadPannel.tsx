@@ -29,7 +29,6 @@ import {
   FolderDefault,
   ClipboardCheck as ClipboardCheckIcon,
   ThreeDotsMenuVertical,
-  GitBranch,
 } from '@xyne/icons';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import {
@@ -60,14 +59,7 @@ import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
-import {
-  MessageType,
-  ChannelScopeType,
-  ChannelType,
-  BaseTicketType,
-  isDeskChannelType,
-  parseTicketMd,
-} from '@xyne/shared';
+import { MessageType, ChannelScopeType, BaseTicketType, parseTicketMd } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
@@ -107,7 +99,7 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets';
+type TabType = 'thread' | 'details' | 'files' | 'rca';
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -203,7 +195,7 @@ export const ThreadMessages = ({
   const [derivedConversationId, setDerivedConversationId] = useState(conversationId || '');
   const [derivedChannelId, setDerivedChannelId] = useState(channelId || '');
 
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
   const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
   const selectedTab: TabType =
@@ -796,10 +788,6 @@ export const ThreadMessages = ({
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
-  const showSubTicketsTab = isDeskChannelType(channel?.type);
-  // The panel is reused across threads, so this tab can vanish while still selected.
-  const currentTab = !showSubTicketsTab && activeTab === 'subtickets' ? 'thread' : activeTab;
-
   const tabs = useMemo(() => {
     const allTabs = [
       { value: 'thread' as const, label: 'Messages', icon: <ChatDefault size={14} /> },
@@ -810,9 +798,6 @@ export const ThreadMessages = ({
         count: files.length,
         icon: <FolderDefault size={14} />,
       },
-      ...(showSubTicketsTab
-        ? [{ value: 'subtickets' as const, label: 'Sub-tickets', icon: <GitBranch size={14} /> }]
-        : []),
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
@@ -820,7 +805,7 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -943,14 +928,6 @@ export const ThreadMessages = ({
 
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket?.channelId || !ticket.conversationId) return;
-
-    // An SDLC ticket has its own page under the hub, not a panel over the chat channel.
-    if (channel?.type === ChannelType.SDLC) {
-      standaloneNavigate(navigate, `/sdlc/${ticket.channelId}/tickets/${ticket.id}`, {
-        state: { activeTab },
-      });
-      return;
-    }
 
     standaloneNavigate(
       navigate,
@@ -1587,15 +1564,8 @@ export const ThreadMessages = ({
         {!simpleView && derivedTicketId ? (
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
-            value={currentTab}
-            onValueChange={value => {
-              setActiveTab(value as TabType);
-              // Mirror it back, or re-opening the same tab from outside is a no-op.
-              if (!searchParams.has('selectedTab')) return;
-              const next = new URLSearchParams(searchParams);
-              next.set('selectedTab', value);
-              setSearchParams(next, { replace: true });
-            }}
+            value={activeTab}
+            onValueChange={value => setActiveTab(value as TabType)}
             className='flex-1 flex flex-col h-full overflow-hidden'
           >
             {headerActionsContainer
@@ -1612,7 +1582,7 @@ export const ThreadMessages = ({
                         <button
                           className={cn(
                             'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
-                            currentTab === tab.value
+                            activeTab === tab.value
                               ? 'bg-muted text-foreground'
                               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                           )}
@@ -1729,16 +1699,6 @@ export const ThreadMessages = ({
             >
               <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
             </Tabs.Content>
-
-            {/* Sub-tickets Tab Content */}
-            {showSubTicketsTab && (
-              <Tabs.Content
-                value='subtickets'
-                className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
-              >
-                <TicketDetails ticketId={derivedTicketId} subTicketsOnly />
-              </Tabs.Content>
-            )}
 
             {/* RCA Tab Content */}
             {isFixTicket && (

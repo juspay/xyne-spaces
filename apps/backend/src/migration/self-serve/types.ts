@@ -8,7 +8,6 @@ export enum MigrationStatus {
   QUEUED = 'QUEUED',
   COLLECTING = 'COLLECTING',
   AWAITING_APPROVAL = 'AWAITING_APPROVAL',
-  REFRESHING = 'REFRESHING',   // "Get latest messages": incremental re-collect of new activity before ingest
   INGESTING = 'INGESTING',
   STOPPED = 'STOPPED',
   FAILED = 'FAILED',
@@ -63,12 +62,6 @@ export interface MigrationJob {
   checkpoint: Checkpoint;
   ingestedCount?: number;       // parallel ingest: count of conversations done, tracked atomically (Redis SET) instead of the checkpoint array
   ingestStartedAt?: number;     // when ingestion first began (planner set INGESTING) — with completedAt gives the ingest duration
-  collectedAt?: number;         // when collection finished (→ AWAITING_APPROVAL) — "data current as of"
-  refreshRequested?: boolean;   // "Get latest messages" pressed → COLLECTION queue runs an incremental re-collect
-  lastRefreshedAt?: number;     // when the last incremental re-collect finished
-  refreshCount?: number;
-  refreshDone?: number;         // conversations processed so far in the current refresh
-  refreshTotal?: number;        // conversations to process in the current refresh
   stats: { conversations: number; messages: number };
   stopRequested: boolean;
   stopReason?: 'admin' | 'system';
@@ -101,12 +94,6 @@ export interface MigrationJobView {
   completedAt?: number;
   ingestStartedAt?: number;
   ingestDurationMs?: number; // completedAt − ingestStartedAt when both present — "how long ingestion took"
-  collectedAt?: number;      // when collection finished — "data current as of"
-  lastRefreshedAt?: number;
-  refreshCount?: number;
-  refreshDone?: number;
-  refreshTotal?: number;
-  canRefresh: boolean;       // awaiting approval AND token still held → "Get latest messages" available
   error?: string;
 }
 
@@ -142,12 +129,6 @@ export const toView = (j: MigrationJob): MigrationJobView => ({
   completedAt: j.completedAt,
   ingestStartedAt: j.ingestStartedAt,
   ingestDurationMs: j.ingestStartedAt && j.completedAt ? j.completedAt - j.ingestStartedAt : undefined,
-  collectedAt: j.collectedAt,
-  lastRefreshedAt: j.lastRefreshedAt,
-  refreshCount: j.refreshCount,
-  refreshDone: j.refreshDone,
-  refreshTotal: j.refreshTotal,
-  canRefresh: j.status === MigrationStatus.AWAITING_APPROVAL && !!j.encryptedToken,
   error: j.error,
   issues: j.issues,
 });

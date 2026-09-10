@@ -20,7 +20,7 @@ export function generateFilePath(options: UploadOptions): string {
 }
 
 export function normalizeStoragePath(url: string): string {
-  const match = url.match(/^(?:gs|s3|az):\/\/[^/]+\/(.+)$/);
+  const match = url.match(/^(?:gs|s3):\/\/[^/]+\/(.+)$/);
   return match ? match[1] : url;
 }
 

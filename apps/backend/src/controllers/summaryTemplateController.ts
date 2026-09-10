@@ -19,8 +19,6 @@ const SummaryTemplateSectionSchema = z.object({
   id: z.string().trim().min(1).max(200),
   title: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(500),
-  // Only honoured on the reserved Decisions / Action Items sections; see summaryTemplateService.
-  disabled: z.boolean().optional(),
 });
 
 const SummaryTemplateCreateSchema = z.object({

@@ -82,7 +82,7 @@ function openFloatingDock(url: string, onClose?: () => void): void {
 }
 
 function closeFloatingDock(): void {
-  setFloatingDockState({ ...floatingDockState, isOpen: false });
+  setFloatingDockState({ isOpen: false, url: null });
 }
 
 function getDefaultFloatingPosition(): { x: number; y: number } {
@@ -144,12 +144,10 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
 
 function FloatingCloudAgentPanel({
   url,
-  isOpen,
   onClose,
   onRequestClose,
 }: {
   url: string;
-  isOpen: boolean;
   onClose?: () => void;
   onRequestClose: () => void;
 }): ReactElement | null {
@@ -226,7 +224,6 @@ function FloatingCloudAgentPanel({
         height: FLOATING_HEIGHT_PX,
         left: position.x,
         top: position.y,
-        display: isOpen ? undefined : 'none',
       }}
     >
       <div className='flex min-h-0 w-full flex-col'>
@@ -313,13 +310,11 @@ export function CloudAgentFloatingHost(): ReactElement | null {
     getFloatingDockSnapshot,
   );
 
-  // Stay mounted after close so the CloudAgent iframe keeps its login and any live call.
-  if (!floatingState.url) return null;
+  if (!floatingState.isOpen || !floatingState.url) return null;
 
   return (
     <FloatingCloudAgentPanel
       url={floatingState.url}
-      isOpen={floatingState.isOpen}
       {...(floatingState.onClose ? { onClose: floatingState.onClose } : {})}
       onRequestClose={closeFloatingDock}
     />
