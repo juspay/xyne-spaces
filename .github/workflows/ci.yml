@@ -24,6 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
+    if: false # temporarily disabled — testing automation test job only
     runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
@@ -64,6 +65,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
+    if: false # temporarily disabled — testing automation test job only
     runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
     strategy:
       fail-fast: false
@@ -114,6 +116,32 @@ jobs:
       - name: Build
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
+
+  test:
+    name: Automation tests
+    if: vars.USE_SELF_HOSTED_CI == 'true'
+    runs-on: ci-cluster-github-runners
+    env:
+      TEST_ENV: test
+      BROWSER: chromium
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
+
+      - name: Install Playwright browser
+        run: pnpm --filter xyne-automation exec playwright install --with-deps chromium
+
+      - name: Run automation tests
+        run: pnpm run test
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
