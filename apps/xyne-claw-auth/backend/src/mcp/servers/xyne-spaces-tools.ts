@@ -5342,8 +5342,11 @@ const spacesSdlcMutateArtifact: ToolDef = {
     "folders on the SDLC Hub's channel and are shared by every repository in that hub: PRD and Tech Docs are seeded " +
     "built-in types, and users can add custom types; list them via spaces-sdlc-list-artifact-types. To create an " +
     "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to). To update " +
-    "an artifact, pass its canvasId and markdown. Link related artifacts via relatedCanvasIds. Trusted repository, " +
-    "hub, and execution identity is injected by the platform when the run has a repository pinned.",
+    "an artifact, read it with spaces-read-canvas first, then pass its canvasId and the full markdown WITH the " +
+    "[bXXXXXX] paragraph labels that read returned, following the label rules in that response — the labels are " +
+    "what lets the review UI show a change as a replace instead of a delete plus an insert. Labels apply to update " +
+    "only; never put them in create, Wiki, or baseline markdown. Link related artifacts via relatedCanvasIds. " +
+    "Trusted repository, hub, and execution identity is injected by the platform when the run has a repository pinned.",
   inputSchema: {
     type: "object",
     properties: {
@@ -5398,6 +5401,10 @@ const spacesSdlcMutateArtifact: ToolDef = {
         properties: {
           action: { const: "update" },
           canvasId: { type: "string", minLength: 1 },
+          markdown: {
+            description:
+              "The whole document as returned by spaces-read-canvas, paragraph labels included: keep a label on every paragraph you kept or reworded, omit the labels of paragraphs you removed, and prefix added paragraphs with [new].",
+          },
         },
         required: ["action", "canvasId", "markdown"],
         not: { required: ["artifactType"] },
