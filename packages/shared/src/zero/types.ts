@@ -790,6 +790,7 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294

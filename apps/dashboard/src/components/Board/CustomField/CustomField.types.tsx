@@ -1,6 +1,6 @@
 import type { TicketField } from '../BoardEditScreen/BoardEditScreen.types';
 
-export type FieldType = 'text' | 'select' | 'multiselect' | 'boolean' | 'date' | 'user';
+export type FieldType = 'text' | 'select' | 'multiselect' | 'boolean' | 'date' | 'user' | 'ticket';
 
 export interface CustomFieldProps {
   mode: 'create' | 'edit';

@@ -89,6 +89,7 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
+import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
@@ -2718,6 +2719,38 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 [fieldName]: isOpen,
                               }));
                             }}
+                          />
+                        </div>
+                        {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
+                      </>
+                    )}
+                    {fieldType === FormFieldType.TICKET && (
+                      <>
+                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
+                        <div className='border border-input rounded'>
+                          <TicketFieldSelector
+                            selectedValue={stringValue || null}
+                            onSelect={ticketId => {
+                              form.setFieldValue('dynamicFields', {
+                                ...formValues?.dynamicFields,
+                                [fieldName]: ticketId ?? '',
+                              });
+                              if (ticketId && error) {
+                                setDynamicFieldErrors(prev => {
+                                  const next = { ...prev };
+                                  delete next[fieldName];
+                                  return next;
+                                });
+                              } else if (!isOptional && !ticketId) {
+                                setDynamicFieldErrors(prev => ({
+                                  ...prev,
+                                  [fieldName]: `${fieldName} is required`,
+                                }));
+                              }
+                            }}
+                            projectId={projectId}
+                            placeholder={`Search ${fieldName.toLowerCase()}`}
+                            testId={`ticket-field-selector-${fieldName}`}
                           />
                         </div>
                         {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}

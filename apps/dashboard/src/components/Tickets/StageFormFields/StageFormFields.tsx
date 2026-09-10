@@ -4,7 +4,15 @@ import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shar
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { MultiSelect } from '../../ui/MultiSelect/MultiSelect';
+import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
+import { TicketLinkField } from '../TicketLinkField/TicketLinkField';
+import {
+  toDateInputValue,
+  formatShortDate,
+  looksLikeXyneId,
+} from '../TicketLinkField/ticketLinkUtils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useAuth } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 
@@ -34,6 +42,8 @@ interface StageFormFieldsProps {
   setLocalDocChanges: Dispatch<SetStateAction<Map<string, StageFormDocLocalChange>>>;
   valuesForRender: readonly FormEntityValueForRender[];
   targetStageId: string;
+  /** The desk ticket the form belongs to — enables the sub-ticket experience for TICKET fields. */
+  parentTicketId?: string;
   disabled?: boolean;
   readOnlyDocs?: boolean;
   showPersistedDocValues?: boolean;
@@ -54,6 +64,7 @@ export const StageFormFields = ({
   setLocalDocChanges,
   valuesForRender,
   targetStageId,
+  parentTicketId,
   disabled = false,
   readOnlyDocs = false,
   showPersistedDocValues = true,
@@ -99,6 +110,42 @@ export const StageFormFields = ({
   // keyed by fieldName — no name lookup needed to find a parent's current value.
   const getFieldEffectiveValue = (fieldId: string): string | undefined => formData[fieldId]?.[0];
 
+  // ETA hint: resolve the linked ticket of the first TICKET field with a value so DATE
+  // fields can offer "linked ticket is due X — use that date".
+  const linkedTicketIdForEta = useMemo(() => {
+    for (const field of fields) {
+      if (field.fieldType !== FormFieldType.TICKET) continue;
+      const candidate = formData[field.id]?.[0]?.trim() ?? '';
+      if (
+        candidate.length > 0 &&
+        !candidate.startsWith('http://') &&
+        !candidate.startsWith('https://')
+      ) {
+        return candidate;
+      }
+    }
+    return '';
+  }, [fields, formData]);
+
+  // Stored TICKET values are xyneIds; resolve those in the active workspace
+  // (legacy uuid values keep resolving by ticket id).
+  const etaValueIsXyneId = looksLikeXyneId(linkedTicketIdForEta);
+  const { user } = useAuth();
+  const workspaceId = user?.workspaceId ?? '';
+
+  const [etaSourceById] = useCachedQuery(
+    queries.ticketRowById({ ticketId: !etaValueIsXyneId ? linkedTicketIdForEta : '' }),
+    { enabled: Boolean(linkedTicketIdForEta) && !etaValueIsXyneId },
+  );
+  const [etaSourceByXyneId] = useCachedQuery(
+    queries.ticketByXyneIdV3({
+      xyneId: etaValueIsXyneId ? linkedTicketIdForEta : '',
+      workspaceId,
+    }),
+    { enabled: etaValueIsXyneId && Boolean(workspaceId) },
+  );
+  const etaSourceTicket = etaValueIsXyneId ? etaSourceByXyneId : etaSourceById;
+
   return (
     <>
       {fields
@@ -126,7 +173,7 @@ export const StageFormFields = ({
                 <p className='text-xs font-medium leading-4 text-muted-foreground'>
                   {field.fieldName}
                 </p>
-                <p className='mt-1 text-sm font-semibold leading-5 text-foreground'>
+                <p className='mt-1 break-all text-sm font-semibold leading-5 text-foreground'>
                   {displayValue}
                 </p>
               </div>
@@ -135,10 +182,12 @@ export const StageFormFields = ({
 
           return (
             <div key={field.id} className={readOnlySummary ? 'py-3 first:pt-0 last:pb-0' : 'mb-4'}>
-              <label className='mb-1 block text-sm font-medium text-foreground'>
-                {field.fieldName}
-                {!field.isOptional && <span className='text-red-500'>*</span>}
-              </label>
+              {!(field.fieldType === FormFieldType.TICKET && parentTicketId) && (
+                <label className='mb-1 block text-sm font-medium text-foreground'>
+                  {field.fieldName}
+                  {!field.isOptional && <span className='text-red-500'>*</span>}
+                </label>
+              )}
 
               {field.fieldType === FormFieldType.STRING && (
                 <input
@@ -198,18 +247,46 @@ export const StageFormFields = ({
                 </div>
               )}
 
-              {field.fieldType === FormFieldType.DATE && (
-                <input
-                  type='date'
-                  value={fieldValue[0] ?? ''}
-                  onChange={event => updateFieldValue(field.id, [event.target.value])}
-                  disabled={disabled}
-                  className={stageFormControlClassName}
-                  data-track-category='Tickets'
-                  data-track-name={`${trackNamePrefix}DateInput`}
-                  data-track-metadata={trackMetadata}
-                />
-              )}
+              {field.fieldType === FormFieldType.DATE &&
+                ((): React.JSX.Element => {
+                  const etaTimestamp = etaSourceTicket?.eta ?? null;
+                  const etaDateValue = etaTimestamp ? toDateInputValue(etaTimestamp) : '';
+                  const etaCurrentValue = fieldValue[0] ?? '';
+                  const showEtaHint =
+                    etaTimestamp !== null &&
+                    etaDateValue.length > 0 &&
+                    etaCurrentValue.length === 0;
+
+                  return (
+                    <>
+                      <input
+                        type='date'
+                        value={etaCurrentValue}
+                        onChange={event => updateFieldValue(field.id, [event.target.value])}
+                        disabled={disabled}
+                        className={stageFormControlClassName}
+                        data-track-category='Tickets'
+                        data-track-name={`${trackNamePrefix}DateInput`}
+                        data-track-metadata={trackMetadata}
+                      />
+                      {showEtaHint && etaTimestamp !== null ? (
+                        <p className='mt-1 text-xs text-muted-foreground'>
+                          {`${etaSourceTicket?.xyneId || 'Linked ticket'} is due ${formatShortDate(etaTimestamp)}. `}
+                          <button
+                            type='button'
+                            onClick={() => updateFieldValue(field.id, [etaDateValue])}
+                            className='font-medium text-red-600 underline-offset-2 hover:underline'
+                            data-track-category='Tickets'
+                            data-track-name={`${trackNamePrefix}UseLinkedTicketEta`}
+                            data-track-metadata={trackMetadata}
+                          >
+                            Use that date
+                          </button>
+                        </p>
+                      ) : null}
+                    </>
+                  );
+                })()}
 
               {field.fieldType === FormFieldType.SINGLE_SELECT && (
                 <div
@@ -267,6 +344,32 @@ export const StageFormFields = ({
                   data-track-metadata={trackMetadata}
                 />
               )}
+
+              {field.fieldType === FormFieldType.TICKET &&
+                (parentTicketId ? (
+                  <TicketLinkField
+                    parentTicketId={parentTicketId}
+                    value={fieldValue[0] || null}
+                    onChange={ticketId => updateFieldValue(field.id, ticketId ? [ticketId] : [])}
+                    label={field.fieldName}
+                    isOptional={field.isOptional === true}
+                    disabled={disabled}
+                    trackName={`${trackNamePrefix}TicketLinkField`}
+                  />
+                ) : (
+                  <div
+                    data-track-category='Tickets'
+                    data-track-name={`${trackNamePrefix}TicketSelector`}
+                    data-track-metadata={trackMetadata}
+                  >
+                    <TicketFieldSelector
+                      selectedValue={fieldValue[0] || null}
+                      onSelect={ticketId => updateFieldValue(field.id, ticketId ? [ticketId] : [])}
+                      disabled={disabled}
+                      placeholder='Search ticket by ID or name'
+                    />
+                  </div>
+                ))}
 
               {field.fieldType === FormFieldType.DOC &&
                 ((): React.JSX.Element => {

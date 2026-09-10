@@ -13,7 +13,10 @@ interface SubTicketModalProps {
   ticketId: string;
   conversationId: string;
   sourceMessageId?: string;
-  onSuccess?: () => void;
+  initialTitle?: string;
+  initialDescription?: string;
+  /** Receives the created ticket, after the sub-ticket mapping is wired. */
+  onSuccess?: (createdTicket: { id: string; xyneId?: string | undefined }) => void;
 }
 
 type InitialAssignee = { type: 'assigneeTo' | 'userGroup'; value: string } | null;
@@ -24,6 +27,8 @@ export const SubTicketModal = ({
   ticketId,
   conversationId,
   sourceMessageId,
+  initialTitle,
+  initialDescription,
   onSuccess,
 }: SubTicketModalProps): ReactElement | null => {
   const zero = useZero();
@@ -63,6 +68,8 @@ export const SubTicketModal = ({
       initialTags={initialTags}
       isFromSubTicket={true}
       {...(sourceMessageId && { sourceMessageId })}
+      {...(initialTitle && { initialTitle })}
+      {...(initialDescription && { initialDescription })}
       parentTicketId={ticketId}
       onTicketCreated={createdTicket => {
         // Create SubTicket and mapping using Zero mutators
@@ -103,7 +110,7 @@ export const SubTicketModal = ({
         );
 
         onClose();
-        onSuccess?.();
+        onSuccess?.(createdTicket);
       }}
     />
   );

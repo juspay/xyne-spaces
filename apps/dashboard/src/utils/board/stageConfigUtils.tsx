@@ -55,6 +55,7 @@ export const FIELD_TYPE_OPTIONS: FieldTypeOption[] = [
   { value: FormFieldType.DATE, label: 'Date' },
   { value: FormFieldType.BOOLEAN, label: 'Boolean' },
   { value: FormFieldType.DOC, label: 'Document' },
+  { value: FormFieldType.TICKET, label: 'Ticket' },
 ];
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
