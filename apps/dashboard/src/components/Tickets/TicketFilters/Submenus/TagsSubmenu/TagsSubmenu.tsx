@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { SearchDefault as Search, CheckTickSingle as Check, Tag } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 
@@ -7,6 +7,10 @@ interface TagsSubmenuProps {
   onChange: (tags: string[]) => void;
   availableTags?: string[];
   className?: string;
+  /** Callback to load more tags */
+  onLoadMore?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMore?: boolean | undefined;
 }
 
 export const TagsSubmenu = ({
@@ -14,43 +18,57 @@ export const TagsSubmenu = ({
   onChange,
   availableTags = [],
   className = '',
+  onLoadMore,
+  hasMore = false,
 }: TagsSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
 
   // Focus search input when component mounts
   useEffect(() => {
     searchInputRef.current?.focus();
   }, []);
 
-  // Debounced Search
+  // Scroll detection for infinite loading (only when not searching)
+  const handleScroll = useCallback(() => {
+    if (!listContainerRef.current || !onLoadMore || !hasMore || searchQuery.trim()) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = listContainerRef.current;
+    // Load more when scrolled to within 50px of bottom
+    if (scrollHeight - scrollTop - clientHeight < 50) {
+      onLoadMore();
+    }
+  }, [onLoadMore, hasMore, searchQuery]);
+
   useEffect(() => {
-    const timer = setTimeout(() => setSearchTerm(searchQuery), 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    const container = listContainerRef.current;
+    if (!container) return;
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
 
   const finalResults = useMemo(() => {
-    if (!availableTags || availableTags.length === 0) return [];
+    if (!availableTags || availableTags.length === 0) {
+      return [];
+    }
 
-    let list = [...availableTags];
-
-    // Filter by search term
-    if (searchTerm.trim()) {
-      const lower = searchTerm.toLowerCase();
-      list = list.filter(tag => tag.toLowerCase().includes(lower));
+    // Filter by search query if present
+    let filtered = availableTags;
+    if (searchQuery.trim()) {
+      const lower = searchQuery.toLowerCase();
+      filtered = availableTags.filter(tag => tag.toLowerCase().includes(lower));
     }
 
     // Sort selected items to top
     const selectedSet = new Set(selectedTags);
-    return list
-      .sort((a, b) => {
-        const aSel = selectedSet.has(a) ? 1 : 0;
-        const bSel = selectedSet.has(b) ? 1 : 0;
-        return bSel - aSel;
-      })
-      .slice(0, 50); // Limit to 50 tags for performance
-  }, [availableTags, searchTerm, selectedTags]);
+    return [...filtered].sort((a, b) => {
+      const aSel = selectedSet.has(a) ? 1 : 0;
+      const bSel = selectedSet.has(b) ? 1 : 0;
+      return bSel - aSel;
+    });
+  }, [availableTags, searchQuery, selectedTags]);
 
   const handleTagToggle = (tag: string) => {
     const isSelected = selectedTags.includes(tag);
@@ -87,7 +105,12 @@ export const TagsSubmenu = ({
           />
         </div>
       </div>
-      <div className='max-h-80 overflow-y-auto p-1' role='listbox' aria-multiselectable='true'>
+      <div
+        ref={listContainerRef}
+        className='max-h-80 overflow-y-auto p-1'
+        role='listbox'
+        aria-multiselectable='true'
+      >
         {!availableTags || availableTags.length === 0 ? (
           <div className='p-8 text-center text-sm text-muted-foreground'>No labels available</div>
         ) : finalResults.length > 0 ? (

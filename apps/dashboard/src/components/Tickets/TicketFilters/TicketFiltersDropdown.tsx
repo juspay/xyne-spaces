@@ -117,6 +117,8 @@ export const TicketFiltersDropdown = ({
   sourceChannelProjectIds,
   showBoardsFilter = false,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags,
   availableStages,
   hideAssigneeFilter = false,
   hasPrReviewers,
@@ -653,6 +655,8 @@ export const TicketFiltersDropdown = ({
             selectedTags={filters.tags || []}
             onChange={(tags: string[]) => handleFilterChange('tags', tags)}
             availableTags={availableTags || []}
+            onLoadMore={onLoadMoreTags}
+            hasMore={hasMoreTags}
           />
         );
       case 'stages':
