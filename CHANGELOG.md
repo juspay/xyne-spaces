@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.9](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.8...v1.295.0-release-20260909.9) (2026-09-10)
+
+
+### Features
+
+* ask ai ([#1765](https://github.com/juspay/xyne-spaces/issues/1765)) ([9b93a26](https://github.com/juspay/xyne-spaces/commit/9b93a260814eba846610d6501bc0a15e76549bc4))
+
 ## [1.295.0-release-20260909.8](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.7...v1.295.0-release-20260909.8) (2026-09-10)
 
 
