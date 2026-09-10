@@ -3099,8 +3099,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
       actorTypes: z.array(z.nativeEnum(UserType)).optional(),
+      actorId: z.string().optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes, actorId } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -3123,7 +3124,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       // reach through the `actor` relationship. Must stay in step with the client
       // definition in packages/shared/src/zero/queries.ts — this is the copy the
       // server actually executes via handleQueryRequest.
-      if (actorTypes && actorTypes.length > 0) {
+      if (actorId) {
+        query = query.where('actorId', actorId);
+      } else if (actorTypes && actorTypes.length > 0) {
         query = query.whereExists('actor', (actor: any) =>
           actor.where('userType', 'IN', actorTypes)
         );

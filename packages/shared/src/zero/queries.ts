@@ -2526,8 +2526,9 @@ export const queries = defineQueries({
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
       isRead: z.boolean().optional(),
       actorTypes: z.array(z.nativeEnum(UserType)).optional(),
+      actorId: z.string().optional(),
     }),
-    ({ args: { limit, start, types, classification, isRead, actorTypes } }) => {
+    ({ args: { limit, start, types, classification, isRead, actorTypes, actorId } }) => {
       let query = zql.activities;
 
       if (types.length > 0) {
@@ -2550,7 +2551,9 @@ export const queries = defineQueries({
       // reach through the `actor` relationship. Filtering here rather than on the
       // client keeps `limit` meaningful — a client-side filter would page over all
       // activities and hand back short or empty pages.
-      if (actorTypes && actorTypes.length > 0) {
+      if (actorId) {
+        query = query.where('actorId', actorId);
+      } else if (actorTypes && actorTypes.length > 0) {
         query = query.whereExists('actor', (actor: any) =>
           actor.where('userType', 'IN', actorTypes),
         );
