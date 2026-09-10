@@ -86,6 +86,8 @@ import {
   xyneAIActor,
   type ThreadInfo,
   type CanvasInfo,
+  type WorkflowInfo,
+  toWorkflowContext,
   type XyneAIContext,
   type AskAIInitialContextSelections,
   type SelectionInfo,
@@ -134,6 +136,8 @@ interface XyneAISidebarProps {
   kbCollectionId?: string;
   kbChannelId?: string;
   kbDocId?: string;
+  workflowInfo?: WorkflowInfo | null;
+  workflowDismissed?: boolean;
   kbDocName?: string;
   kbFolderId?: string;
   kbFolderName?: string;
@@ -171,6 +175,8 @@ const XyneAISidebar = ({
   onConversationChange,
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
+  workflowInfo,
+  workflowDismissed,
   kbDocName: kbDocNameProp,
   kbFolderId: kbFolderIdProp,
   kbFolderName: kbFolderNameProp,
@@ -302,6 +308,11 @@ const XyneAISidebar = ({
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
   const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);
   const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
+  const activeWorkflowInfo = workflowDismissed ? null : (workflowInfo ?? null);
+  const handleRemoveWorkflowInfo = useCallback((e: React.MouseEvent): void => {
+    e.stopPropagation();
+    xyneAIActor.send({ type: 'DISMISS_WORKFLOW_CONTEXT' });
+  }, []);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
   const [browserContext, setBrowserContext] = useState<{
@@ -772,6 +783,7 @@ const XyneAISidebar = ({
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
     canvasId: canvasInfo?.canvasId ?? null,
+    workflowContext: toWorkflowContext(activeWorkflowInfo),
     setMessages,
     setConversationId,
     setCurrentTraceId,
@@ -1943,6 +1955,8 @@ const XyneAISidebar = ({
     scopeType,
     threadInfo: activeThreadInfo,
     canvasInfo,
+    workflowInfo: activeWorkflowInfo,
+    onRemoveWorkflowInfo: handleRemoveWorkflowInfo,
     selectionInfos: activeSelectionInfos,
     inputValue,
     onInputChange: setInputValue,

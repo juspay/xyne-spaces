@@ -127,7 +127,37 @@ const sendRouteResponse = async (
   res.status(response.status).json(response.body);
 };
 
-const mount = (router: Router, authenticated: boolean): void => {
+const CLAW_ALLOWED_ROUTES = new Set([
+  'GET /schema/steps',
+  'GET /schema/steps/:type',
+  'GET /schema/triggers',
+  'GET /schema/triggers/:type',
+  'GET /schema/operators',
+  'POST /schema/available-context',
+  'GET /capabilities',
+  // Authoring.
+  'GET /workflows',
+  'GET /workflows/counts',
+  'GET /workflows/:id',
+  'POST /workflows',
+  'PUT /workflows/:id',
+  'POST /workflows/validate',
+  'POST /workflows/:id/deactivate',
+  'GET /folders',
+  'GET /folders/:id',
+  'POST /folders',
+  'POST /workflows/:id/trigger',
+  'GET /executions',
+  'GET /executions/pending-approvals',
+  'GET /executions/:execId',
+  'GET /executions/:execId/steps/:stepName/events',
+  'POST /executions/:execId/rerun',
+  'POST /executions/:execId/cancel',
+  'GET /analytics/summary',
+  'GET /analytics/top-errors',
+]);
+
+const mount = (router: Router, authenticated: boolean, allow?: ReadonlySet<string>): void => {
   const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
     // Only consulted for unauthenticated routes, whose authorization is a path secret —
     // so reaching it at all means a route was misclassified.
@@ -142,6 +172,8 @@ const mount = (router: Router, authenticated: boolean): void => {
 
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
+
+    if (allow && !allow.has(key)) continue;
 
     // The SDK tells us which routes need a multipart parser; run multer only there so
     // ordinary JSON routes are untouched.
@@ -180,3 +212,5 @@ mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
 mount(workflowsPublicRouter, false);
+export const workflowsClawRouter: Router = express.Router();
+mount(workflowsClawRouter, true, CLAW_ALLOWED_ROUTES);
