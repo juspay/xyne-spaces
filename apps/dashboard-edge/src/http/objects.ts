@@ -4,12 +4,35 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream/promises';
 
-import { cacheControlFor, contentTypeFor, type CacheMode } from '../contentType.js';
+import { cacheControlFor, contentTypeFor, isRouteLike, type CacheMode } from '../contentType.js';
 import { log } from '../log.js';
 import { metrics } from '../metrics.js';
-import type { ObjectInfo, Origin } from '../origin/index.js';
+import type { ObjectInfo, ObjectRead, Origin } from '../origin/index.js';
+import type { RulesStore } from '../rules/store.js';
 
 const CACHE_MODES = new Set<string>(['versioned', 'never', 'ttl']);
+const FALLBACK_PROBES = 10;
+const MISSING_TTL_MS = 60_000;
+const missing = new Map<string, number>();
+
+function knownMissing(key: string): boolean {
+  const until = missing.get(key);
+  if (until === undefined) {
+    return false;
+  }
+  if (until < Date.now()) {
+    missing.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function rememberMissing(key: string): void {
+  if (missing.size > 10_000) {
+    missing.clear();
+  }
+  missing.set(key, Date.now() + MISSING_TTL_MS);
+}
 
 function parseKey(pathname: string): { bundle: string; object: string } | null {
   const rest = pathname.replace(/^\/objects\//, '');
@@ -40,6 +63,7 @@ function responseHeaders(
   const headers: Record<string, string> = {
     'Content-Type': contentTypeFor(object, info.contentType),
     'Cache-Control': cacheControlFor(mode, object),
+    'Accept-Ranges': 'bytes',
   };
   if (info.etag) {
     headers['ETag'] = `"${info.etag}"`;
@@ -63,8 +87,34 @@ function etagMatches(ifNoneMatch: string | undefined, etag: string | undefined):
     .some((s) => s === '*' || s === etag);
 }
 
+async function findElsewhere(
+  origin: Origin,
+  store: RulesStore,
+  ruleId: string,
+  bundle: string,
+  object: string,
+): Promise<{ bundle: string; read: ObjectRead } | null> {
+  if (isRouteLike(object) || object === 'index.html') {
+    return null;
+  }
+  const candidates = (await store.fallbackBundles(ruleId, bundle)).slice(0, FALLBACK_PROBES);
+  for (const candidate of candidates) {
+    const key = `${candidate}/${object}`;
+    if (knownMissing(key)) {
+      continue;
+    }
+    const read = await origin.get(key);
+    if (read) {
+      return { bundle: candidate, read };
+    }
+    rememberMissing(key);
+  }
+  return null;
+}
+
 export function makeObjectsHandler(
   origin: Origin,
+  store: RulesStore,
 ): (req: IncomingMessage, res: ServerResponse, pathname: string) => Promise<void> {
   return async (req, res, pathname) => {
     const key = parseKey(pathname);
@@ -79,6 +129,8 @@ export function makeObjectsHandler(
       typeof modeHeader === 'string' && CACHE_MODES.has(modeHeader) ? modeHeader : 'versioned'
     ) as CacheMode;
     const ifNoneMatch = req.headers['if-none-match'];
+    const ruleHeader = req.headers['x-edge-rule'];
+    const ruleId = typeof ruleHeader === 'string' ? ruleHeader : '';
 
     try {
       if (req.method === 'HEAD' || ifNoneMatch) {
@@ -103,16 +155,34 @@ export function makeObjectsHandler(
         }
       }
 
-      const read = await origin.get(objectKey);
+      let read = await origin.get(objectKey);
+      let servedFrom = key.bundle;
+      if (!read && ruleId !== '') {
+        const found = await findElsewhere(origin, store, ruleId, key.bundle, key.object);
+        if (found) {
+          read = found.read;
+          servedFrom = found.bundle;
+          log.info('asset served from another bundle', {
+            rule: ruleId,
+            object: key.object,
+            requested: key.bundle,
+            served: servedFrom,
+          });
+        }
+      }
       if (!read) {
         metrics.originRequests.inc({ result: 'not_found' });
         res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end('edge: object not found\n');
         return;
       }
-      res.writeHead(200, responseHeaders(key.object, mode, read.info));
+      const headers = responseHeaders(key.object, mode, read.info);
+      if (servedFrom !== key.bundle) {
+        headers['X-Edge-Served-From'] = servedFrom;
+      }
+      res.writeHead(200, headers);
       await pipeline(read.stream, res);
-      metrics.originRequests.inc({ result: 'ok' });
+      metrics.originRequests.inc({ result: servedFrom === key.bundle ? 'ok' : 'fallback' });
     } catch (err) {
       metrics.originRequests.inc({ result: 'error' });
       log.error('origin fetch failed', { key: objectKey, err });

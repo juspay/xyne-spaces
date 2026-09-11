@@ -709,6 +709,25 @@ export class GCSService {
     });
   }
 
+  async listPrefixes(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const [, nextQuery, apiResponse] = await this.bucket.getFiles({
+        prefix,
+        delimiter: '/',
+        autoPaginate: false,
+        ...(pageToken ? { pageToken } : {}),
+      });
+      const prefixes = (apiResponse as { prefixes?: string[] } | undefined)?.prefixes ?? [];
+      for (const p of prefixes) {
+        out.push(p.slice(prefix.length).replace(/\/$/, ''));
+      }
+      pageToken = (nextQuery as { pageToken?: string } | null | undefined)?.pageToken;
+    } while (pageToken);
+    return out;
+  }
+
   /**
    * Ensure bucket exists (useful for initialization)
    */

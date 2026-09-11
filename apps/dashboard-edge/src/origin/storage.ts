@@ -75,5 +75,6 @@ export function createStorageOrigin(cfg: Config['storage']): Origin {
     }),
     head: (key) => service.headObject(key),
     get: (key) => service.getObject(key),
+    listPrefixes: (prefix) => service.listPrefixes(prefix),
   };
 }

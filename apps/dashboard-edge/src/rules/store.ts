@@ -66,6 +66,8 @@ export interface StoreStatus {
 
 const EXISTS_TTL_MS = 60_000;
 const MISSING_TTL_MS = 15_000;
+const HISTORY_DEPTH = 8;
+const LANES_TTL_MS = 5 * 60_000;
 
 export class RulesStore {
   private active: RuleSet | null = null;
@@ -77,6 +79,8 @@ export class RulesStore {
   private running = false;
   private stopped = false;
   private readonly existence = new Map<string, ExistenceEntry>();
+  private readonly history = new Map<string, string[]>();
+  private lanes: { names: string[]; expiresAt: number } | null = null;
 
   constructor(private readonly opts: RulesStoreOptions) {}
 
@@ -152,6 +156,55 @@ export class RulesStore {
         rs.error = r.error;
       }
       out.rules.push(rs);
+    }
+    return out;
+  }
+
+  private async bucketLanes(): Promise<string[]> {
+    const now = Date.now();
+    if (this.lanes && this.lanes.expiresAt > now) {
+      return this.lanes.names;
+    }
+    let names: string[] = [];
+    try {
+      names = await this.opts.origin.listPrefixes('');
+    } catch (err) {
+      log.warn('cannot list bucket lanes for asset fallback', { err });
+      return this.lanes?.names ?? [];
+    }
+    const releases = names
+      .filter((n) => /^release-\d{8}$/.test(n))
+      .sort()
+      .reverse();
+    const rest = names
+      .filter((n) => !/^release-\d{8}$/.test(n) && n !== 'main' && !n.startsWith('devqa-'))
+      .sort();
+    names = [...releases, ...(names.includes('main') ? ['main'] : []), ...rest];
+    this.lanes = { names, expiresAt: now + LANES_TTL_MS };
+    return names;
+  }
+
+  async fallbackBundles(ruleId: string, bundle: string): Promise<string[]> {
+    const sdlc = bundle.endsWith('-sdlc');
+    const fits = (b: string): boolean => b !== bundle && b.endsWith('-sdlc') === sdlc;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const add = (b: string): void => {
+      if (fits(b) && !seen.has(b)) {
+        seen.add(b);
+        out.push(b);
+      }
+    };
+    for (const b of this.history.get(ruleId) ?? []) {
+      add(b);
+    }
+    for (const r of this.active?.rules ?? []) {
+      if (r.enabled && !isDynamicBundle(r.bundle)) {
+        add(r.bundle);
+      }
+    }
+    for (const lane of await this.bucketLanes()) {
+      add(lane);
     }
     return out;
   }
@@ -246,6 +299,16 @@ export class RulesStore {
     this.lastHealthCheck = Date.now();
     if (unchanged && !force && !changed) {
       return;
+    }
+
+    for (const rule of parsed.rules) {
+      const prev = this.active?.rules.find((r) => r.id === rule.id);
+      if (prev && prev.bundle !== rule.bundle && !isDynamicBundle(prev.bundle)) {
+        const list = [prev.bundle, ...(this.history.get(rule.id) ?? [])].filter(
+          (b, i, arr) => b !== rule.bundle && arr.indexOf(b) === i,
+        );
+        this.history.set(rule.id, list.slice(0, HISTORY_DEPTH));
+      }
     }
 
     this.generation += 1;
