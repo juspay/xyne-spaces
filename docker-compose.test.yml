@@ -33,6 +33,11 @@ services:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
       - ./apps/backend/.env.test   # Override with container hostnames
+    environment:
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     depends_on:
       backend-migrate:
@@ -61,6 +66,11 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dashboard
     env_file:
       - ./apps/dashboard/.env.test   # Override with container hostnames
+    environment:
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     ports:
       - "${DASHBOARD_BIND_PORT:-0}:5173"
     depends_on:
@@ -157,6 +167,10 @@ services:
       - NPM_CONFIG_LOGLEVEL=error
       - NODE_NO_WARNINGS=1
       - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     depends_on:
       backend:
         condition: service_healthy
