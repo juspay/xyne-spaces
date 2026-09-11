@@ -17,6 +17,25 @@ import {
   type WikiRevisionEvidence,
 } from './wiki/wikiRunState';
 
+/**
+ * Who is asking and where. Hub scope (channelId, optionally narrowed to
+ * repoIds) is what the claw sends; a bare repoId is the older
+ * repository-scoped contract and resolves to that repository's first hub.
+ */
+export interface SdlcArtifactScope {
+  repoId?: string;
+  channelId?: string;
+  repoIds?: string[];
+  workspaceId: string;
+  userId: string;
+}
+
+interface ResolvedScope {
+  channelId: string;
+  projectId: string;
+  repoIds: string[];
+}
+
 export type SdlcArtifactVersionSelector =
   | { type: 'WIKI_PAGE'; path: string; includeArchived?: boolean }
   | { type: 'SDLC_CANVAS'; canvasId: string };
@@ -30,6 +49,7 @@ interface RevisionRecord {
 
 interface ResolvedArtifact {
   canvasId: string;
+  repoId: string;
   title: string;
   path: string | null;
   artifactKind: 'WIKI' | 'BASELINE' | 'ARTIFACT';
@@ -127,22 +147,19 @@ function versionSummary(
 export class SdlcArtifactVersionStore {
   constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
-  async listArtifacts(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
+  async listArtifacts(input: SdlcArtifactScope & {
     kinds?: Array<'WIKI' | 'BASELINE' | 'ARTIFACT'>;
     includeArchived?: boolean;
   }) {
-    const repo = await this.requireRepository(input);
+    const scope = await this.resolveScope(input);
     const canvases = await this.prisma.canvas.findMany({
       where: {
-        channelId: repo.channelId,
+        channelId: scope.channelId,
         workspaceId: input.workspaceId,
-        projectId: repo.projectId,
+        projectId: scope.projectId,
         // A hub can cover several repositories, so the artifact's repository is part of
         // what identifies it, not just the channel it renders in.
-        sdlcArtifact: { is: { repoId: repo.id, artifactStatus: { not: 'REFRESH_CANDIDATE' } } },
+        sdlcArtifact: { is: { repoId: { in: scope.repoIds }, artifactStatus: { not: 'REFRESH_CANDIDATE' } } },
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       select: {
@@ -173,10 +190,7 @@ export class SdlcArtifactVersionStore {
     });
   }
 
-  async readArtifact(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
+  async readArtifact(input: SdlcArtifactScope & {
     selector: SdlcArtifactVersionSelector;
   }) {
     const artifact = await this.resolveArtifact(input);
@@ -196,10 +210,7 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  async listVersions(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
+  async listVersions(input: SdlcArtifactScope & {
     selector: SdlcArtifactVersionSelector;
     cursor?: string;
     limit: number;
@@ -228,7 +239,7 @@ export class SdlcArtifactVersionStore {
     const hasMore = rows.length > input.limit;
     const page = hasMore ? rows.slice(0, input.limit) : rows;
     const evidence = artifact.artifactKind === 'WIKI'
-      ? await this.loadWikiEvidence(input.repoId, artifact)
+      ? await this.loadWikiEvidence(artifact.repoId, artifact)
       : new Map<string, RevisionRecord>();
     return {
       artifact: this.publicArtifact(artifact),
@@ -238,10 +249,7 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  async readVersion(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
+  async readVersion(input: SdlcArtifactScope & {
     selector: SdlcArtifactVersionSelector;
     versionId: string;
   }) {
@@ -259,7 +267,7 @@ export class SdlcArtifactVersionStore {
     });
     if (!version) throw new AppError('SDLC artifact version not found', 404);
     const evidence = artifact.artifactKind === 'WIKI'
-      ? await this.loadWikiEvidence(input.repoId, artifact)
+      ? await this.loadWikiEvidence(artifact.repoId, artifact)
       : new Map<string, RevisionRecord>();
     const record = evidence.get(version.id);
     const blocks = Array.isArray(version.content)
@@ -287,13 +295,15 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  private async resolveArtifact(input: {
-    repoId: string;
-    workspaceId: string;
-    userId: string;
+  private async resolveArtifact(input: SdlcArtifactScope & {
     selector: SdlcArtifactVersionSelector;
   }): Promise<ResolvedArtifact> {
-    const repo = await this.requireRepository(input);
+    // A canvas id names one document; its own hub is the scope, and the actor
+    // must participate in that hub. The caller's channel or repository can be
+    // a sibling hub of the same repository, which must not hide the artifact.
+    const scope = input.selector.type === 'SDLC_CANVAS'
+      ? await this.scopeOfCanvas({ ...input, canvasId: input.selector.canvasId })
+      : await this.resolveScope(input);
 
     let wikiPath: string | null = null;
     if (input.selector.type === 'WIKI_PAGE') {
@@ -312,15 +322,15 @@ export class SdlcArtifactVersionStore {
     const pages = wikiPath
       ? await this.prisma.canvas.findMany({
           where: {
-            channelId: repo.channelId,
+            channelId: scope.channelId,
             workspaceId: input.workspaceId,
-            projectId: repo.projectId,
-            sdlcArtifact: { is: { artifactType: 'WIKI', repoId: repo.id } },
+            projectId: scope.projectId,
+            sdlcArtifact: { is: { artifactType: 'WIKI', repoId: { in: scope.repoIds } } },
           },
           select: {
             id: true,
             title: true,
-            sdlcArtifact: { select: { artifactType: true } },
+            sdlcArtifact: { select: { artifactType: true, repoId: true } },
             metadata: true,
             content: true,
             folder: { select: { name: true } },
@@ -335,15 +345,17 @@ export class SdlcArtifactVersionStore {
       : await this.prisma.canvas.findFirst({
           where: {
             id: selectedCanvasId!,
-            channelId: repo.channelId,
+            channelId: scope.channelId,
             workspaceId: input.workspaceId,
-            projectId: repo.projectId,
-            sdlcArtifact: { is: { repoId: repo.id, artifactType: { not: 'DEFAULT' } } },
+            projectId: scope.projectId,
+            // DEFAULT is what every PRD / Tech Doc / custom-type artifact carries
+            // (identity comes from the folder), so it must stay readable here.
+            sdlcArtifact: { is: { repoId: { in: scope.repoIds } } },
           },
           select: {
             id: true,
             title: true,
-            sdlcArtifact: { select: { artifactType: true } },
+            sdlcArtifact: { select: { artifactType: true, repoId: true } },
             metadata: true,
             content: true,
             folder: { select: { name: true } },
@@ -362,6 +374,7 @@ export class SdlcArtifactVersionStore {
       }
       return {
         canvasId: canvas.id,
+        repoId: canvas.sdlcArtifact?.repoId ?? '',
         title: canvas.title,
         path: String(metadata.wikiRelativePath),
         artifactKind: 'WIKI',
@@ -376,12 +389,73 @@ export class SdlcArtifactVersionStore {
     }
     return {
       canvasId: canvas.id,
+      repoId: canvas.sdlcArtifact?.repoId ?? '',
       title: canvas.title,
       path: null,
       artifactKind,
       archived: false,
       content: canvas.content,
     };
+  }
+
+  private async scopeOfCanvas(input: {
+    canvasId: string;
+    workspaceId: string;
+    userId: string;
+  }): Promise<ResolvedScope> {
+    const canvas = await this.prisma.canvas.findFirst({
+      where: { id: input.canvasId, workspaceId: input.workspaceId },
+      select: { channelId: true },
+    });
+    if (!canvas?.channelId) throw new AppError('SDLC artifact not found', 404);
+    return this.requireHub({ channelId: canvas.channelId, workspaceId: input.workspaceId, userId: input.userId });
+  }
+
+  private async resolveScope(input: SdlcArtifactScope): Promise<ResolvedScope> {
+    if (input.channelId) return this.requireHub({ ...input, channelId: input.channelId });
+    if (input.repoId) {
+      const repo = await this.requireRepository({ ...input, repoId: input.repoId });
+      return { channelId: repo.channelId, projectId: repo.projectId, repoIds: [repo.id] };
+    }
+    throw new AppError('SDLC artifact not found', 404);
+  }
+
+  /**
+   * Hub scope: the actor must participate in the channel; the artifacts in
+   * play are those of the hub's member repositories, narrowed to repoIds
+   * when the caller passed a non-empty list.
+   */
+  private async requireHub(input: {
+    channelId: string;
+    repoId?: string;
+    repoIds?: string[];
+    workspaceId: string;
+    userId: string;
+  }): Promise<ResolvedScope> {
+    const [channel, links] = await Promise.all([
+      this.prisma.channel.findFirst({
+        where: {
+          id: input.channelId,
+          workspaceId: input.workspaceId,
+          participants: { some: { userId: input.userId } },
+        },
+        select: { id: true, projectId: true },
+      }),
+      this.prisma.sdlcEntityLink.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          channelId: input.channelId,
+          targetType: 'REPOSITORY',
+          relationType: SDLC_MEMBERSHIP_RELATION,
+        },
+        select: { targetId: true },
+      }),
+    ]);
+    if (!channel) throw new AppError('SDLC artifact not found', 404);
+    const members = links.map(link => link.targetId);
+    const requested = input.repoIds ?? (input.repoId ? [input.repoId] : []);
+    const repoIds = requested.length > 0 ? members.filter(id => requested.includes(id)) : members;
+    return { channelId: channel.id, projectId: channel.projectId, repoIds };
   }
 
   private async requireRepository(input: {

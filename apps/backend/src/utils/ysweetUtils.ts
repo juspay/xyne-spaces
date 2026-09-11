@@ -369,21 +369,18 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[], u
 }
 
 /**
- * Read BlockNote content from a Y-Sweet document.
- * This retrieves the content stored in Y-Sweet for collaborative editing.
- *
- * @param canvasId - The document ID (canvas ID)
- * @param userId - The actual user/bot performing this read
- * @returns Array of BlockNote blocks, or empty array if unable to read
- */
-/**
- * The canvas as it stands, with a failed read told apart from an empty canvas.
+ * Read BlockNote content from a Y-Sweet document, distinguishing "the document
+ * is empty" from "the read failed".
  *
  * readFromYSweet answers `[]` for both, which is harmless when the answer is
  * only being read and destructive when it is being written back: a write that
  * restores what markdown cannot carry — a whiteboard's drawing — would take an
  * unreachable Y-Sweet as "there was nothing here" and commit the document
  * without it.
+ *
+ * @param canvasId - The document ID (canvas ID)
+ * @param userId - The actual user/bot performing this read
+ * @returns The blocks ([] for a genuinely empty document); throws if the read failed
  */
 export async function readFromYSweetStrict(
   canvasId: string,
@@ -423,6 +420,29 @@ export async function readFromYSweetStrict(
     `[YSweetUtils] Successfully read ${blocks.length} blocks from Y-Sweet for canvas ${canvasId}`
   );
   return blocks as BlockNoteBlock[];
+}
+
+/**
+ * The same distinction reported as `null` instead of a throw, for callers that
+ * want to refuse a write on a failed read without try/catch at every site.
+ * A 404 (no Y-Sweet document yet) is a genuinely empty canvas, not a failure.
+ *
+ * @returns The blocks ([] for a genuinely empty document), or null if the read failed
+ */
+export async function readFromYSweetOrNull(
+  canvasId: string,
+  userId: string
+): Promise<BlockNoteBlock[] | null> {
+  try {
+    return await readFromYSweetStrict(canvasId, userId);
+  } catch (error) {
+    if (error instanceof YSweetHttpError && error.status === 404) {
+      logger.debug(`[YSweetUtils] No Y-Sweet document for canvas ${canvasId}; treating as empty`);
+      return [];
+    }
+    logger.error('[YSweetUtils] Failed to read from Y-Sweet:', error);
+    return null;
+  }
 }
 
 /** The same read, with a failure reported as an empty canvas. */

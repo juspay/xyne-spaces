@@ -16,7 +16,11 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
-import { initializeYSweetDoc, readFromYSweetStrict, syncToYSweet } from '../utils/ysweetUtils.js';
+import { initializeYSweetDoc, readFromYSweetStrict } from '../utils/ysweetUtils.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
+import { createBlockRenderer } from '@/services/canvas/blockRender.js';
+import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
+import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import {
   convertMarkdownToBlockNote,
   convertBlockNoteToMarkdown,
@@ -1034,6 +1038,26 @@ export class CanvasController {
       // Read content from Y-Sweet
       const { readFromYSweet } = await import('../utils/ysweetUtils.js');
       const blocks = await readFromYSweet(canvas.id, userId);
+
+      // Suggestion mode: return a labelled document and record which blocks the agent saw.
+      if (blocks.length > 0) {
+        const renderer = await createBlockRenderer(blocks);
+        const { markdown: labelled } = labelBlocks(blocks, renderer.render);
+        await saveReadReceipt(canvas.id, userId, {
+          blockIds: blocks
+            .map(b => (b as { id?: string }).id)
+            .filter((id): id is string => Boolean(id)),
+        });
+        res.status(200).json({
+          id: canvas.id,
+          title: canvas.title,
+          markdown: labelled,
+          labelInstruction: LABEL_INSTRUCTION,
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
       const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
 
       res.status(200).json({
@@ -1088,9 +1112,9 @@ export class CanvasController {
       // current document is what the write restores it from. A read that fails
       // must stop the write: taken as an empty canvas it would restore nothing,
       // and the drawing would be gone for good behind a warning in a log.
-      let existingBlocks;
+      let current;
       try {
-        existingBlocks = await readFromYSweetStrict(canvas.id, userId);
+        current = await readFromYSweetStrict(canvas.id, userId);
       } catch (error) {
         logger.error(
           `[CANVAS-UPDATE] Could not read canvas ${canvas.id} before writing to it`,
@@ -1099,28 +1123,54 @@ export class CanvasController {
         res.status(503).json({ error: 'Could not read the canvas to update it. Please try again.' });
         return;
       }
-      const blocks = await convertMarkdownToBlockNote(markdown, existingBlocks);
 
-      // Sync content to Y-Sweet for collaborative editing
-      const ysweetSynced = await syncToYSweet(canvas.id, blocks, userId);
-      if (!ysweetSynced) {
-        logger.warn(`[CANVAS-UPDATE] Y-Sweet sync failed for canvas ${canvas.id}`);
+      // Suggestion mode, no exceptions: this route only receives agent writes
+      // (S2S, spaces-edit-canvas) and NEVER touches the document itself — every
+      // change parks for human review.
+      const renderer = await createBlockRenderer(current);
+      const entries = parseLabelledMarkdown(markdown);
+      const handleMap = buildHandleMap(current);
+
+      const receipt = await getReadReceipt(canvas.id, userId);
+      if (!receipt && current.length > 0) {
+        res.status(409).json({
+          error:
+            'No read receipt for this canvas: read it again with spaces-read-canvas, then resend the whole document with its labels.',
+        });
+        return;
       }
-
-      // Update DB timestamp
-      const prisma = DatabaseClient.getInstance();
-      await prisma.canvas.update({
-        where: { id: canvas.id },
-        data: {
-          lastEditedBy: userId,
-          lastEditedAt: new Date(),
-          updatedAt: new Date(),
-        },
+      const ops = deriveOps({
+        current,
+        entries,
+        handleMap,
+        render: renderer.render,
+        ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
       });
 
-      res.status(200).json({
+      if (ops.length === 0) {
+        res.status(200).json({
+          id: canvas.id,
+          title: canvas.title,
+          status: 'no-changes',
+          message: 'The proposed content matches the canvas; nothing to review.',
+          url: getCanvasUrl(canvas.id, req.user?.workspaceId),
+        });
+        return;
+      }
+
+      const batch = await createSuggestionBatch({
+        workspaceId: canvas.workspaceId,
+        canvasId: canvas.id,
+        ops,
+      });
+
+      res.status(202).json({
         id: canvas.id,
         title: canvas.title,
+        status: 'pending-review',
+        batchId: batch.batchId,
+        changeCount: batch.created,
+        message: `${batch.created} change(s) proposed and awaiting approval.`,
         url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {
