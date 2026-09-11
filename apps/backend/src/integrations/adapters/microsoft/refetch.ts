@@ -241,6 +241,7 @@ export class MicrosoftRefetch extends BaseRefetch {
           );
           if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
           const email = (await msgResponse.json()) as GraphMailMessage;
+          logger.info(`${TAG} fetched new email for channel ${ingestChannelId}`, { messageId: id, threadId });
 
           const preDownloadedAttachments = email.hasAttachments
             ? await preDownloadGraphAttachments({

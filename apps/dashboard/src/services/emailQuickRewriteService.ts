@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * Email Quick Rewrite Service
  * Provides methods to rewrite email text using AI
@@ -37,7 +38,11 @@ export async function rewriteEmailText(
       rewrittenText: response.data.rewrittenText,
     };
   } catch (error) {
-    console.error('Failed to rewrite email:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to rewrite email:'),
+      error: error,
+    });
     throw error;
   }
 }

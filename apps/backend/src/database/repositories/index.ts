@@ -25,13 +25,17 @@ export { UserRepository } from './users';
 export { ResourceRepository } from './resources';
 export { ResourceAccessRepository } from './resourceAccess';
 export { ACLAuditLogRepository } from './aclAuditLogs';
-export { 
+export {
   NotificationRepository, 
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
 export { MessageRepository } from './messageRepository';
-export { MessageSearchRepository } from './messageSearchRepository';
+export {
+  syncMessageArtifact,
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';
@@ -89,8 +93,8 @@ import { UserRepository } from './users';
 import { ResourceRepository } from './resources';
 import { ResourceAccessRepository } from './resourceAccess';
 import { ACLAuditLogRepository } from './aclAuditLogs';
-import { 
-  NotificationRepository, 
+import {
+  NotificationRepository,
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
@@ -101,7 +105,6 @@ import { RecurringCallSeriesRepository } from './recurringCallSeriesRepository';
 import { RecurringCallParticipantRepository } from './recurringCallParticipantRepository';
 import { MessageRepository } from './messageRepository';
 import { ProjectRepository } from './projectRepository';
-import { MessageSearchRepository } from './messageSearchRepository';
 import { ChannelRepository } from './channelRepository';
 import { ChannelParticipantRepository } from './channelParticipantRepository';
 import { ConversationParticipantRepository } from './conversationParticipantRepository';
@@ -165,7 +168,6 @@ export class RepositoryContainer {
   public recurringCallParticipants: RecurringCallParticipantRepository;
   public messages: MessageRepository;
   public projects: ProjectRepository;
-  public messageSearch: MessageSearchRepository;
   public channels: ChannelRepository;
   public channelParticipants: ChannelParticipantRepository;
   public conversations: ConversationRepository;
@@ -225,7 +227,6 @@ export class RepositoryContainer {
     this.recurringCallParticipants = new RecurringCallParticipantRepository();
     this.messages = new MessageRepository();
     this.projects = new ProjectRepository();
-    this.messageSearch = new MessageSearchRepository();
     this.channels = new ChannelRepository();
     this.channelParticipants = new ChannelParticipantRepository();
     this.conversations = new ConversationRepository();
@@ -269,4 +270,11 @@ export class RepositoryContainer {
   }
 }
 
-export const repositories = RepositoryContainer.getInstance();
+// Delay construction until a repository is first used. Constructing the
+// entire container during module evaluation makes any repository that imports
+// this barrel vulnerable to circular-import temporal dead zones.
+export const repositories: RepositoryContainer = new Proxy({} as RepositoryContainer, {
+  get(_target, property: keyof RepositoryContainer) {
+    return RepositoryContainer.getInstance()[property];
+  },
+});

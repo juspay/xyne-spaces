@@ -40,6 +40,14 @@ export class UserGroupMappingRepository extends BaseRepository<
     return this.db.userGroupMapping.update({ where: { id }, data });
   }
 
+  async setStartOffsetIfNull(id: string, startOffset: number): Promise<boolean> {
+    const result = await this.db.userGroupMapping.updateMany({
+      where: { id, startOffset: null },
+      data: { startOffset },
+    });
+    return result.count > 0;
+  }
+
   async delete(id: string) {
     return this.db.userGroupMapping.delete({ where: { id } });
   }

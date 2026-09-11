@@ -38,6 +38,8 @@ interface XyneAIHeaderProps {
   onShowDebugger?: (() => void) | undefined;
   isCompact?: boolean;
   isTight?: boolean;
+  hideClose?: boolean;
+  dense?: boolean;
 }
 
 export const XyneAIHeader = ({
@@ -54,6 +56,8 @@ export const XyneAIHeader = ({
   onShowDebugger,
   isCompact = false,
   isTight = false,
+  hideClose = false,
+  dense = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAgentInfoModalOpen, setIsAgentInfoModalOpen] = useState(false);
@@ -80,7 +84,7 @@ export const XyneAIHeader = ({
         <DropdownMenuItem
           className='gap-2'
           onClick={() => setIsAgentInfoModalOpen(true)}
-          data-track-category='XYNE_AI'
+          data-track-category='XyneAI'
           data-track-name='OpenAgentInfo'
         >
           <InformationCircle size={16} className='shrink-0' />
@@ -113,7 +117,7 @@ export const XyneAIHeader = ({
       <DropdownMenuItem
         className='gap-2'
         onClick={() => setIsSettingsModalOpen(true)}
-        data-track-category='XYNE_AI'
+        data-track-category='XyneAI'
         data-track-name='OpenSettings'
       >
         <Settings01 size={16} className='shrink-0' />
@@ -174,15 +178,17 @@ export const XyneAIHeader = ({
             >
               <PencilEditBox size={16} />
             </button>
-            <button
-              onClick={handleClose}
-              className={mwebActionPillClass}
-              title='Close'
-              data-track-category='XyneAI'
-              data-track-name='CLOSE_MOBILE'
-            >
-              <MultipleCrossCancelDefault size={16} />
-            </button>
+            {!hideClose && (
+              <button
+                onClick={handleClose}
+                className={mwebActionPillClass}
+                title='Close'
+                data-track-category='XyneAI'
+                data-track-name='CLOSE_MOBILE'
+              >
+                <MultipleCrossCancelDefault size={16} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -210,7 +216,9 @@ export const XyneAIHeader = ({
       {/* Padding mirrors ConversationHeader so the two titles line up across
           the panel split (see ConversationHeader.tsx). */}
       <div
-        className='shrink-0 pl-2 pr-3 py-3 flex items-center justify-between gap-6 self-stretch border-border'
+        className={`shrink-0 flex items-center justify-between self-stretch border-border pl-2 pr-3 ${
+          dense ? 'gap-3 py-2' : 'gap-6 py-3'
+        }`}
         style={APP_DRAG_STYLE}
       >
         {/* Left: title */}
@@ -277,17 +285,19 @@ export const XyneAIHeader = ({
             </DropdownMenuContent>
           </DropdownMenu>
           {/* Close */}
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={handleClose}
-            className={headerButtonClass}
-            title='Close'
-            data-track-category='XyneAI'
-            data-track-name='CLOSE_DESKTOP'
-          >
-            <MultipleCrossCancelDefault size={16} />
-          </Button>
+          {!hideClose && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={handleClose}
+              className={headerButtonClass}
+              title='Close'
+              data-track-category='XyneAI'
+              data-track-name='CLOSE_DESKTOP'
+            >
+              <MultipleCrossCancelDefault size={16} />
+            </Button>
+          )}
         </div>
       </div>
 

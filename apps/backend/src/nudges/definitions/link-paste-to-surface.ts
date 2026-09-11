@@ -57,7 +57,6 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
     ): Promise<NudgeCandidate[]> {
       const meta = payload.contextMetadata ?? {};
       const messageId = typeof meta.messageId === 'string' ? meta.messageId : undefined;
-      const projectId = typeof meta.projectId === 'string' ? meta.projectId : undefined;
 
       if (!messageId) return [];
 
@@ -88,7 +87,6 @@ export const linkPasteToSurface: NudgeDefinition<ActivityEventNudgePayload, Nudg
             targetType: ref.targetType,
             targetId: ref.targetId,
             linkKind: SurfaceLinkKind.RELATES_TO,
-            projectId,
           },
         });
       }

@@ -1,4 +1,5 @@
 import { Response, type Request } from 'express';
+import { EncryptedFieldQueryError } from '@xyne/shared';
 import { 
   handleMutate, 
   handleQueries,
@@ -8,6 +9,30 @@ import {
 } from '../zero/server.js';
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
+import { logger } from '@/utils/logger';
+
+function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
+  if (error instanceof Error && error.message === 'Rate limit exceeded') {
+    res.status(429).json({
+      error: 'Rate limit exceeded',
+      message: rateLimitMessage,
+    });
+    return;
+  }
+
+  if (error instanceof EncryptedFieldQueryError) {
+    res.status(400).json({
+      error: 'Bad request',
+      message: error.message,
+    });
+    return;
+  }
+
+  res.status(500).json({
+    error: 'Internal server error',
+    message: error instanceof Error ? error.message : 'Unknown error'
+  });
+}
 
 export const handlePush = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -35,22 +60,15 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         body: JSON.stringify(req.body),
       });
 
-      const result = await handleMutate(webRequest);
+    const result = await handleMutate(webRequest);
 
-      res.json(result);
-    } catch (error) {
-      if (error instanceof Error && error.message === "Rate limit exceeded") {
-        res.status(429).json({
-          error: 'Rate limit exceeded',
-          message: 'You have exceeded the maximum number of allowed mutations. Please try again later.'
-        });
-        return;
-      }
-
-      res.status(500).json({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+    res.json(result);
+  } catch (error) {
+      handleZeroError(
+        res,
+        error,
+        'You have exceeded the maximum number of allowed mutations. Please try again later.',
+      );
     }
   }
 
@@ -81,22 +99,15 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
         body: JSON.stringify(req.body),
       });
 
-      const result = await handleQueries(webRequest);
+    const result = await handleQueries(webRequest);
 
-      res.json(result);
-    } catch (error) {
-      if (error instanceof Error && error.message === "Rate limit exceeded") {
-        res.status(429).json({
-          error: 'Rate limit exceeded',
-          message: 'You have exceeded the maximum number of allowed queries. Please try again later.'
-        });
-        return;
-      }
-
-      res.status(500).json({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+    res.json(result);
+  } catch (error) {
+      handleZeroError(
+        res,
+        error,
+        'You have exceeded the maximum number of allowed queries. Please try again later.',
+      );
     }
   }
 
@@ -130,7 +141,7 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
 
     res.json(result);
   } catch (error) {
-    console.error('Fallback query error:', error);
+    logger.error('Fallback query error', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -177,7 +188,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
 
     res.json(result);
   } catch (error) {
-    console.error('Fallback push error:', error);
+    logger.error('Fallback push error', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -215,7 +226,7 @@ export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<
 
     res.json(result);
   } catch (error) {
-    console.error('ZQL-to-SQL query error:', error);
+    logger.error('ZQL-to-SQL query error', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -228,7 +239,7 @@ export const getZeroFallbackConfig = async (_req: Request, res: Response): Promi
     const config = await redisService.getZeroFallbackConfig();
     res.json(config);
   } catch (error) {
-    console.error('Failed to get zero fallback config:', error);
+    logger.error('Failed to get zero fallback config', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -266,7 +277,7 @@ export const setZeroFallbackConfig = async (req: Request, res: Response): Promis
 
     res.json({ success: true, ...config });
   } catch (error) {
-    console.error('Failed to set zero fallback config:', error);
+    logger.error('Failed to set zero fallback config', error);
     res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',

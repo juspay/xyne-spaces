@@ -42,6 +42,13 @@ export class ReleaseAttributionsACL extends BaseACL<'release_attributions'> {
       throw new MutationACLError('Release attribution update failed: attribution does not exist', 'release_attributions');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'release_attributions');
+    // Gate on the stored row's ticket channel — non-participants of the private
+    // channel must not tamper with the release attribution.
+    await this.verifyTicketAccess(row.ticketId, tx);
+    // ticketId can be repointed on update — re-verify access to the new ticket too.
+    if (args.ticketId !== undefined) {
+      await this.verifyTicketAccess(args.ticketId, tx);
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'release_attributions'>>, tx: Transaction<Schema>): Promise<void> {
@@ -50,6 +57,7 @@ export class ReleaseAttributionsACL extends BaseACL<'release_attributions'> {
       throw new MutationACLError('Release attribution delete failed: attribution does not exist', 'release_attributions');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'release_attributions');
+    await this.verifyTicketAccess(row.ticketId, tx);
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'release_attributions'>>, _tx: Transaction<Schema>): Promise<void> {

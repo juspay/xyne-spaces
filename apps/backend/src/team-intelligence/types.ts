@@ -99,6 +99,7 @@ export interface TeamIntelligenceQueuedJobData {
   teamId: string | null;
   teamName: string | null;
   source: string;
+  orgId: string;
 }
 
 export interface TeamIntelligenceTeamSummaryQueuedJobData {
@@ -108,6 +109,7 @@ export interface TeamIntelligenceTeamSummaryQueuedJobData {
   teamId: string | null;
   teamName: string;
   source: string;
+  orgId: string;
 }
 
 export interface TeamIntelligenceOrgSummaryQueuedJobData {
@@ -115,6 +117,7 @@ export interface TeamIntelligenceOrgSummaryQueuedJobData {
   orgSummaryId: string;
   reportDate: string;
   source: string;
+  orgId: string;
 }
 
 export interface TeamIntelligenceIngestionResponse {

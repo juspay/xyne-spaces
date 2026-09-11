@@ -1,10 +1,10 @@
 import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, ArrowRight } from '@xyne/icons';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import {
   FileText,
   GitCompare,
-  Hash,
   Loader2,
   Mail,
   MessageCircle,
@@ -14,7 +14,10 @@ import {
 } from 'lucide-react';
 
 const utcToIst = (utcString?: string): string => {
-  if (!utcString) return '';
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
   const dateUtc = new Date(`${utcString} UTC`);
   return dateUtc.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -26,45 +29,57 @@ const utcToIst = (utcString?: string): string => {
     hour12: true,
   });
 };
-import ThreadMessages from '../ThreadPannel';
-import { UserProfile } from '../../ui/UserProfile/UserProfile';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import {
   DEFAULT_SEARCH_FILTERS,
+  saveLastSearchState,
   type SearchResultsFilters,
 } from '../../../hooks/useSearchResultsScreen';
+import {
+  ALL_FILTER_PARAM_KEYS,
+  buildChips,
+  buildSearchFilters,
+  buildTokens,
+  readFiltersFromParams,
+  writeFiltersToParams as writeRegistryParams,
+  type FilterResolvers,
+} from '../../../search/filterRegistry';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
 import { SearchFilterBar } from './SearchFilterBar';
+import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
+import { parseSearchFilters } from '../../../utils/searchFilterParser';
 import {
   useAllVisibleChannels,
   useAllChannels,
   useUserChannelStatuses,
 } from '../../../hooks/useChannels';
-import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import {
-  formatChannelLabel,
-  getDMSearchableNames,
+  getDMNames,
   isDMChannel,
   isGroupDMChannel,
   groupChannelsByScope,
+  resolveChannelLabel,
 } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { formatFileSize } from '../MessageAttachment/utils';
 import {
   TabType,
-  MentionType,
   VALID_DOC_TYPES,
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
 import { Channel } from '@xyne/shared';
-import { navigateToSearchResult } from '../../../utils/searchNavigation';
+import { resolveOrCreateDmChannelId } from '../../../utils/searchNavigation';
+import { toast } from 'sonner';
 import Avatar from '../../ui/Avatar/Avatar';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
@@ -84,18 +99,10 @@ import {
 } from '@xyne/shared';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
-
-type SidePanelState =
-  | { kind: 'thread'; thread: SearchResultsThread }
-  | { kind: 'profile'; userId: string }
-  | {
-      kind: 'channel';
-      channelId: string;
-      conversationId: string;
-      conversationCreatedAt?: number;
-      matchedMessageId?: string | null;
-    }
-  | null;
+import type { SidePanelState } from './SidePanel/PanelTypes';
+import { SearchResultsSidePanel } from './SidePanel/SidePanel';
+import { resolveResultClick } from './SidePanel/ResultClickResolver';
+import ChannelIcon from '../ChannelIcon/ChannelIcon';
 
 function parseDocTypeParam(value: string | null): SearchResultsFilters['docType'] | null {
   return value && (VALID_DOC_TYPES as string[]).includes(value)
@@ -107,24 +114,19 @@ function docTypeToTabType(docType: SearchResultsFilters['docType']): TabType {
   return DOC_TYPE_TO_TAB[docType] ?? TabType.ALL;
 }
 
-type ResultsMention = {
-  id: string;
-  type: MentionType;
-  // Optional: bare @user / #channel mention filters have no prefix.
-  prefix?: 'from:' | 'to:' | 'in:' | 'assignee:' | 'priority:';
-  // Display name — only bare mentions need it (drives the highlight phrase).
-  name?: string;
-};
-
-// Returns true when any sender/channel/assignee filter is active.
+// Returns true when any sender/channel/assignee/participant filter is active.
 // Centralised here so adding a new filter type only requires one update.
 function hasActiveFilters(
-  filters: Pick<SearchResultsFilters, 'fromUserIds' | 'inChannelIds' | 'assigneeIds'>,
+  filters: Pick<
+    SearchResultsFilters,
+    'fromUserIds' | 'inChannelIds' | 'assigneeIds' | 'withUserIds'
+  >,
 ): boolean {
   return (
     filters.fromUserIds.length > 0 ||
     filters.inChannelIds.length > 0 ||
-    filters.assigneeIds.length > 0
+    filters.assigneeIds.length > 0 ||
+    filters.withUserIds.length > 0
   );
 }
 
@@ -134,82 +136,74 @@ function toMessageType(value?: string): MessageType {
     : MessageType.USER;
 }
 
-// Build the hook's selectedMentions from resolved filter ids. Priority is appended from
-// the URL — it has no results-screen UI, so it's pinned rather than read from `filters`.
-function buildSelectedMentions(
-  fromUserIds: string[],
-  channelIds: string[],
-  assigneeIds: string[],
-  priority: string,
-  fromEmails: string[] = [],
-  toEmails: string[] = [],
-  mentionUserIds: string[] = [],
-  mentionChannelIds: string[] = [],
-  mentionUserName: (id: string) => string | undefined = () => undefined,
-  mentionChannelName: (id: string) => string | undefined = () => undefined,
-): ResultsMention[] {
-  return [
-    ...fromUserIds.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
-    ...fromEmails.map(id => ({ id, type: MentionType.USER, prefix: 'from:' as const })),
-    ...toEmails.map(id => ({ id, type: MentionType.USER, prefix: 'to:' as const })),
-    ...channelIds.map(id => ({ id, type: MentionType.CHANNEL, prefix: 'in:' as const })),
-    ...assigneeIds.map(id => ({ id, type: MentionType.USER, prefix: 'assignee:' as const })),
-    // Bare @user / #channel — no prefix (routed to mentions/channelMentions); the resolved name
-    // drives the highlight phrase, since the URL carries only ids. Omit name when unresolved —
-    // exactOptionalPropertyTypes forbids an explicit `name: undefined`.
-    ...mentionUserIds.map(id => {
-      const name = mentionUserName(id);
-      return name ? { id, type: MentionType.USER, name } : { id, type: MentionType.USER };
-    }),
-    ...mentionChannelIds.map(id => {
-      const name = mentionChannelName(id);
-      return name ? { id, type: MentionType.CHANNEL, name } : { id, type: MentionType.CHANNEL };
-    }),
-    ...(priority
-      ? [{ id: priority, type: MentionType.PRIORITY, prefix: 'priority:' as const }]
-      : []),
-  ];
+/**
+ * URL ⇄ filter-bar state. The palette hands the page its whole search through these params,
+ * and every bar/popover change is written back, so a results URL is a complete, shareable
+ * description of the search (UX-5). `query` and `display` are owned by the header input and
+ * handled separately.
+ */
+const SORT_VALUES: ReadonlyArray<SearchResultsFilters['sortBy']> = [
+  'relevance',
+  'newest',
+  'oldest',
+];
+
+function parseFiltersFromParams(
+  params: URLSearchParams,
+  previous: SearchResultsFilters = DEFAULT_SEARCH_FILTERS,
+): SearchResultsFilters {
+  const tabParam = parseDocTypeParam(params.get('tab'));
+  const sortParam = params.get('sort') as SearchResultsFilters['sortBy'] | null;
+  // Filter syntax can also arrive typed into the query (`status:todo` from the palette,
+  // which has no control for it); each registry entry decides how its params and that
+  // text merge.
+  const typed = parseSearchFilters(params.get('query') ?? '');
+  return {
+    ...previous,
+    // Only the palette and the "See N more" links pass a tab; absent it, keep the user's
+    // current tab so unrelated URL changes don't reset it.
+    ...(tabParam ? { docType: tabParam } : {}),
+    ...readFiltersFromParams(params, typed),
+    sortBy:
+      sortParam && SORT_VALUES.includes(sortParam) ? sortParam : DEFAULT_SEARCH_FILTERS.sortBy,
+    rankProfile: params.get('rank') ?? '',
+  };
+}
+
+/** Order-independent fingerprint of the filter params, for comparing URL against state. */
+function serializeFilterParams(params: URLSearchParams): string {
+  const filtered = new URLSearchParams();
+  for (const key of ALL_FILTER_PARAM_KEYS) {
+    const value = params.get(key);
+    if (value) filtered.set(key, value);
+  }
+  filtered.sort();
+  return filtered.toString();
+}
+
+/** filters → URL: the registry's params, plus the page-level ones it doesn't own. */
+function writeFiltersToParams(filters: SearchResultsFilters, params: URLSearchParams): void {
+  writeRegistryParams(filters, params);
+  if (filters.docType === 'all') params.delete('tab');
+  else params.set('tab', filters.docType);
+  if (filters.sortBy === DEFAULT_SEARCH_FILTERS.sortBy) params.delete('sort');
+  else params.set('sort', filters.sortBy);
+  if (filters.rankProfile) params.set('rank', filters.rankProfile);
+  else params.delete('rank');
 }
 
 const SearchResults = (): ReactElement => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const [selectedPanel, setSelectedPanel] = useState<SidePanelState>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const query = searchParams.get('query')?.trim() ?? '';
 
-  // Priority has no results-screen UI, so it isn't in `filters` — it's pinned from the
-  // URL into selectedMentions wherever they're rebuilt. Validated against the enum so a
-  // hand-crafted `?priority=garbage` can't inject a bogus filter.
-  const priorityParam = searchParams.get('priority')?.toUpperCase() ?? '';
-  const priorityFilter = (Object.values(TicketPriority) as string[]).includes(priorityParam)
-    ? priorityParam
-    : '';
-
-  const [filters, setFilters] = useState<SearchResultsFilters>(() => {
-    const fromParam = searchParams.get('from') ?? '';
-    const fromEmailParam = searchParams.get('fromEmail') ?? '';
-    const toEmailParam = searchParams.get('toEmail') ?? '';
-    const inParam = searchParams.get('in') ?? '';
-    const assigneeParam = searchParams.get('assignee') ?? '';
-    const mentionsParam = searchParams.get('mentions') ?? '';
-    const channelMentionsParam = searchParams.get('channelMentions') ?? '';
-    const tabParam = parseDocTypeParam(searchParams.get('tab'));
-    return {
-      ...DEFAULT_SEARCH_FILTERS,
-      ...(tabParam ? { docType: tabParam } : {}),
-      fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
-      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
-      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
-      inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
-      assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
-      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
-      mentionChannelIds: channelMentionsParam
-        ? channelMentionsParam.split(',').filter(Boolean)
-        : [],
-    };
-  });
+  const [filters, setFilters] = useState<SearchResultsFilters>(() =>
+    parseFiltersFromParams(searchParams),
+  );
 
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
@@ -265,40 +259,55 @@ const SearchResults = (): ReactElement => {
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
+    searchNames?: string[];
   }> => {
     const result = [];
     for (const ch of starredChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
+    // EMAIL/desk channels are excluded by groupChannelsByScope (they live in Desk). Re-include them
+    // as CHANNELS from the full set (useAllChannels) — like GlobalCommandMenu — since desk channels
+    // aren't in useAllVisibleChannels.
+    for (const ch of allChannelsForNav.filter(channel => isDeskChannelType(channel.type))) {
+      result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
+    }
     for (const ch of dmChannels) {
+      const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
         channel: ch,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(ch, currentUserId, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     }
     return result;
-  }, [starredChannels, regularChannels, dmChannels, currentUserId, usersById]);
+  }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
     isGrouped,
     isSearching: isLoading,
+    isSearchPending,
     searchError: error,
+    text: searchedText,
     setText,
     setActiveTab,
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExactMatch,
     setRankProfile,
+    setStructuredFilters,
     setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
@@ -309,7 +318,18 @@ const SearchResults = (): ReactElement => {
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
     groupByDocType: true,
+    // The URL follows the results: the hook hands back the query these were fetched for,
+    // so the address bar is shareable without anyone pressing Enter.
+    onSearchComplete: (_results, searchedQuery) => {
+      handleQuerySubmitRef.current(searchedQuery.trim());
+    },
   });
+
+  // The text the on-screen results actually reflect. Results update live as the user
+  // types (the hook searches `searchedText`) but the URL `query` only commits on Enter,
+  // so query-driven UI (empty-state copy, local-section gating) must read this, not the
+  // stale URL param. Falls back to `query` on first paint before the sync effect runs.
+  const displayQuery = searchedText.trim() || query;
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
   useEffect(() => {
@@ -320,43 +340,20 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // Sync from/in/assignee/tab URL params → filter state on navigation (popup → search screen while already mounted)
-  const fromParam = searchParams.get('from') ?? '';
-  const fromEmailParam = searchParams.get('fromEmail') ?? '';
-  const toEmailParam = searchParams.get('toEmail') ?? '';
-  const inParam = searchParams.get('in') ?? '';
-  const assigneeParam = searchParams.get('assignee') ?? '';
-  const mentionsParam = searchParams.get('mentions') ?? '';
-  const channelMentionsParam = searchParams.get('channelMentions') ?? '';
-  const tabParam = searchParams.get('tab') ?? '';
+  // URL filter params → filter state. Covers the palette handoff into an already-mounted
+  // page, the "See N more" links, back/forward, and a pasted results URL.
+  const urlFilterKey = useMemo(() => serializeFilterParams(searchParams), [searchParams]);
   useEffect(() => {
-    const parsedTab = parseDocTypeParam(tabParam);
-    setFilters(prev => ({
-      ...prev,
-      // Only the "See N more" links pass a tab; absent it, keep the user's
-      // current tab so unrelated URL changes don't reset it.
-      ...(parsedTab ? { docType: parsedTab } : {}),
-      fromUserIds: fromParam ? fromParam.split(',').filter(Boolean) : [],
-      fromEmails: fromEmailParam ? fromEmailParam.split(',').filter(Boolean) : [],
-      toEmails: toEmailParam ? toEmailParam.split(',').filter(Boolean) : [],
-      inChannelIds: inParam ? inParam.split(',').filter(Boolean) : [],
-      assigneeIds: assigneeParam ? assigneeParam.split(',').filter(Boolean) : [],
-      mentionUserIds: mentionsParam ? mentionsParam.split(',').filter(Boolean) : [],
-      mentionChannelIds: channelMentionsParam
-        ? channelMentionsParam.split(',').filter(Boolean)
-        : [],
-    }));
+    setFilters(prev => parseFiltersFromParams(new URLSearchParams(urlFilterKey), prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    fromParam,
-    fromEmailParam,
-    toEmailParam,
-    inParam,
-    assigneeParam,
-    mentionsParam,
-    channelMentionsParam,
-    tabParam,
-  ]);
+  }, [urlFilterKey]);
+
+  // Park the live search where the palette can find it. Its own history entry froze the
+  // moment we navigated here, so without this a back-navigation restores the search as it
+  // was before any filter set on this page.
+  useEffect(() => {
+    saveLastSearchState(searchParams.toString());
+  }, [searchParams]);
 
   // Sync docType filter → hook active tab.
   // When from: is active with "all" tab, the Vespa from: filter is message-schema-only,
@@ -384,6 +381,12 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
 
+  // Sync exact-match → hook; the hook quotes the query when the request is built.
+  useEffect(() => {
+    setExactMatch(filters.exactMatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.exactMatch]);
+
   // Sync rankProfile filter → hook; clear selection so the matrix never mixes
   // ranking data captured under different profiles
   useEffect(() => {
@@ -404,6 +407,15 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compareMode]);
 
+  // Sync the popover's ticket/date filters → hook. They ride the same backend fields as the
+  // typed `status:`/`board:`/`tags:`/`before:` syntax, which keeps working alongside them.
+  const structuredFilters = useMemo(() => buildSearchFilters(filters), [filters]);
+  const structuredFiltersKey = JSON.stringify(structuredFilters);
+  useEffect(() => {
+    setStructuredFilters(structuredFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structuredFiltersKey]);
+
   // Only explicit in: chips are passed as channel mentions; "only my channels" is
   // applied server-side via the onlyMyChannels flag synced above.
   const channelIdsForSearch = filters.inChannelIds;
@@ -416,26 +428,41 @@ const SearchResults = (): ReactElement => {
     },
     [allUsers],
   );
+  // Falls back to every known channel: a carried-over `in:` may point at a DM or a channel
+  // the user has left, neither of which is in the *visible* set.
   const mentionChannelName = useCallback(
-    (id: string): string | undefined => allChannels.find(c => c.id === id)?.name,
-    [allChannels],
+    (id: string): string | undefined => {
+      const channel =
+        allChannels.find(c => c.id === id) ?? allChannelsForNav.find(c => c.id === id);
+      // A DM's `name` is its participant ids comma-joined, so it can't be shown raw.
+      return channel ? resolveChannelLabel(channel, currentUserId ?? '', allUsers) : undefined;
+    },
+    [allChannels, allChannelsForNav, currentUserId, allUsers],
+  );
+  // Id → name for every registry entry that renders one.
+  // Board tokens carry the board id (that's what the backend matches on), so they need a
+  // resolver too or they render as a raw cuid.
+  const [allBoardsList] = useCachedQuery(queries.getAllBoardsList());
+  const boardName = useCallback(
+    (id: string): string | undefined =>
+      (allBoardsList as ReadonlyArray<{ id: string; name: string }> | undefined)?.find(
+        b => b.id === id,
+      )?.name,
+    [allBoardsList],
+  );
+  const filterResolvers = useMemo(
+    (): FilterResolvers => ({
+      userName: mentionUserName,
+      channelName: mentionChannelName,
+      boardName,
+    }),
+    [mentionUserName, mentionChannelName, boardName],
   );
 
-  // Sync from/in/assignee/priority filters → hook selected mentions
+  // Sync every chip filter (from/to/with/in/assignee/priority + bare @/#) → hook mentions
   useEffect(() => {
     setSelectedMentions(
-      buildSelectedMentions(
-        filters.fromUserIds,
-        channelIdsForSearch,
-        filters.assigneeIds,
-        priorityFilter,
-        filters.fromEmails,
-        filters.toEmails,
-        filters.mentionUserIds,
-        filters.mentionChannelIds,
-        mentionUserName,
-        mentionChannelName,
-      ),
+      buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -444,12 +471,80 @@ const SearchResults = (): ReactElement => {
     filters.toEmails,
     channelIdsForSearch,
     filters.assigneeIds,
+    filters.withUserIds,
     filters.mentionUserIds,
     filters.mentionChannelIds,
+    filters.priority,
     mentionUserName,
     mentionChannelName,
-    priorityFilter,
   ]);
+
+  // Declared above the memo that uses it, so the callback is reached through a ref.
+  const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
+  // handleQuerySubmit isn't declared where the hook options are built.
+  const handleQuerySubmitRef = useRef<(next: string) => void>(() => undefined);
+
+  /**
+   * Applied filters as search-box tokens, labelled with the syntax that expresses them, so
+   * the box reads as the whole search — `from:@nasim in:#access-requests issue` — instead
+   * of only its free-text half. Removing one re-runs the search without it.
+   */
+  /**
+   * Applied filters as search-box tokens. Labels and removal both come from the registry,
+   * so a new filter shows up here without touching this component.
+   */
+  const queryTokens = useMemo(
+    (): QueryToken[] =>
+      buildTokens(filters, filterResolvers).map(token => ({
+        key: token.key,
+        ...(token.prefix ? { prefix: token.prefix } : {}),
+        ...(token.chip ? { chip: token.chip } : {}),
+        label: token.label,
+        onRemove: () => handleFiltersChangeRef.current({ ...filters, ...token.patch }),
+        ...(token.icon ? { icon: token.icon } : {}),
+      })),
+    [filters, filterResolvers],
+  );
+
+  // Keep `display` — the label the global top bar shows — in step with the filters. It's
+  // written once by the palette at hand-off, so without this the bar keeps showing the
+  // search as it was launched and never reflects anything filtered here.
+  const displayLabel = useMemo(
+    // Prefix + value, so the top bar still reads `in:general`, not a bare `general`.
+    () => [...queryTokens.map(t => `${t.prefix ?? ''}${t.label}`), query].filter(Boolean).join(' '),
+    [queryTokens, query],
+  );
+  /**
+   * The complete URL this page's state implies: filter params, the query with any filter
+   * syntax lifted out of it, and the `display` label.
+   *
+   * Built and written as ONE update on purpose. Splitting it across several effects loses
+   * writes — each `setSearchParams(prev => …)` in the same commit sees the pre-update
+   * params, so the last one silently drops what the others just wrote.
+   */
+  const desiredSearch = useMemo(() => {
+    const params = new URLSearchParams(searchParams);
+    writeFiltersToParams(filters, params);
+    // Filter syntax in the query has been lifted into `filters` by parseFiltersFromParams;
+    // strip it so it isn't shown twice — once as its token, once as raw words.
+    const cleanedQuery = parseSearchFilters(params.get('query') ?? '').searchText;
+    if (cleanedQuery) params.set('query', cleanedQuery);
+    else params.delete('query');
+    if (displayLabel) params.set('display', displayLabel);
+    else params.delete('display');
+    return params.toString();
+  }, [searchParams, filters, displayLabel]);
+
+  // Always replaces: refining the search edits this screen, it doesn't navigate. Back
+  // leaves the screen rather than walking every intermediate refinement.
+  useEffect(() => {
+    if (desiredSearch === searchParams.toString()) return;
+    setSearchParams(new URLSearchParams(desiredSearch), {
+      replace: true,
+      preventScrollReset: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desiredSearch]);
 
   const handleFiltersChange = useCallback(
     (newFilters: SearchResultsFilters) => {
@@ -463,37 +558,52 @@ const SearchResults = (): ReactElement => {
         setActiveTab(effectiveTab);
       }
       setOnlyMyChannels(newFilters.onlyMyChannels);
-      // priorityFilter re-pinned from the URL (not in newFilters) so toggling another
-      // filter keeps it.
-      setSelectedMentions(
-        buildSelectedMentions(
-          newFilters.fromUserIds,
-          newFilters.inChannelIds,
-          newFilters.assigneeIds,
-          priorityFilter,
-          newFilters.fromEmails,
-          newFilters.toEmails,
-          newFilters.mentionUserIds,
-          newFilters.mentionChannelIds,
-          mentionUserName,
-          mentionChannelName,
-        ),
-      );
+      setExactMatch(newFilters.exactMatch);
+      setSelectedMentions(buildChips(newFilters, filterResolvers));
+      setStructuredFilters(buildSearchFilters(newFilters));
     },
     [
       setActiveTab,
       setOnlyMyChannels,
+      setExactMatch,
       setSelectedMentions,
-      priorityFilter,
+      setStructuredFilters,
       mentionUserName,
       mentionChannelName,
     ],
   );
+  handleFiltersChangeRef.current = handleFiltersChange;
+
+  // Editing the query in the header re-runs the search through the URL, the same path a
+  // cmd+K search takes, so back/forward and the overlay's query restore keep working.
+  // Filters live in their own params and are deliberately left untouched. Safe to write
+  // separately: this runs from a user event, not alongside the combined effect above.
+  /** Commit a query to the URL. Always replaces — see the sync effect above. */
+  const handleQuerySubmit = useCallback(
+    (next: string) => {
+      if (next === query) return;
+      setSearchParams(
+        prev => {
+          const params = new URLSearchParams(prev);
+          if (next) params.set('query', next);
+          else params.delete('query');
+          // Drop the stale `display` label; the combined URL effect rebuilds it from the
+          // new query plus the filters that are still applied.
+          params.delete('display');
+          return params;
+        },
+        { preventScrollReset: true, replace: true },
+      );
+    },
+    [query, setSearchParams],
+  );
+  handleQuerySubmitRef.current = handleQuerySubmit;
+
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
     if (!isChannelsMode && filters.docType !== 'all') return [];
-    if (!query.trim()) return [];
+    if (!displayQuery) return [];
     return filteredLocalChannels.map(({ channel: c, searchableNames }) => {
       const isDm = isDMChannel(c.scopeType);
       const title = isDm ? searchableNames?.join(', ') || c.name : c.name;
@@ -506,11 +616,11 @@ const SearchResults = (): ReactElement => {
         metadata: {},
       };
     });
-  }, [isChannelsMode, filters.docType, query, filteredLocalChannels]);
+  }, [isChannelsMode, filters.docType, displayQuery, filteredLocalChannels]);
 
   // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
   // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
-  const filtersActive = hasActiveFilters(filters) || !!priorityFilter;
+  const filtersActive = hasActiveFilters(filters) || !!filters.priority;
 
   const baseResults = useMemo(() => {
     if (isChannelsMode) return localChannelResults;
@@ -558,50 +668,42 @@ const SearchResults = (): ReactElement => {
     });
   }, [baseResults, filters.sortBy, isChannelsMode]);
 
-  // Track whether a search has been initiated for the current query/filters to avoid
-  // showing "No results" before the first search fires (300ms debounce window)
-  const hasEverLoadedRef = useRef(false);
-  const autoOpenedResultKeyRef = useRef<string | null>(null);
-  const hasManualPanelSelectionRef = useRef(false);
-  const searchRequestKey = JSON.stringify([
-    query,
+  const filterKey = JSON.stringify([
     filters.docType,
     filters.fromUserIds,
     filters.fromEmails,
     filters.toEmails,
     filters.inChannelIds,
     filters.assigneeIds,
-    priorityFilter,
+    filters.withUserIds,
+    filters.mentionUserIds,
+    filters.mentionChannelIds,
+    filters.priority,
     filters.includeBotMessages,
     filters.onlyMyChannels,
     filters.rankProfile,
+    structuredFiltersKey,
   ]);
+  const searchRequestKey = JSON.stringify([query, filterKey]);
   const fullSearchKey = JSON.stringify([searchRequestKey, filters.sortBy]);
-  const prevSearchKeyRef = useRef(searchRequestKey);
-  if (searchRequestKey !== prevSearchKeyRef.current) {
-    prevSearchKeyRef.current = searchRequestKey;
-    hasEverLoadedRef.current = false; // reset for new search
-  }
-  if (isLoading) hasEverLoadedRef.current = true;
+  // Latest search key, read by async handlers to drop panels that resolve after a re-search.
+  const fullSearchKeyRef = useRef(fullSearchKey);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [query]);
 
-  // Reset auto-open and close stale panel whenever the search or any filter changes
+  // Close any open panel and refresh the async race key whenever the search or filters change
   useEffect(() => {
-    autoOpenedResultKeyRef.current = null;
-    hasManualPanelSelectionRef.current = false;
+    fullSearchKeyRef.current = fullSearchKey;
     setSelectedPanel(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
   const handleSelectThread = useCallback((thread: SearchResultsThread) => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'thread', thread });
   }, []);
   const handleSelectUser = useCallback((userId: string) => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel({ kind: 'profile', userId });
   }, []);
   const handleSelectChannelContext = useCallback(
@@ -611,7 +713,6 @@ const SearchResults = (): ReactElement => {
       conversationCreatedAt?: number,
       matchedMessageId?: string | null,
     ) => {
-      hasManualPanelSelectionRef.current = true;
       setSelectedPanel({
         kind: 'channel',
         channelId,
@@ -622,81 +723,45 @@ const SearchResults = (): ReactElement => {
     },
     [],
   );
+  // Open a user's 1:1 DM chat in the right pane, creating the DM if it doesn't exist.
+  // Async; drops the result if the search changed while the DM was being created.
+  const openUserDm = useCallback(
+    (userId: string): void => {
+      const keyAtClick = fullSearchKeyRef.current;
+      void (async (): Promise<void> => {
+        try {
+          const channelId = await resolveOrCreateDmChannelId(userId, allChannelsForNav);
+          if (fullSearchKeyRef.current !== keyAtClick) return;
+          setSelectedPanel({ kind: 'channel', channelId });
+        } catch {
+          toast.error('Failed to open conversation');
+        }
+      })();
+    },
+    [allChannelsForNav],
+  );
+  // Single entry point for a result-card click: resolve what it should do, then do it.
+  const openResult = useCallback(
+    (result: DisplaySearchResult): void => {
+      const action = resolveResultClick(result, allChannelsForNav);
+      if (!action) return;
+      switch (action.kind) {
+        case 'panel':
+          setSelectedPanel(action.panel);
+          return;
+        case 'navigate':
+          void navigate(action.to, action.state ? { state: action.state } : undefined);
+          return;
+        case 'userDm':
+          openUserDm(action.userId);
+          return;
+      }
+    },
+    [allChannelsForNav, navigate, openUserDm],
+  );
   const handleClosePanel = (): void => {
-    hasManualPanelSelectionRef.current = true;
     setSelectedPanel(null);
   };
-
-  // Auto-open the first result once results arrive for a new search (desktop only)
-  useEffect(() => {
-    if (isMobile || isLoading) return;
-    if (hasManualPanelSelectionRef.current) return;
-
-    const autoOpenableTypes =
-      filters.docType === 'messages'
-        ? new Set<DisplaySearchResult['type']>(['conversation'])
-        : filters.docType === 'tickets'
-          ? new Set<DisplaySearchResult['type']>(['ticket'])
-          : filters.docType === 'all'
-            ? new Set<DisplaySearchResult['type']>(['conversation', 'ticket'])
-            : null;
-
-    // Files and other non-message tabs do not have a meaningful thread to preview.
-    if (!autoOpenableTypes) return;
-
-    const first = results.find(result => {
-      if (!autoOpenableTypes.has(result.type)) return false;
-      const resultContext = result.searchContext;
-      if (!resultContext?.channelId || !resultContext.conversationId) return false;
-      return !(
-        resultContext.subApp === 'DESK' ||
-        (result.type === 'ticket' &&
-          isDeskChannelType(allChannelsForNav.find(c => c.id === resultContext.channelId)?.type))
-      );
-    });
-
-    if (!first) {
-      // A completed search with no previewable result must not retain a stale panel.
-      if (autoOpenedResultKeyRef.current !== null) {
-        autoOpenedResultKeyRef.current = null;
-        setSelectedPanel(null);
-      }
-      return;
-    }
-
-    const ctx = first.searchContext;
-    if (!ctx?.channelId || !ctx?.conversationId) return;
-    const resultKey = JSON.stringify([
-      fullSearchKey,
-      first.type,
-      first.id,
-      ctx.channelId,
-      ctx.conversationId,
-      ctx.messageId,
-    ]);
-    if (autoOpenedResultKeyRef.current === resultKey) return;
-    autoOpenedResultKeyRef.current = resultKey;
-
-    // Mirror the click-handler routing: open thread panel for any conversation with
-    // replies (replyCount > 0), channel context for standalone messages.
-    if (ctx.replyCount && ctx.replyCount > 0) {
-      setSelectedPanel({
-        kind: 'thread',
-        thread: {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          matchedMessageId: ctx.messageId ?? null,
-        },
-      });
-    } else {
-      setSelectedPanel({
-        kind: 'channel',
-        channelId: ctx.channelId,
-        conversationId: ctx.conversationId,
-        matchedMessageId: ctx.messageId ?? null,
-      });
-    }
-  }, [results, isMobile, isLoading, filters.docType, fullSearchKey, allChannelsForNav]);
 
   const contextValue = useMemo(
     () => ({
@@ -744,13 +809,54 @@ const SearchResults = (): ReactElement => {
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
-        {query && (
-          <p className='pt-4 text-base text-muted-foreground'>
-            Results for: <span className='font-semibold text-foreground'>{query}</span>
-          </p>
-        )}
+        <div className='pt-4 flex items-center gap-2'>
+          {/* This page is only ever arrived at from somewhere — the cmd+K palette, or a
+              link out of it — and it is the one screen that renders no AppNavigator, so it
+              had no in-app way back at all. Going back lands on the palette's own history
+              entry, which reopens cmd+K with the search still in it. */}
+          <button
+            type='button'
+            aria-label='Back'
+            onClick={() => void navigate(-1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_BACK'
+          >
+            <ArrowLeft size={16} />
+          </button>
+          {/* Paired with Back so a step backwards is undoable — refining a query pushes
+              history entries, and without this the only way forward is retyping. Mirrors
+              Back exactly, including staying enabled: forward past the end of the stack
+              is a harmless no-op. */}
+          <button
+            type='button'
+            aria-label='Forward'
+            onClick={() => void navigate(1)}
+            className='size-7 shrink-0 flex items-center justify-center rounded-[10px] border border-transparent transition-colors text-sidebar-secondary-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent'
+            data-track-category='SEARCH_RESULTS'
+            data-track-name='GO_FORWARD'
+          >
+            <ArrowRight size={16} />
+          </button>
+          <div className='flex-1 min-w-0'>
+            <SearchQueryInput
+              query={query}
+              tokens={queryTokens}
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onSubmit={handleQuerySubmit}
+              onLiveChange={setText}
+              isSearching={isLoading}
+            />
+          </div>
+        </div>
         <div className='mt-3'>
-          <SearchFilterBar filters={filters} onFiltersChange={handleFiltersChange} />
+          <SearchFilterBar
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            query={query}
+            onQueryChange={handleQuerySubmit}
+          />
         </div>
         {(results.length > 0 || (query && totalCount > 0)) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
@@ -775,20 +881,32 @@ const SearchResults = (): ReactElement => {
           </div>
         )}
       </div>
-      <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto px-4'>
+      <div
+        ref={scrollRef}
+        className={cn(
+          // pb-16 so the last card clears the bottom of the viewport instead of sitting
+          // flush against it (and above the floating compare bar when it's up).
+          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
+          // A re-search keeps the previous results on screen rather than blanking to a
+          // spinner — they fade back while the new ones land, and the box spins.
+          isLoading && results.length > 0 && 'opacity-50 transition-opacity duration-150',
+        )}
+      >
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
           <ResultsBody
             query={query}
+            displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
-            hasEverLoaded={hasEverLoadedRef.current}
+            isSearchPending={isSearchPending}
             isLoading={isLoading}
             error={error}
             results={results}
             loadMoreRef={loadMoreRef}
             selectedPanel={selectedPanel}
-            onSelectUser={handleSelectUser}
+            onOpenResult={openResult}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
+            usersById={usersById}
             compareMode={compareMode}
             isGrouped={isGrouped}
             selectedIds={selectedIds}
@@ -879,20 +997,24 @@ export default SearchResults;
 
 interface ResultsBodyProps {
   query: string;
+  /** The text the visible results reflect (live typed text, falling back to the URL
+   *  query). Drives empty-state copy and local-section gating so they track live typing. */
+  displayQuery: string;
   hasActiveFilters: boolean;
-  hasEverLoaded: boolean;
+  isSearchPending: boolean;
   isLoading: boolean;
   error: string | null;
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
   selectedPanel: SidePanelState;
-  onSelectUser: (userId: string) => void;
+  onOpenResult: (result: DisplaySearchResult) => void;
   channelData: ReturnType<typeof useAllChannels>;
   searchableChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
   }>;
+  usersById: Map<string, Parameters<typeof getUserDisplayName>[0]>;
   compareMode: boolean;
   isGrouped: boolean;
   selectedIds: Set<string>;
@@ -980,7 +1102,7 @@ function UserResultCard({
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_USER'
     >
-      <Avatar userId={result.id} size='md' showActiveStatus={false} />
+      <Avatar userId={result.id} size='md' showActiveStatus />
       <div className='min-w-0'>
         <div className='flex items-center gap-2 min-w-0'>
           <p
@@ -1022,16 +1144,18 @@ function getAttachmentResultIcon(result: DisplaySearchResult): ReactElement {
 
 function ResultsBody({
   query,
+  displayQuery,
   hasActiveFilters,
-  hasEverLoaded,
+  isSearchPending,
   isLoading,
   error,
   results,
   loadMoreRef,
   selectedPanel,
-  onSelectUser,
+  onOpenResult,
   channelData,
   searchableChannels,
+  usersById,
   compareMode,
   isGrouped,
   selectedIds,
@@ -1040,11 +1164,21 @@ function ResultsBody({
   docType,
   filteredLocalChannels,
 }: ResultsBodyProps): ReactElement {
-  const navigate = useNavigate();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  // `searchableNames` is already the rendered form: getDMNames(...).display for DMs
+  // (participant names — `channel.name` is a participant id there) and [channel.name]
+  // for everything else. That is `formatChannelLabel` without its `#`, which rows
+  // supplying their own lead-in ("in design") don't want.
   const channelLabelsById = useMemo(
     () =>
-      new Map(searchableChannels.map(channel => [channel.channel.id, formatChannelLabel(channel)])),
+      new Map(
+        searchableChannels.map(channel => [
+          channel.channel.id,
+          (channel.searchableNames?.length ? channel.searchableNames : [channel.channel.name]).join(
+            ', ',
+          ),
+        ]),
+      ),
     [searchableChannels],
   );
 
@@ -1066,9 +1200,9 @@ function ResultsBody({
   const renderCard = (result: DisplaySearchResult): ReactElement | null => {
     const key = `${result.type}-${result.id}`;
 
-    // User card — opens profile panel
+    // User card — opens the user's DM chat in the right pane.
     if (result.type === 'user') {
-      return <UserResultCard key={key} result={result} onSelectUser={onSelectUser} />;
+      return <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result)} />;
     }
 
     // Channel card
@@ -1079,19 +1213,13 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() =>
-            void navigate(isDeskChannel ? `/support/${channelId}` : `/chat/dir/${channelId}`)
-          }
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name={isDeskChannel ? 'OPEN_DESK_CHANNEL' : 'OPEN_CHANNEL'}
         >
           <div className='flex items-center justify-center size-9 rounded-lg bg-muted shrink-0'>
-            {isDeskChannel ? (
-              <Mail className='size-4 text-muted-foreground' />
-            ) : (
-              <Hash className='size-4 text-muted-foreground' />
-            )}
+            <ChannelIcon channel={channel} glyphClassName='text-muted-foreground' avatarSize='md' />
           </div>
           <div className='min-w-0'>
             <p className='text-sm font-medium text-foreground truncate'>
@@ -1112,11 +1240,26 @@ function ResultsBody({
       const icon = getAttachmentResultIcon(result);
       const channelId = result.searchContext?.channelId;
       const channelName = channelId ? channelLabelsById.get(channelId) : undefined;
-      const subtitle = channelName ? `File uploaded in ${channelName}` : result.subtitle;
+      const uploaderId = result.avatar;
+      const uploader = uploaderId ? usersById.get(uploaderId) : undefined;
+      const uploaderName = uploader ? getUserDisplayName(uploader) : '';
+      const shouldShowUploader = !!uploader && uploaderName !== 'Unknown';
+      const rawTs = result.metadata.timestamp;
+      const uploadedAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+      const fileSize = result.searchContext?.fileSize;
+      const fileSizeLabel = typeof fileSize === 'number' ? formatFileSize(fileSize) : '';
+      // Same shape as every other card on this screen: metadata left, timestamp
+      // right. Segments are middot-separated, except the channel, which closes
+      // the line as a phrase ("in design") and so takes no separator in front.
+      const metaLine = [shouldShowUploader ? `Uploaded by ${uploaderName}` : '', fileSizeLabel]
+        .filter(Boolean)
+        .join(' · ');
+      const infoLine = [metaLine, channelName ? `in ${channelName}` : ''].filter(Boolean).join(' ');
+
       return (
         <button
           key={key}
-          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_ATTACHMENT'
@@ -1125,21 +1268,22 @@ function ResultsBody({
             {icon}
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              {subtitle && (
-                <span className='truncate'>
-                  {channelName ? subtitle : <RenderMessageWithHTML message={subtitle} />}
-                </span>
-              )}
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
+            {/* Timestamp sits on the title row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {uploadedAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {uploadedAt}
                 </span>
               )}
             </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {infoLine ||
+                (result.subtitle ? <RenderMessageWithHTML message={result.subtitle} /> : null)}
+            </span>
           </div>
         </button>
       );
@@ -1148,10 +1292,11 @@ function ResultsBody({
     // Conversation message card (type === 'conversation')
     // DESK mails navigate away; regular messages open in the side panel
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
-      // Mirrors cmdK's desk-mail row: subject, then sender + recipient count and
-      // timestamp, then the body snippet.
+      // Mirrors cmdK's desk-mail row: subject and timestamp, then sender +
+      // recipient count, then the body snippet.
       const senderName = result.searchContext?.senderName || result.subtitle || '';
       const recipientCount = result.searchContext?.recipientCount ?? 0;
+      const sentAt = utcToIst(result.metadata.timestamp);
       const deskTicketSubtitle = [
         result.subtitle || result.searchContext.xyneId,
         ...(result.searchContext.formFieldMatches ?? []).map(
@@ -1163,7 +1308,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+          onClick={() => onOpenResult(result)}
           className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_MAIL'
@@ -1172,25 +1317,27 @@ function ResultsBody({
             <Mail className='size-4 text-muted-foreground' />
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-foreground truncate'>
-              <RenderMessageWithHTML message={result.title} />
-            </p>
+            {/* Timestamp sits on the subject row, matching the ticket and message
+                cards; the metadata line below carries only metadata. */}
+            <div className='flex items-baseline justify-between gap-2'>
+              <p className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+                <RenderMessageWithHTML message={result.title} />
+              </p>
+              {sentAt && (
+                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+                  {sentAt}
+                </span>
+              )}
+            </div>
             {deskTicketSubtitle && (
               <div className='text-xs text-foreground truncate'>
                 <RenderMessageWithHTML message={deskTicketSubtitle} />
               </div>
             )}
-            <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
-              <span className='min-w-0 truncate'>
-                {senderName}
-                {recipientCount > 0 && ` +${recipientCount} more`}
-              </span>
-              {result.metadata.timestamp && (
-                <span className='shrink-0 whitespace-nowrap'>
-                  {utcToIst(result.metadata.timestamp)}
-                </span>
-              )}
-            </div>
+            <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+              {senderName}
+              {recipientCount > 0 && ` +${recipientCount} more`}
+            </span>
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />
@@ -1204,8 +1351,6 @@ function ResultsBody({
     const ctx = result.searchContext;
     if (!ctx?.channelId || !ctx?.conversationId) return null;
     const isTicket = result.type === 'ticket';
-    const isDeskTicket =
-      isTicket && isDeskChannelType(channelData?.find(c => c.id === ctx.channelId)?.type);
 
     // Ticket summary from the search fields — desk tickets render it as a compact
     // card; normal tickets serialize it into ticket_md so the message bubble shows
@@ -1228,16 +1373,23 @@ function ResultsBody({
         }
       : null;
 
-    // Desk tickets: their message-bound widget can't render (bot/AI initial
-    // message, missing ticket_md), so render a compact data-driven ticket card.
-    if (isDeskTicket && ticketSummary) {
+    // Tickets render as a compact data-driven ticket card. Desk tickets navigate to
+    // the support view; board tickets open their details in the right pane. Rendering
+    // both as TicketCardV2 (single onClick) avoids the message-bubble's embedded ticket
+    // widget fighting the card click for board tickets.
+    if (isTicket && ticketSummary) {
       return (
-        <div key={key} className='w-full'>
+        <div
+          key={key}
+          className='w-full'
+          data-track-category='SEARCH_RESULTS'
+          data-track-name='OPEN_DESK_TICKET_RESULT'
+        >
           <TicketCardV2
             ticket={ticketSummary}
             isConversation
             width='max-w-none w-full'
-            onClick={() => void navigateToSearchResult(result, navigate, channelData)}
+            onClick={() => onOpenResult(result)}
           />
         </div>
       );
@@ -1409,22 +1561,20 @@ function ResultsBody({
     // query, filteredLocalChannels returns every channel, so gate on the query to
     // avoid a partial browse (which would also drop 1:1 DMs) and keep the clean
     // empty state until the user types.
-    const showLocalSections = !hasActiveFilters && !!query.trim();
+    const showLocalSections = !hasActiveFilters && !!displayQuery;
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
-      if (!query && !hasActiveFilters) {
+      if (!displayQuery && !hasActiveFilters) {
         return (
-          <EmptyState
-            title='Search for messages, files, and tickets'
-            subtitle='Type above and press Enter to search'
-          />
+          <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
-      if (isLoading || !hasEverLoaded) {
+      // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+      if (isLoading || isSearchPending) {
         return (
           <div className='flex items-center justify-center h-full'>
             <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1435,7 +1585,9 @@ function ResultsBody({
         <EmptyState
           title='No results found'
           subtitle={
-            query ? `Nothing matched "${query}"` : 'No results found for the active filters'
+            displayQuery
+              ? `Nothing matched "${displayQuery}"`
+              : 'No results found for the active filters'
           }
         />
       );
@@ -1483,15 +1635,13 @@ function ResultsBody({
 
   // ── Flat view — specific docType tabs and compare mode ──────────────────
   if (results.length === 0) {
-    if (!query && !hasActiveFilters) {
+    if (!displayQuery && !hasActiveFilters) {
       return (
-        <EmptyState
-          title='Search for messages, files, and tickets'
-          subtitle='Type above and press Enter to search'
-        />
+        <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
       );
     }
-    if (isLoading || !hasEverLoaded) {
+    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+    if (isLoading || isSearchPending) {
       return (
         <div className='flex items-center justify-center h-full'>
           <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1501,7 +1651,11 @@ function ResultsBody({
     return (
       <EmptyState
         title='No results found'
-        subtitle={query ? `Nothing matched "${query}"` : 'No results found for the active filters'}
+        subtitle={
+          displayQuery
+            ? `Nothing matched "${displayQuery}"`
+            : 'No results found for the active filters'
+        }
       />
     );
   }
@@ -1575,18 +1729,30 @@ function MobileLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): R
   );
 }
 
+// Default pane split when a side panel is open. Desk tickets render a 3-column ticket view
+// (email thread + details/AI sidebar), so they open wider than other panes.
+const RESULTS_SIZE_FULL = '100%'; // no panel open
+const RESULTS_SIZE_WITH_PANEL = '55%';
+const RESULTS_MIN_SIZE = '30%';
+const SIDE_PANEL_SIZE = '45%';
+const SIDE_PANEL_MIN_SIZE = '25%';
+
+// Layout persistence key (ResizableGroup autoSaveId → localStorage). One split for every panel type —
+// a single consistent side-panel width avoids the results list reflowing when switching result types.
+const PANE_LAYOUT_ID = 'search-results-panel';
+
 function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): ReactElement {
   return (
     <ResizableGroup
       orientation='horizontal'
       className='h-full'
-      autoSaveId='search-results-thread'
+      autoSaveId={PANE_LAYOUT_ID}
       panelIds={selectedPanel ? ['search-results', 'search-side-panel'] : ['search-results']}
     >
       <Panel
         id='search-results'
-        defaultSize={selectedPanel ? '60%' : '100%'}
-        minSize={selectedPanel ? '30%' : '100%'}
+        defaultSize={selectedPanel ? RESULTS_SIZE_WITH_PANEL : RESULTS_SIZE_FULL}
+        minSize={selectedPanel ? RESULTS_MIN_SIZE : RESULTS_SIZE_FULL}
       >
         <div className='h-full'>{resultsColumn}</div>
       </Panel>
@@ -1595,7 +1761,7 @@ function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): 
           <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
             <div className='w-[1px] h-full bg-border' />
           </Separator>
-          <Panel id='search-side-panel' defaultSize='40%' minSize='25%'>
+          <Panel id='search-side-panel' defaultSize={SIDE_PANEL_SIZE} minSize={SIDE_PANEL_MIN_SIZE}>
             <div className='h-full animate-slide-in-from-right'>
               <SearchResultsSidePanel panel={selectedPanel} onClose={onClose} />
             </div>
@@ -1606,61 +1772,5 @@ function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): 
   );
 }
 
-function SearchResultsSidePanel({
-  panel,
-  onClose,
-}: {
-  panel: NonNullable<SidePanelState>;
-  onClose: () => void;
-}): ReactElement {
-  const { user: currentUser } = useAuth();
-  const navigate = useNavigate();
-
-  return (
-    <div className='h-full flex flex-col min-h-0 bg-background'>
-      {panel.kind === 'channel' ? (
-        <ConversationPanelV2
-          channelId={panel.channelId}
-          previousChannelId={null}
-          linkedConversationIdOverride={panel.conversationId}
-          linkedItemCreatedAtOverride={panel.conversationCreatedAt ?? null}
-          onClose={onClose}
-        />
-      ) : panel.kind === 'thread' ? (
-        <ThreadMessages
-          channelId={panel.thread.channelId}
-          conversationId={panel.thread.conversationId}
-          matchedMessageId={panel.thread.matchedMessageId ?? null}
-          showChannelLink
-          onChannelLinkClick={() =>
-            void navigate(
-              `/chat/dir/${panel.thread.channelId}#origin=${panel.thread.conversationId}`,
-            )
-          }
-          onClose={onClose}
-        />
-      ) : (
-        <>
-          <div className='flex items-center justify-end p-2 border-b border-border shrink-0'>
-            <button
-              onClick={onClose}
-              className='p-2 rounded-md hover:bg-accent'
-              aria-label='Close profile'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='CLOSE_PROFILE_PANEL'
-            >
-              <X size={18} />
-            </button>
-          </div>
-          <div className='flex-1 min-h-0 overflow-y-auto'>
-            <UserProfile
-              userId={panel.userId}
-              isOwnProfile={currentUser?.id === panel.userId}
-              className='border-0 rounded-none shadow-none'
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// Side-panel rendering, click resolution, and panel types now live in ./SidePanel
+// (SidePanel, ResultClickResolver, PanelTypes).

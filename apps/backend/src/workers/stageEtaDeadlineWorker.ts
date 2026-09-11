@@ -1,23 +1,44 @@
+import { Prisma } from '@prisma/client';
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
+import { db, readReplicaDb } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
-import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
-import { ActivityType } from '@xyne/shared';
 import {
-  getUsersToNotifyForTicket,
   getTicketBotActorId,
-  isSameTimeDaily,
-  calculateDaysOverdueExact,
-  createEtaSystemMessage,
   TicketWithStageInfo,
   OPEN_STATUSES,
 } from '@/utils/etaNotificationUtils';
+import {
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+  BoardType,
+} from '@xyne/shared';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import {
+  evaluatePlanningRisk,
+  buildRiskTransitionActivityIntents,
+  dispatchEtaNotifications,
+  etaSignalsFromResult,
+} from '@/services/etaManagement';
 
-// Window for initial breach notification (30 minutes)
-const BREACH_WINDOW_MS = 30 * 60 * 1000;
-const STAGE_ETA_REMINDER_BATCH_SIZE = 50;
+interface TicketForReconciliation extends TicketWithStageInfo {
+  boardId: string;
+  userGroupId: string | null;
+  statusV2: string;
+  metadata: unknown;
+}
+
+// Batching for the bulk `isStageOverdue` flag sync.
+const BATCH_SIZE = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SIZE || '15', 10);
+const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS || '1000', 10);
+
+// Batching for the planning-risk reconciliation pass, which does per-ticket writes
+// (metadata + timeline + notifications) rather than a bulk `updateMany`.
+const STAGE_ETA_REMINDER_BATCH_SIZE = 15;
 const STAGE_ETA_REMINDER_BATCH_DELAY_MS = 1000;
+// Page size for both cursor-paginated TicketStageEta scans below - shared so the two
+// stay in sync rather than drifting as two separately-tuned magic numbers.
+const QUERY_BATCH_SIZE = 10000;
 
 const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
   if (chunkSize <= 0) return [items];
@@ -28,13 +49,11 @@ const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
   return chunks;
 };
 
-const sleep = async (ms: number): Promise<void> => {
-  if (ms <= 0) return;
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 class StageEtaDeadlineWorker {
   private isInitialized = false;
+  private isProcessing = false;
 
   async start(): Promise<void> {
     if (this.isInitialized) return;
@@ -44,6 +63,12 @@ class StageEtaDeadlineWorker {
     const queue = stageEtaDeadlineQueue.getQueue();
 
     queue.process('check-stage-eta-deadlines', async () => {
+      if (this.isProcessing) {
+        logger.warn(
+          '[STAGE-ETA-DEADLINE-WORKER] Skipping job: previous job still in progress',
+        );
+        return;
+      }
       return this.processJob();
     });
 
@@ -59,160 +84,372 @@ class StageEtaDeadlineWorker {
   }
 
   private async processJob(): Promise<void> {
-    logger.info(
-      '[STAGE-ETA-DEADLINE-WORKER] Processing stage ETA deadline check job',
-    );
-    await this.checkAndNotifyStageEtaDeadlines();
-    logger.info('[STAGE-ETA-DEADLINE-WORKER] Stage ETA deadline check completed');
-  }
-
-  private async checkAndNotifyStageEtaDeadlines(): Promise<void> {
-    const now = new Date();
-
+    this.isProcessing = true;
     try {
-      // 1. Get open tickets with stage info, excluding tickets where overall ETA is breached
-      const tickets = await this.getOpenTickets(now);
-      
-      if (tickets.length === 0) return;
-
-      // 3. Check stage ETA for remaining tickets and create activities
-      await this.checkAndNotifyForStageEta(tickets, now);
+      logger.info(
+        '[STAGE-ETA-DEADLINE-WORKER] Processing stage ETA deadline check job',
+      );
+      const now = new Date();
+      // Two independent passes over the same hourly tick, split by which side of `now`
+      // the active visit's deadline falls on: already-breached visits drive the
+      // denormalized `isStageOverdue` flag, not-yet-breached ones drive planning-risk
+      // reconciliation.
+      await this.syncStageOverdueFlags(now);
+      await this.reconcileOpenTicketPlanningRisk(now);
+      logger.info('[STAGE-ETA-DEADLINE-WORKER] Stage ETA deadline check completed');
     } catch (error) {
       logger.error('[STAGE-ETA-DEADLINE-WORKER] Error checking stage ETA deadlines:', error);
       throw error;
+    } finally {
+      this.isProcessing = false;
     }
   }
 
-  private async getOpenTickets(now: Date): Promise<TicketWithStageInfo[]> {
-    // Get today at midnight for date comparison
+  private async syncStageOverdueFlags(now: Date = new Date()): Promise<void> {
+    const overdueTicketIds = await this.getOverdueTicketIds(now);
+
+    if (overdueTicketIds.length === 0) return;
+
+    for (let i = 0; i < overdueTicketIds.length; i += BATCH_SIZE) {
+      const batchIds = overdueTicketIds.slice(i, i + BATCH_SIZE);
+      await db.$executeRaw`
+        UPDATE "tickets"
+        SET "isStageOverdue" = true
+        WHERE "id" IN (${Prisma.join(batchIds)})
+          AND ("isStageOverdue" = false OR "isStageOverdue" IS NULL)
+      `;
+      if (i + BATCH_SIZE < overdueTicketIds.length) {
+        await sleep(BATCH_SLEEP_MS);
+      }
+    }
+  }
+
+  private async getOverdueTicketIds(now: Date): Promise<string[]> {
+    const readerDb = readReplicaDb ?? db;
+    const allOverdueTicketIds: string[] = [];
+    const QUERY_BATCH_SIZE = 10000;
+    let cursor: string | undefined;
+
+    while (true) {
+      const overdueEntries = await readerDb.ticketStageEta.findMany({
+        where: {
+          stageLeftAt: null,
+          stageEta: { lte: now },
+          // Ensure stage exists (filters out orphaned records with deleted stages)
+          // ticket is implicitly checked via the statusV2 filter (JOIN filters out missing tickets)
+          stage: { id: { not: '' } },
+          ticket: {
+            statusV2: { in: OPEN_STATUSES },
+            // Only fetch tickets not already marked as overdue
+            OR: [
+              { isStageOverdue: false },
+              { isStageOverdue: null },
+            ],
+          } as any,
+        },
+        select: {
+          id: true,
+          ticketId: true,
+          stage: { select: { name: true } },
+          ticket: { select: { stageName: true } },
+        },
+        take: QUERY_BATCH_SIZE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        orderBy: { id: 'asc' },
+      });
+
+      if (overdueEntries.length === 0) break;
+
+      // Filter to only tickets still in the overdue stage (stage name matches current stage)
+      // Also skip entries with missing relations (orphaned records)
+      const filteredIds = (overdueEntries as any[])
+        .filter(entry => entry.stage?.name && entry.ticket?.stageName && entry.stage.name === entry.ticket.stageName)
+        .map(entry => entry.ticketId);
+
+      allOverdueTicketIds.push(...filteredIds);
+
+      if (overdueEntries.length < QUERY_BATCH_SIZE) break;
+
+      cursor = overdueEntries[overdueEntries.length - 1].id;
+    }
+
+    return allOverdueTicketIds;
+  }
+
+  /**
+   * Loads the not-yet-breached active visits (`stageEta > now`) that planning-risk
+   * reconciliation operates on. Deliberately the complement of `getOverdueTicketIds`:
+   * once a stage deadline is breached it stops being a *planning* risk and becomes a
+   * stage-overdue condition, which the flag sync above owns.
+   */
+  private async reconcileOpenTicketPlanningRisk(now: Date): Promise<void> {
+    // Tickets whose overall ETA is already breached are excluded - the daily
+    // ticket-overdue worker owns those, and ticket-overdue outranks planning risk.
     const todayMidnight = new Date(now);
     todayMidnight.setHours(0, 0, 0, 0);
 
-    return await db.ticket.findMany({
-      where: {
-        statusV2: { in: OPEN_STATUSES },
-        // Exclude tickets where overall ETA is breached (eta < today at midnight)
-        OR: [
-          { eta: null },
-          { eta: { gte: todayMidnight } },
-        ],
-      },
-      select: {
-        id: true,
-        xyneId: true,
-        assignedTo: true,
-        createdBy: true,
-        channelId: true,
-        conversationId: true,
-        stageName: true,
-        eta: true,
-        workspaceId: true,
-      },
-    });
-  }
+    // Cursor-paginated and read-replica, like getOverdueTicketIds - and processed one page
+    // at a time (fetch, evaluate/write, discard, repeat) rather than accumulated into one
+    // array first, since each row here carries a full nested ticket including its metadata
+    // JSON blob. Unlike the ID-only overdue scan, an unbounded version of this query holds
+    // that full payload for every matching visit in a large workspace at once.
+    const readerDb = readReplicaDb ?? db;
+    let cursor: string | undefined;
+    let hasMore = true;
 
-  private async checkAndNotifyForStageEta(
-    tickets: TicketWithStageInfo[],
-    now: Date
-  ): Promise<void> {
-    // Get active stage entries for these tickets
-    const activeStageEntries = await db.ticketStageEta.findMany({
-      where: {
-        ticketId: { in: tickets.map(t => t.id) },
-        stageLeftAt: null,
-        stageEta: { lte: now },
-      },
-    });
+    while (hasMore) {
+      const entries = await readerDb.ticketStageEta.findMany({
+        where: {
+          stageLeftAt: null,
+          stageEta: { gt: now },
+          ticket: {
+            statusV2: { in: OPEN_STATUSES },
+            OR: [
+              { eta: null },
+              { eta: { gte: todayMidnight } },
+            ],
+          },
+        },
+        select: {
+          id: true,
+          ticketId: true,
+          stageId: true,
+          stageEta: true,
+          stageEnteredAt: true,
+          ticket: {
+            select: {
+              id: true,
+              xyneId: true,
+              assignedTo: true,
+              createdBy: true,
+              channelId: true,
+              conversationId: true,
+              stageName: true,
+              eta: true,
+              workspaceId: true,
+              boardId: true,
+              userGroupId: true,
+              statusV2: true,
+              metadata: true,
+            },
+          },
+        },
+        take: QUERY_BATCH_SIZE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        orderBy: { id: 'asc' },
+      });
 
-    if (activeStageEntries.length === 0) return;
-
-    // Get stage info
-    const stageIds = [...new Set(activeStageEntries.map(e => e.stageId))];
-    const stages = await db.stage.findMany({
-      where: { id: { in: stageIds } },
-      select: { id: true, name: true, eta: true },
-    });
-
-    const ticketMap = new Map(tickets.map(t => [t.id, t]));
-    const stageMap = new Map(stages.map(s => [s.id, s]));
-
-    const entryBatches = chunkArray(activeStageEntries, STAGE_ETA_REMINDER_BATCH_SIZE);
-
-    for (let batchIndex = 0; batchIndex < entryBatches.length; batchIndex += 1) {
-      const entryBatch = entryBatches[batchIndex]!;
-
-      logger.info(
-        `[STAGE-ETA-DEADLINE-WORKER] Processing stage ETA batch ${batchIndex + 1}/${entryBatches.length} (${entryBatch.length} entries)`
-      );
-
-      for (const entry of entryBatch) {
-        const ticket = ticketMap.get(entry.ticketId);
-        const stage = stageMap.get(entry.stageId);
-
-        if (!ticket || !stage) continue;
-
-        const actorId = await getTicketBotActorId(ticket.workspaceId);
-
-        // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
-        if (stage.eta === null || stage.eta === 0) continue;
-
-        // Get stage name from stage entry and compare with ticket's current stage
-        if (stage.name !== ticket.stageName) continue;
-
-        const stageEta = new Date(entry.stageEta!);
-        if (stageEta > now) continue;
-
-        const timeSinceBreach = now.getTime() - stageEta.getTime();
-        const daysOverdue = calculateDaysOverdueExact(stageEta, now);
-        const isInitialBreach = timeSinceBreach <= BREACH_WINDOW_MS;
-        const isFollowUpTime = timeSinceBreach > BREACH_WINDOW_MS && isSameTimeDaily(stageEta, now);
-
-        if (!isInitialBreach && !isFollowUpTime) continue;
-
-        const overdueText = daysOverdue === 0 ? 'due today' : `overdue (${daysOverdue} days)`;
-        const message = isInitialBreach
-          ? `Ticket ${ticket.xyneId} stage "${stage.name}" is ${overdueText}`
-          : `Reminder: Ticket ${ticket.xyneId} stage "${stage.name}" is still ${overdueText}`;
-
-        const usersToNotify = await getUsersToNotifyForTicket(
-          ticket.id,
-          ticket.assignedTo,
-          ticket.createdBy
+      if (entries.length > 0) {
+        const ticketMap = new Map<string, TicketForReconciliation>(
+          entries.map(e => [e.ticketId, e.ticket as TicketForReconciliation]),
         );
 
-        await TicketsSideEffectHandler.createEtaBreachActivities({
-          ticketId: ticket.id,
-          xyneId: ticket.xyneId,
-          channelId: ticket.channelId,
-          userIds: usersToNotify,
-          actorAction: 'stage_eta_breach',
-          actorId,
-          stageName: stage.name,
-          daysOverdue,
+        const stageIds = [...new Set(entries.map(e => e.stageId))];
+        const stages = await readerDb.stage.findMany({
+          where: { id: { in: stageIds } },
+          select: { id: true, name: true, eta: true },
         });
+        const stageMap = new Map(stages.map(s => [s.id, s]));
 
-        if (ticket.conversationId) {
-          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId,
-            () => createEtaSystemMessage({
-              conversationId: ticket.conversationId!,
-              content: message,
-              createdAt: now,
-              activityType: ActivityType.STAGE_ETA,
-              stageId: stage.id,
-            }),
-          );
-        }
-
-        logger.info(
-          `[STAGE-ETA-DEADLINE-WORKER] ${isInitialBreach ? 'Initial breach' : 'Follow-up'} reminder for ticket ${ticket.xyneId} stage "${stage.name}" (${daysOverdue} days overdue)`
-        );
+        await this.reconcilePlanningRisk(entries, ticketMap, stageMap, now);
       }
 
-      if (batchIndex < entryBatches.length - 1) {
-        await sleep(STAGE_ETA_REMINDER_BATCH_DELAY_MS);
+      hasMore = entries.length === QUERY_BATCH_SIZE;
+      if (hasMore) {
+        cursor = entries[entries.length - 1].id;
       }
     }
   }
+
+  /**
+   * Scheduled counterpart to the immediate planning-risk evaluation wired into every ticket
+   * mutation path (services/etaManagement).
+   *
+   * Note it is NOT the clock that creates work here: the risk condition includes
+   * `now <= stageDeadline`, so as time passes the condition can only go true -> false. Time
+   * ends a planning risk (it becomes stage-overdue); it can never start one. What this pass
+   * catches is tickets never evaluated at all - written before this feature existed, or by a
+   * path that doesn't run the immediate evaluation (imports, flow cascades). Their metadata
+   * parses to state NONE even though the condition is already true.
+   *
+   * A board ETA-config change does NOT reopen an acknowledged/active risk on its own - the
+   * fingerprint depends only on the ticket's own stageEta/ticketEta/status/visit, all of
+   * which this pass reads fresh from current settings on every run, but none of which a
+   * config change alone can move. It only reopens if that fresh read produces a genuinely
+   * different value (e.g. auto-recompute pushing the due date out).
+   *
+   * Scope is deliberately the pre-breach window only - the loader filters `stageEta > now`,
+   * so a visit whose deadline has already passed is not seen here at all; that is
+   * stage-overdue, owned by syncStageOverdueFlags. One consequence: a risk that was ACTIVE
+   * when its deadline passed keeps that state until the ticket's next mutation. It is
+   * masked in the UI (stage-overdue outranks planning risk), but the stored state is stale.
+   *
+   * Read-only with respect to `Ticket.eta`/forecasts: it only ever updates the persisted
+   * planning-risk state, never extends a due date.
+   */
+  private async reconcilePlanningRisk(
+    entries: Array<{
+      id: string;
+      ticketId: string;
+      stageId: string;
+      stageEta: Date;
+      stageEnteredAt: Date;
+    }>,
+    ticketMap: Map<string, TicketForReconciliation>,
+    stageMap: Map<string, { id: string; name: string; eta: number | null }>,
+    now: Date,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+
+    const boardIds = [
+      ...new Set(
+        entries
+          .map(e => ticketMap.get(e.ticketId)?.boardId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const boards = await db.board.findMany({
+      where: { id: { in: boardIds } },
+      select: { id: true, boardType: true },
+    });
+    const boardMap = new Map(boards.map(b => [b.id, b]));
+
+    const metrics = { detected: 0, reopened: 0, resolved: 0, skippedStale: 0, evaluated: 0 };
+    const startedAt = Date.now();
+
+    const batches = chunkArray(entries, STAGE_ETA_REMINDER_BATCH_SIZE);
+
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+      const batch = batches[batchIndex]!;
+
+      for (const entry of batch) {
+        const ticket = ticketMap.get(entry.ticketId);
+        if (!ticket) continue;
+
+        const board = boardMap.get(ticket.boardId);
+        // Flow boards are deferred this release; detection must not synthesize forecasts/
+        // visits there. Non-linear/Release boards are fine here since we only ever compare
+        // the ticket's OWN active visit deadline against its due date - no route needed.
+        if (!board || board.boardType === BoardType.FLOW) continue;
+
+        // Guard against a stale/orphaned open entry left over from a stage transition that
+        // didn't close it (same check the overdue branch above applies) - only evaluate risk
+        // against the entry that matches the ticket's actual current stage.
+        const stage = stageMap.get(entry.stageId);
+        if (!stage || stage.name !== ticket.stageName) continue;
+
+        const currentTicketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+        const deadlineTracked = entry.stageEta.getTime() !== entry.stageEnteredAt.getTime();
+
+        metrics.evaluated += 1;
+        const decision = evaluatePlanningRisk({
+          ticketId: ticket.id,
+          activeStageVisitId: entry.id,
+          stageDeadline: entry.stageEta,
+          deadlineTracked,
+          ticketDue: ticket.eta,
+          ticketStatus: ticket.statusV2,
+          now,
+          currentRisk: currentTicketEtaManagement.planningRisk,
+          isTerminal: false, // OPEN_STATUSES excludes COMPLETED/CANCELLED already
+        });
+
+        if (decision.transitionKind === 'UNCHANGED') continue;
+
+        // Re-check the persisted fingerprint under a row lock and write in the same
+        // transaction, so an overlapping run or a retry can't pass the check and then
+        // both write. Without the lock this is check-then-write: two workers could
+        // duplicate the risk activities and notify twice for one fingerprint.
+        const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+        const committed = await runAsServiceActor(
+          'stage-eta-deadline-worker',
+          ticket.workspaceId,
+          async () =>
+            db.$transaction(async tx => {
+              const [locked] = await tx.$queryRaw<{ metadata: unknown }[]>`
+                SELECT "metadata"
+                FROM "tickets"
+                WHERE "id" = ${ticket.id}
+                FOR UPDATE
+              `;
+              const freshRisk = parseTicketEtaManagement(locked?.metadata).planningRisk;
+              if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
+                return false;
+              }
+
+              const mergedMetadata = mergeTicketEtaManagement(locked?.metadata, {
+                planningRisk: decision.nextState,
+              });
+              await tx.ticket.update({
+                where: { id: ticket.id },
+                data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+              });
+
+              const intents = buildRiskTransitionActivityIntents(decision, {
+                currentStageId: entry.stageId,
+                oldEta: ticket.eta ? ticket.eta.getTime() : null,
+                trigger: 'RECONCILIATION',
+                systemReason: 'Hourly reconciliation detected a planning-risk state change',
+                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+              });
+              for (const intent of intents) {
+                await recordTicketTimelineEvent(
+                  {
+                    activity: {
+                      ticketId: ticket.id,
+                      updatedBy: systemActorId,
+                      activityType: intent.activityType,
+                      value: intent.value as Prisma.InputJsonValue,
+                      workspaceId: ticket.workspaceId,
+                      channelId: ticket.channelId,
+                    },
+                  },
+                  tx,
+                );
+              }
+              return true;
+            }),
+        );
+
+        if (!committed) {
+          metrics.skippedStale += 1;
+          continue;
+        }
+
+        // Post-commit, and never while paused. Only the run that actually won the lock
+        // reaches here, so one fingerprint notifies once.
+        if (ticket.statusV2 !== 'PAUSED') {
+          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, () =>
+            dispatchEtaNotifications(
+              etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),
+              {
+                ticketId: ticket.id,
+                createdBy: ticket.createdBy ?? systemActorId,
+                assignedTo: ticket.assignedTo,
+                ticketUserGroupId: ticket.userGroupId,
+                boardId: ticket.boardId,
+                actorId: systemActorId,
+              },
+            ),
+          );
+        }
+
+        if (decision.transitionKind === 'DETECTED') metrics.detected += 1;
+        else if (decision.transitionKind === 'REOPENED') metrics.reopened += 1;
+        else if (decision.transitionKind === 'RESOLVED') metrics.resolved += 1;
+      }
+
+      if (batchIndex < batches.length - 1) {
+        await sleep(STAGE_ETA_REMINDER_BATCH_DELAY_MS);
+      }
+    }
+
+    logger.info('[STAGE-ETA-DEADLINE-WORKER] Planning-risk reconciliation complete', {
+      ...metrics,
+      durationMs: Date.now() - startedAt,
+    });
+  }
+
 
   async shutdown(): Promise<void> {
     await stageEtaDeadlineQueue.close();

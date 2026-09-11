@@ -18,19 +18,16 @@ import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
-import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -57,15 +54,15 @@ const ChatView = (): ReactElement => {
   const outletContext = useOutletContext<ChatScreenContext>();
   const shouldStackThreadFromParent = outletContext?.shouldStackThread || false;
 
-  // Track previous channelId to detect navigation changes
-  const prevChannelIdRef = useRef<string | undefined>(undefined);
+  // Last channel for which CHANNEL_VIEWED was recorded this mount.
+  const viewedChannelIdRef = useRef<string | undefined>(undefined);
 
   // Track previous channelId for navigation back on leave
   const previousChannelId = usePreviousChannelId(channelId);
 
   // Query channel data to check if it's a DM and if user's participation is closed
   const channel = useChannel(channelId || '');
-  const channelUserStatus = useGetChannelUserStatus(channelId || '');
+  const channelUserStatus = useChannelParticipation(channelId || '');
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
@@ -94,36 +91,42 @@ const ChatView = (): ReactElement => {
   const { groupId } = useParams<{ groupId?: string }>();
   const isGroupPanelOpen = !!groupId;
 
-  // Reopen DM if user navigates to a closed DM (only on navigation, not on data updates)
+  // CHANNEL_VIEWED: one event per channel entry, whichever way the user got here
+  // (sidebar, search, mention, notification, deep link). Waits for the channel
+  // row so the name/scope can ride along, then latches on channelId so
+  // re-renders and thread navigation inside the same channel don't refire.
   useEffect(() => {
-    // Only run when channelId changes (navigation), not on data updates
-    if (prevChannelIdRef.current === channelId) return;
-    prevChannelIdRef.current = channelId;
+    if (!channel || !channelId) return;
+    if (viewedChannelIdRef.current === channelId) return;
+    viewedChannelIdRef.current = channelId;
 
+    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', channelDisplayName, {
+      ...channelTrackingMetadata(channel),
+      openedInThread: !!conversationId,
+    });
+  }, [channel, channelId, channelDisplayName, conversationId]);
+
+  // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
+  const reopenAttemptedForRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
     if (!channel || !channelId) return;
 
     const isDM =
       channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
-
-    // Track conversation opened (no sensitive data - only conversation type)
-    const conversationType =
-      channel.scopeType === ChannelScopeType.DM
-        ? EVENT_PROPERTIES.CONVERSATION_TYPES.DM
-        : channel.scopeType === ChannelScopeType.GROUP_DM
-          ? EVENT_PROPERTIES.CONVERSATION_TYPES.GROUP_DM
-          : EVENT_PROPERTIES.CONVERSATION_TYPES.CHANNEL;
-
-    mixpanelService.track(EVENTS.CONVERSATION_OPENED, {
-      type: conversationType,
-    });
-
     if (!isDM) return;
 
-    // If user's participation is closed, reopen it
-    if (channelUserStatus?.isClosed) {
+    // Already handled this channel this visit.
+    if (reopenAttemptedForRef.current === channelId) return;
+
+    // Status not resolved yet (closed DMs load via a fallback query); this effect re-runs when it changes.
+    if (channelUserStatus === undefined) return;
+
+    reopenAttemptedForRef.current = channelId;
+
+    if (channelUserStatus.isClosed) {
       zero.mutate(mutators.channel.reopenDm({ channelId, updatedAt: Date.now() }));
     }
-  }, [channel, channelId, context.userID, zero]);
+  }, [channel, channelId, channelUserStatus, zero]);
 
   // Save the current channelId as the last visited channel.
   useEffect(() => {
@@ -249,7 +252,7 @@ const ChatView = (): ReactElement => {
       <div
         ref={chatViewContainerRef}
         data-component='ChatView'
-        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
       >
         <Outlet />
       </div>
@@ -306,7 +309,7 @@ const ChatView = (): ReactElement => {
     <div
       ref={chatViewContainerRef}
       data-component='ChatView'
-      className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
+      className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
     >
       {isThreadSummaryActive && conversationId && channelId ? (
         // Thread Summary Mode — unchanged; ConversationPanelV2 is not rendered
@@ -314,7 +317,7 @@ const ChatView = (): ReactElement => {
         shouldStack ? (
           <>
             <ThreadMessages channelId={channelId} conversationId={conversationId} />
-            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+            <div className='absolute inset-0 bg-background z-10 rounded-2xl animate-slide-in-from-right'>
               <ThreadSummary
                 conversationId={conversationId}
                 channelName={channel?.['name'] || 'thread'}
@@ -432,7 +435,7 @@ const ChatView = (): ReactElement => {
 
           {/* Overlay secondary panel — slides over chat when viewport is narrow */}
           {showSecondaryPanel && shouldStack && !shouldStackThreadFromParent && (
-            <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
+            <div className='absolute inset-0 bg-background z-10 rounded-2xl animate-slide-in-from-right'>
               {secondaryPanelContent}
             </div>
           )}

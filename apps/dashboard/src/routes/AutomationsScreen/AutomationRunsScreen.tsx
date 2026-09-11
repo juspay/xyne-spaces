@@ -7,20 +7,16 @@ export default function AutomationRunsScreen(): ReactElement {
   const { id } = useParams<{ id: string }>();
   if (!id) {
     return (
-      <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-        <div className='flex h-full w-full items-center justify-center text-sm text-red-600'>
-          Missing automation id.
-        </div>
+      <div className='flex h-full w-full items-center justify-center text-sm text-red-600'>
+        Missing automation id.
       </div>
     );
   }
   return (
-    <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-      <RunHistory
-        automationId={id}
-        onBack={() => void navigate('..', { relative: 'path' })}
-        onOpenRun={run => void navigate(`${run.id}`, { relative: 'path' })}
-      />
-    </div>
+    <RunHistory
+      automationId={id}
+      onBack={() => void navigate('..', { relative: 'path' })}
+      onOpenRun={run => void navigate(`${run.id}`, { relative: 'path' })}
+    />
   );
 }

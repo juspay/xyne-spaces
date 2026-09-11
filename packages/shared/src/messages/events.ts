@@ -31,8 +31,6 @@ export function emitMessageSent(event: MessageSentEvent): void {
   for (const cb of listeners) {
     try {
       cb(event);
-    } catch (err) {
-      console.error('messages: message-sent listener threw', err);
-    }
+    } catch {}
   }
 }

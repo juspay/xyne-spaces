@@ -83,10 +83,24 @@ const RoleDetailHeader = ({
           className='h-8 min-w-0 flex-1 text-sm'
         />
         <div className='flex shrink-0 items-center gap-1.5'>
-          <Button size='sm' onClick={onSaveEdit} disabled={!canSaveEdit} loading={saving}>
+          <Button
+            size='sm'
+            onClick={onSaveEdit}
+            data-track-category='ROLES'
+            data-track-name='SAVE_ROLE_EDIT'
+            disabled={!canSaveEdit}
+            loading={saving}
+          >
             <Check size={14} /> Save
           </Button>
-          <Button size='sm' variant='outline' onClick={onCancelEdit} disabled={saving}>
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={onCancelEdit}
+            data-track-category='ROLES'
+            data-track-name='CANCEL_ROLE_EDIT'
+            disabled={saving}
+          >
             <X size={14} /> Cancel
           </Button>
         </div>

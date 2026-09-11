@@ -29,7 +29,7 @@ const TeamIntelligenceHeader = ({
   const { data: memberData } = useMemberDetails(memberEmail!);
 
   const breadcrumbs = useMemo<BreadcrumbSegment[]>(() => {
-    const segs: BreadcrumbSegment[] = [{ label: 'Org Digest', path: '/team-intelligence' }];
+    const segs: BreadcrumbSegment[] = [{ label: 'Founder Brief', path: '/team-intelligence' }];
 
     if (teamId) {
       const team = teams?.data?.find(t => t.id === teamId);

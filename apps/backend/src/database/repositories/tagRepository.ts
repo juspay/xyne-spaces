@@ -5,6 +5,13 @@ import { logger } from '../../utils/logger';
 
 export type TxClient = Prisma.TransactionClient;
 
+export interface MirrorTagRow {
+  tagCategory: string;
+  tag: string;
+  method: TagMethod;
+  reason?: string | null;
+}
+
 interface InsertConfigRowData {
   configKey: string;
   sourceType: string;
@@ -109,6 +116,27 @@ export class TagRepository {
     });
   }
 
+  async findActiveTagsBySourceIds(
+    sourceIds: string[],
+    workspaceId: string,
+    sourceType: string,
+    tagCategory?: string,
+    tx?: TxClient
+  ): Promise<Tag[]> {
+    if (sourceIds.length === 0) return [];
+
+    return this.client(tx).tag.findMany({
+      where: {
+        workspaceId,
+        sourceId: { in: sourceIds },
+        sourceType,
+        isDeleted: false,
+        ...(tagCategory !== undefined ? { tagCategory } : {}),
+      },
+      orderBy: [{ tag: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   /**
    * Bulk-resolve Tag ids to their `{ id, tag }` rows, scoped to a workspace.
    * Used to resolve id-referencing arrays (e.g. Call.labels) back to display
@@ -125,15 +153,26 @@ export class TagRepository {
     workspaceId: string,
     sourceType: string,
     tagCategory: string,
+    query?: string,
+    pagination?: { skip?: number; take?: number }
   ): Promise<string[]> {
+    const where: Prisma.TagWhereInput = {
+      workspaceId,
+      sourceType,
+      tagCategory,
+      isDeleted: false,
+      ...(query ? { tag: { contains: query, mode: 'insensitive' } } : {}),
+    };
+
     const rows = await this.client().tag.findMany({
-      where: { workspaceId, sourceType, tagCategory, isDeleted: false },
+      where,
       distinct: ['tag'],
       select: { tag: true },
       orderBy: { tag: 'asc' },
-      take: 50,
+      skip: pagination?.skip,
+      take: pagination?.take ?? 50,
     });
-    return rows.map(r => r.tag);
+    return rows.map((r) => r.tag);
   }
 
   async insertTagRow(data: InsertTagRowData, tx?: TxClient): Promise<Tag> {
@@ -164,20 +203,127 @@ export class TagRepository {
     });
   }
 
-  /**
-   * Returns all distinct (tagCategory, tag) pairs for a configKey (capped at 500).
-   * Used by the "AI Tags" filter submenu to list all tags that actually exist for a channel.
-   */
-  async findDistinctTagsByConfigKey(
+  async findById(id: string, workspaceId: string, tx?: TxClient): Promise<Tag | null> {
+    return this.client(tx).tag.findFirst({
+      where: { id, workspaceId, isDeleted: false },
+    });
+  }
+
+  async updateTagMethod(id: string, method: TagMethod, updatedBy?: string | null, tx?: TxClient): Promise<Tag> {
+    return this.client(tx).tag.update({
+      where: { id },
+      data: { method, updatedAt: new Date(), ...(updatedBy !== undefined ? { updatedBy } : {}) },
+    });
+  }
+
+  async findDistinctTagCategoriesByConfigKey(
     configKey: string,
-  ): Promise<{ tagCategory: string; tag: string }[]> {
+  ): Promise<{ tagCategory: string }[]> {
     return this.client().tag.findMany({
       where: { configKey, sourceType: 'desk-email', isDeleted: false },
-      distinct: ['tagCategory', 'tag'],
-      select: { tagCategory: true, tag: true },
-      orderBy: [{ tagCategory: 'asc' }, { tag: 'asc' }],
-      take: 500,
+      distinct: ['tagCategory'],
+      select: { tagCategory: true },
+      orderBy: { tagCategory: 'asc' },
+      take: 200,
     });
+  }
+
+  async findDistinctTagsByConfigKeyAndCategory(
+    configKey: string,
+    tagCategory: string,
+  ): Promise<{ tag: string }[]> {
+    return this.client().tag.findMany({
+      where: { configKey, tagCategory, sourceType: 'desk-email', isDeleted: false },
+      distinct: ['tag'],
+      select: { tag: true },
+      orderBy: { tag: 'asc' },
+      take: 2000,
+    });
+  }
+
+  /**
+   * Delta-sync all tags for a projection source (e.g. 'desk-ticket') against
+   * the given rows in one transaction step.
+   *
+   * Semantics:
+   *   - Rows present in both existing and incoming → untouched.
+   *   - Rows only in existing → HARD-DELETED (not soft-deleted).
+   *   - Rows only in incoming → inserted.
+   *   - Empty `rows` → all existing rows hard-deleted.
+   *
+   * Hard delete is intentional: ticket tag rows are a derived projection of
+   * the canonical desk-email tag rows. Audit history lives on the email side
+   * (isDeleted rows there). Do NOT reuse this hard-delete policy for
+   * source-of-truth entities like 'desk-email' — that would cause data loss.
+   *
+   * Equality is checked by (tagCategory, tag, method) — reason is excluded to
+   * avoid constant rewrites when LLM reasons change on every regen.
+   * Incoming rows are deduped by the same key before diffing.
+   *
+   * Must be called inside an existing transaction (tx is required).
+   * Returns true if anything actually changed.
+   */
+  async replaceAllTagsForSource(
+    params: {
+      sourceId: string;
+      sourceType: string;
+      workspaceId: string;
+      configKey: string;
+      rows: MirrorTagRow[];
+    },
+    tx: TxClient,
+  ): Promise<boolean> {
+    const { sourceId, sourceType, workspaceId, configKey, rows } = params;
+
+    const existing = await tx.tag.findMany({
+      where: { sourceId, sourceType, isDeleted: false },
+      select: { id: true, tagCategory: true, tag: true, method: true },
+    });
+
+    const toKey = (r: { tagCategory: string; tag: string; method: string }) =>
+      `${r.tagCategory}|${r.tag}|${r.method}`;
+
+    const existingByKey = new Map(existing.map(r => [toKey(r), r.id]));
+    const incomingKeySet = new Set(rows.map(toKey));
+
+    const isEqual =
+      existingByKey.size === incomingKeySet.size &&
+      [...incomingKeySet].every(k => existingByKey.has(k));
+
+    if (isEqual) return false;
+
+    const toDeleteIds = existing
+      .filter(r => !incomingKeySet.has(toKey(r)))
+      .map(r => r.id);
+
+    const toInsert = [...new Map(rows.map(r => [toKey(r), r])).values()]
+      .filter(r => !existingByKey.has(toKey(r)));
+
+    const now = new Date();
+
+    if (toDeleteIds.length > 0) {
+      await tx.tag.deleteMany({ where: { id: { in: toDeleteIds } } });
+    }
+
+    if (toInsert.length > 0) {
+      await tx.tag.createMany({
+        data: toInsert.map(row => ({
+          sourceId,
+          sourceType,
+          workspaceId,
+          configKey,
+          tagCategory: row.tagCategory,
+          tag: row.tag,
+          method: row.method,
+          reason: row.reason ?? null,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+        })),
+      });
+    }
+
+    return true;
   }
 
   /**
@@ -200,7 +346,7 @@ export class TagRepository {
     if (pairs.length === 0) return [];
 
     const conditions = pairs.map(
-      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`,
+      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`
     );
     const whereClause = Prisma.join(conditions, ' OR ');
 
@@ -223,6 +369,68 @@ export class TagRepository {
     logger.info('[TAG-REPO] findConversationIdsByEmailTags success', { channelId, count: rows.length });
 
     return rows.map(r => r.conversationId);
+  }
+
+  /**
+   * Distinct (conversationId, tagCategory, tag) triples for every email of a desk
+   * channel created inside [start, end].
+   *
+   * Where `findConversationIdsByEmailTags` answers "which threads match this
+   * filter?", this is the grouping read: the caller gets the tag values themselves
+   * so it can bucket tickets by category.
+   */
+  async findGeneratedTagsByConversation(
+    channelId: string,
+    configKey: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ conversationId: string; tagCategory: string; tag: string }[]> {
+    // Last email per conversation: a thread is re-tagged per email, so reading
+    // them all put one ticket in several sentiment groups at once.
+    const emails = await this.client().email.findMany({
+      where: { channelId, createdAt: { gte: start, lte: end } },
+      orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      distinct: ['conversationId'],
+      select: { id: true, conversationId: true },
+    });
+    if (emails.length === 0) return [];
+
+    // Tags hang off the email (`sourceId`), and `non_zero.tags` has no relation
+    // to `public.emails` to traverse, so the conversation is joined back here.
+    const conversationByEmailId = new Map(emails.map(e => [e.id, e.conversationId]));
+
+    const tags = await this.client().tag.findMany({
+      where: {
+        sourceId: { in: [...conversationByEmailId.keys()] },
+        sourceType: 'desk-email',
+        configKey,
+        isDeleted: false,
+      },
+      select: { sourceId: true, tagCategory: true, tag: true },
+    });
+
+    // Dedupe: the same category and tag can be stored twice against one email.
+    // The key is
+    // NUL-joined because categories and tags are LLM-authored free text: any
+    // printable separator can occur inside them and would fold two distinct
+    // triples into one ("customer intent"/"billing" vs "customer"/"intent billing").
+    const seen = new Set<string>();
+    const rows: { conversationId: string; tagCategory: string; tag: string }[] = [];
+    for (const { sourceId, tagCategory, tag } of tags) {
+      const conversationId = conversationByEmailId.get(sourceId);
+      if (!conversationId) continue;
+      const key = `${conversationId}\u0000${tagCategory}\u0000${tag}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ conversationId, tagCategory, tag });
+    }
+
+    logger.info('[TAG-REPO] findGeneratedTagsByConversation success', {
+      channelId,
+      count: rows.length,
+    });
+
+    return rows;
   }
 }
 

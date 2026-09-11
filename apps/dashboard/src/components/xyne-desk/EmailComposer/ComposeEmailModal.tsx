@@ -1,11 +1,18 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
 import { ChevronUp, ChevronsDownUp, X } from 'lucide-react';
+import type { EmailChannelPreference } from '@xyne/shared';
 import { EmailComposer } from './EmailComposer';
+import { useChannelIntegrationInfo } from '../../../hooks/useChannelConnectedEmail';
+import type { ComposeDraftRecord } from '../../../hooks/useComposeDraft';
 
 interface ComposeEmailModalProps {
   open: boolean;
   channelId: string;
   channelName: string;
+  channelPreference: EmailChannelPreference | undefined;
+  channelPreferenceLoaded: boolean;
+  composeDrafts: readonly ComposeDraftRecord[];
+  composeDraftsLoaded: boolean;
   resetKey?: number;
   minimized?: boolean;
   onMinimizedChange?: (next: boolean) => void;
@@ -44,6 +51,10 @@ export const ComposeEmailModal = ({
   open,
   channelId,
   channelName,
+  channelPreference,
+  channelPreferenceLoaded,
+  composeDrafts,
+  composeDraftsLoaded,
   resetKey,
   minimized: minimizedProp,
   onMinimizedChange,
@@ -52,6 +63,7 @@ export const ComposeEmailModal = ({
   draftId,
   initialTo,
 }: ComposeEmailModalProps): ReactElement | null => {
+  const channelIntegrationInfo = useChannelIntegrationInfo(channelId);
   const [internalMinimized, setInternalMinimized] = useState(false);
   const isControlled = typeof minimizedProp === 'boolean';
   const minimized = isControlled ? minimizedProp : internalMinimized;
@@ -182,6 +194,11 @@ export const ComposeEmailModal = ({
             key={`${resetKey}-${draftId ?? channelId}`}
             mode='compose'
             channelId={channelId}
+            channelConnectedEmail={channelIntegrationInfo.email ?? ''}
+            channelPreference={channelPreference}
+            channelPreferenceLoaded={channelPreferenceLoaded}
+            composeDrafts={composeDrafts}
+            composeDraftsLoaded={composeDraftsLoaded}
             onClose={onClose}
             {...(initialTo ? { initialTo } : {})}
             {...(onDiscard ? { onDiscard } : {})}

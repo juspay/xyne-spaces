@@ -413,14 +413,16 @@ export class AiProvisioningBackfillController {
 
   // ── USER PROVISIONING ────────────────────────────────────────────────
 
-  private static async provisionUser(userId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  private static async provisionUser(orgMemberId: string): Promise<void> {
+    const user = await this.prisma.user.findFirst({
+      where: { orgMemberId, leftAt: null },
+      orderBy: { createdAt: 'asc' },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
+        orgMemberId: true,
         status: true,
         workspace: {
           select: {
@@ -439,7 +441,7 @@ export class AiProvisioningBackfillController {
       },
     });
     if (!user) {
-      throw new Error(`User not found: ${userId}`);
+      throw new Error(`No active workspace user found for org member: ${orgMemberId}`);
     }
 
     const orgId = user.workspace.orgId;
@@ -455,6 +457,7 @@ export class AiProvisioningBackfillController {
       spacesUserId: user.id,
       spacesWorkspaceId: user.workspace.id,
       spacesOrgId: orgId,
+      spacesOrgMemberId: user.orgMemberId,
       email: user.email,
       name: user.name,
       role: user.role,
@@ -466,12 +469,12 @@ export class AiProvisioningBackfillController {
 
     await clawSpacesSyncClient.syncUser(clawUserPayload);
 
-    const litellmUserId = `claw-user-${user.id}`;
+    const litellmUserId = `claw-user-${user.orgMemberId}`;
 
     try {
       await litellmProvisioningClient.createUser({
         orgId,
-        userId: user.id,
+        userId: user.orgMemberId,
         email: user.email,
         name: user.name,
         teamId,
@@ -480,7 +483,7 @@ export class AiProvisioningBackfillController {
       });
     } catch (error) {
       if (error instanceof LiteLLMProvisioningError && error.statusCode === 409) {
-        logger.info(`[AiProvisioningBackfill] LiteLLM user already exists for ${user.id}, continuing`);
+        logger.info(`[AiProvisioningBackfill] LiteLLM user already exists for org member ${user.orgMemberId}, continuing`);
       } else {
         throw error;
       }
@@ -488,7 +491,7 @@ export class AiProvisioningBackfillController {
 
     const key = await litellmProvisioningClient.generateKey({
       orgId,
-      userId: user.id,
+      userId: user.orgMemberId,
       email: user.email,
       litellmUserId,
       teamId,
@@ -496,9 +499,11 @@ export class AiProvisioningBackfillController {
     });
 
     await litellmProvisioningClient.storeUserKey({
-      userId: user.id,
+      userId: user.orgMemberId,
       orgId,
       spacesOrgId: orgId,
+      spacesWorkspaceId: user.workspace.id,
+      spacesOrgMemberId: user.orgMemberId,
       litellmUserId,
       teamId,
       key: key.key,
@@ -615,15 +620,19 @@ export class AiProvisioningBackfillController {
         result.summary = batchResult.summary;
         result.errors = batchResult.errors;
       } else if (options.mode === 'users') {
-        const users = await this.prisma.user.findMany({
-          select: { id: true },
-          orderBy: { id: 'asc' },
+        const users = await this.prisma.orgMember.findMany({
+          where: {
+            leftAt: null,
+            users: { some: { leftAt: null } },
+          },
+          select: { memberId: true },
+          orderBy: { memberId: 'asc' },
         });
 
-        const batchResult = await this.runBatched<{ id: string }>(
+        const batchResult = await this.runBatched<{ memberId: string }>(
           users,
-          (u) => u.id,
-          (u) => this.provisionUser(u.id),
+          (u) => u.memberId,
+          (u) => this.provisionUser(u.memberId),
           (id) => this.isProvisioned(AIProvisioningSubjectType.USER, id),
           (id) => this.markStatus(AIProvisioningSubjectType.USER, id, AIProvisioningStatusValue.SUCCESS),
           (id, err) => this.markStatus(AIProvisioningSubjectType.USER, id, AIProvisioningStatusValue.FAILED, err),

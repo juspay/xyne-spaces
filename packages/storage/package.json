@@ -2,7 +2,7 @@
   "name": "@xyne/storage",
   "version": "1.0.0",
   "type": "module",
-  "description": "Provider-agnostic object storage (GCS or S3, selected by config) shared by backend and claw apps",
+  "description": "Provider-agnostic object storage (GCS, S3 or Azure Blob, selected by config) shared by the backend, claw and dashboard-edge apps",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -21,8 +21,10 @@
     "@aws-sdk/client-s3": "^3.1017.0",
     "@aws-sdk/lib-storage": "3.1017.0",
     "@aws-sdk/s3-request-presigner": "^3.1017.0",
+    "@azure/identity": "^4.10.0",
+    "@azure/storage-blob": "^12.26.0",
     "@google-cloud/storage": "^7.7.0",
-    "uuid": "^9.0.0"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

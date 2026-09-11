@@ -302,8 +302,15 @@ class OrgLLMCredentialService {
     const baseUrl = config.litellm.baseUrl;
 
     if (!apiKey) {
+      logger.warn('[OrgLLMCredentialService] env fallback requested but env not configured', {
+        purpose,
+      });
       return null;
     }
+
+    logger.warn('[OrgLLMCredentialService] using env credential (no org-provisioned key in DB)', {
+      purpose,
+    });
 
     return {
       apiKey,

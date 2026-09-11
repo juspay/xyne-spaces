@@ -35,6 +35,8 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
       role='button'
       tabIndex={0}
       onClick={onClick}
+      data-track-category='MENTION'
+      data-track-name='OPEN_MENTION'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

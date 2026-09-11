@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FileText, Upload } from 'lucide-react';
+import { FileText, UploadUp as Upload } from '@xyne/icons';
 import { useSelector } from '@xstate/react';
 import { MediaViewer } from '../../ui/files/MediaViewer';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';

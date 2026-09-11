@@ -31,11 +31,11 @@ export const vespaSearchQuerySchema = Joi.object({
     'number.max': 'Offset cannot exceed 1000',
   }),
 
-  limit: Joi.number().integer().min(1).max(200).default(20).messages({
+  limit: Joi.number().integer().min(1).max(400).default(20).messages({
     'number.base': 'Limit must be a number',
     'number.integer': 'Limit must be an integer',
     'number.min': 'Limit must be at least 1',
-    'number.max': 'Limit cannot exceed 200'
+    'number.max': 'Limit cannot exceed 400'
   }),
 
   // Rank profile
@@ -45,11 +45,12 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
+  // Special type 'ticket_tags' is used for tag search aggregation
   type: Joi.string()
-    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
+    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, calls'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, ticket_tags'
     }),
 
   from: Joi.alternatives()
@@ -208,6 +209,29 @@ export const vespaSearchQuerySchema = Joi.object({
   tags: Joi.string().optional().messages({
     'string.base': 'Tags must be a comma-separated string'
   }),
+
+  // Thread classification. threadType matches a thread's ROOT message (one hit per thread);
+  // messageActs matches the individual messages cited as evidence for a type.
+  threadType: Joi.string().optional().messages({
+    'string.base': 'threadType must be a comma-separated string'
+  }),
+
+  messageActs: Joi.string().optional().messages({
+    'string.base': 'messageActs must be a comma-separated string'
+  }),
+
+  // Entity filter: entity name(s) annotated on chat messages / tickets (`entityNames`).
+  entity: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((name: string) => name.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'entity must be a string or array of entity names'
+    }),
 
   dynamicFieldValues: Joi.alternatives()
     .try(

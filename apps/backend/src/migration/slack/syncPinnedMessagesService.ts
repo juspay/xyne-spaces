@@ -59,8 +59,10 @@ export async function syncPinnedMessages({
   const messageRepo = new MessageRepository();
   const conversationRepo = new ConversationRepository();
 
-  const externalSource = await externalSourceRepo.findByName(`slackMigration-${slackChannelId}`);
-  if (!externalSource) {
+  // A Slack channel can be migrated into several Xyne channels/workspaces, each
+  // with its own migration source. Pin the message in every one of them.
+  const externalSources = await externalSourceRepo.findSlackMigrationSourcesByChannel(slackChannelId);
+  if (externalSources.length === 0) {
     await postMessage({ channelId: slackChannelId, text: '❌ This channel has not been migrated yet. Run `/sync` first.', botToken });
     return;
   }
@@ -83,26 +85,42 @@ export async function syncPinnedMessages({
   let pinnedCount = 0;
   let skippedCount = 0;
 
+  // Each pinned Slack message maps to one migrated record per source. A message
+  // absent from a given source is not a hard skip — it may live in another
+  // source — so only count it skipped when no source has it.
   for (const ts of pinnedTs) {
-    const externalMessage = await externalMessageRepo.findByExternalId(externalSource.id, ts);
-    if (!externalMessage?.entityId) {
+    let pinnedInAnySource = false;
+
+    for (const externalSource of externalSources) {
+      const externalMessage = await externalMessageRepo.findByExternalId(externalSource.id, ts);
+      if (!externalMessage?.entityId) {
+        continue;
+      }
+
+      const message = await messageRepo.findById(externalMessage.entityId);
+      if (!message) {
+        logger.warn('[SyncPins] Message record not found', { entityId: externalMessage.entityId });
+        continue;
+      }
+
+      await conversationRepo.update(message.conversationId, { pinned: true });
+      pinnedInAnySource = true;
+    }
+
+    if (pinnedInAnySource) {
+      pinnedCount++;
+    } else {
       logger.warn('[SyncPins] Pinned message not found in migration records', { ts, slackChannelId });
       skippedCount++;
-      continue;
     }
-
-    const message = await messageRepo.findById(externalMessage.entityId);
-    if (!message) {
-      logger.warn('[SyncPins] Message record not found', { entityId: externalMessage.entityId });
-      skippedCount++;
-      continue;
-    }
-
-    await conversationRepo.update(message.conversationId, { pinned: true });
-    pinnedCount++;
   }
 
-  logger.info('[SyncPins] Pin sync complete', { slackChannelId, pinnedCount, skippedCount });
+  logger.info('[SyncPins] Pin sync complete', {
+    slackChannelId,
+    sources: externalSources.length,
+    pinnedCount,
+    skippedCount,
+  });
 
   const skippedNote = skippedCount > 0 ? ` ${skippedCount} message(s) skipped (pinned after migration window).` : '';
   await postMessage({ channelId: slackChannelId, text: `✅ Pinned ${pinnedCount} conversation(s).${skippedNote}`, botToken });

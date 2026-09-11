@@ -52,7 +52,7 @@ export class AiRetriggerController {
       this.prefRepo.findByChannelId(channelId),
     ]);
     return {
-      classification: !!config?.enabled,
+      classification: !!config?.classificationEnabled,
       priority: !!config?.priorityClassificationEnabled,
       autoDraft: pref?.autoDraftMode === AutoDraftMode.DRAFT,
     };

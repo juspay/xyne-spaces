@@ -1,15 +1,23 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { Check, X, Plus } from 'lucide-react';
+import { MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
+import { TagsListContent } from '../TagsListContent';
 
 interface TagSelectorProps {
   availableTags: string[];
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
-  onCreateTag?: (tagName: string) => void;
-  stopEditing?: () => void;
-  inlineTags?: boolean;
+  onCreateTag?: ((tagName: string) => void) | undefined;
+  stopEditing?: (() => void) | undefined;
+  inlineTags?: boolean | undefined;
+  allowCreate?: boolean | undefined;
+  /** Callback to load more tags */
+  onLoadMore?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMore?: boolean | undefined;
+  /** Callback for server-side search */
+  onSearch?: ((query: string) => void) | undefined;
 }
 
 export const TagSelector: React.FC<TagSelectorProps> = ({
@@ -19,74 +27,22 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   onCreateTag,
   stopEditing,
   inlineTags = false,
+  allowCreate = true,
+  onLoadMore,
+  hasMore = false,
+  onSearch,
 }) => {
   const [isOpen, setIsOpen] = useState(true);
-  const [search, setSearch] = useState('');
-  const [activeIdx, setActiveIdx] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => setActiveIdx(0), [search]);
-
-  const filtered = useMemo(() => {
-    const lower = search.toLowerCase().trim();
-    return lower ? availableTags.filter(t => t.toLowerCase().includes(lower)) : availableTags;
-  }, [availableTags, search]);
-
-  const canCreate = useMemo(() => {
-    const trimmed = search.trim();
-    return trimmed && !availableTags.some(t => t.toLowerCase() === trimmed.toLowerCase());
-  }, [search, availableTags]);
 
   const toggle = (tag: string) => {
     const next = selectedTags.includes(tag)
       ? selectedTags.filter(t => t !== tag)
       : [...selectedTags, tag];
     onTagsChange(next);
+  };
+
+  const handleTagToggled = () => {
     setTimeout(() => stopEditing?.(), 100);
-  };
-
-  const create = () => {
-    const trimmed = search.trim();
-    if (canCreate) {
-      if (onCreateTag) {
-        onCreateTag(trimmed);
-      }
-      onTagsChange([...selectedTags, trimmed]);
-      setSearch('');
-      setTimeout(() => stopEditing?.(), 100);
-    }
-  };
-
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      const maxIdx = canCreate ? filtered.length : filtered.length - 1;
-      setActiveIdx(prev => Math.min(prev + 1, maxIdx));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveIdx(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Backspace' && !search && selectedTags.length) {
-      onTagsChange(selectedTags.slice(0, -1));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (filtered[activeIdx]) {
-        toggle(filtered[activeIdx]);
-        setSearch('');
-      } else if (canCreate && activeIdx === filtered.length) {
-        create();
-      } else if (canCreate && filtered.length === 0) {
-        create();
-      }
-    } else if (e.key === 'Escape') {
-      setIsOpen(false);
-      stopEditing?.();
-    }
   };
 
   return (
@@ -130,17 +86,9 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
               </button>
             </span>
           ))}
-          <input
-            ref={inputRef}
-            className='flex-1 min-w-[60px] bg-transparent border-none text-sm p-1 outline-none'
-            placeholder={selectedTags.length === 0 ? 'Add labels...' : ''}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            onKeyDown={handleKey}
-            data-track-event='blur'
-            data-track-category='Tickets'
-            data-track-name='TagSearchInput'
-          />
+          <span className='flex-1 min-w-[60px] text-sm p-1 text-muted-foreground'>
+            {selectedTags.length === 0 ? 'Add labels...' : ''}
+          </span>
         </label>
       </Popover.Trigger>
 
@@ -149,66 +97,22 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-[var(--radix-popover-trigger-width)] bg-background border border-border rounded-lg shadow-lg mr-auto'
+          className='z-[100] w-80 bg-background border border-border rounded-lg shadow-lg'
           avoidCollisions={true}
           onOpenAutoFocus={e => e.preventDefault()}
         >
-          <div className='max-h-[240px] overflow-y-auto p-1'>
-            {filtered.length > 0 ? (
-              filtered.map((tag, i) => {
-                const selected = selectedTags.includes(tag);
-                const active = i === activeIdx;
-                return (
-                  <button
-                    key={tag}
-                    onClick={() => {
-                      toggle(tag);
-                      setSearch('');
-                    }}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    className={`flex items-center justify-between w-full px-3 py-2 text-sm rounded text-left ${
-                      active ? 'bg-muted' : ''
-                    } ${selected ? 'text-blue-700 font-medium' : 'text-foreground'}`}
-                    data-track-category='Tickets'
-                    data-track-name='SelectTag'
-                    data-track-metadata={JSON.stringify({ tag, selected: !selected })}
-                  >
-                    <div className='flex items-center gap-2'>
-                      <span className='w-2 h-2 rounded-full bg-xyne-purple-400' />
-                      {tag}
-                    </div>
-                    {selected && <Check className='size-4 text-blue-600' />}
-                  </button>
-                );
-              })
-            ) : search.trim() ? (
-              <div className='p-3 text-center text-sm text-muted-foreground'>
-                No matching labels
-              </div>
-            ) : (
-              <div className='p-3 text-center text-sm text-muted-foreground'>
-                No labels available
-              </div>
-            )}
-
-            {canCreate && (
-              <div className='border-t border-border mt-1 pt-1'>
-                <button
-                  onClick={create}
-                  onMouseEnter={() => setActiveIdx(filtered.length)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-sm rounded font-medium ${
-                    activeIdx === filtered.length ? 'bg-blue-50 text-blue-700' : 'text-blue-600'
-                  }`}
-                  data-track-category='Tickets'
-                  data-track-name='CreateTag'
-                  data-track-metadata={JSON.stringify({ tagName: search.trim() })}
-                >
-                  <Plus className='size-4' />
-                  Create {search.trim()}
-                </button>
-              </div>
-            )}
-          </div>
+          <TagsListContent
+            selectedTags={selectedTags}
+            onChange={onTagsChange}
+            availableTags={availableTags}
+            onLoadMore={onLoadMore}
+            hasMore={hasMore}
+            showSelectAll={false}
+            allowCreate={allowCreate}
+            onCreateTag={onCreateTag}
+            onTagToggled={handleTagToggled}
+            onSearch={onSearch}
+          />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

@@ -26,7 +26,7 @@ const PAGE_SIZE = 20;
 const FileListV2: React.FC<FileListProps> = ({ channelId }) => {
   const [anchor, setAnchor] = useState<Anchor>(LATEST_ANCHOR);
   const [attachementsResponse, attachementsDetails] = useCachedQuery(
-    queries.getConversationAttachements({
+    queries.getConversationAttachementsV2({
       channelId: channelId,
       limit: PAGE_SIZE,
       start: anchor.row,

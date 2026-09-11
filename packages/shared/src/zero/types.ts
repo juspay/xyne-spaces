@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }
@@ -119,6 +118,7 @@ export enum AttachmentEntityType {
   COLLECTION = 'COLLECTION',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
+  DESK_REPORT = 'DESK_REPORT',
 }
 
 // @ts-ignore TS1294
@@ -172,6 +172,14 @@ export enum ChannelSortOrder {
   UNREAD = 'UNREAD',
   RECENCY = 'RECENCY',
   ALPHABETICAL = 'ALPHABETICAL',
+}
+
+// @ts-ignore TS1294
+export enum ChannelFilterMode {
+  ACTIVE = 'ACTIVE',
+  UNREADS = 'UNREADS',
+  MENTIONS = 'MENTIONS',
+  ALL = 'ALL',
 }
 
 // @ts-ignore TS1294
@@ -342,6 +350,8 @@ export enum ActivityType {
   TAGS = 'TAGS',
   ENTITY = 'ENTITY',
   SUBTICKET_CREATED = 'SUBTICKET_CREATED',
+  SUBTICKET_LINKED = 'SUBTICKET_LINKED',
+  SUBTICKET_UNLINKED = 'SUBTICKET_UNLINKED',
   BOARD = 'BOARD',
   PR = 'PR',
   USER_GROUP_ID = 'USER_GROUP_ID',
@@ -358,6 +368,17 @@ export enum ActivityType {
   EMAIL_SENT = 'EMAIL_SENT',
   TICKET_CREATED = 'TICKET_CREATED',
   CSAT_RECEIVED = 'CSAT_RECEIVED',
+  // ETA risk-detection / automatic-recalculation feature (see
+  // packages/shared/src/tickets/etaActivityValues.ts for each type's stored
+  // `value` shape). Distinct from the existing ETA/STAGE_ETA field-change
+  // activities above and from the pre-existing stage/ticket-overdue breach
+  // activities, which keep using their own actorAction values.
+  ETA_AUTO_RECOMPUTED = 'ETA_AUTO_RECOMPUTED',
+  ETA_MANUALLY_UPDATED = 'ETA_MANUALLY_UPDATED',
+  ETA_RISK_DETECTED = 'ETA_RISK_DETECTED',
+  ETA_RISK_ACKNOWLEDGED = 'ETA_RISK_ACKNOWLEDGED',
+  ETA_RISK_REOPENED = 'ETA_RISK_REOPENED',
+  ETA_RISK_RESOLVED = 'ETA_RISK_RESOLVED',
 }
 
 // @ts-ignore TS1294
@@ -374,6 +395,17 @@ export enum ActivityClassification {
 export enum ActivityClassificationJobType {
   SINGLE = 'SINGLE',
   SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
+}
+
+// Lifecycle of a structured message whose state drives UI outside the message
+// bubble. Stored as a string in Postgres so adding a future lifecycle state
+// does not require altering a database enum.
+// @ts-ignore TS1294
+export enum MessageArtifactStatus {
+  ACTIVE = 'active',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
 }
 
 // @ts-ignore TS1294
@@ -398,6 +430,12 @@ export enum CallStatus {
   IN_PROGRESS = 'IN_PROGRESS',
   ENDED = 'ENDED',
   CANCELLED = 'CANCELLED',
+}
+
+// @ts-ignore TS1294
+export enum CallVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
 }
 
 // @ts-ignore TS1294
@@ -464,6 +502,9 @@ export enum UserType {
 export enum AppIncomingWebhookType {
   SLACK = 'SLACK',
   SENTINELONE = 'SENTINELONE',
+  AMAZON_SNS = 'AMAZON_SNS',
+  PINGDOM = 'PINGDOM',
+  GCP = 'GCP',
 }
 
 // @ts-ignore TS1294
@@ -584,6 +625,8 @@ export enum NotificationType {
   TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
   TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
   TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
+  /** Planning-risk detected/reopened - stage deadline later than ticket due date, not yet overdue. */
+  TICKET_ETA_PLANNING_RISK = "TICKET_ETA_PLANNING_RISK",
   CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
   MENTION = "MENTION",
   DIRECT_MESSAGE = "DIRECT_MESSAGE",
@@ -606,8 +649,15 @@ export enum NotificationType {
   CALL_UPDATED = "CALL_UPDATED",
   EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
+  EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
+  RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
+  SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
+  MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
+  ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
+  ASSIGNMENT_RESUMED = "ASSIGNMENT_RESUMED",
 }
 
 // @ts-ignore TS1294
@@ -705,6 +755,10 @@ export enum ChannelType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  // SDLC repository channel: system-managed, hidden from the chat surfaces
+  // the same way SUPPORT channels are (inline type checks).
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294
@@ -714,6 +768,7 @@ export enum DeskType {
   SLACK = 'SLACK',
   APP = 'APP',
   CALL = 'CALL',
+  SOCIAL_MEDIA = 'SOCIAL_MEDIA',
 }
 
 // @ts-ignore TS1294
@@ -749,6 +804,7 @@ export enum BoardType {
   DEFAULT = 'DEFAULT',
   RELEASE = 'RELEASE',
   NON_LINEAR = 'NON_LINEAR',
+  FLOW = 'FLOW',
 }
 
 // @ts-ignore TS1294
@@ -939,6 +995,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
+// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// @ts-ignore TS1294
+export enum ViewAccessEntityType {
+  USER = 'USER',
+}
+
 // @ts-ignore TS1294
 export enum DelayedMessageStatus {
   PENDING = 'PENDING',
@@ -1112,6 +1174,10 @@ export enum WorkflowEventType {
   MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
   CALL_EVENT = 'CALL_EVENT',
   TAG_GENERATED = 'TAG_GENERATED',
+  MANUAL = 'MANUAL',
+  CRON = 'CRON',
+  EVENT = 'EVENT',
+  WEBHOOK_V2 = 'WEBHOOK_V2',
 }
 
 // @ts-ignore TS1294
@@ -1131,9 +1197,20 @@ export enum WorkflowMappingEntityType {
 // valid values; import them everywhere instead of hardcoding string literals.
 export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
+  SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
+  CALL: 'CALL',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
+
+export const SummaryTemplateVisibility = {
+  PRIVATE: 'PRIVATE',
+  WAITING_FOR_APPROVAL: 'WAITING_FOR_APPROVAL',
+  PUBLIC: 'PUBLIC',
+} as const;
+
+export type SummaryTemplateVisibility =
+  typeof SummaryTemplateVisibility[keyof typeof SummaryTemplateVisibility];
 
 export const EntityUserAccess = {
   VIEW: 'VIEW',
@@ -1178,4 +1255,3 @@ export enum BaseTicketType {
   DESK = 'DESK',
   Epic = 'Epic',
 }
-

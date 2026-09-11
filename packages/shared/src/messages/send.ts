@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Zero } from '@rocicorp/zero';
 import { MessageType } from '../zero/schema.js';
+import type { EntityLinkContextInput } from '../sdlc.js';
 import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
 import { clearDraft } from './draft.js';
@@ -24,6 +25,7 @@ export type SendPayload = {
   conversationId?: string;
   timestamp?: number;
   attachments?: PendingAttachment[];
+  entityLinkContext?: EntityLinkContextInput;
 };
 
 export type SendResult = {
@@ -72,6 +74,7 @@ export function sendMessage(
     }),
     ...(childConversationId !== undefined && { childConversationId }),
     ...(attachments.length > 0 && { attachments }),
+    ...(payload.entityLinkContext !== undefined && { entityLinkContext: payload.entityLinkContext }),
     sessionId: getCurrentSessionId(),
     zeroStateAtSend,
     mutatorFired: false,
@@ -97,6 +100,11 @@ export function sendMessage(
   const fireTimestamp = Date.now();
   updatePending(messageId, { mutatorFired: true, timestamp: fireTimestamp });
 
+  // First fire only: when the caller passes no attachments we OMIT attachmentIds
+  // so a send that under-specifies still hits the mutator's legacy draft-scan
+  // fallback for this same compose context. The durable retry path
+  // (firePendingMutator in pending.ts) deliberately does the opposite and always
+  // passes attachmentIds, because a replay must not scavenge live draft state.
   const attachmentIds = attachments.map(a => a.attachmentId);
   const mutation =
     ref.kind === 'channel'
@@ -108,7 +116,10 @@ export function sendMessage(
             messageId,
             timestamp: fireTimestamp,
             type,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
+            ...(payload.entityLinkContext !== undefined && {
+              entityLinkContext: payload.entityLinkContext,
+            }),
           }),
         )
       : zero.mutate(
@@ -118,7 +129,7 @@ export function sendMessage(
             type,
             timestamp: fireTimestamp,
             messageId,
-            attachmentIds,
+            ...(attachmentIds.length > 0 && { attachmentIds }),
             ...(payload.alsoSendToChannel !== undefined && {
               showInChannel: payload.alsoSendToChannel,
             }),

@@ -1,5 +1,6 @@
 import { CommitAnalysisResult } from '@/services/commitAnalysisService';
 import { logger } from '@/utils/logger';
+import { isSameCommit } from '@/utils/commitIds';
 
 export interface ApplicationMappingInput {
 	id: string;
@@ -14,6 +15,9 @@ export interface ApplicationReleaseTicketMapping {
 	applicationReleaseId: string;
 	releaseId: string;
 	devTicketId: string;
+	// This dev ticket entered the release as a hotfix (merged after the frozen
+	// release head). Release-scoped — does not touch the dev ticket's own type.
+	isHotfix: boolean;
 }
 
 // True if the PR touched any file owned by this application.
@@ -69,12 +73,21 @@ export function buildApplicationReleaseTicketMappings(
 	results: CommitAnalysisResult[],
 	affectedApplications: ApplicationWithSubTicket[],
 	releaseId: string,
+	// Present ⇒ this is a hotfix-delta run; every commit NOT in this set is a
+	// hotfix (the set holds the boundary/frozen-head commits, which are main PRs).
+	// Absent/null ⇒ a normal main run: nothing is a hotfix.
+	hotfixBoundaryCommits?: ReadonlySet<string> | null,
 ): ApplicationReleaseTicketMapping[] {
 	const matchedFileSets = buildMatchedFileSets(affectedApplications);
 	const recordsToCreate: ApplicationReleaseTicketMapping[] = [];
 
 	for (const result of results) {
 		if (!result.ticket || !result.filePaths) continue;
+
+		// prefix compare, not Set.has — boundary ids may be abbreviated SHAs
+		const isHotfix =
+			hotfixBoundaryCommits != null &&
+			![...hotfixBoundaryCommits].some(boundary => isSameCommit(boundary, result.commitId));
 
 		for (const app of affectedApplications) {
 			if (!app.subTicketId) continue;
@@ -85,9 +98,10 @@ export function buildApplicationReleaseTicketMappings(
 				applicationReleaseId: app.subTicketId,
 				releaseId,
 				devTicketId: result.ticket.id,
+				isHotfix,
 			});
 			logger.info(
-				`Prepared ART row: applicationRelease=${app.subTicketId} → devTicket=${result.ticket.xyneId}`
+				`Prepared ART row: applicationRelease=${app.subTicketId} → devTicket=${result.ticket.xyneId}${isHotfix ? ' (hotfix)' : ''}`
 			);
 		}
 	}

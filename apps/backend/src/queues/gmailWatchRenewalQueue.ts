@@ -82,7 +82,7 @@ async function renewSource(source: {
 async function renewAllGmailWatches(): Promise<void> {
   const startedAt = Date.now();
   const sources = await externalSourceRepo.findAll({
-    sourceType: ExternalSourcePlatform.GOOGLE,
+    sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
     isActive: true,
   });
 

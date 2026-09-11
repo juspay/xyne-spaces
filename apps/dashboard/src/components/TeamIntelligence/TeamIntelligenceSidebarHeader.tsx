@@ -26,7 +26,7 @@ const TeamIntelligenceSidebarHeader = ({
             Team Intelligence
           </h1>
           <p className='text-[12px] text-muted-foreground line-clamp-1'>
-            Insights for Juspay Teams
+            Founder and manager briefs
           </p>
         </div>
       </div>

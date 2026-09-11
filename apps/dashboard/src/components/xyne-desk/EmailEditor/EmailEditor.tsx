@@ -385,7 +385,7 @@ export const EmailEditor = ({
     editor.commands.setContent(value || '', { emitUpdate: false });
     const normalized = editor.getHTML();
     lastEmittedRef.current = normalized;
-    if (normalized !== value) cb.current.onChange(normalized);
+    cb.current.onChange(normalized);
   }, [value, editor]);
 
   useEffect(() => {

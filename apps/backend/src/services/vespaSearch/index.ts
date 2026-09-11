@@ -7,6 +7,7 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
 
@@ -82,7 +83,7 @@ function parseVespaResults(children: any[]): { grouped: boolean; groups?: any[];
 }
 
 const MAX_FILTER_VALUES = 50;
-const MAX_VESPA_RESULT_WINDOW = 1000;
+const MAX_VESPA_HITS = 400;
 
 /**
  * Keep every non-mail hit, but only the highest-ranked mail hit for each Desk
@@ -213,7 +214,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       priority,    // Priority (HIGH, MEDIUM, LOW) - comma-separated
       searchId,
       board,       // Board name/ID
-      tags,        // Comma-separated tags
+      tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
+      threadType,  // Thread classification type(s) - comma-separated; matches thread roots
+      entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
+      messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
       before,      // Created before date (multiple formats)
@@ -311,9 +315,36 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             cluster: config.cluster,
           });
           const fields = (raw?.fields ?? {}) as Record<string, any>;
-          // Enforce the same per-user gate the YQL-based search does.
+          // Access rule:
+          //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
+          //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
+          //     OR a participant of the doc's chat channel (`channelRef`).
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
-          if (perms.length > 0 && !perms.includes(userId)) {
+          const isOwner = fields.ownerId === userId;
+          const isShared = perms.includes(userId);
+          const isPublic = fields.isPrivate === false;
+          // Private docs: owner or explicit `permissions` only.
+          // Public docs: owner, `permissions`, OR a participant of the doc's
+          // chat channel (via `channelRef`).
+          let allowed = isOwner || isShared;
+          // Channel-participant access: a doc may belong to a chat channel via
+          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
+          // Only consulted for public docs, and only when the cheaper checks
+          // above didn't already pass.
+          if (!allowed && isPublic) {
+            const channelRef =
+              typeof fields.channelRef === 'string' ? fields.channelRef : '';
+            const channelId = channelRef ? (channelRef.split('::').pop() ?? '') : '';
+            if (channelId) {
+              const participant =
+                await repositories.channelParticipants.findParticipant(
+                  channelId,
+                  userId,
+                );
+              allowed = participant !== null;
+            }
+          }
+          if (!allowed) {
             res.status(403).json({ success: false, error: 'Forbidden' });
             return;
           }
@@ -498,16 +529,18 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
             return '';
           };
           const snippetForIdx = (chunkIndex: number): string => {
+            // `chunks` on a hit is pruned by `select-elements-by: best_chunks`,
+            // so it holds the top-scoring chunks RE-NUMBERED from 0.
+            // `chunks_pos_summary` is `chunks_pos` pruned by the same selector,
+            // so it maps a document chunk index to its slot in that array.
+            // Indexing `chunks` by the document index instead served one chunk's
+            // text under another chunk's page — the reason every citation came
+            // back as chunk 0. Unplaceable text is dropped, not guessed at.
             const at = chunksPosSummary.indexOf(chunkIndex);
-            const fromSummary =
-              at >= 0 ? chunksSummary[at] : chunksSummary[chunkIndex];
-            const fromSummaryText = pickToText(fromSummary);
-            if (fromSummaryText) return fromSummaryText;
+            if (at < 0) return '';
             // Strip the [Page N] ingestion prefix to match kb-get-chunks output.
-            return pickToText(chunksFull[chunkIndex]).replace(
-              /^\[Page \d+(-\d+)?\]\s*/,
-              '',
-            );
+            return (pickToText(chunksSummary[at]) || pickToText(chunksFull[at]))
+              .replace(/^\[Page \d+(-\d+)?\]\s*/, '');
           };
           for (const r of ranked) {
             if (hits.length >= limitParsed) break;
@@ -581,6 +614,30 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         offset: offset ? Number(offset) : 0,
       });
       res.json({ success: true, results, total });
+      return;
+    }
+
+    // Ticket tags search — uses Vespa grouping to get distinct tag values.
+    // Short-circuits the normal search pipeline and returns just tag strings.
+    if (String(type).trim() === 'ticket_tags') {
+      const projectIds = projectId ? toFilterValues(projectId, 'projectId') : undefined;
+      const boardIds = board ? toFilterValues(board, 'board') : undefined;
+      const { tags: tagResults, total } = await vespaService.searchService.searchTicketTags(
+        workspaceId,
+        {
+          projectId: projectIds?.[0],
+          boardIds,
+          query: q ? String(q) : undefined,
+          limit: limit ? Number(limit) : 100,
+        },
+      );
+      res.json({
+        success: true,
+        data: {
+          tags: tagResults,
+          total,
+        },
+      });
       return;
     }
 
@@ -746,6 +803,16 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (channelMentions) {
       options.slack.mentionedChannelIds = channelMentions;
     }
+    // Thread classification. threadType matches a thread's ROOT message, so it returns one
+    // hit per thread; messageActs matches the individual messages the classifier cited as
+    // evidence. Sent together they AND, which is how you ask for "the message that made this
+    // an ISSUE" rather than either on its own.
+    if (threadType) {
+      options.slack.threadType = toFilterValues(threadType, 'threadType');
+    }
+    if (messageActs) {
+      options.slack.messageActs = toFilterValues(messageActs, 'messageActs');
+    }
     // Highlight-only: exact display names to bold in result snippets (kept out of the YQL filter).
     if (mentionHighlights) {
       options.mentionHighlights = mentionHighlights;
@@ -789,8 +856,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.boardId = toFilterValues(board, 'board');
     }
 
+    // One `tags` filter, two schemas: a ticket's labels live in `tags`, a message's in
+    // `messageActs`. Callers ask for "tagged X" once; each schema applies it to its own
+    // field, so on a mixed search tagged tickets and tagged messages both come back.
     if (tags) {
-      options.ticket.tags = toFilterValues(tags, 'tags');
+      const tagValues = toFilterValues(tags, 'tags');
+      options.ticket.tags = tagValues;
+      options.slack.messageActs = tagValues;
+    }
+
+    // Entity filter — same values for both schemas; AND-ed inside YqlBuilder so a doc must
+    // mention every requested entity.
+    if (entity) {
+      const entityNames = toFilterValues(entity, 'entity');
+      options.slack.entityNames = entityNames;
+      options.ticket.entityNames = entityNames;
     }
 
     if (dynamicFieldValues) {
@@ -878,16 +958,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     const isMailOnlySearch =
       searchApps.length === 1 && searchApps[0].trim().toLowerCase() === 'mail';
-    const effectiveGroupBy =
-      options.groupBy === undefined ? 'docType' : options.groupBy;
-    const isFlatMultiAppMailSearch =
-      effectiveGroupBy === '' &&
-      searchApps.length > 1 &&
-      searchApps.some(app => app.trim().toLowerCase() === 'mail');
     const mailGroupOffset = isMailOnlySearch
-      ? Math.max(Number(offset) || 0, 0)
-      : 0;
-    const flatSearchOffset = isFlatMultiAppMailSearch
       ? Math.max(Number(offset) || 0, 0)
       : 0;
 
@@ -896,19 +967,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // slice the requested page after parsing the grouping response.
     if (isMailOnlySearch && mailGroupOffset > 0) {
       options.offset = 0;
-      options.limit = mailGroupOffset + effectiveLimit;
-    }
-
-    // For flat All-tab searches, fetch from the start so mail threads can be
-    // deduplicated consistently across pages. Over-fetch to compensate for
-    // conversations that have several matching mail documents.
-    if (isFlatMultiAppMailSearch) {
-      const requestedUniquePrefix = flatSearchOffset + effectiveLimit;
-      options.offset = 0;
-      options.limit = Math.min(
-        MAX_VESPA_RESULT_WINDOW,
-        requestedUniquePrefix * 4,
-      );
+      options.limit = Math.min(MAX_VESPA_HITS, mailGroupOffset + effectiveLimit);
     }
 
     // Call vespa search
@@ -982,19 +1041,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       // Return flat results (backward compatible)
       // flat results will have matchFeatures returned by vespa.
       // No need to add.
-      const transformedResults = dedupeMailResults(
-        await transformVespaResults(
-          dedupeMailHits(parsedResults.hits || []),
-          db,
-          wantDebugInfo,
-        ),
+      const pageResults = await transformVespaResults(
+        parsedResults.hits || [],
+        db,
+        wantDebugInfo,
       );
-      const pageResults = isFlatMultiAppMailSearch
-        ? transformedResults.slice(
-            flatSearchOffset,
-            flatSearchOffset + effectiveLimit,
-          )
-        : transformedResults;
 
       res.json({
         success: true,

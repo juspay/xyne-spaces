@@ -160,6 +160,11 @@ function McpItemCard({
           className="line-clamp-1 flex w-fit items-center gap-2 text-sm font-medium leading-snug text-xyne-fg-primary"
         >
           {server.name}
+          {server.oauth && (
+            <span className="shrink-0 rounded bg-xyne-surface px-1.5 py-0.5 text-[10px] font-semibold text-xyne-fg-tertiary shadow-sm">
+              OAuth
+            </span>
+          )}
         </div>
         {hasDescription && (
           <p
@@ -490,11 +495,33 @@ export function MCPPageV3({ userId }: Props) {
 
   const handleCreateServer = useCallback(
     async (payload: Parameters<typeof createServer>[0]) => {
-      const created = await createServer(payload, userId);
+      const result = await createServer(payload, userId);
+      // Shared (scope=global) connector: the edit was queued for admin approval,
+      // the live definition is unchanged. Tell the user explicitly instead of
+      // letting the form silently revert to the old content.
+      if (result.kind === "editRequest") {
+        showSnackbar({
+          variant: "success",
+          title: "Sent to admin for approval",
+          description:
+            result.message ||
+            "This is a shared connector, so your changes were submitted for admin review.",
+        });
+        reload();
+        return result;
+      }
+      const created = result.server;
+      // Make a newly-created connector's form immediately available to the
+      // reconnect dialog instead of waiting for the page-level credential map
+      // (which is fetched only on mount).
+      setCredentialFields((current) => ({
+        ...current,
+        [created.type]: created.credentialForm?.fields ?? payload.credentialForm?.fields ?? [],
+      }));
       reload();
-      return created;
+      return result;
     },
-    [userId, reload]
+    [userId, reload, showSnackbar]
   );
 
   const handleRequestPublish = useCallback(
@@ -527,16 +554,35 @@ export function MCPPageV3({ userId }: Props) {
   // collect their credential fields via the AddConnectionDialog first. The raw
   // connect() would post empty credentials, which the backend rejects — and the
   // sidebar swallows the error, so the button appears to "do nothing".
-  const requiresCredentials = useCallback((s: McpServer) => {
-    if (s.oauth) return false;
-    if (s.type === "google" || s.type === "microsoft" || s.type === "xyne-spaces") return false;
-    const hasFormFields = (s.credentialForm?.fields?.length ?? 0) > 0;
-    const hasSchema = !!s.credentialSchema && Object.keys(s.credentialSchema).length > 0;
-    return hasFormFields || hasSchema;
-  }, []);
+  const requiresCredentials = useCallback(
+    (s: McpServer, resolvedFields?: CredentialField[]) => {
+      if (s.oauth) return false;
+      if (s.type === "google" || s.type === "microsoft" || s.type === "xyne-spaces") return false;
+      if (resolvedFields) return resolvedFields.length > 0;
+      const hasFormFields = (s.credentialForm?.fields?.length ?? 0) > 0;
+      const hasSchema = !!s.credentialSchema && Object.keys(s.credentialSchema).length > 0;
+      return hasFormFields || hasSchema;
+    },
+    [],
+  );
+
+  const resolveCredentialFields = useCallback(
+    async (type: string): Promise<CredentialField[] | undefined> => {
+      const cached = credentialFields[type];
+      if (cached) return cached;
+      try {
+        const map = await getCredentialFields();
+        setCredentialFields(map);
+        return map[type];
+      } catch {
+        return undefined;
+      }
+    },
+    [credentialFields],
+  );
 
   const handleConnect = useCallback(async (server: McpServer) => {
-    if (requiresCredentials(server)) {
+    if (requiresCredentials(server, await resolveCredentialFields(server.type))) {
       setConnectServerId(server.id);
       setShowAddDialog(true);
       return;
@@ -550,7 +596,7 @@ export function MCPPageV3({ userId }: Props) {
         description: err instanceof Error ? err.message : undefined,
       });
     }
-  }, [requiresCredentials, connect, showSnackbar]);
+  }, [requiresCredentials, resolveCredentialFields, connect, showSnackbar]);
 
   // OAuth callback params
   useEffect(() => {

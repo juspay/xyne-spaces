@@ -6,7 +6,11 @@ import { ReactElement, useEffect, useState } from 'react';
 import { Podcast, Plus, ChevronDown, Columns2, Layers, AlignLeft } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import type { RecordingLayout } from '../../../stores/recordingStore';
-import { formatTime12Hour, formatElapsedTime } from '../../../utils/recordingUtils';
+import {
+  calculateRecordingElapsedMs,
+  formatTime12Hour,
+  formatElapsedTime,
+} from '../../../utils/recordingUtils';
 
 const layoutTabClassName = (isActive: boolean): string =>
   [
@@ -21,6 +25,8 @@ interface RecordingWorkspaceHeaderProps {
   startTime: number | null;
   /** Whether recording is paused */
   isPaused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   /** Whether a notes canvas exists */
   hasCanvas: boolean;
   /** Current layout of the recording workspace */
@@ -38,6 +44,8 @@ interface RecordingWorkspaceHeaderProps {
 export function RecordingWorkspaceHeader({
   startTime,
   isPaused,
+  pauseStartedAt,
+  accumulatedPausedMs,
   hasCanvas,
   activeLayout,
   isCreatingCanvas = false,
@@ -52,8 +60,11 @@ export function RecordingWorkspaceHeader({
     if (!startTime) return;
 
     const updateElapsed = (): void => {
-      const elapsed = Date.now() - startTime;
-      setElapsedTime(formatElapsedTime(elapsed));
+      setElapsedTime(
+        formatElapsedTime(
+          calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs),
+        ),
+      );
     };
 
     updateElapsed();
@@ -61,7 +72,7 @@ export function RecordingWorkspaceHeader({
 
     const interval = setInterval(updateElapsed, 1000);
     return (): void => clearInterval(interval);
-  }, [startTime, isPaused]);
+  }, [startTime, isPaused, pauseStartedAt, accumulatedPausedMs]);
 
   return (
     <div className='flex-none flex items-center justify-between gap-4 px-5 py-3 border-b border-input'>

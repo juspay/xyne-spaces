@@ -2,6 +2,12 @@
  * Shared type definitions for Xyne Spaces
  */
 
+// Flow-board plan types, schema, and the FlowPlanModel read-model live in
+// their own module; re-exported here so `@xyne/shared` consumers are unchanged.
+export * from './flow-plan';
+
+import type { BoardEtaManagement } from '../validation/etaManagementSchema';
+
 export interface TicketFormConfig {
   userGroupsOnly?: {
     enabled: boolean;
@@ -101,4 +107,13 @@ export interface BoardMetadata {
    * Absent = treat as visible (backward compat for boards saved before this existed).
    */
   customFieldVisibility?: Record<string, boolean>;
+  /**
+   * Config + versioning for the ETA risk-detection/auto-recalculation
+   * feature (planning risk, Standard Path, automatic due-date extension).
+   * Absent = no Standard Path, automatic due-date recalculation defaulted per
+   * board type (see `defaultAutoRecomputeEnabled`) - go through
+   * `parseBoardEtaManagement` in `validation/etaManagementSchema.ts` rather
+   * than casting this field directly.
+   */
+  etaManagement?: BoardEtaManagement;
 }

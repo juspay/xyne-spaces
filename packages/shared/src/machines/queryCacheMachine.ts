@@ -635,9 +635,7 @@ export const setupQueryCachePersistence = (
     cache.forEach((value, key) => {
       if (lastPersistedRefs.get(key) === value) return;
       lastPersistedRefs.set(key, value);
-      storage.saveContextProperty(key, value).catch(error => {
-        console.error(`Failed to persist query cache entry ${key}:`, error);
-      });
+      storage.saveContextProperty(key, value).catch(() => {});
     });
 
     // Prune refs for keys no longer in the cache. Without this, a
@@ -664,9 +662,7 @@ export const setupQueryCachePersistence = (
         [FINGERPRINT_FIELD]: conversationHash,
       };
 
-      storage.saveContextProperty('channelConversations', payload).catch(error => {
-        console.error('Failed to persist conversations:', error);
-      });
+      storage.saveContextProperty('channelConversations', payload).catch(() => {});
     }
 
     if (
@@ -682,9 +678,7 @@ export const setupQueryCachePersistence = (
 
       storage
         .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
-        .catch((error) => {
-          console.error("Failed to persist thread conversations:", error);
-        });
+        .catch(() => {});
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -694,9 +688,7 @@ export const setupQueryCachePersistence = (
           ...callHistory,
           [FINGERPRINT_FIELD]: getCallHistoryQueryHash(),
         })
-        .catch(error => {
-          console.error('Failed to persist call history:', error);
-        });
+        .catch(() => {});
     }
 
     if (lastPersistedRefs.get(RECORDINGS_KEY) !== recordings) {
@@ -706,9 +698,7 @@ export const setupQueryCachePersistence = (
           ...recordings,
           [FINGERPRINT_FIELD]: getRecordingsQueryHash(),
         })
-        .catch(error => {
-          console.error('Failed to persist recordings:', error);
-        });
+        .catch(() => {});
     }
   };
 
@@ -726,9 +716,7 @@ export const setupQueryCachePersistence = (
         }, PERSIST_DEBOUNCE_MS);
       });
     })
-    .catch(error => {
-      console.error('Failed to initialize storage for query cache:', error);
-    });
+    .catch(() => {});
 };
 
 /**
@@ -782,10 +770,6 @@ export const hydrateQueryCacheFromStorage = async (
         const storedHash = raw[FINGERPRINT_FIELD] as string | undefined;
 
         if (storedHash !== undefined && storedHash !== currentConversationHash) {
-          console.log(
-            'channelConversations discarded: query has changed since last save ' +
-              `(stored hash: ${storedHash}, current: ${currentConversationHash}).`,
-          );
           continue;
         }
 
@@ -799,10 +783,6 @@ export const hydrateQueryCacheFromStorage = async (
         const raw = value as Record<string, unknown>;
         const storedHash = raw[THREAD_FINGERPRINT_FIELD] as string | undefined;
         if (storedHash !== undefined && storedHash !== currentThreadHash) {
-          console.log(
-            "threadConversations discarded: query has changed since last save " +
-              `(stored hash: ${storedHash}, current: ${currentThreadHash}).`,
-          );
           continue;
         }
         for (const [conversationId, conversation] of Object.entries(raw)) {
@@ -820,10 +800,6 @@ export const hydrateQueryCacheFromStorage = async (
         const currentCallHistoryHash = getCallHistoryQueryHash();
 
         if (storedHash !== undefined && storedHash !== currentCallHistoryHash) {
-          console.log(
-            'callHistory discarded: query has changed since last save ' +
-              `(stored hash: ${storedHash}, current: ${currentCallHistoryHash}).`,
-          );
           continue;
         }
 
@@ -839,10 +815,6 @@ export const hydrateQueryCacheFromStorage = async (
         const currentRecordingsHash = getRecordingsQueryHash();
 
         if (storedHash !== undefined && storedHash !== currentRecordingsHash) {
-          console.log(
-            'recordings discarded: query has changed since last save ' +
-              `(stored hash: ${storedHash}, current: ${currentRecordingsHash}).`,
-          );
           continue;
         }
 
@@ -861,9 +833,6 @@ export const hydrateQueryCacheFromStorage = async (
         type: 'HYDRATE_CONVERSATIONS',
         conversationsData,
       });
-      console.log(
-        `Hydrated ${Object.keys(conversationsData).length} conversation caches from storage`,
-      );
     }
 
     if (Object.keys(threadConversationsData).length > 0) {
@@ -871,9 +840,6 @@ export const hydrateQueryCacheFromStorage = async (
         type: "HYDRATE_THREAD_CONVERSATIONS",
         threadConversationsData,
       });
-      console.log(
-        `Hydrated ${Object.keys(threadConversationsData).length} thread caches from storage`,
-      );
     }
 
     return (
@@ -882,8 +848,7 @@ export const hydrateQueryCacheFromStorage = async (
       callHistoryHydrated ||
       recordingsHydrated
     );
-  } catch (error) {
-    console.error('Failed to hydrate query cache from storage:', error);
+  } catch {
     return false;
   }
 };

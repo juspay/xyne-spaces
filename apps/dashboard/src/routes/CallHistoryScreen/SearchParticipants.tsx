@@ -27,6 +27,27 @@ interface SearchParticipantsProps {
     allUserIds?: string[],
   ) => void;
   exclusiveSelection?: boolean;
+  /** Already-selected values that cannot be deselected (no X, no backspace, no clear-all). */
+  lockedValues?: ReadonlySet<string>;
+  /**
+   * Skip the built-in `label.includes(query)` substring filter. Set this when the
+   * caller has already ranked `options` with the shared participant matcher
+   * (`rankParticipantOptions`) so the fuzzy/prefix results are not re-filtered
+   * (and dropped) by substring matching. The exclusive-selection filtering below
+   * still applies.
+   */
+  disableClientFiltering?: boolean;
+  /**
+   * Options used ONLY to render the pills for already-selected values — never
+   * offered in the dropdown.
+   *
+   * `options` is now a bounded, query-ranked slice (see `useParticipantCandidates`),
+   * so a selected participant who does not match the current query is simply absent
+   * from it. Without a resolvable option their pill silently disappears while they
+   * stay selected. Callers that prefill a selection (edit-mode calls, thread-scoped
+   * invites) pass the resolved options for their selected values here.
+   */
+  prefilledOptions?: ParticipantOptions[];
 }
 
 export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
@@ -43,6 +64,9 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   hoistSelectedChannelMembers = false,
   toggleExcludedChannelMember,
   exclusiveSelection = true,
+  lockedValues,
+  disableClientFiltering = false,
+  prefilledOptions,
 }) => {
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
@@ -60,19 +84,43 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     return selectedValues.some(v => v.startsWith('user:'));
   }, [selectedValues]);
 
-  // Cache selected options so they remain visible even when filtered out of options
+  // value -> option, so resolving a selection is O(1) instead of a linear scan of
+  // `options` per selected value. `options` wins over `prefilledOptions` on conflict:
+  // a live ranked row is fresher than a prefilled one.
+  const optionByValue = useMemo(() => {
+    const map = new Map<string, ParticipantOptions>();
+    for (const option of prefilledOptions ?? []) map.set(option.value, option);
+    for (const option of options) map.set(option.value, option);
+    return map;
+  }, [options, prefilledOptions]);
+
+  const prefilledValues = useMemo(
+    () => new Set((prefilledOptions ?? []).map(opt => opt.value)),
+    [prefilledOptions],
+  );
+
+  // Fallback cache so a selected option still renders a pill after it drops out of
+  // the (bounded, query-ranked) `options` slice.
+  //
+  // Values the caller resolves via `prefilledOptions` are skipped: they are already
+  // reachable through `optionByValue`, so caching them would be pure churn. That
+  // matters because the builders mint fresh objects on every keystroke — an
+  // identity check alone can never bail out, and returning a new Map each time
+  // forced a second render per character typed.
   useEffect(() => {
+    const uncached = selectedValues.filter(
+      value => !prefilledValues.has(value) && optionByValue.has(value),
+    );
+    if (uncached.length === 0) return;
     setSelectedOptionsMap(prev => {
       const next = new Map(prev);
-      selectedValues.forEach(value => {
-        const option = options.find(opt => opt.value === value);
-        if (option) {
-          next.set(value, option);
-        }
-      });
+      for (const value of uncached) {
+        const option = optionByValue.get(value);
+        if (option) next.set(value, option);
+      }
       return next;
     });
-  }, [selectedValues, options]);
+  }, [selectedValues, optionByValue, prefilledValues]);
 
   const hasGroupSelected = useMemo(() => {
     return exclusiveSelection && selectedValues.some(v => v.startsWith('user_group:'));
@@ -82,38 +130,49 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   const filteredOptions = useMemo(() => {
     let opts = options;
 
-    // Filter out channels, user groups if a user or user group is already selected
-    // (only applies in exclusive mode — non-exclusive mode allows any mix).
+    // A channel-scoped selection is its own mode (it unfurls a member checklist), so
+    // once any individual is picked the channel options drop out. User groups are NOT
+    // exclusive: callers expand a group into its members on select, so picking one is
+    // the same as picking those users by hand and must not hide the remaining groups.
     if (exclusiveSelection && (hasUserSelected || hasGroupSelected)) {
-      opts = opts.filter(
-        opt => !opt.value.startsWith('channel:') && !opt.value.startsWith('user_group:'),
-      );
+      opts = opts.filter(opt => !opt.value.startsWith('channel:'));
     }
 
-    if (!searchQuery.trim()) return opts;
+    if (disableClientFiltering || !searchQuery.trim()) return opts;
 
     return opts.filter(
       opt =>
         opt.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opt.subtitle?.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-  }, [options, searchQuery, hasUserSelected, hasGroupSelected, exclusiveSelection]);
+  }, [
+    options,
+    searchQuery,
+    hasUserSelected,
+    hasGroupSelected,
+    exclusiveSelection,
+    disableClientFiltering,
+  ]);
 
   const selectedOptions = useMemo(() => {
     return selectedValues
-      .map(value => {
-        const currentOption = options.find(opt => opt.value === value);
-        if (currentOption) return currentOption;
-
-        // Fallback to cached option
-        return selectedOptionsMap.get(value);
-      })
+      .map(value => optionByValue.get(value) ?? selectedOptionsMap.get(value))
       .filter((opt): opt is ParticipantOptions => opt !== undefined);
-  }, [options, selectedValues, selectedOptionsMap]);
+  }, [optionByValue, selectedValues, selectedOptionsMap]);
 
   const hasChannelSelected = useMemo(() => {
     return exclusiveSelection && selectedValues.some(v => v.startsWith('channel:'));
   }, [selectedValues, exclusiveSelection]);
+
+  // Only meaningful while `lockedValues` is set: the pinned roster vs. what this editor added.
+  const pinnedOptions = useMemo(
+    () => selectedOptions.filter(opt => lockedValues?.has(opt.value)),
+    [selectedOptions, lockedValues],
+  );
+  const addedByEditorOptions = useMemo(
+    () => selectedOptions.filter(opt => !lockedValues?.has(opt.value)),
+    [selectedOptions, lockedValues],
+  );
 
   const isEmailLikeQuery = useMemo(() => {
     const query = searchQuery.trim();
@@ -144,19 +203,21 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   ]);
 
   const toggleValue = (value: string) => {
+    if (lockedValues?.has(value) && selectedValues.includes(value)) return;
+
     const isChannel = value.startsWith('channel:');
-    const isUserGroup = value.startsWith('user_group:');
 
     if (!selectedValues.includes(value) && hasChannelSelected && !isChannel) {
       return;
     }
 
-    if (!selectedValues.includes(value) && hasGroupSelected && (isChannel || isUserGroup)) {
+    // Groups and channels still don't mix, but group + group does.
+    if (!selectedValues.includes(value) && hasGroupSelected && isChannel) {
       return;
     }
 
     if (exclusiveSelection && isChannel && !selectedValues.includes(value)) {
-      const option = options.find(opt => opt.value === value);
+      const option = optionByValue.get(value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
@@ -166,21 +227,10 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
       return;
     }
 
-    if (exclusiveSelection && isUserGroup && !selectedValues.includes(value)) {
-      const option = options.find(opt => opt.value === value);
-      if (option) {
-        setSelectedOptionsMap(prev => new Map(prev).set(value, option));
-      }
-      void onMultiSelect([...selectedValues.filter(v => !v.startsWith('user_group:')), value]);
-      setSearchQuery('');
-      setIsOpen(false);
-      return;
-    }
-
     if (selectedValues.includes(value)) {
       void onMultiSelect(selectedValues.filter(v => v !== value));
     } else {
-      const option = options.find(opt => opt.value === value);
+      const option = optionByValue.get(value);
       if (option) {
         setSelectedOptionsMap(prev => new Map(prev).set(value, option));
       }
@@ -279,6 +329,30 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
     }
   };
 
+  const renderSelectedPill = (option: ParticipantOptions): React.ReactNode => (
+    <div
+      key={option.value}
+      className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
+    >
+      {option.icon && <span>{option.icon}</span>}
+      <span className='truncate max-w-60 text-foreground'>{option.label}</span>
+      {!lockedValues?.has(option.value) && (
+        <button
+          type='button'
+          onClick={e => {
+            e.stopPropagation();
+            toggleValue(option.value);
+          }}
+          className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+          data-track-category='CALLS'
+          data-track-name='remove-participant'
+        >
+          <X className='size-3' />
+        </button>
+      )}
+    </div>
+  );
+
   const renderTrigger = () => {
     const selectedGroupOrChannel = exclusiveSelection
       ? selectedOptions.find(opt => opt.value.startsWith('channel:'))
@@ -321,7 +395,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                       className='w-4 h-4 cursor-pointer'
                       title='Select All'
                       checked={!!allSelected}
-                      data-track-category='calls'
+                      data-track-category='CALLS'
                       data-track-name='select-all-channel-members'
                       ref={el => {
                         if (el) {
@@ -340,7 +414,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   )}
                   <button
                     type='button'
-                    data-track-category='calls'
+                    data-track-category='CALLS'
                     data-track-name='toggle-channel-members-expand'
                     onClick={e => {
                       e.stopPropagation();
@@ -363,7 +437,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 toggleValue(selectedGroupOrChannel.value);
               }}
               className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground shrink-0'
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='remove-participant'
             >
               <X className='size-3' />
@@ -377,7 +451,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 void onMultiSelect([]);
               }}
               className='text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0'
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='change-selection'
             >
               Change
@@ -401,7 +475,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           role='button'
           tabIndex={0}
           className='relative flex items-center h-10 border border-border rounded-lg focus-within:border-foreground duration-300 ease-in-out bg-background'
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='search-participants-input'
         >
           <span className='px-2 bg-background'>
@@ -454,7 +528,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     onChange={e => setParticipantSearchQuery(e.target.value)}
                     onClick={e => e.stopPropagation()}
                     onKeyDown={e => e.stopPropagation()}
-                    data-track-category='calls'
+                    data-track-category='CALLS'
                     data-track-name='channel-member-search'
                     className='flex-1 bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted-foreground'
                   />
@@ -482,7 +556,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                             type='checkbox'
                             checked={isChecked}
                             onChange={() => toggleExcludedChannelMember(userId)}
-                            data-track-category='calls'
+                            data-track-category='CALLS'
                             data-track-name='toggle-channel-member-inclusion'
                             className='shrink-0'
                           />
@@ -549,7 +623,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                               setIsOpen(false);
                             }}
                             onMouseEnter={() => setIndex(index)}
-                            data-track-category='calls'
+                            data-track-category='CALLS'
                             data-track-name='select-participant-option'
                             data-testid='participant-option'
                           >
@@ -586,37 +660,63 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         </Popover.Root>
       )}
 
-      {/* Selected participants rendered below the search bar */}
-      {selectedOptions.length > 0 && !hasChannelSelected && (
-        <div className='flex items-start justify-between mt-2'>
-          <div className='flex flex-wrap gap-1.5 max-h-32 overflow-y-auto flex-1'>
-            {selectedOptions.map(option => (
-              <div
-                key={option.value}
-                className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
-              >
-                {option.icon && <span>{option.icon}</span>}
-                <span className='truncate max-w-60 text-foreground'>{option.label}</span>
+      {/* Restricted editors get the roster split into its own panel: one section for the
+          people already on the call, one for the people they added. Mixing both into a
+          single wrap left the removable pills indistinguishable from the pinned ones. */}
+      {lockedValues && selectedOptions.length > 0 && !hasChannelSelected && (
+        <div className='mt-2 rounded-xl border border-border bg-muted/20 divide-y divide-border overflow-hidden'>
+          {pinnedOptions.length > 0 && (
+            <div className='p-3 space-y-2'>
+              <p className='text-xs text-muted-foreground'>Already in this call</p>
+              <div className='flex flex-wrap gap-1.5 max-h-28 overflow-y-auto no-scrollbar'>
+                {pinnedOptions.map(renderSelectedPill)}
+              </div>
+            </div>
+          )}
+          <div className='p-3 space-y-2'>
+            <div className='flex items-center justify-between gap-2'>
+              <p className='text-xs text-muted-foreground'>
+                Added by you
+                {addedByEditorOptions.length > 0 && ` (${addedByEditorOptions.length})`}
+              </p>
+              {addedByEditorOptions.length > 0 && (
                 <button
                   type='button'
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleValue(option.value);
-                  }}
-                  className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
-                  data-track-category='calls'
-                  data-track-name='remove-participant'
+                  onClick={() =>
+                    void onMultiSelect(selectedValues.filter(v => lockedValues.has(v)))
+                  }
+                  className='shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors'
+                  data-track-category='CALLS'
+                  data-track-name='clear-all-participants'
                 >
-                  <X className='size-3' />
+                  Clear all
                 </button>
+              )}
+            </div>
+            {addedByEditorOptions.length > 0 ? (
+              <div className='flex flex-wrap gap-1.5 max-h-28 overflow-y-auto no-scrollbar'>
+                {addedByEditorOptions.map(renderSelectedPill)}
               </div>
-            ))}
+            ) : (
+              <p className='text-xs text-muted-foreground'>
+                Search above to invite more people to this call.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Selected participants rendered below the search bar */}
+      {!lockedValues && selectedOptions.length > 0 && !hasChannelSelected && (
+        <div className='flex items-start justify-between mt-2'>
+          <div className='flex flex-wrap gap-1.5 max-h-32 overflow-y-auto flex-1'>
+            {selectedOptions.map(renderSelectedPill)}
           </div>
           <button
             type='button'
             onClick={() => void onMultiSelect([])}
             className='ml-2 shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5'
-            data-track-category='calls'
+            data-track-category='CALLS'
             data-track-name='clear-all-participants'
           >
             Clear all

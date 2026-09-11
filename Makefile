@@ -5,13 +5,20 @@ VERSION ?= $(shell git rev-parse --short=7 HEAD)
 BACKEND_IMAGE_NAME ?= xyne-spaces-backend
 RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
+DASHBOARD_EDGE_IMAGE_NAME ?= xyne-spaces-dashboard-edge
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
 LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
+TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
 CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
 SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
+
+# PostHog client-side analytics (public key, but injected from CI so it stays out
+# of git). Empty default: local builds ship a bundle with analytics disabled.
+VITE_POSTHOG_KEY ?=
+VITE_POSTHOG_HOST ?=
 
 #temp2
 # Backend targets 3s
@@ -54,16 +61,43 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:
 	docker rmi $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# Export the built dashboard bundles (dist + releases/dashboard.zip) for
+# upload to the dashboard edge's bucket: the normal bundle to
+# $(DASHBOARD_BUNDLE_OUT) and the SDLC-mode bundle (build:sdlc, base
+# /sdlc-app/) to $(DASHBOARD_BUNDLE_OUT)-sdlc. Same build args as
+# push-dashboard so the builder stage is served from cache.
+DASHBOARD_BUNDLE_OUT ?= out/dashboard-bundle
+export-dashboard-bundle:
+	$(info Exporting dashboard bundles to $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc / git-head: $(SOURCE_COMMIT))
+	rm -rf $(DASHBOARD_BUNDLE_OUT) $(DASHBOARD_BUNDLE_OUT)-sdlc
+	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
+	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT)-sdlc --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "BUILD_SCRIPT=build:sdlc" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
+	$(info Exported: $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc)
+
+# Dashboard edge targets (nginx + Node app serving bundles from object storage; apps/dashboard-edge)
+build-dashboard-edge:
+	$(info Building $(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/dashboard-edge/Dockerfile -t $(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-dashboard-edge:
+	$(info Pushing to registry: $(NS)/$(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/dashboard-edge/Dockerfile -t $(NS)/$(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-dashboard-edge:
+	docker rmi $(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(DASHBOARD_EDGE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
 # External Dashboard targets (public call-join SPA — deployed without mTLS)
 build-external-dashboard:
@@ -94,6 +128,22 @@ push-lighton-ocr-wrapper:
 clean-lighton-ocr-wrapper:
 	docker rmi $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# Transcription agent targets (Python / LiveKit agent). Self-contained build context
+# (apps/backend/python-agent) because the Dockerfile COPYs only from its own directory.
+build-transcription-agent:
+	$(info Building $(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd apps/backend/python-agent && docker buildx build -f Dockerfile -t $(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-transcription-agent:
+	$(info Pushing to registry: $(NS)/$(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd apps/backend/python-agent && docker buildx build -f Dockerfile -t $(NS)/$(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-transcription-agent:
+	docker rmi $(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(TRANSCRIPTION_AGENT_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
 # Claw runtime targets (xyne-claw — the agent runtime). Root build context (.)
 # because the Dockerfile COPYs packages/xyne-claw-shared/ and packages/kata-sdk/ too.
@@ -195,11 +245,11 @@ push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
 clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-claw-all
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-transcription-agent build-claw-all
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-claw-all
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-transcription-agent push-claw-all
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-claw-all
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-transcription-agent clean-claw-all
 
 test:
 	$(info Running tests for all components)
@@ -214,4 +264,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

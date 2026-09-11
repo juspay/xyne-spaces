@@ -15,6 +15,7 @@
  */
 
 import { CONFIG } from "../config.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type { MemoryProvider, SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
 
@@ -58,7 +59,7 @@ export async function classifySessionSubsystem(args: ClassifySessionSubsystemArg
   } catch (err) {
     logger.warn("[curator-client] subsystem classification failed open", {
       sessionId: args.sessionId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -108,7 +109,7 @@ export async function classifySessionSubsystemForBank(
     logger.warn("[curator-client] subsystem taxonomy/classification failed open", {
       sessionId: args.sessionId,
       bankId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -168,7 +169,7 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
   } catch (err) {
     logger.error("[curator-client] curator call failed", {
       sessionId: t.sessionId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -179,7 +180,8 @@ export interface DistillSessionFileArgs {
   agentSlug: string;
   userId: string;
   filename: string;
-  /** Raw uploaded Claude export (Claude Code JSONL or claude.ai JSON). */
+  source?: "claude" | "opencode" | "codex" | (string & {});
+  /** Raw uploaded Claude/OpenCode/Codex export. */
   rawSession: string;
 }
 
@@ -227,7 +229,7 @@ export async function parseSessionFile(
     }
     return { transcript: data.transcript, meta: (data.meta ?? {}) as { format?: string; turnCount?: number; conversationCount?: number; toolsUsed?: string[]; task?: string } };
   } catch (err) {
-    logger.error("[curator-client] parse-only call failed", { sessionId: args.sessionId, err: err instanceof Error ? err.message : String(err) });
+    logger.error("[curator-client] parse-only call failed", { sessionId: args.sessionId, err: errMsg(err) });
     return null;
   }
 }
@@ -282,7 +284,7 @@ export async function distillSessionFile(args: DistillSessionFileArgs): Promise<
   } catch (err) {
     logger.error("[curator-client] distill-session call failed", {
       sessionId: args.sessionId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }

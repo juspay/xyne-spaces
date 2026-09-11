@@ -11,9 +11,16 @@ interface EntryGridV2Props {
    *  Same predicate applies as `onDelete`: passing a handler enables it
    *  for the entry. */
   onRename?: (entry: CollectionChild) => void;
-  /** Surfaces a hover-revealed share button on FOLDER cards. Wired by
-   *  the root-level collections view only; files are not shareable. */
+  /** Surfaces a hover-revealed share button on every card, folder or file.
+   *  At root this opens the full collection access-management dialog;
+   *  inside a collection it opens a copy-link-only dialog. */
   onShare?: (entry: CollectionChild) => void;
+  /** Surfaces a hover-revealed Ask AI button on every card, folder or file.
+   *  Files scope precisely (kbDocId); folders fall back to their owning
+   *  collection — see KnowledgeBaseV2Screen's onAskAIAboutEntry. */
+  onAskAI?: (entry: CollectionChild) => void;
+  /** Opens the per-collection ingestion status drawer (root collections view). */
+  onOpenStatus?: (entry: CollectionChild) => void;
   /** Entry id currently in inline-rename mode (only one at a time). When
    *  set the matching card renders an editable input instead of its name. */
   editingId?: string | null;
@@ -60,11 +67,13 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
   onDelete,
   onRename,
   onShare,
+  onAskAI,
   editingId,
   onRenameCommit,
   onRenameCancel,
   scrollParentRef,
   folderCaption,
+  onOpenStatus,
 }) => {
   const cols = useResponsiveCols();
   const rowCount = Math.ceil(entries.length / cols);
@@ -115,6 +124,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
                       onShare={onShare ? () => onShare(e) : undefined}
+                      onAskAI={onAskAI ? () => onAskAI(e) : undefined}
+                      onOpenStatus={onOpenStatus}
                       isRenaming={isRenaming}
                       onRenameCommit={commitFor}
                       onRenameCancel={onRenameCancel}
@@ -125,6 +136,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       onClick={() => onOpen(e)}
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
+                      onAskAI={onAskAI ? () => onAskAI(e) : undefined}
+                      onShare={onShare ? () => onShare(e) : undefined}
                       isRenaming={isRenaming}
                       onRenameCommit={commitFor}
                       onRenameCancel={onRenameCancel}

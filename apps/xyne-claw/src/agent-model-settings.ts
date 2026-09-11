@@ -14,6 +14,12 @@
  *                               // requires temperature=1 with extended thinking)
  *     maxTokens?: number        // max output tokens (default 16384)
  *     thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high"
+ *     speed?: "standard" | "fast"
+ *                               // provider fast mode (Anthropic `speed: "fast"`,
+ *                               // Opus 5 / 4.8 on a direct Claude credential).
+ *                               // Same credential + model, faster tier. NOT the
+ *                               // top-level agentConfig.fastMode tool-catalog
+ *                               // flag — see model-speed.ts
  *   }
  *
  *   config.outputFormat = {
@@ -30,6 +36,7 @@
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { parseModelSpeed, type ModelSpeed } from "./model-speed.js";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
 export type ModelSettingsThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -39,6 +46,7 @@ export interface AgentModelSettings {
   temperature?: number | undefined;
   maxTokens?: number | undefined;
   thinkingLevel?: ModelSettingsThinkingLevel | undefined;
+  speed?: ModelSpeed | undefined;
 }
 
 // Clamps mirror the control-plane validation (claw-auth routes/agents.ts) so a
@@ -46,11 +54,11 @@ export interface AgentModelSettings {
 export const MAX_TOKENS_MIN = 1024;
 export const MAX_TOKENS_MAX = 64000;
 
-export function parseModelSettings(agentConfig: Record<string, unknown> | undefined): AgentModelSettings | undefined {
-  const raw = agentConfig?.["modelSettings"];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const r = raw as Record<string, unknown>;
+/** Parse + clamp the shared model-settings fields out of one settings bag. */
+function parseSettingsFields(raw: unknown): AgentModelSettings {
   const out: AgentModelSettings = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  const r = raw as Record<string, unknown>;
 
   if (typeof r["model"] === "string" && r["model"].trim()) out.model = r["model"].trim();
 
@@ -64,6 +72,31 @@ export function parseModelSettings(agentConfig: Record<string, unknown> | undefi
 
   if (typeof r["thinkingLevel"] === "string" && (THINKING_LEVELS as readonly string[]).includes(r["thinkingLevel"])) {
     out.thinkingLevel = r["thinkingLevel"] as ModelSettingsThinkingLevel;
+  }
+  return out;
+}
+
+export function parseModelSettings(agentConfig: Record<string, unknown> | undefined): AgentModelSettings | undefined {
+  const out = parseSettingsFields(agentConfig?.["modelSettings"]);
+  const r = agentConfig?.["modelSettings"];
+  const speed = r && typeof r === "object" && !Array.isArray(r)
+    ? parseModelSpeed((r as Record<string, unknown>)["speed"])
+    : undefined;
+  if (speed) out.speed = speed;
+
+  // Fast-mode run-setting overrides (config.fastModeProfile.modelSettings):
+  // when THIS run is fast (agent default, or the per-message toggle merged in
+  // by claw-auth), set fields override the standard values field-by-field —
+  // unset fields inherit. So "Spaces on minimal thinking normally, high in
+  // fast mode" is one thinkingLevel override; temperature/maxTokens/thinking
+  // apply to whichever provider serves the run (a fast thinkingLevel also
+  // outranks a codex credential's reasoningEffort, same as the standard one).
+  if (out.speed === "fast") {
+    const profile = agentConfig?.["fastModeProfile"];
+    if (profile && typeof profile === "object" && !Array.isArray(profile)) {
+      const overrides = parseSettingsFields((profile as Record<string, unknown>)["modelSettings"]);
+      Object.assign(out, overrides);
+    }
   }
 
   return Object.keys(out).length > 0 ? out : undefined;

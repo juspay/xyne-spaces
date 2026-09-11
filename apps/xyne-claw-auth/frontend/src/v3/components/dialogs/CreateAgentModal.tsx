@@ -88,10 +88,10 @@ interface State {
   availableTools: AvailableTools | null; toolsLoading: boolean;
   subagents: string[]; direct: string[]; custom: string[]; gateway: string[];
   availableSkills: Skill[]; skillsLoading: boolean; selectedSkillIds: string[];
+  /** No explicit scope choice — an empty selectedKbResources means the agent
+   *  matches the running user's own spaces access; a non-empty one scopes it
+   *  to that allowlist. Computed at create time (see handleCreate). */
   selectedKbResources: KbSelection[];
-  /** KB scope mode. USER hides the picker and tells the server to ignore
-   *  any grants — the agent inherits the running user's spaces access. */
-  selectedKbScope: "COLLECTIONS" | "USER";
   researchAgentProducts: ResearchAgentOption[]; researchAgentRepositories: ResearchAgentOption[];
   researchAgentProductId: string; researchAgentRepositoryId: string; researchAgentOptionsLoading: boolean;
   /** AI-suggested starter toolkit. Auto-fetched once step 2 opens with a
@@ -120,7 +120,6 @@ const INIT: State = {
   subagents: [], direct: [], custom: [], gateway: [],
   availableSkills: [], skillsLoading: false, selectedSkillIds: [],
   selectedKbResources: [],
-  selectedKbScope: "COLLECTIONS",
   researchAgentProducts: [], researchAgentRepositories: [],
   researchAgentProductId: "", researchAgentRepositoryId: "", researchAgentOptionsLoading: false,
   suggestion: null, suggestionLoading: false, suggestionApplied: false,
@@ -475,7 +474,9 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
   const handleCreate = async () => {
     u({ creating: true, error: null });
     try {
-      const isUserScopedKb = w.selectedKbScope === "USER";
+      // No explicit scope choice in the UI — an empty allowlist means the
+      // agent matches the running user's own spaces access.
+      const isUserScopedKb = w.selectedKbResources.length === 0;
       await createAgent({
         slug: effectiveSlug,
         name: w.name.trim(),
@@ -485,13 +486,8 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
         ownerUserId: userId,
         // Send kbScope on create so a USER-scoped agent gets KB tools wired
         // up immediately without needing the follow-up updateAgent call.
-        kbScope: w.selectedKbScope,
-        // Grants are meaningful only in COLLECTIONS mode — in USER mode the
-        // server ignores them anyway, but sending them implies an intent we
-        // don't have.
-        ...(isUserScopedKb || w.selectedKbResources.length === 0
-          ? {}
-          : { knowledgeBase: w.selectedKbResources }),
+        kbScope: isUserScopedKb ? "USER" : "COLLECTIONS",
+        ...(isUserScopedKb ? {} : { knowledgeBase: w.selectedKbResources }),
       });
       const hasTools = w.subagents.length || w.direct.length || w.custom.length || w.gateway.length;
       const hasSkills = w.selectedSkillIds.length > 0;
@@ -929,74 +925,25 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
               </>
             )}
 
-            {/* Knowledge Base — two scoping modes:
-                  • COLLECTIONS — pick an explicit allowlist. Same scope for
-                    every user who runs the agent.
-                  • USER        — agent inherits the caller's full spaces KB.
-                    Each session is gated by that user's own permissions. */}
+            {/* Knowledge Base — no explicit scope choice. Attaching specific
+                collections/files scopes the agent to that allowlist; leaving
+                it empty falls back to matching the running user's own spaces
+                access (computed at create time from selectedKbResources). */}
             <div className="mt-6 space-y-2 border-t border-xyne-border-subtle pt-5">
               <SectionCaption friendly="Knowledge Base" technical="knowledge-base" />
               <p className="text-[13px] text-xyne-fg-secondary leading-relaxed">
                 Attach spaces documents this agent can read. The agent automatically gets read-only tools (search, list, read) over the chosen scope.
               </p>
 
-              <fieldset className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {([
-                  {
-                    value: "COLLECTIONS" as const,
-                    label: "Selected collections & files",
-                    hint: "Pick an explicit allowlist. Same scope for everyone.",
-                  },
-                  {
-                    value: "USER" as const,
-                    label: "Match my access",
-                    hint: "Inherits the running user's spaces access — per session.",
-                  },
-                ]).map((opt) => {
-                  const selected = w.selectedKbScope === opt.value;
-                  return (
-                    <label
-                      key={opt.value}
-                      className={`flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2 transition-colors ${
-                        selected ? "border-xyne-accent bg-xyne-accent/5" : "border-xyne-border-subtle hover:border-xyne-border"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="kb-scope-create"
-                          value={opt.value}
-                          checked={selected}
-                          onChange={() => setW((p) => ({ ...p, selectedKbScope: opt.value }))}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-[13px] font-medium text-xyne-fg-primary">{opt.label}</span>
-                      </span>
-                      <span className="pl-[22px] text-[11px] leading-snug text-xyne-fg-tertiary">{opt.hint}</span>
-                    </label>
-                  );
-                })}
-              </fieldset>
-
-              {w.selectedKbScope === "USER" ? (
-                <div className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-muted px-3 py-3">
-                  <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                    This agent is scoped at the user level — its Knowledge Base reach is whatever the running user can already see in spaces. The per-collection picker is disabled.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <KnowledgeBasePicker
-                    value={w.selectedKbResources}
-                    onChange={(next) => setW((p) => ({ ...p, selectedKbResources: next }))}
-                  />
-                  <p className="text-[11px] text-xyne-fg-tertiary">
-                    {w.selectedKbResources.length === 0
-                      ? "No KB resources attached — the agent will not be able to read documents."
-                      : `${w.selectedKbResources.length} grant${w.selectedKbResources.length === 1 ? "" : "s"} attached`}
-                  </p>
-                </>
-              )}
+              <KnowledgeBasePicker
+                value={w.selectedKbResources}
+                onChange={(next) => setW((p) => ({ ...p, selectedKbResources: next }))}
+              />
+              <p className="text-[11px] text-xyne-fg-tertiary">
+                {w.selectedKbResources.length === 0
+                  ? "No specific KB resources attached — this agent will match your access (inherits the running user's spaces access)."
+                  : `${w.selectedKbResources.length} grant${w.selectedKbResources.length === 1 ? "" : "s"} attached`}
+              </p>
             </div>
           </div>
         )}

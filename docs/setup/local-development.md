@@ -90,8 +90,8 @@ Fill them in:
 pnpm run secrets
 ```
 
-This generates `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, and the VAPID
-keypair used for web push, writing them into `apps/backend/.env.local`.
+This generates `JWT_SECRET`, `ZERO_AUTH_SECRET`, and `ENCRYPTION_KEY`, writing
+them into `apps/backend/.env.local`.
 
 `pnpm run services` runs this for you, so a normal setup never needs it explicitly.
 Reach for it directly when you copied `.env.local` by hand, or when a `.env.local`

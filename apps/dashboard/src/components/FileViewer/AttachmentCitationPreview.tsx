@@ -23,6 +23,7 @@ import ReadmeViewer from './ReadmeViewer';
 import TxtViewer from './TxtViewer';
 import HtmlViewer from './HtmlViewer';
 import ImageViewer from './ImageViewer';
+import PptxFileViewer from './PptxFileViewer';
 import { DocumentOperationsProvider } from '../../contexts/DocumentOperationsContext';
 import type { DocumentOperations } from '../../contexts/DocumentOperationsContext';
 import { useScopedFind } from '../../hooks/useScopedFind';
@@ -111,6 +112,9 @@ function getExtension(mimeType: string, fileName: string): string {
     return 'xlsx';
   if (mimeType === 'text/csv') return 'csv';
   if (mimeType === 'text/tsv') return 'tsv';
+  if (mimeType === 'application/vnd.ms-powerpoint') return 'ppt';
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+    return 'pptx';
   if (mimeType.startsWith('image/')) return 'image';
   // fall back to filename extension
   return fileName.toLowerCase().split('.').pop() ?? '';
@@ -137,6 +141,10 @@ function getDefaultMimeType(ext: string): string {
       return 'application/vnd.ms-excel';
     case 'csv':
       return 'text/csv';
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint';
     default:
       return 'application/octet-stream';
   }
@@ -259,6 +267,9 @@ const AttachmentCitationPreviewInner: React.FC = () => {
       case 'csv':
       case 'tsv':
         return <CsvViewer source={fileWithType} />;
+      case 'pptx':
+      case 'ppt':
+        return <PptxFileViewer source={fileWithType} />;
       case 'txt':
       case 'text':
         return <TxtViewer source={fileWithType} />;
@@ -284,7 +295,13 @@ const AttachmentCitationPreviewInner: React.FC = () => {
 
   const handleDownload = () => {
     if (!ref) return;
-    downloadFile(ref.attachmentId, ref.fileName).catch(console.error);
+    downloadFile(ref.attachmentId, ref.fileName).catch(error => {
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'attachment_download',
+        message: 'Failed to download attachment',
+        error,
+      });
+    });
   };
 
   const close = () => attachmentCitationPreviewStore.close();
@@ -386,3 +403,4 @@ export const AttachmentCitationPreview: React.FC = () => (
 );
 
 export default AttachmentCitationPreview;
+import { Event, logger } from '../../utils/logger';

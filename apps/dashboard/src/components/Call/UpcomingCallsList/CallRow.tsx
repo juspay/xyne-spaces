@@ -3,11 +3,12 @@ import { MoreVertical } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { CallStatus } from '@xyne/shared';
 import {
+  canEditScheduledCallParticipants,
   getPreviewParticipantUserIds,
   getCallParticipantCount,
-  isScheduledCallJoinable,
   type Call,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import Button from '../../ui/Button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../../ui/dropdown-menu';
 import { formatParticipantText } from '../../../hooks/useCalls';
@@ -32,7 +33,7 @@ export function CallRow({
   onEditCall,
   onCancelCall,
 }: CallRowProps): React.JSX.Element {
-  const joinable = isScheduledCallJoinable(call);
+  const isActive = call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
   const isEnded = call.status === CallStatus.ENDED;
   const title = call.title || 'Scheduled Call';
   const startTime = call.startsAt ? format(new Date(call.startsAt), 'h:mm a') : '';
@@ -44,6 +45,8 @@ export function CallRow({
     getCallParticipantCount(call),
   );
   const isOwner = currentUserId === call.createdByUserId;
+  const visibleChannels = useAllVisibleChannels();
+  const canEdit = isOwner || canEditScheduledCallParticipants(call, currentUserId, visibleChannels);
 
   return (
     <div className='flex items-center gap-2'>
@@ -62,13 +65,13 @@ export function CallRow({
               }
             : undefined
         }
-        data-track-category='Calls'
+        data-track-category='CALLS'
         data-track-name='upcoming-call-click'
       >
         <div
           className={cn(
             'absolute left-0 top-0 bottom-0 w-1 rounded-full',
-            joinable ? 'bg-status-success' : 'bg-primary/40',
+            isActive ? 'bg-status-success' : 'bg-primary/40',
           )}
         />
         <p className='text-sm font-medium text-foreground truncate'>{title}</p>
@@ -85,9 +88,11 @@ export function CallRow({
             e.stopPropagation();
             onJoinCall(call);
           }}
+          data-track-category='CALLS'
+          data-track-name='JOIN_UPCOMING_CALL'
           className={cn(
             'shrink-0 text-sm',
-            joinable
+            isActive
               ? 'border-status-success text-status-success hover:bg-accent'
               : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
           )}
@@ -100,7 +105,7 @@ export function CallRow({
           <Button
             variant='ghost'
             className='shrink-0 size-6 p-0 text-muted-foreground hover:text-foreground'
-            data-track-category='Calls'
+            data-track-category='CALLS'
             data-track-name='upcoming-call-more-options'
             onClick={e => e.stopPropagation()}
             aria-label='More options'
@@ -112,6 +117,7 @@ export function CallRow({
           <UpcomingCallActionsMenuItems
             call={call}
             isOwner={isOwner}
+            canEdit={canEdit}
             onEdit={onEditCall ? () => onEditCall(call) : undefined}
             onCancel={onCancelCall ? () => onCancelCall(call) : undefined}
           />

@@ -180,7 +180,14 @@ export const RCADetailsView = ({
           </div>
           <div className='self-start'>
             {onEdit && (
-              <Button type='button' size='sm' variant='outline' onClick={onEdit}>
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                onClick={onEdit}
+                data-track-category='RCA'
+                data-track-name='EDIT_RCA'
+              >
                 Edit
               </Button>
             )}

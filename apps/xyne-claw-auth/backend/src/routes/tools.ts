@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
+import { asyncHandler, ok, badRequest } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -481,190 +483,171 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
 }
 
 // List available subagents, MCP servers, and direct tools for agent creation
-router.get("/available", async (req: Request, res: Response) => {
-  try {
-    // Reconcile the catalog from the LIVE tool lists of the requester's
-    // connected MCP servers BEFORE building the response, so the picker never
-    // drifts from what the agent can actually call (server-side tool changes,
-    // new connectors). The catalog is only consumed here — the runtime uses the
-    // live /mcp/tools list — so this is the single point that needs to be fresh.
-    // Best-effort + bounded: per-server timeout, debounced in reconcileServerCatalog,
-    // failures ignored (we still serve the current catalog).
-    const userId = getRequesterId(req);
-    const orgId = getOrgId(req)
-      ?? (userId
-        ? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
-        : undefined);
-    if (!orgId) {
-      log.error(`[tools/available] orgId is required; refusing global tools catalog userId=${userId ?? "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
-    if (userId) {
-      const connections = await prisma.userMcpConnection.findMany({
-        where: { userId },
-        include: { mcpServer: true },
-        distinct: ["mcpServerId"],
-      });
-      const RECONCILE_TIMEOUT_MS = 8_000;
-      await Promise.allSettled(
-        connections.map(async (conn) => {
-          if (!(await hasConnectorDefinition(conn.mcpServer.type))) return;
-          const credentials = JSON.parse(
-            decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey),
-          ) as Record<string, unknown>;
-          await Promise.race([
-            reconcileServerCatalog(userId, conn.mcpServer.type, conn.mcpServer.name, credentials),
-            new Promise((resolve) => setTimeout(resolve, RECONCILE_TIMEOUT_MS)),
-          ]);
-        }),
-      );
-    }
-
-    const tenantUniqueId = (req as Request & { user?: { workspaceId?: string } }).user?.workspaceId;
-    const catalog = await buildAvailableToolsCatalog(tenantUniqueId, orgId);
-    res.json({ success: true, data: catalog });
-  } catch (err) {
-    log.error("[tools] available error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/available", asyncHandler(async (req: Request, res: Response) => {
+  // Reconcile the catalog from the LIVE tool lists of the requester's
+  // connected MCP servers BEFORE building the response, so the picker never
+  // drifts from what the agent can actually call (server-side tool changes,
+  // new connectors). The catalog is only consumed here — the runtime uses the
+  // live /mcp/tools list — so this is the single point that needs to be fresh.
+  // Best-effort + bounded: per-server timeout, debounced in reconcileServerCatalog,
+  // failures ignored (we still serve the current catalog).
+  const userId = getRequesterId(req);
+  const orgId = getOrgId(req)
+    ?? (userId
+      ? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
+      : undefined);
+  if (!orgId) {
+    log.error(`[tools/available] orgId is required; refusing global tools catalog userId=${userId ?? "none"}`);
+    throw badRequest("orgId is required");
   }
-});
-
-router.get("/", async (_req: Request, res: Response) => {
-  try {
-    const tools = await prisma.tool.findMany({
-      orderBy: [{ source: "asc" }, { name: "asc" }],
-    });
-    res.json({ success: true, data: tools });
-  } catch (err) {
-    log.error("[tools] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.post("/sync", requireClawAdmin, async (req: Request, res: Response) => {
-  try {
-    // Optional filter: sync only specific MCP server(s) instead of the full
-    // sweep (the full sweep spawns every connected server for every user and
-    // routinely exceeds the nginx upstream timeout → 504). Accept names/types
-    // from body { serverTypes: [...] } / { serverType: "google" } or query
-    // ?types=google,microsoft / ?type=google. Matched (case-insensitively)
-    // against the server's `type` OR display `name`, so either works.
-    const body = (req.body ?? {}) as { serverType?: unknown; serverTypes?: unknown };
-    const rawFilter = [
-      ...(Array.isArray(body.serverTypes) ? body.serverTypes : []),
-      ...(body.serverType != null ? [body.serverType] : []),
-      ...(typeof req.query["types"] === "string" ? req.query["types"].split(",") : []),
-      ...(typeof req.query["type"] === "string" ? [req.query["type"]] : []),
-    ]
-      .map((s) => String(s).trim().toLowerCase())
-      .filter(Boolean);
-    const filter = rawFilter.length > 0 ? new Set(rawFilter) : null;
-
-    // Find all connections grouped by server type, pick one per type
+  if (userId) {
     const connections = await prisma.userMcpConnection.findMany({
+      where: { userId },
       include: { mcpServer: true },
       distinct: ["mcpServerId"],
     });
-
-    let totalSynced = 0;
-    const errors: string[] = [];
-    const syncedServers: string[] = [];
-
-    for (const conn of connections) {
-      if (!(await hasConnectorDefinition(conn.mcpServer.type))) continue;
-      // Targeted sync: skip servers that don't match the requested type/name.
-      if (
-        filter &&
-        !filter.has(conn.mcpServer.type.toLowerCase()) &&
-        !filter.has((conn.mcpServer.name ?? "").toLowerCase())
-      ) {
-        continue;
-      }
-
-      try {
-        const decrypted = decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey);
-        const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-        const count = await syncToolsForServer(conn.userId, conn.mcpServer.type, conn.mcpServer.name, credentials);
-        totalSynced += count;
-        syncedServers.push(conn.mcpServer.type);
-      } catch (err) {
-        const msg = `${conn.mcpServer.type}: ${err instanceof Error ? err.message : String(err)}`;
-        errors.push(msg);
-        log.error(`[tools/sync] ${msg}`);
-      }
-    }
-
-    // A targeted sync only touches the requested MCP server(s). The builtin +
-    // shared-registry upserts below are GLOBAL housekeeping (re-seed every
-    // custom tool), irrelevant to one server and slow — only run on a full sweep.
-    if (filter) {
-      const noMatch = syncedServers.length === 0 && errors.length === 0;
-      res.json({
-        success: true,
-        data: {
-          synced: totalSynced,
-          servers: syncedServers,
-          errors,
-          requested: [...filter],
-          ...(noMatch ? { note: "no connected MCP server matched the requested name(s)" } : {}),
-        },
-      });
-      return;
-    }
-
-    // Also ensure builtin tools exist
-    const builtins = [
-      { slug: "builtin__bash", name: "bash", description: "Execute shell commands", source: "builtin" },
-      { slug: "builtin__read", name: "read", description: "Read files", source: "builtin" },
-      { slug: "builtin__write", name: "write", description: "Write files", source: "builtin" },
-      { slug: "builtin__edit", name: "edit", description: "Edit files", source: "builtin" },
-      { slug: "builtin__grep", name: "grep", description: "Search file contents with regex", source: "builtin" },
-      { slug: "builtin__find", name: "find", description: "Find files by pattern", source: "builtin" },
-      { slug: "builtin__ls", name: "ls", description: "List directory contents", source: "builtin" },
-    ];
-
-    for (const b of builtins) {
-      await prisma.tool.upsert({
-        where: { slug: b.slug },
-        create: b,
-        update: { name: b.name, description: b.description },
-      });
-    }
-    totalSynced += builtins.length;
-
-    // Sync custom tools from shared registry (research-agent, sandbox, etc.).
-    // SKIP_CATALOG_SOURCES (google/microsoft) are per-user OAuth MCP connectors,
-    // NOT custom tools — upserting them here would resurrect the `custom:*` rows
-    // the catalog-cleanup migration deletes (and the picker would list them under
-    // "custom tools"). Same filter bootstrap-tools.ts uses; shared so they can't drift.
-    const { getAllCustomTools } = await import("xyne-claw-shared");
-    const customTools = getAllCustomTools().filter((ct) => !SKIP_CATALOG_SOURCES.has(ct.source));
-    for (const ct of customTools) {
-      await prisma.tool.upsert({
-        where: { slug: ct.slug },
-        create: {
-          slug: ct.slug,
-          name: ct.name,
-          description: ct.description,
-          source: ct.source,
-          inputSchema: ct.inputSchema as unknown as import("@prisma/client").Prisma.InputJsonValue,
-        },
-        update: {
-          name: ct.name,
-          description: ct.description,
-          source: ct.source,
-          inputSchema: ct.inputSchema as unknown as import("@prisma/client").Prisma.InputJsonValue,
-        },
-      });
-    }
-    totalSynced += customTools.length;
-
-    res.json({ success: true, data: { synced: totalSynced, servers: syncedServers, errors } });
-  } catch (err) {
-    log.error("[tools/sync] error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    const RECONCILE_TIMEOUT_MS = 8_000;
+    await Promise.allSettled(
+      connections.map(async (conn) => {
+        if (!(await hasConnectorDefinition(conn.mcpServer.type))) return;
+        const credentials = JSON.parse(
+          decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey),
+        ) as Record<string, unknown>;
+        await Promise.race([
+          reconcileServerCatalog(userId, conn.mcpServer.type, conn.mcpServer.name, credentials),
+          new Promise((resolve) => setTimeout(resolve, RECONCILE_TIMEOUT_MS)),
+        ]);
+      }),
+    );
   }
-});
+
+  const tenantUniqueId = (req as Request & { user?: { workspaceId?: string } }).user?.workspaceId;
+  const catalog = await buildAvailableToolsCatalog(tenantUniqueId, orgId);
+  ok(res, catalog);
+}));
+
+router.get("/", asyncHandler(async (_req: Request, res: Response) => {
+  const tools = await prisma.tool.findMany({
+    orderBy: [{ source: "asc" }, { name: "asc" }],
+  });
+  ok(res, tools);
+}));
+
+router.post("/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  // Optional filter: sync only specific MCP server(s) instead of the full
+  // sweep (the full sweep spawns every connected server for every user and
+  // routinely exceeds the nginx upstream timeout → 504). Accept names/types
+  // from body { serverTypes: [...] } / { serverType: "google" } or query
+  // ?types=google,microsoft / ?type=google. Matched (case-insensitively)
+  // against the server's `type` OR display `name`, so either works.
+  const body = (req.body ?? {}) as { serverType?: unknown; serverTypes?: unknown };
+  const rawFilter = [
+    ...(Array.isArray(body.serverTypes) ? body.serverTypes : []),
+    ...(body.serverType != null ? [body.serverType] : []),
+    ...(typeof req.query["types"] === "string" ? req.query["types"].split(",") : []),
+    ...(typeof req.query["type"] === "string" ? [req.query["type"]] : []),
+  ]
+    .map((s) => String(s).trim().toLowerCase())
+    .filter(Boolean);
+  const filter = rawFilter.length > 0 ? new Set(rawFilter) : null;
+
+  // Find all connections grouped by server type, pick one per type
+  const connections = await prisma.userMcpConnection.findMany({
+    include: { mcpServer: true },
+    distinct: ["mcpServerId"],
+  });
+
+  let totalSynced = 0;
+  const errors: string[] = [];
+  const syncedServers: string[] = [];
+
+  for (const conn of connections) {
+    if (!(await hasConnectorDefinition(conn.mcpServer.type))) continue;
+    // Targeted sync: skip servers that don't match the requested type/name.
+    if (
+      filter &&
+      !filter.has(conn.mcpServer.type.toLowerCase()) &&
+      !filter.has((conn.mcpServer.name ?? "").toLowerCase())
+    ) {
+      continue;
+    }
+
+    try {
+      const decrypted = decrypt(conn.encryptedCreds, conn.iv, conn.authTag, CONFIG.encryptionKey);
+      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
+      const count = await syncToolsForServer(conn.userId, conn.mcpServer.type, conn.mcpServer.name, credentials);
+      totalSynced += count;
+      syncedServers.push(conn.mcpServer.type);
+    } catch (err) {
+      const msg = `${conn.mcpServer.type}: ${errMsg(err)}`;
+      errors.push(msg);
+      log.error(`[tools/sync] ${msg}`);
+    }
+  }
+
+  // A targeted sync only touches the requested MCP server(s). The builtin +
+  // shared-registry upserts below are GLOBAL housekeeping (re-seed every
+  // custom tool), irrelevant to one server and slow — only run on a full sweep.
+  if (filter) {
+    const noMatch = syncedServers.length === 0 && errors.length === 0;
+    ok(res, {
+      synced: totalSynced,
+      servers: syncedServers,
+      errors,
+      requested: [...filter],
+      ...(noMatch ? { note: "no connected MCP server matched the requested name(s)" } : {}),
+    });
+    return;
+  }
+
+  // Also ensure builtin tools exist
+  const builtins = [
+    { slug: "builtin__bash", name: "bash", description: "Execute shell commands", source: "builtin" },
+    { slug: "builtin__read", name: "read", description: "Read files", source: "builtin" },
+    { slug: "builtin__write", name: "write", description: "Write files", source: "builtin" },
+    { slug: "builtin__edit", name: "edit", description: "Edit files", source: "builtin" },
+    { slug: "builtin__grep", name: "grep", description: "Search file contents with regex", source: "builtin" },
+    { slug: "builtin__find", name: "find", description: "Find files by pattern", source: "builtin" },
+    { slug: "builtin__ls", name: "ls", description: "List directory contents", source: "builtin" },
+  ];
+
+  for (const b of builtins) {
+    await prisma.tool.upsert({
+      where: { slug: b.slug },
+      create: b,
+      update: { name: b.name, description: b.description },
+    });
+  }
+  totalSynced += builtins.length;
+
+  // Sync custom tools from shared registry (research-agent, sandbox, etc.).
+  // SKIP_CATALOG_SOURCES (google/microsoft) are per-user OAuth MCP connectors,
+  // NOT custom tools — upserting them here would resurrect the `custom:*` rows
+  // the catalog-cleanup migration deletes (and the picker would list them under
+  // "custom tools"). Same filter bootstrap-tools.ts uses; shared so they can't drift.
+  const { getAllCustomTools } = await import("xyne-claw-shared");
+  const customTools = getAllCustomTools().filter((ct) => !SKIP_CATALOG_SOURCES.has(ct.source));
+  for (const ct of customTools) {
+    await prisma.tool.upsert({
+      where: { slug: ct.slug },
+      create: {
+        slug: ct.slug,
+        name: ct.name,
+        description: ct.description,
+        source: ct.source,
+        inputSchema: ct.inputSchema as unknown as import("@prisma/client").Prisma.InputJsonValue,
+      },
+      update: {
+        name: ct.name,
+        description: ct.description,
+        source: ct.source,
+        inputSchema: ct.inputSchema as unknown as import("@prisma/client").Prisma.InputJsonValue,
+      },
+    });
+  }
+  totalSynced += customTools.length;
+
+  ok(res, { synced: totalSynced, servers: syncedServers, errors });
+}));
 
 export { router as toolsRouter };

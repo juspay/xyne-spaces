@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -16,11 +17,6 @@ import { useBrowsableChannels, searchChannels } from '../../../hooks/useChannels
 import { useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { channelService } from '../../../services/Chat/channelService';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 
 const PAGE_SIZE = 10;
 
@@ -54,8 +50,11 @@ const BrowseChannels = (): ReactElement => {
         if (!cancelled) setMemberCounts(counts);
       })
       .catch((err: unknown) => {
-        // eslint-disable-next-line no-console
-        console.error('Failed to fetch channel member counts:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to fetch channel member counts:'),
+          error: err,
+        });
       });
     return (): void => {
       cancelled = true;
@@ -114,22 +113,9 @@ const BrowseChannels = (): ReactElement => {
     setCurrentPage(1);
   };
 
-  // Track search execution (no sensitive data - only metadata)
+  // Reset to page 1 when search query changes
   useEffect(() => {
-    // Reset to page 1 when search query changes
     setCurrentPage(1);
-
-    if (!searchQuery.trim()) return;
-
-    const timer = setTimeout((): void => {
-      mixpanelService.track(EVENTS.SEARCH_PERFORMED, {
-        searchType: EVENT_PROPERTIES.SEARCH_TYPES.CHANNELS,
-        resultsCount: filteredChannels.length,
-      });
-    }, 500); // Debounce to avoid tracking every keystroke
-
-    return (): void => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
   // Pagination calculations

@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { Prisma } from "@prisma/client";
 import { skillRepository, agentRequestRepository, userRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess , requireRequester} from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { decrypt } from "../crypto.js";
@@ -14,8 +15,10 @@ import {
   type SkillDiff,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
+  authorizeSkillFileUpdate,
   buildSkillUpdateApprovalFlow,
 } from "xyne-claw-shared";
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("skills");
@@ -37,157 +40,130 @@ export function canProposerPostAsAgent<T extends { canEdit: boolean; agent: { sc
 }
 
 // List skills: global + user's own personal skills (admins see ALL)
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
-    const authedUserId = String(req.headers["x-user-id"] ?? "");
-    const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
-    // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
-    // mirroring GET /agents. Without this an admin's normal skill list leaks
-    // every user's private skills (the same regression agents.ts already fixed).
-    const wantAllSkills = req.query["scope"] === "all";
-    const listOrgId = getOrgId(req);
-    const skills = await skillRepository.listVisible({
-      ...(scopeUserId ? { userId: scopeUserId } : {}),
-      ...(listOrgId ? { orgId: listOrgId } : {}),
-      isAdmin: admin && wantAllSkills,
-    });
-    res.json({ success: true, data: skills });
-  } catch (err) {
-    log.error("[skills] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const authedUserId = String(req.headers["x-user-id"] ?? "");
+  const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+  // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
+  // mirroring GET /agents. Without this an admin's normal skill list leaks
+  // every user's private skills (the same regression agents.ts already fixed).
+  const wantAllSkills = req.query["scope"] === "all";
+  const listOrgId = getOrgId(req);
+  const skills = await skillRepository.listVisible({
+    ...(scopeUserId ? { userId: scopeUserId } : {}),
+    ...(listOrgId ? { orgId: listOrgId } : {}),
+    isAdmin: admin && wantAllSkills,
+  });
+  ok(res, skills);
+}));
 
 // Get a single skill by slug
-router.get("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    // Phase-2: org-scope this read (global fallback while slug is globally unique).
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) {
-      log.warn(`[skills/get] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
-      res.status(404).json({ success: false, error: "Skill not found" });
-      return;
-    }
-    res.json({ success: true, data: skill });
-  } catch (err) {
-    log.error("[skills] get error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  // Phase-2: org-scope this read (global fallback while slug is globally unique).
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/get] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("Skill not found");
   }
-});
+  ok(res, skill);
+}));
 
 // Create a new skill (personal by default, admins can create global)
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const { slug, name, description, content, source } = req.body as {
-      slug?: string;
-      name?: string;
-      description?: string;
-      content?: string;
-      source?: string;
-    };
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const { slug, name, description, content, source } = req.body as {
+    slug?: string;
+    name?: string;
+    description?: string;
+    content?: string;
+    source?: string;
+  };
 
-    if (!slug || !content) {
-      res.status(400).json({ success: false, error: "slug and content are required" });
-      return;
-    }
-    const cleanSlug = slug.trim();
-    if (!/^[a-z0-9-]+$/.test(cleanSlug) || cleanSlug.startsWith("-") || cleanSlug.endsWith("-") || cleanSlug.includes("--")) {
-      res.status(400).json({ success: false, error: "slug must match ^[a-z0-9-]+$ (no leading/trailing/consecutive hyphens)" });
-      return;
-    }
-
-    const orgId = getOrgId(req);
-    if (!orgId) {
-      log.warn(`[skills/create] orgId is required requesterId=${getRequesterId(req) ?? "none"} slug=${cleanSlug} source=${source ?? "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
-
-    const existing = await skillRepository.findBySlug(cleanSlug, orgId);
-    if (existing) {
-      res.status(409).json({ success: false, error: "A skill with this slug already exists" });
-      return;
-    }
-
-    const requesterId = getRequesterId(req);
-    // Note: removed the `isClawAdmin` lookup here. It was only used to
-    // decide create-time scope ("admin → global, everyone else →
-    // personal"). Now everyone gets `personal` at create; admins who
-    // want global can call POST /skills/:slug/promote separately. Saves
-    // one DB query per skill create.
-
-    // Derive `name` from slug if not provided (UI no longer asks for it; the
-    // worker reads pi-format frontmatter from `content` if present).
-    const resolvedName = name?.trim()
-      || cleanSlug.split("-").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
-
-    const skill = await skillRepository.create({
-      slug: cleanSlug,
-      name: resolvedName,
-      description: description?.trim() ?? "",
-      content: content.trim(),
-      source: source?.trim() ?? "user-created",
-      // Always create at personal scope. Previously admins got a silent
-      // auto-promotion to "global" on create — that bypassed the
-      // publish-review flow entirely, so the Publish button in the UI
-      // never appeared for their own skills (it correctly hides for
-      // already-global skills). Admins who want to skip review can
-      // still use POST /skills/:slug/promote after create — one click,
-      // explicit intent, and the UI now matches what non-admins see.
-      scope: "personal",
-      ...(requesterId ? { owner: { connect: { id: requesterId } } } : {}),
-      // Phase-2: stamp the creating org.
-      org: { connect: { id: orgId } },
-    });
-
-    res.status(201).json({ success: true, data: skill });
-  } catch (err) {
-    log.error("[skills] create error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  if (!slug || !content) {
+    throw badRequest("slug and content are required");
   }
-});
+  const cleanSlug = slug.trim();
+  if (!/^[a-z0-9-]+$/.test(cleanSlug) || cleanSlug.startsWith("-") || cleanSlug.endsWith("-") || cleanSlug.includes("--")) {
+    throw badRequest("slug must match ^[a-z0-9-]+$ (no leading/trailing/consecutive hyphens)");
+  }
+
+  const orgId = getOrgId(req);
+  if (!orgId) {
+    log.warn(`[skills/create] orgId is required requesterId=${getRequesterId(req) ?? "none"} slug=${cleanSlug} source=${source ?? "none"}`);
+    throw badRequest("orgId is required");
+  }
+
+  const existing = await skillRepository.findBySlug(cleanSlug, orgId);
+  if (existing) {
+    throw conflict("A skill with this slug already exists");
+  }
+
+  const requesterId = getRequesterId(req);
+  // Note: removed the `isClawAdmin` lookup here. It was only used to
+  // decide create-time scope ("admin → global, everyone else →
+  // personal"). Now everyone gets `personal` at create; admins who
+  // want global can call POST /skills/:slug/promote separately. Saves
+  // one DB query per skill create.
+
+  // Derive `name` from slug if not provided (UI no longer asks for it; the
+  // worker reads pi-format frontmatter from `content` if present).
+  const resolvedName = name?.trim()
+    || cleanSlug.split("-").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+
+  const skill = await skillRepository.create({
+    slug: cleanSlug,
+    name: resolvedName,
+    description: description?.trim() ?? "",
+    content: content.trim(),
+    source: source?.trim() ?? "user-created",
+    // Always create at personal scope. Previously admins got a silent
+    // auto-promotion to "global" on create — that bypassed the
+    // publish-review flow entirely, so the Publish button in the UI
+    // never appeared for their own skills (it correctly hides for
+    // already-global skills). Admins who want to skip review can
+    // still use POST /skills/:slug/promote after create — one click,
+    // explicit intent, and the UI now matches what non-admins see.
+    scope: "personal",
+    ...(requesterId ? { owner: { connect: { id: requesterId } } } : {}),
+    // Phase-2: stamp the creating org.
+    org: { connect: { id: orgId } },
+  });
+
+  ok(res, skill);
+}));
 
 // Update a skill (owner or admin)
-router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const existing = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!existing) {
-      log.warn(`[skills/update] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
-      res.status(404).json({ success: false, error: "Skill not found" });
-      return;
-    }
-
-    const requesterId = getRequesterId(req);
-    if (requesterId) {
-      const admin = await isClawAdmin(requesterId);
-      const isOwner = existing.ownerUserId === requesterId;
-      if (!admin && !isOwner) {
-        res.status(403).json({ success: false, error: "Only the owner or admins can edit this skill" });
-        return;
-      }
-    }
-
-    const { name, description, content, enabled } = req.body as {
-      name?: string;
-      description?: string;
-      content?: string;
-      enabled?: boolean;
-    };
-
-    const data: Record<string, unknown> = {};
-    if (name !== undefined) data.name = name.trim();
-    if (description !== undefined) data.description = description.trim();
-    if (content !== undefined) data.content = content.trim();
-    if (enabled !== undefined) data.enabled = enabled;
-
-    const skill = await skillRepository.update(req.params.slug, existing.orgId, data);
-    res.json({ success: true, data: skill });
-  } catch (err) {
-    log.error("[skills] update error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.put("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const existing = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!existing) {
+    log.warn(`[skills/update] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("Skill not found");
   }
-});
+
+  const requesterId = getRequesterId(req);
+  if (requesterId) {
+    const admin = await isClawAdmin(requesterId);
+    const isOwner = existing.ownerUserId === requesterId;
+    if (!admin && !isOwner) {
+      throw forbidden("Only the owner or admins can edit this skill");
+    }
+  }
+
+  const { name, description, content, enabled } = req.body as {
+    name?: string;
+    description?: string;
+    content?: string;
+    enabled?: boolean;
+  };
+
+  const data: Record<string, unknown> = {};
+  if (name !== undefined) data.name = name.trim();
+  if (description !== undefined) data.description = description.trim();
+  if (content !== undefined) data.content = content.trim();
+  if (enabled !== undefined) data.enabled = enabled;
+
+  const skill = await skillRepository.update(req.params.slug, existing.orgId, data);
+  ok(res, skill);
+}));
 
 // Delete a skill (owner or admin)
 router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
@@ -222,90 +198,83 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
 });
 
 // Promote skill to global (admin only)
-router.post("/:slug/promote", requireClawAdmin, async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req)!;
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) { log.warn(`[skills/promote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
-    if (skill.scope === "global") { res.status(400).json({ success: false, error: "Skill is already global" }); return; }
-
-    const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
-
-    await writeAuditLog({
-      actorUserId: requesterId,
-      eventType: "AGENT_PROMOTED",
-      targetId: skill.id,
-      description: `Skill "${skill.name}" (${skill.slug}) promoted to global`,
-    });
-
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    log.error("[skills] promote error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.post("/:slug/promote", requireClawAdmin, asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const requesterId = getRequesterId(req)!;
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/promote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("Skill not found");
   }
-});
+  if (skill.scope === "global") throw badRequest("Skill is already global");
+
+  const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "AGENT_PROMOTED",
+    targetId: skill.id,
+    description: `Skill "${skill.name}" (${skill.slug}) promoted to global`,
+  });
+
+  ok(res, updated);
+}));
 
 // Demote skill to personal (admin only)
-router.post("/:slug/demote", requireClawAdmin, async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req)!;
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) { log.warn(`[skills/demote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
-    if (skill.scope !== "global") { res.status(400).json({ success: false, error: "Skill is not global" }); return; }
-
-    const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "personal", promotedBy: null, promotedAt: null });
-
-    await writeAuditLog({
-      actorUserId: requesterId,
-      eventType: "AGENT_DEMOTED",
-      targetId: skill.id,
-      description: `Skill "${skill.name}" (${skill.slug}) demoted to personal`,
-    });
-
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    log.error("[skills] demote error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.post("/:slug/demote", requireClawAdmin, asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const requesterId = getRequesterId(req)!;
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/demote] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("Skill not found");
   }
-});
+  if (skill.scope !== "global") throw badRequest("Skill is not global");
+
+  const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "personal", promotedBy: null, promotedAt: null });
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "AGENT_DEMOTED",
+    targetId: skill.id,
+    description: `Skill "${skill.name}" (${skill.slug}) demoted to personal`,
+  });
+
+  ok(res, updated);
+}));
 
 // Request to push skill to global (owner only)
-router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
+router.post("/:slug/request", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
 
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) { log.warn(`[skills/request] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`); res.status(404).json({ success: false, error: "Skill not found" }); return; }
-    if (skill.ownerUserId !== requesterId) { res.status(403).json({ success: false, error: "Only the owner can request this" }); return; }
-    if (skill.scope === "global") { res.status(400).json({ success: false, error: "Skill is already global" }); return; }
-
-    // Check for existing pending request
-    const existing = await agentRequestRepository.findPendingSkill(skill.id);
-    if (existing) { res.status(409).json({ success: false, error: "A pending request already exists" }); return; }
-
-    const request = await agentRequestRepository.create({
-      targetType: "skill",
-      skillId: skill.id,
-      skillSlug: skill.slug,
-      requestType: "push_to_global",
-      requesterId,
-      orgId: skill.orgId,
-    });
-
-    await writeAuditLog({
-      actorUserId: requesterId,
-      eventType: "REQUEST_CREATED",
-      targetId: skill.id,
-      description: `push_to_global request for skill "${skill.name}"`,
-    });
-
-    res.status(201).json({ success: true, data: request });
-  } catch (err) {
-    log.error("[skills] request error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/request] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("Skill not found");
   }
-});
+  if (skill.ownerUserId !== requesterId) throw forbidden("Only the owner can request this");
+  if (skill.scope === "global") throw badRequest("Skill is already global");
+
+  // Check for existing pending request
+  const existing = await agentRequestRepository.findPendingSkill(skill.id);
+  if (existing) throw conflict("A pending request already exists");
+
+  const request = await agentRequestRepository.create({
+    targetType: "skill",
+    skillId: skill.id,
+    skillSlug: skill.slug,
+    requestType: "push_to_global",
+    requesterId,
+    orgId: skill.orgId,
+  });
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "REQUEST_CREATED",
+    targetId: skill.id,
+    description: `push_to_global request for skill "${skill.name}"`,
+  });
+
+  ok(res, request);
+}));
 
 // ── Skill files (directory uploads) ──────────────────────────────────
 //
@@ -326,136 +295,96 @@ router.post("/:slug/request", async (req: Request<{ slug: string }>, res: Respon
 const MAX_FILE_BYTES = 1_000_000;       // 1 MB per file
 const MAX_BUNDLE_BYTES = 5_000_000;     // 5 MB total per skill
 
-router.get("/:slug/files", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) {
-      log.warn(`[skills/files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
-      res.status(404).json({ success: false, error: "Skill not found" });
-      return;
-    }
-    const files = await skillRepository.listFiles(skill.id);
-    res.json({
-      success: true,
-      data: files.map((f) => ({
-        id: f.id,
-        relativePath: f.relativePath,
-        contentType: f.contentType,
-        sizeBytes: f.sizeBytes,
-        createdAt: f.createdAt,
-      })),
-    });
-  } catch (err) {
-    log.error("[skills] list files error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("Skill not found");
   }
-});
+  const files = await skillRepository.listFiles(skill.id);
+  ok(res, files.map((f) => ({
+    id: f.id,
+    relativePath: f.relativePath,
+    contentType: f.contentType,
+    sizeBytes: f.sizeBytes,
+    createdAt: f.createdAt,
+  })));
+}));
 
-router.get("/:slug/files/:fileId", async (req: Request<{ slug: string; fileId: string }>, res: Response) => {
-  try {
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) {
-      log.warn(`[skills/file] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} fileId=${req.params.fileId} userId=${getRequesterId(req) ?? "none"}`);
-      res.status(404).json({ success: false, error: "Skill not found" });
-      return;
-    }
-    const files = await skillRepository.listFiles(skill.id);
-    const file = files.find((f) => f.id === req.params.fileId);
-    if (!file) {
-      res.status(404).json({ success: false, error: "File not found" });
-      return;
-    }
-    res.json({
-      success: true,
-      data: {
-        id: file.id,
-        relativePath: file.relativePath,
-        content: file.content,
-        contentType: file.contentType,
-        sizeBytes: file.sizeBytes,
-      },
-    });
-  } catch (err) {
-    log.error("[skills] get file error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:slug/files/:fileId", asyncHandler(async (req: Request<{ slug: string; fileId: string }>, res: Response) => {
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/file] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} fileId=${req.params.fileId} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("Skill not found");
   }
-});
+  const files = await skillRepository.listFiles(skill.id);
+  const file = files.find((f) => f.id === req.params.fileId);
+  if (!file) throw notFound("File not found");
+  ok(res, {
+    id: file.id,
+    relativePath: file.relativePath,
+    content: file.content,
+    contentType: file.contentType,
+    sizeBytes: file.sizeBytes,
+  });
+}));
 
-router.put("/:slug/files", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      res.status(401).json({ success: false, error: "x-user-id header is required" });
-      return;
-    }
-    const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!skill) {
-      log.warn(`[skills/upsert-files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
-      res.status(404).json({ success: false, error: "Skill not found" });
-      return;
-    }
-    // ACL: owner of a personal skill, OR admin (for any skill).
-    const admin = await isClawAdmin(requesterId);
-    if (!admin) {
-      if (skill.scope !== "personal" || skill.ownerUserId !== requesterId) {
-        res.status(403).json({
-          success: false,
-          error: "Only the skill owner or a CLAW_ADMIN can update files",
-        });
-        return;
-      }
-    }
-
-    const body = req.body as { files?: Array<{ relativePath?: string; content?: string; contentType?: string }> };
-    const rawFiles = Array.isArray(body.files) ? body.files : [];
-
-    // Validate before touching the DB so a bad payload doesn't half-replace.
-    let totalBytes = 0;
-    const sanitized: Array<{ relativePath: string; content: string; contentType?: string }> = [];
-    for (const f of rawFiles) {
-      if (typeof f?.content !== "string") {
-        res.status(400).json({ success: false, error: "each file must have a string `content`" });
-        return;
-      }
-      const bytes = Buffer.byteLength(f.content, "utf8");
-      if (bytes > MAX_FILE_BYTES) {
-        res.status(413).json({ success: false, error: `${f.relativePath ?? "(file)"} exceeds the ${MAX_FILE_BYTES}-byte per-file limit` });
-        return;
-      }
-      totalBytes += bytes;
-      sanitized.push({
-        relativePath: String(f.relativePath ?? ""),
-        content: f.content,
-        ...(f.contentType ? { contentType: String(f.contentType) } : {}),
-      });
-    }
-    if (totalBytes > MAX_BUNDLE_BYTES) {
-      res.status(413).json({ success: false, error: `total bundle exceeds the ${MAX_BUNDLE_BYTES}-byte limit` });
-      return;
-    }
-
-    try {
-      await skillRepository.replaceFiles(skill.id, sanitized);
-    } catch (err) {
-      res.status(400).json({ success: false, error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-
-    const files = await skillRepository.listFiles(skill.id);
-    res.json({
-      success: true,
-      data: files.map((f) => ({
-        id: f.id,
-        relativePath: f.relativePath,
-        contentType: f.contentType,
-        sizeBytes: f.sizeBytes,
-      })),
-    });
-  } catch (err) {
-    log.error("[skills] replace files error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id header is required");
+  const skill = await skillRepository.findBySlug(req.params.slug, getOrgId(req));
+  if (!skill) {
+    log.warn(`[skills/upsert-files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("Skill not found");
   }
-});
+  // ACL: the skill's own owner (personal OR global), OR a CLAW_ADMIN.
+  const authz = authorizeSkillFileUpdate({
+    ownerUserId: skill.ownerUserId,
+    callerUserId: requesterId,
+    callerIsAdmin: await isClawAdmin(requesterId),
+  });
+  if (!authz.ok) {
+    throw new HttpError(authz.code, authz.reason);
+  }
+
+  const body = req.body as { files?: Array<{ relativePath?: string; content?: string; contentType?: string }> };
+  const rawFiles = Array.isArray(body.files) ? body.files : [];
+
+  // Validate before touching the DB so a bad payload doesn't half-replace.
+  let totalBytes = 0;
+  const sanitized: Array<{ relativePath: string; content: string; contentType?: string }> = [];
+  for (const f of rawFiles) {
+    if (typeof f?.content !== "string") {
+      throw badRequest("each file must have a string `content`");
+    }
+    const bytes = Buffer.byteLength(f.content, "utf8");
+    if (bytes > MAX_FILE_BYTES) {
+      throw new HttpError(413, `${f.relativePath ?? "(file)"} exceeds the ${MAX_FILE_BYTES}-byte per-file limit`);
+    }
+    totalBytes += bytes;
+    sanitized.push({
+      relativePath: String(f.relativePath ?? ""),
+      content: f.content,
+      ...(f.contentType ? { contentType: String(f.contentType) } : {}),
+    });
+  }
+  if (totalBytes > MAX_BUNDLE_BYTES) {
+    throw new HttpError(413, `total bundle exceeds the ${MAX_BUNDLE_BYTES}-byte limit`);
+  }
+
+  try {
+    await skillRepository.replaceFiles(skill.id, sanitized);
+  } catch (err) {
+    throw badRequest(errMsg(err));
+  }
+
+  const files = await skillRepository.listFiles(skill.id);
+  ok(res, files.map((f) => ({
+    id: f.id,
+    relativePath: f.relativePath,
+    contentType: f.contentType,
+    sizeBytes: f.sizeBytes,
+  })));
+}));
 
 
 // ── Skill-update proposal + owner-approval ───────────────────────────────────
@@ -527,196 +456,177 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
     }, token);
     log.info(`[skills/propose-update] sent skill-update DM to approver ${args.approverUserId} for ${args.skillSlug}`);
   } catch (err) {
-    log.warn(`[skills/propose-update] owner DM failed for ${args.skillSlug}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[skills/propose-update] owner DM failed for ${args.skillSlug}:`, errMsg(err));
   }
 }
 
 // POST /skills/:slug/propose-update — the update-skill tool proposes a full
 // replacement. Validates requester + org, computes the diff, records a
 // skill_update AgentRequest, and DMs the approver the diff. Never applies here.
-router.post("/:slug/propose-update", async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-    const orgId = getOrgId(req);
-    if (!orgId) { res.status(400).json({ success: false, error: "orgId is required" }); return; }
+router.post("/:slug/propose-update", asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+  const requesterId = requireRequester(req, "x-user-id required");
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("orgId is required");
 
-    const { content: rawContent, edits, summary, agentSlug } = req.body as {
-      content?: string;
-      edits?: Array<{ oldText?: string; newText?: string }>;
-      summary?: string;
-      agentSlug?: string;
-    };
+  const { content: rawContent, edits, summary, agentSlug } = req.body as {
+    content?: string;
+    edits?: Array<{ oldText?: string; newText?: string }>;
+    summary?: string;
+    agentSlug?: string;
+  };
 
-    const skill = await skillRepository.findBySlug(req.params.slug, orgId);
-    if (!skill) { res.status(404).json({ success: false, error: "Skill not found" }); return; }
+  const skill = await skillRepository.findBySlug(req.params.slug, orgId);
+  if (!skill) throw notFound("Skill not found");
 
-    // ── Construct the proposed content ────────────────────────────────────
-    // PATCH MODE (preferred, 2026-07-15): anchored {oldText,newText} edits
-    // applied server-side to the CURRENT content. Tool arguments then scale
-    // with the CHANGE, not the file — a full body does NOT survive as one
-    // LLM tool argument (output-token truncation silently destroyed a
-    // 318-rule skill today). Full-replacement `content` stays only for small
-    // skills, where truncation cannot occur.
-    const FULL_REPLACEMENT_MAX_CHARS = 8_000;
-    let content: string;
-    if (Array.isArray(edits) && edits.length > 0) {
-      let working = normalizeSkillContent(skill.content);
-      for (const [i, e] of edits.entries()) {
-        const oldText = typeof e?.oldText === "string" ? e.oldText : "";
-        const newText = typeof e?.newText === "string" ? e.newText : "";
-        if (!oldText) { res.status(400).json({ success: false, error: `edits[${i}].oldText is required` }); return; }
-        const first = working.indexOf(oldText);
-        if (first === -1) {
-          res.status(400).json({ success: false, error: `edits[${i}].oldText not found in the current skill — copy it EXACTLY (read the skill first; it may have changed since you read it).` });
-          return;
-        }
-        if (working.indexOf(oldText, first + 1) !== -1) {
-          res.status(400).json({ success: false, error: `edits[${i}].oldText matches more than once — include more surrounding context to make it unique.` });
-          return;
-        }
-        working = working.slice(0, first) + newText + working.slice(first + oldText.length);
+  // ── Construct the proposed content ────────────────────────────────────
+  // PATCH MODE (preferred, 2026-07-15): anchored {oldText,newText} edits
+  // applied server-side to the CURRENT content. Tool arguments then scale
+  // with the CHANGE, not the file — a full body does NOT survive as one
+  // LLM tool argument (output-token truncation silently destroyed a
+  // 318-rule skill today). Full-replacement `content` stays only for small
+  // skills, where truncation cannot occur.
+  const FULL_REPLACEMENT_MAX_CHARS = 8_000;
+  let content: string;
+  if (Array.isArray(edits) && edits.length > 0) {
+    let working = normalizeSkillContent(skill.content);
+    for (const [i, e] of edits.entries()) {
+      const oldText = typeof e?.oldText === "string" ? e.oldText : "";
+      const newText = typeof e?.newText === "string" ? e.newText : "";
+      if (!oldText) throw badRequest(`edits[${i}].oldText is required`);
+      const first = working.indexOf(oldText);
+      if (first === -1) {
+        throw badRequest(`edits[${i}].oldText not found in the current skill — copy it EXACTLY (read the skill first; it may have changed since you read it).`);
       }
-      content = working;
-    } else if (rawContent && rawContent.trim()) {
-      if (normalizeSkillContent(skill.content).length > FULL_REPLACEMENT_MAX_CHARS) {
-        res.status(400).json({
-          success: false,
-          error: `This skill is ${skill.content.length} chars — too large for full-replacement mode (tool arguments get truncated and would destroy it). Use \`edits\` ({oldText, newText} anchored replacements) instead.`,
-        });
-        return;
+      if (working.indexOf(oldText, first + 1) !== -1) {
+        throw badRequest(`edits[${i}].oldText matches more than once — include more surrounding context to make it unique.`);
       }
-      content = rawContent;
-    } else {
-      res.status(400).json({ success: false, error: "Provide `edits` (preferred) or `content`." });
-      return;
+      working = working.slice(0, first) + newText + working.slice(first + oldText.length);
     }
-
-    // Hard shrink guard: a proposal that deletes most of the skill is almost
-    // always a truncated "full replacement", never an intentional edit —
-    // reject rather than warn (the card also warns for smaller shrinks).
-    const baseLen = normalizeSkillContent(skill.content).length;
-    const newLen = normalizeSkillContent(content).length;
-    if (baseLen > 2_000 && newLen < baseLen * 0.6) {
-      res.status(400).json({
-        success: false,
-        error: `Proposed content is ${newLen} chars vs the current ${baseLen} — it removes over 40% of the skill. If this is intentional, make the deletions via explicit \`edits\` so the diff shows exactly what is removed.`,
-      });
-      return;
+    content = working;
+  } else if (rawContent && rawContent.trim()) {
+    if (normalizeSkillContent(skill.content).length > FULL_REPLACEMENT_MAX_CHARS) {
+      throw badRequest(
+        `This skill is ${skill.content.length} chars — too large for full-replacement mode (tool arguments get truncated and would destroy it). Use \`edits\` ({oldText, newText} anchored replacements) instead.`,
+      );
     }
-
-    // Route the approval: personal → owner, global → admin (notify owner/promoter).
-    const approver = resolveSkillUpdateApprover({
-      scope: skill.scope === "global" ? "global" : "personal",
-      ownerUserId: skill.ownerUserId ?? null,
-      promotedBy: skill.promotedBy ?? null,
-    });
-    if (!approver.ok || !approver.approverUserId) {
-      res.status(409).json({ success: false, error: "This skill has no owner or admin to approve an update." });
-      return;
-    }
-
-    // No-op guard: reject an update identical to the current content (409).
-    const diff = computeSkillDiff(skill.content, content);
-    if (!diff.hasChanges) {
-      res.status(409).json({ success: false, error: "Your update is identical to the current skill — nothing to propose." });
-      return;
-    }
-
-    const baseContentHash = hashSkillContent(skill.content);
-    const proposedContentHash = hashSkillContent(content);
-
-    // One pending proposal per (skill, proposer) — enforced by the partial
-    // unique index `agent_requests_pending_skill_update_uniq`. A re-propose
-    // SUPERSEDES the proposer's stale pending row instead of 409ing: the
-    // proposer has no way to withdraw a queued proposal, so a plain 409
-    // deadlocked the slot until the owner declined the old card by hand
-    // (2026-07-16, xyne-spaces-review-guidelines). The stale card resolves to
-    // "already handled" via the pending-only claim.
-    let request: Awaited<ReturnType<typeof agentRequestRepository.supersedeAndCreateSkillUpdate>>["request"];
-    let supersededCount = 0;
-    try {
-      const outcome = await agentRequestRepository.supersedeAndCreateSkillUpdate({
-        skillId: skill.id,
-        skillSlug: skill.slug,
-        requesterId,
-        orgId,
-        proposedContent: normalizeSkillContent(content),
-        baseContentHash,
-        proposedContentHash,
-        requestNote: summary?.trim() || null,
-      });
-      request = outcome.request;
-      supersededCount = outcome.supersededCount;
-      if (supersededCount > 0) {
-        log.info(`[skills/propose-update] superseded ${supersededCount} stale pending proposal(s) for ${skill.slug} by ${requesterId}`);
-      }
-    } catch (err) {
-      // Two concurrent proposals from the same proposer: both supersede zero
-      // rows, one create loses on the unique index. The winner's proposal is
-      // live, so this is a duplicate submission, not a deadlock.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        res.status(409).json({ success: false, error: "A proposal you just submitted for this skill is already pending — this looks like a duplicate. Propose again if this version was different." });
-        return;
-      }
-      throw err;
-    }
-
-    await writeAuditLog({
-      actorUserId: requesterId,
-      eventType: "REQUEST_CREATED",
-      targetId: skill.id,
-      description: `skill_update request for "${skill.name}" (${skill.slug})`,
-    });
-
-    // R1: resolve + AUTHORIZE the posting agent from trusted context before
-    // using its Spaces bot identity to DM the approver. The DM is sent AS this
-    // agent, so the requester must actually be entitled to act as it: its
-    // owner, a contributor (EDITOR/CONTRIBUTOR share), or — for a shared global
-    // agent — any member of the same org. getAgentEditAccess org-scopes the
-    // lookup (cross-org ⇒ null), so a body-supplied slug can never borrow an
-    // agent from another org or another user's private agent. An unauthorized
-    // or unknown slug simply skips the best-effort DM (the request row + inbox
-    // stay authoritative) — it NEVER decrypts or posts with that identity.
-    const requester = await userRepository.findById(requesterId);
-    const proposerName = requester?.name ?? requester?.email ?? "A user";
-    if (agentSlug) {
-      const access = await getAgentEditAccess(requesterId, agentSlug, orgId);
-      if (canProposerPostAsAgent(access)) {
-        void notifyApproverOfSkillUpdateInSpaces({
-          approverUserId: approver.approverUserId,
-          requestId: request.id,
-          skillSlug: skill.slug,
-          skillName: skill.name,
-          proposerName,
-          diff,
-          summary: summary?.trim() || null,
-          agent: access.agent,
-        });
-      } else {
-        log.warn(
-          `[skills/propose-update] owner DM skipped for ${skill.slug}: requester ${requesterId} not authorized to post as agent ${agentSlug}`,
-        );
-      }
-    } else {
-      log.info(`[skills/propose-update] owner DM skipped for ${skill.slug}: no agentSlug on proposal`);
-    }
-
-    res.status(202).json({
-      success: true,
-      data: {
-        requestId: request.id,
-        status: "pending_approval",
-        requiresAdmin: approver.requiresAdmin,
-        // Lets the agent tell the user their earlier stale proposal was replaced.
-        ...(supersededCount > 0 ? { supersededPreviousProposal: true } : {}),
-      },
-    });
-  } catch (err) {
-    log.error("[skills] propose-update error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    content = rawContent;
+  } else {
+    throw badRequest("Provide `edits` (preferred) or `content`.");
   }
-});
+
+  // Hard shrink guard: a proposal that deletes most of the skill is almost
+  // always a truncated "full replacement", never an intentional edit —
+  // reject rather than warn (the card also warns for smaller shrinks).
+  const baseLen = normalizeSkillContent(skill.content).length;
+  const newLen = normalizeSkillContent(content).length;
+  if (baseLen > 2_000 && newLen < baseLen * 0.6) {
+    throw badRequest(
+      `Proposed content is ${newLen} chars vs the current ${baseLen} — it removes over 40% of the skill. If this is intentional, make the deletions via explicit \`edits\` so the diff shows exactly what is removed.`,
+    );
+  }
+
+  // Route the approval: personal → owner, global → admin (notify owner/promoter).
+  const approver = resolveSkillUpdateApprover({
+    scope: skill.scope === "global" ? "global" : "personal",
+    ownerUserId: skill.ownerUserId ?? null,
+    promotedBy: skill.promotedBy ?? null,
+  });
+  if (!approver.ok || !approver.approverUserId) {
+    throw conflict("This skill has no owner or admin to approve an update.");
+  }
+
+  // No-op guard: reject an update identical to the current content (409).
+  const diff = computeSkillDiff(skill.content, content);
+  if (!diff.hasChanges) {
+    throw conflict("Your update is identical to the current skill — nothing to propose.");
+  }
+
+  const baseContentHash = hashSkillContent(skill.content);
+  const proposedContentHash = hashSkillContent(content);
+
+  // One pending proposal per (skill, proposer) — enforced by the partial
+  // unique index `agent_requests_pending_skill_update_uniq`. A re-propose
+  // SUPERSEDES the proposer's stale pending row instead of 409ing: the
+  // proposer has no way to withdraw a queued proposal, so a plain 409
+  // deadlocked the slot until the owner declined the old card by hand
+  // (2026-07-16, xyne-spaces-review-guidelines). The stale card resolves to
+  // "already handled" via the pending-only claim.
+  let request: Awaited<ReturnType<typeof agentRequestRepository.supersedeAndCreateSkillUpdate>>["request"];
+  let supersededCount = 0;
+  try {
+    const outcome = await agentRequestRepository.supersedeAndCreateSkillUpdate({
+      skillId: skill.id,
+      skillSlug: skill.slug,
+      requesterId,
+      orgId,
+      proposedContent: normalizeSkillContent(content),
+      baseContentHash,
+      proposedContentHash,
+      requestNote: summary?.trim() || null,
+    });
+    request = outcome.request;
+    supersededCount = outcome.supersededCount;
+    if (supersededCount > 0) {
+      log.info(`[skills/propose-update] superseded ${supersededCount} stale pending proposal(s) for ${skill.slug} by ${requesterId}`);
+    }
+  } catch (err) {
+    // Two concurrent proposals from the same proposer: both supersede zero
+    // rows, one create loses on the unique index. The winner's proposal is
+    // live, so this is a duplicate submission, not a deadlock.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      throw conflict("A proposal you just submitted for this skill is already pending — this looks like a duplicate. Propose again if this version was different.");
+    }
+    throw err;
+  }
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "REQUEST_CREATED",
+    targetId: skill.id,
+    description: `skill_update request for "${skill.name}" (${skill.slug})`,
+  });
+
+  // R1: resolve + AUTHORIZE the posting agent from trusted context before
+  // using its Spaces bot identity to DM the approver. The DM is sent AS this
+  // agent, so the requester must actually be entitled to act as it: its
+  // owner, a contributor (EDITOR/CONTRIBUTOR share), or — for a shared global
+  // agent — any member of the same org. getAgentEditAccess org-scopes the
+  // lookup (cross-org ⇒ null), so a body-supplied slug can never borrow an
+  // agent from another org or another user's private agent. An unauthorized
+  // or unknown slug simply skips the best-effort DM (the request row + inbox
+  // stay authoritative) — it NEVER decrypts or posts with that identity.
+  const requester = await userRepository.findById(requesterId);
+  const proposerName = requester?.name ?? requester?.email ?? "A user";
+  if (agentSlug) {
+    const access = await getAgentEditAccess(requesterId, agentSlug, orgId);
+    if (canProposerPostAsAgent(access)) {
+      void notifyApproverOfSkillUpdateInSpaces({
+        approverUserId: approver.approverUserId,
+        requestId: request.id,
+        skillSlug: skill.slug,
+        skillName: skill.name,
+        proposerName,
+        diff,
+        summary: summary?.trim() || null,
+        agent: access.agent,
+      });
+    } else {
+      log.warn(
+        `[skills/propose-update] owner DM skipped for ${skill.slug}: requester ${requesterId} not authorized to post as agent ${agentSlug}`,
+      );
+    }
+  } else {
+    log.info(`[skills/propose-update] owner DM skipped for ${skill.slug}: no agentSlug on proposal`);
+  }
+
+  ok(res, {
+    requestId: request.id,
+    status: "pending_approval",
+    requiresAdmin: approver.requiresAdmin,
+    // Lets the agent tell the user their earlier stale proposal was replaced.
+    ...(supersededCount > 0 ? { supersededPreviousProposal: true } : {}),
+  });
+}));
 
 /**
  * Apply-or-reject a skill_update request. Enforced twice (defense in depth):
@@ -799,31 +709,19 @@ export async function resolveSkillUpdateRequest(
 
 // REST parity endpoints (used by tests / non-card callers). The card path in
 // flow-action.ts calls resolveSkillUpdateRequest directly.
-router.post("/skill-update-requests/:requestId/approve", async (req: Request<{ requestId: string }>, res: Response) => {
-  try {
-    const callerUserId = getRequesterId(req);
-    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-    const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "approve");
-    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
-    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
-  } catch (err) {
-    log.error("[skills] approve skill-update error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.post("/skill-update-requests/:requestId/approve", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
+  const callerUserId = requireRequester(req, "x-user-id required");
+  const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "approve");
+  if (!result.ok) throw new HttpError(result.code, result.error);
+  ok(res, { alreadyResolved: result.alreadyResolved ?? false });
+}));
 
-router.post("/skill-update-requests/:requestId/reject", async (req: Request<{ requestId: string }>, res: Response) => {
-  try {
-    const callerUserId = getRequesterId(req);
-    if (!callerUserId) { res.status(401).json({ success: false, error: "x-user-id required" }); return; }
-    const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "reject");
-    if (!result.ok) { res.status(result.code).json({ success: false, error: result.error }); return; }
-    res.json({ success: true, alreadyResolved: result.alreadyResolved ?? false });
-  } catch (err) {
-    log.error("[skills] reject skill-update error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.post("/skill-update-requests/:requestId/reject", asyncHandler(async (req: Request<{ requestId: string }>, res: Response) => {
+  const callerUserId = requireRequester(req, "x-user-id required");
+  const result = await resolveSkillUpdateRequest(req.params.requestId, callerUserId, "reject");
+  if (!result.ok) throw new HttpError(result.code, result.error);
+  ok(res, { alreadyResolved: result.alreadyResolved ?? false });
+}));
 
 void requireClawAdmin;
 

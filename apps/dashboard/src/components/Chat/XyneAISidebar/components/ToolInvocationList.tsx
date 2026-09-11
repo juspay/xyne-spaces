@@ -95,7 +95,7 @@ function CitationList({ citations }: CitationListProps): ReactElement {
         onClick={() => hasOverflow && setExpanded(!expanded)}
         className={`flex w-full items-center justify-between ${hasOverflow ? 'cursor-pointer hover:text-foreground' : ''} text-muted-foreground/70 mb-1 text-[10px] uppercase tracking-wide`}
         type='button'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='toggle-citations-expand'
       >
         <span>Citations ({citations.length})</span>
@@ -118,6 +118,8 @@ function CitationList({ citations }: CitationListProps): ReactElement {
                   to={url}
                   className='break-all text-[10px] text-blue-500 hover:text-blue-600 hover:underline'
                   onClick={e => e.stopPropagation()}
+                  data-track-category='XyneAI'
+                  data-track-name='open-citation-link'
                 >
                   {label}
                 </Link>
@@ -173,7 +175,7 @@ function InvocationItem({ invocation, children }: InvocationItemProps): ReactEle
         onClick={() => setExpanded(!expanded)}
         className='flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground'
         type='button'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='toggle-tool-invocation'
       >
         <ChevronRight

@@ -111,6 +111,7 @@ export const DeskIntegrationCard = ({
             )}
             data-track-category='desk-integration'
             data-track-name='connect'
+            data-ph-capture-attribute-track-id='desk_integration_reconnect'
           >
             <Plug size={14} className='shrink-0' />
             {isReconnecting ? 'Redirecting…' : 'Connect'}
@@ -143,6 +144,8 @@ export const DeskIntegrationCard = ({
               variant='secondary'
               size='sm'
               onClick={() => setShowDisconnectConfirm(false)}
+              data-track-category='desk-integration'
+              data-track-name='CANCEL_DISCONNECT'
               disabled={isDisconnecting}
             >
               Cancel

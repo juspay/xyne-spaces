@@ -27,6 +27,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -105,7 +106,7 @@ async function runCypher(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     throw new Error(`HTTP request to Query API failed (${QUERY_URL}): ${msg}`);
   }
 
@@ -151,13 +152,13 @@ async function getSchema(): Promise<unknown> {
         "YIELD nodeLabels, propertyName, propertyTypes " +
         "RETURN nodeLabels, propertyName, propertyTypes",
       {},
-    ).catch((e) => ({ rows: [{ error: e instanceof Error ? e.message : String(e) }] })),
+    ).catch((e) => ({ rows: [{ error: errMsg(e) }] })),
     runCypher(
       "CALL db.schema.relTypeProperties() " +
         "YIELD relType, propertyName, propertyTypes " +
         "RETURN relType, propertyName, propertyTypes",
       {},
-    ).catch((e) => ({ rows: [{ error: e instanceof Error ? e.message : String(e) }] })),
+    ).catch((e) => ({ rows: [{ error: errMsg(e) }] })),
   ]);
 
   // Fold the flat property rows into a per-label / per-relType map.
@@ -190,7 +191,7 @@ function ok(data: unknown): CallToolResult {
 }
 
 function fail(err: unknown): CallToolResult {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errMsg(err);
   logErr(`tool error: ${msg}`);
   return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
 }

@@ -13,6 +13,7 @@
  */
 
 import { spacesFetch } from "./xyne-spaces-client.js";
+import { errMsg } from "../../lib/errors.js";
 
 interface ToolResult {
   [key: string]: unknown;
@@ -43,7 +44,7 @@ function err(text: string): ToolResult {
  *  bodies into its Error message. Dig the model-facing text back out so the
  *  agent reads "Query validation failed …" instead of a JSON-escaped blob. */
 function modelText(e: unknown, tool: string): string {
-  const raw = e instanceof Error ? e.message : String(e);
+  const raw = errMsg(e);
   const jsonStart = raw.indexOf("{");
   if (jsonStart >= 0) {
     try {

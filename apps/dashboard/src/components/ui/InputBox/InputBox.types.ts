@@ -64,12 +64,21 @@ export interface InputBoxProps {
   onCreateCanvas?: (initialContent?: string) => void;
   onTranscriptSelect?: (content: string) => void;
   onScheduleSend?: (scheduledFor: number, content: string, files: File[]) => void | Promise<void>;
+  showSchedulePresets?: boolean;
   hasTicket?: boolean;
   disableEnterToSend?: boolean;
   hideSendButton?: boolean;
+  hideComposerTools?: boolean;
+  hideVoiceInput?: boolean;
+  compact?: boolean;
   sendDisabled?: boolean;
+  /** Shown on the send button's tooltip in place of 'Send message' while sendDisabled. */
+  sendDisabledReason?: string;
   /** Extra buttons rendered in the left side of the desktop bottom action bar, after the # button */
   bottomLeftSlot?: React.ReactNode;
   disableDraftUpload?: boolean;
   dockSlot?: React.ReactNode;
+  slashCommandArtifactCommand?: string;
+  slashCommandArtifactChannelLabel?: string;
+  onCancelSlashCommandArtifact?: () => void;
 }

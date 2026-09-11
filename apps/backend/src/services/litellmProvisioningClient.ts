@@ -1,6 +1,5 @@
 import { config } from '@/config/env';
 
-const TEAM_MODELS = ['external-kimi', 'external-glm'];
 const USER_MODELS = ['no-default-models'];
 const KEY_MODELS = ['all-team-models'];
 const KEY_TYPE = 'llm_api';
@@ -83,9 +82,21 @@ export interface StoreUserKeyParams {
   userId: string;
   orgId: string;
   spacesOrgId: string;
+  spacesWorkspaceId: string;
+  spacesOrgMemberId: string;
   litellmUserId: string;
   teamId: string;
   key: string;
+  tokenId?: string;
+  keyName?: string;
+  keyAlias?: string;
+  expires?: string;
+}
+
+export interface StoreOrgKeyParams {
+  orgId: string;
+  key: string;
+  teamId?: string;
   tokenId?: string;
   keyName?: string;
   keyAlias?: string;
@@ -96,7 +107,7 @@ class LiteLLMProvisioningClient {
   async createTeam(params: CreateTeamParams): Promise<CreateTeamResult> {
     const body = {
       team_alias: truncate(params.teamAlias, 180),
-      models: TEAM_MODELS,
+      models: config.aiProvisioning.orgDefaultModels,
       max_budget: TEAM_MAX_BUDGET,
       budget_duration: DURATION,
       rpm_limit: TEAM_RPM_LIMIT,
@@ -196,18 +207,6 @@ class LiteLLMProvisioningClient {
     };
   }
 
-  async storeOrgKey(params: {
-    orgId: string;
-    teamId: string;
-    key: string;
-    tokenId?: string;
-    keyName?: string;
-    keyAlias?: string;
-    expires?: string;
-  }): Promise<unknown> {
-    return this.postClawStore('/org-key', params);
-  }
-
   async deleteUser(litellmUserId: string): Promise<void> {
     await this.postLiteLLM('/user/delete', { user_ids: [litellmUserId] });
   }
@@ -226,9 +225,24 @@ class LiteLLMProvisioningClient {
       userId: params.userId,
       orgId: params.orgId,
       spacesOrgId: params.spacesOrgId,
+      spacesWorkspaceId: params.spacesWorkspaceId,
+      spacesOrgMemberId: params.spacesOrgMemberId,
       litellmUserId: params.litellmUserId,
       teamId: params.teamId,
       key: params.key,
+      tokenId: params.tokenId,
+      keyName: params.keyName,
+      keyAlias: params.keyAlias,
+      expires: params.expires,
+    });
+  }
+
+  /** Store the org's DEFAULT service-account key for headless Claw work. */
+  async storeOrgKey(params: StoreOrgKeyParams): Promise<void> {
+    await this.postClawStore('/org-key', {
+      orgId: params.orgId,
+      key: params.key,
+      teamId: params.teamId,
       tokenId: params.tokenId,
       keyName: params.keyName,
       keyAlias: params.keyAlias,

@@ -5,6 +5,8 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import AppNavigator from '../../components/AppNavigator/AppNavigator';
+import { usePlatform } from '../../hooks/usePlatform';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
@@ -20,6 +22,7 @@ import {
   Share2,
   Trash2,
   Download,
+  ScrollText,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
@@ -62,35 +65,51 @@ function isCanvas(value: unknown): value is Canvas {
   return content === undefined || Array.isArray(content);
 }
 
-function RecordingNotesSection({ notesCanvasId }: { notesCanvasId: string }): ReactElement {
-  const [canvasData, canvasDetails] = useCachedQuery(
-    queries.getCanvas({ canvasId: notesCanvasId }),
-    {
-      enabled: !!notesCanvasId,
-    },
-  );
+interface RecordingCanvasSectionProps {
+  canvasId: string;
+  title: string;
+  icon: ReactElement;
+  loadingLabel: string;
+  errorLabel: string;
+  placeholder: string;
+}
+
+function RecordingCanvasSection({
+  canvasId,
+  title,
+  icon,
+  loadingLabel,
+  errorLabel,
+  placeholder,
+}: RecordingCanvasSectionProps): ReactElement {
+  const [canvasData, canvasDetails] = useCachedQuery(queries.getCanvas({ canvasId }), {
+    enabled: !!canvasId,
+  });
   const canvas = isCanvas(canvasData) ? canvasData : null;
   const hasCanvasError =
     canvasDetails.type === 'error' || (canvasDetails.type === 'complete' && !canvas);
 
-  return (
-    <div className='mb-6 bg-background rounded-lg border border-border p-6'>
-      <div className='flex items-center gap-2 mb-4'>
-        <FileText className='w-4 h-4 text-muted-foreground' />
-        <h2 className='text-lg font-semibold text-foreground'>Notes</h2>
-      </div>
-
-      {hasCanvasError ? (
+  const renderBody = (): ReactElement => {
+    if (hasCanvasError) {
+      return (
         <div className='flex items-center gap-2 text-sm text-destructive'>
           <AlertCircle className='size-4' />
-          <span>Failed to load notes.</span>
+          <span>{errorLabel}</span>
         </div>
-      ) : !canvas ? (
+      );
+    }
+
+    if (!canvas) {
+      return (
         <div className='flex items-center gap-2 text-sm text-muted-foreground'>
           <Loader2 className='size-4 animate-spin' />
-          <span>Loading notes...</span>
+          <span>{loadingLabel}</span>
         </div>
-      ) : canvas.isCollaborative ? (
+      );
+    }
+
+    if (canvas.isCollaborative) {
+      return (
         <div className='min-h-[360px] overflow-hidden rounded-md border border-border'>
           <CollaborativeCanvasEditor
             key={canvas.id}
@@ -98,20 +117,34 @@ function RecordingNotesSection({ notesCanvasId }: { notesCanvasId: string }): Re
             channelId={canvas.channelId || undefined}
             title={canvas.title}
             editable={false}
-            placeholder='Recording notes...'
+            placeholder={placeholder}
             autoFocus={false}
           />
         </div>
-      ) : (
-        <div className='min-h-[240px] overflow-hidden rounded-md border border-border p-4'>
-          <CanvasEditor content={canvas.content} editable={false} canvasId={canvas.id} />
-        </div>
-      )}
+      );
+    }
+
+    return (
+      <div className='min-h-[240px] overflow-hidden rounded-md border border-border p-4'>
+        <CanvasEditor content={canvas.content} editable={false} canvasId={canvas.id} />
+      </div>
+    );
+  };
+
+  return (
+    <div className='mb-6 bg-background rounded-lg border border-border p-6'>
+      <div className='flex items-center gap-2 mb-4'>
+        {icon}
+        <h2 className='text-lg font-semibold text-foreground'>{title}</h2>
+      </div>
+
+      {renderBody()}
     </div>
   );
 }
 
 export default function RecordingDetailScreen(): ReactElement {
+  const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -311,6 +344,15 @@ export default function RecordingDetailScreen(): ReactElement {
 
   return (
     <div className='h-full overflow-auto bg-muted'>
+      {/* This root is itself the scroll container, so a zero-height sticky wrapper
+          pins the navigator without contributing layout height. */}
+      {!isMobile && (
+        <div className='sticky left-0 top-0 z-30 hidden h-0 w-fit md:block'>
+          <div className='h-[52px] w-fit'>
+            <AppNavigator />
+          </div>
+        </div>
+      )}
       <div className='max-w-4xl mx-auto p-6'>
         {/* Header */}
         <div className='mb-6'>
@@ -493,17 +535,39 @@ export default function RecordingDetailScreen(): ReactElement {
           </div>
         )}
 
+        {/* Detailed Summary */}
+        {recording.detailedSummaryCanvasId && (
+          <RecordingCanvasSection
+            canvasId={recording.detailedSummaryCanvasId}
+            title='Detailed Summary'
+            icon={<ScrollText className='w-4 h-4 text-muted-foreground' />}
+            loadingLabel='Loading detailed summary...'
+            errorLabel='Failed to load detailed summary.'
+            placeholder='Detailed summary...'
+          />
+        )}
+
         {/* Notes */}
         {recording.notesCanvasId && (
-          <RecordingNotesSection notesCanvasId={recording.notesCanvasId} />
+          <RecordingCanvasSection
+            canvasId={recording.notesCanvasId}
+            title='Notes'
+            icon={<FileText className='w-4 h-4 text-muted-foreground' />}
+            loadingLabel='Loading notes...'
+            errorLabel='Failed to load notes.'
+            placeholder='Recording notes...'
+          />
         )}
 
         {/* No content message */}
-        {!recording.hasTranscript && !recording.hasSummary && !recording.notesCanvasId && (
-          <div className='bg-background rounded-lg border border-border p-12 text-center'>
-            <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
-          </div>
-        )}
+        {!recording.hasTranscript &&
+          !recording.hasSummary &&
+          !recording.notesCanvasId &&
+          !recording.detailedSummaryCanvasId && (
+            <div className='bg-background rounded-lg border border-border p-12 text-center'>
+              <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
+            </div>
+          )}
       </div>
 
       {/* Share Recording Dialog */}

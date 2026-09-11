@@ -37,6 +37,10 @@ export const setCurrentFolderId = (
   knowledgeBaseActor.send({ type: 'SET_CURRENT_FOLDER_ID', id: next });
 };
 
+export const setCurrentFileId = (id: string | null): void => {
+  knowledgeBaseActor.send({ type: 'SET_CURRENT_FILE_ID', id });
+};
+
 export const setViewMode = (mode: ViewMode): void => {
   knowledgeBaseActor.send({ type: 'SET_VIEW_MODE', mode });
 };
@@ -79,6 +83,8 @@ export interface ProjectCollectionsValue {
   setActiveCollection: typeof setActiveCollection;
   currentFolderId: string | null;
   setCurrentFolderId: typeof setCurrentFolderId;
+  currentFileId: string | null;
+  setCurrentFileId: typeof setCurrentFileId;
   viewMode: ViewMode;
   setViewMode: typeof setViewMode;
   expansionState: Record<string, boolean>;
@@ -99,6 +105,7 @@ export function useProjectCollections(): ProjectCollectionsValue {
   const channelId = useSelector(knowledgeBaseActor, s => s.context.channelId);
   const activeCollection = useSelector(knowledgeBaseActor, s => s.context.activeCollection);
   const currentFolderId = useSelector(knowledgeBaseActor, s => s.context.currentFolderId);
+  const currentFileId = useSelector(knowledgeBaseActor, s => s.context.currentFileId);
   const viewMode = useSelector(knowledgeBaseActor, s => s.context.viewMode);
   const expansionState = useSelector(knowledgeBaseActor, s => s.context.expansionState);
   const nodes = useSelector(knowledgeBaseActor, s => s.context.nodes);
@@ -115,6 +122,8 @@ export function useProjectCollections(): ProjectCollectionsValue {
     setActiveCollection,
     currentFolderId,
     setCurrentFolderId,
+    currentFileId,
+    setCurrentFileId,
     viewMode,
     setViewMode,
     expansionState,

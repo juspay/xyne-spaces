@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 export const DESK_TABLE_BUILTIN_COLUMNS = [
   { key: 'createdAt', label: 'Created at' },
+  { key: 'age', label: 'Age' },
   { key: 'assignee', label: 'Assignee' },
   { key: 'dueDate', label: 'Due date' },
   { key: 'status', label: 'Status Category' },
@@ -14,13 +15,33 @@ const DEFAULT_COLUMN_KEYS = DESK_TABLE_BUILTIN_COLUMNS.map(column => column.key 
 
 const storageKey = (channelId: string): string => `desk-table-columns-${channelId}`;
 
+const CURRENT_COLUMNS_VERSION = 3;
+
+// Adding a builtin column means bumping the version and listing its key here,
+// or desks with saved column choices never see it.
+const COLUMNS_ADDED_IN_VERSION: ReadonlyMap<number, readonly string[]> = new Map([
+  [2, ['createdAt']],
+  [3, ['age']],
+]);
+
+const withColumnsAddedSince = (version: number, columns: Set<string>): Set<string> => {
+  const next = new Set(columns);
+  for (let v = version + 1; v <= CURRENT_COLUMNS_VERSION; v += 1) {
+    for (const key of COLUMNS_ADDED_IN_VERSION.get(v) ?? []) next.add(key);
+  }
+  return next;
+};
+
 interface StoredDeskTableColumns {
-  version: 2;
+  version: number;
   columns: string[];
 }
 
 const writeColumns = (channelId: string, columns: Set<string>): void => {
-  const value: StoredDeskTableColumns = { version: 2, columns: [...columns] };
+  const value: StoredDeskTableColumns = {
+    version: CURRENT_COLUMNS_VERSION,
+    columns: [...columns],
+  };
   localStorage.setItem(storageKey(channelId), JSON.stringify(value));
 };
 
@@ -30,27 +51,30 @@ const readColumns = (channelId: string | null): Set<string> => {
     const raw = localStorage.getItem(storageKey(channelId));
     if (!raw) return new Set(DEFAULT_COLUMN_KEYS);
     const parsed: unknown = JSON.parse(raw);
+    // The original format was a bare array of keys — treat it as version 1.
     if (Array.isArray(parsed)) {
-      // Migrate the old array-only format once. Existing desks should gain the
-      // new Created-at column without losing the user's other column choices.
-      const migrated = new Set([
-        ...parsed.filter((key): key is string => typeof key === 'string'),
-        'createdAt',
-      ]);
+      const migrated = withColumnsAddedSince(
+        1,
+        new Set(parsed.filter((key): key is string => typeof key === 'string')),
+      );
       writeColumns(channelId, migrated);
       return migrated;
     }
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
-      (parsed as Partial<StoredDeskTableColumns>).version === 2 &&
+      typeof (parsed as Partial<StoredDeskTableColumns>).version === 'number' &&
       Array.isArray((parsed as Partial<StoredDeskTableColumns>).columns)
     ) {
-      return new Set(
-        (parsed as StoredDeskTableColumns).columns.filter(
-          (key): key is string => typeof key === 'string',
-        ),
+      const stored = parsed as StoredDeskTableColumns;
+      const columns = new Set(
+        stored.columns.filter((key): key is string => typeof key === 'string'),
       );
+      // Ahead of this build (user rolled back) — leave their choices untouched.
+      if (stored.version >= CURRENT_COLUMNS_VERSION) return columns;
+      const migrated = withColumnsAddedSince(stored.version, columns);
+      writeColumns(channelId, migrated);
+      return migrated;
     }
     return new Set(DEFAULT_COLUMN_KEYS);
   } catch {

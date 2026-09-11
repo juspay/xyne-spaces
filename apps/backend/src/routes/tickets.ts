@@ -11,6 +11,7 @@ import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator'
 import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
+import { FlowRunExportController } from '@/controllers/flowRunExportController';
 
 const router = Router();
 const ticketController = new TicketController();
@@ -18,15 +19,29 @@ const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
+const flowRunExportController = new FlowRunExportController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
 // Kanban board counts grouped by the active view, filters, and group-by mode
 router.post('/kanban/counts', kanbanTicketController.getCounts);
+router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
+router.post(
+  '/:ticketId/flow-groups/:groupId/backlog',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketController.backlogFlowGroup,
+);
+// Bulk add/remove tags across many tickets in one request (additive semantics)
+router.post(
+  '/bulk-tags',
+  authorize('TICKETS', AccessType.WRITE),
+  ticketController.bulkUpdateTags,
+);
+
 // Update a ticket (assignee, stage, group, title, description, priority, status, eta)
 router.patch('/:ticketId', ticketController.updateTicket);
 

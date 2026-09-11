@@ -23,6 +23,7 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
@@ -32,11 +33,26 @@ router.post('/recordings/:callId/export-google-doc', recordingGoogleDocControlle
 router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
+router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
+router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
+router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post(
+  '/summary-templates/ai/generate-system-prompt',
+  summaryTemplateController.generateSystemPrompt
+);
+router.get('/summary-templates/publication/context', summaryTemplateController.publicationContext);
+router.get('/summary-templates/:templateId/shares', summaryTemplateController.listShares);
+router.post('/summary-templates/:templateId/sharing', summaryTemplateController.manageSharing);
+router.post(
+  '/summary-templates/:templateId/publication',
+  summaryTemplateController.managePublication
+);
 router.patch('/summary-templates/:templateId', summaryTemplateController.update);
+router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
@@ -80,6 +96,9 @@ router.post('/:callId/generate-prd', callController.generatePRD);
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
+// Rewrite a call's detailed summary with a chosen summary template
+router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
+
 // Invite users to call (creates call_participants for notifications)
 router.post('/:callId/invite', callController.inviteUsers);
 
@@ -97,6 +116,18 @@ router.get('/:callId/participants', callController.getCallParticipants);
 
 // Get call chat history (for recording detail page)
 router.get('/:callId/chat-history', callController.getCallChatHistory);
+
+// Update a call's labels (the call's audience; recordings use /recordings/:callId)
+router.patch('/:callId/labels', callController.updateCallLabels);
+
+// Share a call with people, groups or channels.
+router.post('/:callId/sharing', recordingSharingController.manage);
+
+// Draft a follow-up email and export to Google Docs.
+router.get('/:callId/email-compose-context', recordingEmailController.getComposeContext);
+router.post('/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
@@ -118,6 +149,12 @@ router.post('/:callId/recording/stop', callController.stopCallRecording);
 
 // Host controls: turn off/allow audio, camera, screen-share for all non-host participants (host only)
 router.patch('/:callId/host-controls', callHostControlController.setHostControls);
+
+// End-of-call transcript disposition when transcription was toggled off (host only): keep | discard
+router.post('/:callId/transcript-disposition', callHostControlController.setTranscriptDisposition);
+
+// Mid-call transcription on/off state → room metadata so late joiners sync (host only)
+router.patch('/:callId/transcription-state', callHostControlController.setTranscriptionState);
 
 // Remove a participant from the call (host only); rejoin requires re-admission
 router.post('/:callId/remove-participant', callHostControlController.removeCallParticipant);

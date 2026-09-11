@@ -11,7 +11,7 @@ export class UserAssignmentStateController {
   async toggleAssignmentAvailability(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;
-      const { isUnavailable, unavailableUntil } = req.body;
+      const { isUnavailable, unavailableUntil, reassignExistingTickets = false } = req.body;
 
       if (!userId) {
         res.status(401).json({ error: 'Unauthorized' });
@@ -19,6 +19,11 @@ export class UserAssignmentStateController {
       }
 
       if (isUnavailable === true) {
+        if (typeof reassignExistingTickets !== 'boolean') {
+          res.status(400).json({ error: 'reassignExistingTickets must be a boolean.' });
+          return;
+        }
+
         // Toggle ON: Set user as unavailable
         if (!unavailableUntil) {
           res.status(400).json({ error: 'Please select a time.' });
@@ -39,18 +44,22 @@ export class UserAssignmentStateController {
 
         const userGroupIds = await userAssignmentStateService.setUnavailableForAssignment(
           userId,
-          unavailableUntilTimestamp
+          unavailableUntilTimestamp,
+          reassignExistingTickets
         );
 
         res.json({
           success: true,
           message: 'User set as unavailable for assignment',
           unavailableUntil: unavailableUntilTimestamp,
+          reassignExistingTickets,
           userGroupIds,
           groupCount: userGroupIds.length,
         });
 
-        logger.info(`👤 [ASSIGNMENT-STATE-API] User ${userId} set unavailable for assignment until ${new Date(unavailableUntilTimestamp).toISOString()}`);
+        logger.info(
+          `👤 [ASSIGNMENT-STATE-API] User ${userId} set unavailable for assignment until ${new Date(unavailableUntilTimestamp).toISOString()}${reassignExistingTickets ? ' with existing-ticket reassignment requested' : ''}`
+        );
       } else {
         // Toggle OFF: Set user as available (restore from backup)
         const userGroupIds = await userAssignmentStateService.setAvailableForAssignment(userId);
@@ -62,7 +71,9 @@ export class UserAssignmentStateController {
           groupCount: userGroupIds.length,
         });
 
-        logger.info(`👤 [ASSIGNMENT-STATE-API] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`);
+        logger.info(
+          `👤 [ASSIGNMENT-STATE-API] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`
+        );
       }
     } catch (error) {
       logger.error('❌ [ASSIGNMENT-STATE-API] Error toggling assignment availability:', error);

@@ -4,7 +4,7 @@
  */
 export const PATH_TO_RESOURCE: Record<string, string> = {
   '/support': 'SUPPORT',
-  '/knowledge-base': 'KNOWLEDGE-BASE',
+  '/sdlc': 'SDLC',
   '/analytics': 'ANALYTICS',
   '/dashboards': 'ANALYTICS',
   '/user-groups': 'USER-GROUPS',
@@ -18,6 +18,8 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/product-insights': 'PRODUCT-INSIGHTS',
   '/projects': 'PROJECTS',
   '/workspace-management': 'WORKSPACE',
+  '/tag-review': 'WORKSPACE',
   '/organisations': 'ORGANIZATIONS',
   '/team-intelligence': 'TEAM-INTELLIGENCE-DASHBOARD',
+  '/workflows': 'WORKFLOWS',
 };

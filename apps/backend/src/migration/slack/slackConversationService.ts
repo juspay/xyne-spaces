@@ -19,6 +19,7 @@ import { UserRepository } from '../../database/repositories/users';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
 import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
+import { buildSlackMigrationSourceName } from './slackMigrationSource';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -891,8 +892,10 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       });
     }
 
-    // External source name format: slackMigration-{slackChannelId}
-    const externalSourceName = `slackMigration-${input.channelId}`;
+    // External source name format: slackMigration-{slackChannelId}-{xyneChannelId}.
+    // The Xyne channel id scopes the source so the same Slack channel can be
+    // migrated into multiple Xyne channels/workspaces without a name collision.
+    const externalSourceName = buildSlackMigrationSourceName(input.channelId!, input.xyneSpaceChannelId);
 
     // Process batches
     let totalMessages = 0;
@@ -995,7 +998,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         });
 
         if (legacyMessages.length > 0 && xyneChannelForLegacy) {
-          const externalSourceNameLegacy = `slackMigration-${input.channelId}`;
+          const externalSourceNameLegacy = buildSlackMigrationSourceName(input.channelId!, input.xyneSpaceChannelId);
 
           // Sub-batch legacy messages using the same weight-based OOM protection
           // as processBatch (weight = 1 top-level + N replies per message).
@@ -1282,7 +1285,7 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
       });
     }
 
-    const externalSourceName = `slackMigration-${dmChannelId}`;
+    const externalSourceName = buildSlackMigrationSourceName(dmChannelId, xyneSpaceChannelId);
     const migrationInput: MigrationInput = {
       channelId: dmChannelId,
       xyneSpaceChannelId,

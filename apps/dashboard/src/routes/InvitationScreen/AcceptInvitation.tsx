@@ -246,7 +246,12 @@ export const AcceptInvitation = (): ReactElement => {
           <h1 className='text-2xl font-semibold text-foreground mb-2'>
             You are not supposed to access this invitation
           </h1>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -263,7 +268,12 @@ export const AcceptInvitation = (): ReactElement => {
           </div>
           <h1 className='text-2xl font-semibold text-foreground mb-2'>Invitation Expired</h1>
           <p className='text-muted-foreground mb-6'>{state.message}</p>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -280,7 +290,12 @@ export const AcceptInvitation = (): ReactElement => {
           </div>
           <h1 className='text-2xl font-semibold text-foreground mb-2'>Invalid Invitation</h1>
           <p className='text-muted-foreground mb-6'>{state.message}</p>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -291,8 +306,12 @@ export const AcceptInvitation = (): ReactElement => {
   // state.status === 'accepted'
   if (state.status === 'accepted') {
     const isInElectron = typeof window.electronAPI?.openExternal === 'function';
+    // New users must land on the workspace index so HomeScreen can redirect them
+    // to the onboarding questionnaire; deep-link redirectPath is only for
+    // returning users who have already completed onboarding.
+    const isNewUser = Cookies.get('is_new_user') === 'true';
     let targetPath = state.redirectPath || `/${state.workspaceId}`;
-    if (!targetPath.startsWith('/') || targetPath.startsWith('//')) {
+    if (isNewUser || !targetPath.startsWith('/') || targetPath.startsWith('//')) {
       targetPath = `/${state.workspaceId}`;
     }
 
@@ -302,9 +321,7 @@ export const AcceptInvitation = (): ReactElement => {
       window.location.href = targetPath;
     } else {
       // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.
-      const launchPath = state.redirectPath
-        ? state.redirectPath.replace(/^\//, '')
-        : state.workspaceId;
+      const launchPath = targetPath.replace(/^\//, '');
       window.location.href = `/launch?path=${encodeURIComponent(launchPath)}`;
     }
     return <></>;
@@ -395,7 +412,12 @@ export const AcceptInvitation = (): ReactElement => {
           )}
         </div>
 
-        <Button onClick={() => void handleAccept()} className='w-full'>
+        <Button
+          onClick={() => void handleAccept()}
+          data-track-category='Invitations'
+          data-track-name='ACCEPT_INVITATION'
+          className='w-full'
+        >
           Accept Invitation
         </Button>
       </div>

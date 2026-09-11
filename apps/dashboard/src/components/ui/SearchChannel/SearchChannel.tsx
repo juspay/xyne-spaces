@@ -173,6 +173,8 @@ export const SearchChannel: React.FC<SearchChannelProps> = ({
                 <button
                   type='button'
                   onClick={() => handleTagRemove(c)}
+                  data-track-category='ENTITY_PICKER'
+                  data-track-name='REMOVE_CHANNEL_CHIP'
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${c.name}`}
                 >

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
 import { createAgent, updateAgent } from '../services/claw/clawAgentWizardService';
@@ -55,6 +55,12 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
   const userId = user?.id;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+
+  // The library's agent detail screen. Workspace-prefixed, since every claw
+  // surface now lives under /:workspaceId/ai.
+  const detailPath = (slug: string): string =>
+    `${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/${slug}?tab=persona`;
 
   return useMutation<Agent, Error, WizardSubmission>({
     mutationFn: async s => {
@@ -112,7 +118,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
     onSuccess: agent => {
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
       toast.success('Agent created');
-      void navigate(`/claw-agents/agents/${agent.slug}?tab=persona`);
+      void navigate(detailPath(agent.slug));
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so
@@ -122,7 +128,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
         toast.error(
           'Agent created, but tools and skills could not be attached — add them from the agent page.',
         );
-        void navigate(`/claw-agents/agents/${err.slug}?tab=persona`);
+        void navigate(detailPath(err.slug));
       }
       // Plain create failures surface via the mutation's `error` (Review step box).
     },

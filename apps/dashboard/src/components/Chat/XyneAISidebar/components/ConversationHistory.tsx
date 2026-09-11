@@ -545,6 +545,7 @@ const ConversationItem = ({
                 onDelete();
                 setOpenDropdownId(null);
               }}
+              data-ph-capture-attribute-track-id='delete_conversation'
               className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-destructive touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='DELETE_CONVERSATION'
@@ -579,6 +580,7 @@ const ConversationItem = ({
               onDelete();
               setOpenDropdownId(null);
             }}
+            data-ph-capture-attribute-track-id='delete_conversation'
             className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-destructive'
             data-track-category='XyneAI'
             data-track-name='DELETE_DESKTOP'

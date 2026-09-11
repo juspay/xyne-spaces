@@ -13,6 +13,7 @@ import {
   Forward,
   Copy,
   Headphones,
+  Mic,
   ArrowLeft,
   Clock3,
 } from 'lucide-react';
@@ -42,6 +43,7 @@ export interface MessageActionsDrawerProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onEditMessage?: () => void;
   onDeleteMessage?: () => void;
@@ -59,6 +61,9 @@ export interface MessageActionsDrawerProps {
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
+  /** Starts a headless ("take notes") recording anchored to this thread. */
+  onStartRecording?: () => void;
+  isRecordingDisabled?: boolean;
   isChannelArchived?: boolean;
   onCopyImage?: () => void;
 }
@@ -73,6 +78,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  showSubscription,
   onCreateTicket,
   onEditMessage,
   onDeleteMessage,
@@ -90,6 +96,8 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onMarkAsUnread,
   onInitiateCall,
   isCallDisabled = false,
+  onStartRecording,
+  isRecordingDisabled = false,
   isChannelArchived = false,
   onCopyImage,
 }) => {
@@ -229,6 +237,16 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                     />
                   )}
 
+                  {/* Start Recording (Take Notes) */}
+                  {onStartRecording && messageId === initialMessageId && !isChannelArchived && (
+                    <ActionButton
+                      icon={<Mic className='w-5 h-5' />}
+                      label={isRecordingDisabled ? 'Recording in progress' : 'Take Notes'}
+                      onClick={() => handleActionClick(onStartRecording)}
+                      disabled={isRecordingDisabled}
+                    />
+                  )}
+
                   {/* Send to Channel */}
                   {onSendToChannel && (
                     <ActionButton
@@ -322,7 +340,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   )}
 
                   {/* Conversation Subscription */}
-                  {open && onReplyInThread && conversationId && (
+                  {open && showSubscription && conversationId && (
                     <ConversationSubscription
                       conversationId={conversationId}
                       {...(conversation && { conversation })}

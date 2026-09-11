@@ -18,8 +18,13 @@ export function isOAuthServerType(type: string): boolean {
   return OAUTH_SERVER_TYPES.has(type);
 }
 
-/** OAuth by built-in type OR a DB-declared connectorMeta.authMethod="oauth". */
-export function isOAuthServer(type: string, connectorMeta?: unknown): boolean {
+/**
+ * OAuth by built-in type, a DB-declared connectorMeta.authMethod="oauth", or
+ * the explicit McpServer.isOauth flag (lets an admin-defined connector with
+ * no code opt in purely via the DB).
+ */
+export function isOAuthServer(type: string, connectorMeta?: unknown, isOauth?: boolean): boolean {
+  if (isOauth === true) return true;
   if (OAUTH_SERVER_TYPES.has(type)) return true;
   if (connectorMeta && typeof connectorMeta === "object") {
     const m = connectorMeta as Record<string, unknown>;

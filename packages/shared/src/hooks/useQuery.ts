@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useQuery as zeroUseQuery } from '@rocicorp/zero/react';
 import type {
   DefaultSchema,
@@ -16,7 +16,168 @@ import { Event } from '../logger/events.js';
 import { useInstrumentation } from './useZero.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
+import { useEncryptionConfig } from './useEncryptionConfig.js';
+import { decryptionCache } from '../crypto/decryption-cache.js';
+import { isEncryptedField } from '../crypto/field-decrypt.js';
 import { wasInterrupted } from './metricValidity.js';
+import type { MetricsRecorder } from '../logger/index.js';
+
+/**
+ * Decryption pass over query results using server-provided config.
+ * Pure function — no hooks allowed here.
+ * Records metrics when metrics API is provided.
+ */
+function decryptResultData<TData>(
+  data: TData,
+  key: CryptoKey | null,
+  encryptedFields: Record<string, { fields: string[]; enforceClientEncryption: boolean }>,
+  metrics?: MetricsRecorder,
+  queryName?: string,
+): [TData, boolean] {
+  if (!data || typeof data !== 'object') {
+    return [data, false];
+  }
+
+  let hasPending = false;
+  const startTime = performance.now();
+  let cacheHits = 0;
+  let cacheMisses = 0;
+  let fieldsProcessed = 0;
+  const tablesEncountered = new Set<string>();
+
+  function traverseRecord(record: Record<string, unknown>): Record<string, unknown> {
+    const entries = Object.entries(record).filter(([k]) => k !== '__tableName');
+    const result: Record<string, unknown> = {};
+
+    for (const [k, v] of entries) {
+      result[k] = traverse(v);
+    }
+
+    return result;
+  }
+
+  function decryptRecord(
+    record: Record<string, unknown>,
+    tableName: string,
+  ): [Record<string, unknown>, boolean] {
+    const tableConfig = encryptedFields[tableName];
+    if (!tableConfig || !tableConfig.fields?.length || !tableConfig.enforceClientEncryption) {
+      if ('__tableName' in record) {
+        const { __tableName, ...rest } = record;
+        return [rest, false];
+      }
+      return [record, false];
+    }
+
+    tablesEncountered.add(tableName);
+    const fieldsToDecrypt = tableConfig.fields;
+    let recordPending = false;
+    let modified = false;
+    const copy: Record<string, unknown> = {};
+
+    for (const field of fieldsToDecrypt) {
+      const value = record[field];
+      if (isEncryptedField(value)) {
+        fieldsProcessed++;
+        const encryptedValue = value as string;
+        const cached = decryptionCache.get(encryptedValue);
+
+        if (cached !== undefined) {
+          copy[field] = cached;
+          modified = true;
+          cacheHits++;
+        } else {
+          if (key) {
+            const prefetchStart = performance.now();
+            void decryptionCache.prefetch(encryptedValue, key);
+            const prefetchLatency = performance.now() - prefetchStart;
+            metrics?.recordLatency?.('crypto.decrypt.cache.prefetch', prefetchLatency, {
+              query: queryName ?? 'unknown',
+              table: tableName,
+            });
+          }
+          // Mark as pending even without key - ensures re-processing when key arrives
+          recordPending = true;
+          cacheMisses++;
+        }
+      }
+    }
+
+    if (modified) {
+      const result = { ...record, ...copy };
+      // Remove metadata field before returning
+      delete result['__tableName'];
+      return [result, recordPending];
+    }
+    // Remove metadata field even if not modified
+    if ('__tableName' in record) {
+      const { __tableName, ...rest } = record;
+      return [rest, recordPending];
+    }
+    return [record, recordPending];
+  }
+
+  function traverse(value: unknown): unknown {
+    if (!value || typeof value !== 'object') return value;
+
+    if (Array.isArray(value)) {
+      const firstRow = value[0] as Record<string, unknown> | undefined;
+      const tableName = firstRow?.['__tableName'] as string | undefined;
+
+      if (tableName && encryptedFields[tableName]?.enforceClientEncryption) {
+        const decrypted: unknown[] = [];
+        for (const row of value) {
+          if (row && typeof row === 'object') {
+            const [dr, pending] = decryptRecord(row as Record<string, unknown>, tableName);
+            if (pending) hasPending = true;
+            decrypted.push(traverseRecord(dr));
+          } else {
+            decrypted.push(row);
+          }
+        }
+        return decrypted;
+      }
+
+      return value.map(traverse);
+    }
+
+    const obj = value as Record<string, unknown>;
+    const tableName = obj['__tableName'] as string | undefined;
+
+    if (tableName && encryptedFields[tableName]?.enforceClientEncryption) {
+      const [dr, pending] = decryptRecord(obj, tableName);
+      if (pending) hasPending = true;
+      return traverseRecord(dr);
+    }
+
+    return traverseRecord(obj);
+  }
+
+  const result = traverse(data);
+
+  const totalLatency = performance.now() - startTime;
+  if (fieldsProcessed > 0 && metrics) {
+    const tableTag = Array.from(tablesEncountered).join(',');
+    metrics.recordLatency('crypto.decrypt.result_data', totalLatency, {
+      query: queryName ?? 'unknown',
+      table: tableTag,
+    });
+    metrics.recordLatency('crypto.decrypt.cache_hits', cacheHits, {
+      query: queryName ?? 'unknown',
+      table: tableTag,
+    });
+    metrics.recordLatency('crypto.decrypt.cache_misses', cacheMisses, {
+      query: queryName ?? 'unknown',
+      table: tableTag,
+    });
+    metrics.recordLatency('crypto.decrypt.fields_processed', fieldsProcessed, {
+      query: queryName ?? 'unknown',
+      table: tableTag,
+    });
+  }
+
+  return [result as TData, hasPending];
+}
 
 /**
  * App-wide default TTL for queries that don't specify one. Zero's own default
@@ -165,7 +326,7 @@ export function useQuery<
   useEffect(() => {
     if (!isEnabled) return;
     hasLoggedCompleteRef.current = false;
-    logger.info(Event.ZERO_QUERY_CALLED, { query: queryName, args: query.args });
+    logger.info(Event.ZERO_QUERY_CALLED, { query: queryName });
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
   }, [queryName, argsKey, isEnabled]);
 
@@ -182,14 +343,62 @@ export function useQuery<
       }
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
       const rowCount = Array.isArray(data) ? data.length : data != null ? 1 : 0;
-      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, args, skewed, rowCount });
+      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, skewed, rowCount });
     } else if (details.type === 'error') {
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });
     }
-  }, [data, details, queryName]);
+  }, [data, details, queryName, startTime, metrics, logger]);
 
-  return result;
+  // Decryption pass — uses server-provided config from context
+  const { key, config: encConfig } = useEncryptionConfig();
+  const encryptedFields = encConfig?.encryptedFields ?? {};
+  const clientEncryptionEnabled = encConfig?.clientEncryptionEnabled ?? false;
+  const hasEncrypted = Object.keys(encryptedFields).length > 0;
+  const shouldDecrypt = hasEncrypted && clientEncryptionEnabled;
+
+  const [decryptionTick, setDecryptionTick] = useState(0);
+  const triggerRerender = useCallback(() => setDecryptionTick(t => t + 1), []);
+
+  // Ref to hold fully-decrypted data snapshot - only updated when hasPending is false
+  const stableDecryptedRef = useRef<typeof data | null>(null);
+  // Track the source data that produced our stable snapshot
+  const lastSourceDataRef = useRef<typeof data | null>(null);
+
+  const [decryptedData, hasPending] = useMemo(
+    () => (shouldDecrypt ? decryptResultData(data, key, encryptedFields, metrics, queryName) : [data, false]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, key, encryptedFields, decryptionTick, shouldDecrypt],
+  );
+
+  // Update stable ref only when we have complete decrypted data
+  useEffect(() => {
+    if (!shouldDecrypt) return;
+    if (!hasPending && decryptedData !== lastSourceDataRef.current) {
+      stableDecryptedRef.current = decryptedData;
+      lastSourceDataRef.current = data;
+    }
+  }, [decryptedData, hasPending, data, shouldDecrypt]);
+
+  useEffect(() => {
+    if (!shouldDecrypt) return;
+    if (hasPending) {
+      return decryptionCache.subscribe(triggerRerender);
+    }
+    return undefined;
+  }, [hasPending, triggerRerender, data, shouldDecrypt]);
+
+  if (!shouldDecrypt) {
+    return result;
+  }
+
+  // Return stable snapshot while decrypting to prevent UI flicker.
+  // Only expose new data when fully decrypted (hasPending = false).
+  // On first render with no stable data yet, return current decrypted state.
+  const outputData =
+    hasPending && stableDecryptedRef.current !== null ? stableDecryptedRef.current : decryptedData;
+
+  return [outputData, details] as unknown as QueryResult<TReturn>;
 }
 
 /**
@@ -237,5 +446,53 @@ export function useRawQuery<
     }
   }, [data, details, queryName]);
 
-  return result;
+  // Decryption pass — uses server-provided config from context
+  const { key, config: encConfig } = useEncryptionConfig();
+  const encryptedFields = encConfig?.encryptedFields ?? {};
+  const clientEncryptionEnabled = encConfig?.clientEncryptionEnabled ?? false;
+  const hasEncrypted = Object.keys(encryptedFields).length > 0;
+  const shouldDecrypt = hasEncrypted && clientEncryptionEnabled;
+
+  const [decryptionTick, setDecryptionTick] = useState(0);
+  const triggerRerender = useCallback(() => setDecryptionTick(t => t + 1), []);
+
+  // Ref to hold fully-decrypted data snapshot - only updated when hasPending is false
+  const stableDecryptedRef = useRef<typeof data | null>(null);
+  // Track the source data that produced our stable snapshot
+  const lastSourceDataRef = useRef<typeof data | null>(null);
+
+  const [decryptedData, hasPending] = useMemo(
+    () => (shouldDecrypt ? decryptResultData(data, key, encryptedFields, metrics, queryName) : [data, false]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, key, encryptedFields, decryptionTick, shouldDecrypt],
+  );
+
+  // Update stable ref only when we have complete decrypted data
+  useEffect(() => {
+    if (!shouldDecrypt) return;
+    if (!hasPending && decryptedData !== lastSourceDataRef.current) {
+      stableDecryptedRef.current = decryptedData;
+      lastSourceDataRef.current = data;
+    }
+  }, [decryptedData, hasPending, data, shouldDecrypt]);
+
+  useEffect(() => {
+    if (!shouldDecrypt) return;
+    if (hasPending) {
+      return decryptionCache.subscribe(triggerRerender);
+    }
+    return undefined;
+  }, [hasPending, triggerRerender, data, shouldDecrypt]);
+
+  if (!shouldDecrypt) {
+    return result;
+  }
+
+  // Return stable snapshot while decrypting to prevent UI flicker.
+  // Only expose new data when fully decrypted (hasPending = false).
+  // On first render with no stable data yet, return current decrypted state.
+  const outputData =
+    hasPending && stableDecryptedRef.current !== null ? stableDecryptedRef.current : decryptedData;
+
+  return [outputData, details] as unknown as QueryResult<TReturn>;
 }

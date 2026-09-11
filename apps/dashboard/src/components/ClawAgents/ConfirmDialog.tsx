@@ -43,6 +43,8 @@ export const ConfirmDialog = ({
           variant='outline'
           size='sm'
           onClick={() => onOpenChange(false)}
+          data-track-category='Claw Agents'
+          data-track-name='CANCEL_CONFIRM_DIALOG'
           disabled={loading}
         >
           {cancelLabel}
@@ -53,6 +55,8 @@ export const ConfirmDialog = ({
           size='sm'
           loading={loading}
           onClick={onConfirm}
+          data-track-category='Claw Agents'
+          data-track-name='CONFIRM_DIALOG_ACTION'
         >
           {confirmLabel}
         </Button>

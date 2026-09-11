@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import {
   ChevronDown,
   ChevronUp,
@@ -119,13 +120,21 @@ export function TranscriptSidePanel({
     window.setTimeout(() => URL.revokeObjectURL(href), 0);
   }, [transcript]);
 
+  const shouldReduceMotion = useReducedMotion();
+
   return (
-    <aside
+    <motion.aside
       aria-label='Transcript'
       className={cn(
         'flex h-full w-full flex-col overflow-hidden border-l border-border/70 bg-background shadow-2xl',
         className,
       )}
+      initial={{ x: '100%' }}
+      animate={{ x: 0 }}
+      exit={{ x: '100%' }}
+      transition={
+        shouldReduceMotion ? { duration: 0.15 } : { type: 'spring', stiffness: 380, damping: 34 }
+      }
     >
       <header className='flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3'>
         <h2 className='truncate text-base font-semibold text-foreground'>Transcript</h2>
@@ -136,7 +145,7 @@ export function TranscriptSidePanel({
               variant='ghost'
               size='iconSm'
               onClick={() => void handleCopy()}
-              className='text-muted-foreground hover:bg-muted hover:text-foreground'
+              className='text-muted-foreground hover:bg-muted hover:text-foreground rounded-xl'
               aria-label='Copy transcript'
               data-track-category='TranscriptPanel'
               data-track-name='copy_transcript'
@@ -150,7 +159,7 @@ export function TranscriptSidePanel({
               variant='ghost'
               size='iconSm'
               onClick={handleDownload}
-              className='text-muted-foreground hover:bg-muted hover:text-foreground'
+              className='text-muted-foreground hover:bg-muted hover:text-foreground rounded-xl'
               aria-label='Download transcript'
               data-track-category='TranscriptPanel'
               data-track-name='download_transcript'
@@ -164,7 +173,7 @@ export function TranscriptSidePanel({
               variant='ghost'
               size='iconSm'
               onClick={onClose}
-              className='text-muted-foreground hover:bg-muted hover:text-foreground'
+              className='text-muted-foreground hover:bg-muted hover:text-foreground rounded-xl'
               aria-label='Close transcript'
               data-track-category='TranscriptPanel'
               data-track-name='close_transcript'
@@ -176,7 +185,7 @@ export function TranscriptSidePanel({
       </header>
 
       <div className='shrink-0 border-b border-border px-4 py-3'>
-        <div className='flex h-10 items-center gap-1.5 rounded-lg border border-border bg-muted/45 px-3 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20'>
+        <div className='flex h-10 items-center gap-1.5 rounded-xl border border-border bg-muted/45 px-3 text-muted-foreground focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20'>
           <SearchBig size={16} strokeWidth={2.2} className='shrink-0' aria-hidden='true' />
           <input
             type='text'
@@ -295,6 +304,6 @@ export function TranscriptSidePanel({
           </div>
         ) : null}
       </div>
-    </aside>
+    </motion.aside>
   );
 }

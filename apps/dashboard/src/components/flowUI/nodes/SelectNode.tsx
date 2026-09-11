@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useRef } from 'react';
 import { useFlow } from '../FlowContext';
 import {
@@ -53,7 +54,10 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
   const isLoading = state.loadingComponentIds.includes(node.id);
 
   const handleChange = (val: string) => {
-    console.log(`[SelectNode] value changed  name=${props.name}  value=${val}`);
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_log',
+      message: String(`[SelectNode] value changed  name=${props.name}  value=${val}`),
+    });
     // updateFieldValue syncs stateRef immediately so the debounced executeAction
     // reads the correct (freshly selected) values when it fires
     updateFieldValue(props.name, val);
@@ -62,12 +66,18 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
     const action = props.action;
     if (action?.type === 'inputChange') {
       const ms = action.debounceMs ?? 0;
-      console.log(
-        `[SelectNode] scheduling inputChange  actionId=${action.actionId}  debounceMs=${ms}`,
-      );
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String(
+          `[SelectNode] scheduling inputChange  actionId=${action.actionId}  debounceMs=${ms}`,
+        ),
+      });
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        console.log(`[SelectNode] firing inputChange  actionId=${action.actionId}`);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`[SelectNode] firing inputChange  actionId=${action.actionId}`),
+        });
         void executeAction(action);
       }, ms);
     }

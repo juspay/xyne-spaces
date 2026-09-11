@@ -122,8 +122,9 @@ export class PdfJsStrategy extends BaseStrategy {
                 page.cleanup()
             }
 
-            // In older pdfjs-dist versions doc.destroy() might not exist
-            if (doc.destroy) await doc.destroy()
+            // pdfjs-dist v6 moved destroy() to the loading task; it tears down
+            // the document and its worker.
+            await loadingTask.destroy()
 
             // Chunk based on paragraphs, tracking which pages each chunk covers
             const { chunks, chunks_map } = this.chunkByParagraphsWithMeta(allParagraphs, paragraphPages)

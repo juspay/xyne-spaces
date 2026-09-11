@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
-  buildAppDeskSourceName,
   buildSlackDeskSourceName,
-  extractInstalledAppId,
+  resolveAppDeskInstalledAppId,
   extractSlackChannelId,
 } from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
@@ -14,9 +14,10 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { Prisma } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { createForwardedMessageXml,
+import {
+  createForwardedMessageXml,
   parseForwardedMessageXml,
   ChannelScopeType,
   ChannelVisibility,
@@ -27,7 +28,11 @@ import { createForwardedMessageXml,
   AppPermissionStatus,
   AppPermissionType,
   ActivityClassification,
-  ActivityClassificationJobType, ChannelType, ChannelRole } from '@xyne/shared';
+  ActivityClassificationJobType, ChannelType, ChannelRole,
+  normalizeHistoryScope,
+  type AddGroupDmParticipantsRequest,
+  type AddGroupDmParticipantsResponse,
+} from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
@@ -42,6 +47,7 @@ import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
@@ -55,6 +61,8 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
+import { groupDmParticipantService } from '@/services/groupDmParticipantService';
+import { AppError } from '@/middleware/errorHandler';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -67,6 +75,7 @@ export class ChannelController {
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
+  private externalSourceRepository: ExternalSourceRepository;
   private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
@@ -80,6 +89,7 @@ export class ChannelController {
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
+    this.externalSourceRepository = new ExternalSourceRepository();
     this.channelEmailAliasService = new ChannelEmailAliasService();
   }
 
@@ -113,24 +123,52 @@ export class ChannelController {
     channelId: string,
     newParticipants: Array<{ userId: string; userName: string }>,
     authData: { id: string; name: string },
-    operationType: 'participants_added' | 'participants_removed'
+    operationType:
+      | 'participants_added'
+      | 'participants_removed'
+      | 'conversation_moved_source'
+      | 'conversation_moved_target',
+    options: { movedEverything?: boolean; destinationChannelId?: string } = {}
   ): Promise<void> {
     try {
-      if (newParticipants.length === 0) {
+      const isMove =
+        operationType === 'conversation_moved_source' ||
+        operationType === 'conversation_moved_target';
+      if (newParticipants.length === 0 && operationType !== 'conversation_moved_target') {
         return;
       }
 
-      // Format system message
-      const allUserNames = newParticipants.map((p) => p.userName);
+      // Names are user-supplied, so everything interpolated into the markup is escaped.
+      const esc = (value: string): string =>
+        value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const channelPill = (id: string, label: string): string =>
+        `<span data-channel-mention data-channel-id="${esc(id)}" data-channel-name="${esc(label)}" data-is-private="true">${esc(label)}</span>`;
+
+      const names = newParticipants.map(p => esc(p.userName));
       let formattedUsers = '';
-      if (allUserNames.length === 1) {
-        formattedUsers = allUserNames[0];
-      } else if (allUserNames.length > 1) {
-        formattedUsers = `${allUserNames.slice(0, -1).join(', ')} and ${allUserNames[allUserNames.length - 1]}`;
+      if (names.length === 1) {
+        formattedUsers = names[0];
+      } else if (names.length > 1) {
+        formattedUsers = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
       }
+      const actor = esc(authData.name);
 
       const addedOrRemovedText = operationType === 'participants_added' ? 'added' : 'removed';
-      const systemContent = `${formattedUsers} ${allUserNames.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${authData.name}`;
+      let systemContent: string;
+      if (operationType === 'conversation_moved_source') {
+        const howMany = options.movedEverything ? 'all' : 'some of';
+        const destination = options.destinationChannelId
+          ? channelPill(
+              options.destinationChannelId,
+              newParticipants.map(p => p.userName).join(', ')
+            )
+          : formattedUsers;
+        systemContent = `${actor} moved ${howMany} the messages from this conversation to ${destination}`;
+      } else if (operationType === 'conversation_moved_target') {
+        systemContent = `${actor} moved messages from a previous conversation into this one`;
+      } else {
+        systemContent = `${formattedUsers} ${names.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
+      }
 
       // Create metadata
       const messageMetadata = {
@@ -152,7 +190,7 @@ export class ChannelController {
       // Create system message
       const messageData: CreateMessageInput = {
         conversationId: conversation.conversationId,
-        senderId: newParticipants[0].userId,
+        senderId: isMove ? authData.id : newParticipants[0].userId,
         content: systemContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
@@ -171,7 +209,7 @@ export class ChannelController {
       await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
 
       // Get sender info
-      const senderInfo = await this.getUserInfo(newParticipants[0].userId);
+      const senderInfo = await this.getUserInfo(createdMessage.senderId);
 
       // Broadcast new conversation via WebSocket
       const conversationMessage = {
@@ -554,7 +592,19 @@ export class ChannelController {
          // Copy attachments to the new message
          const copiedAttachments: any[] = [];
         if (originalAttachments.length > 0) {
-           for (const attachment of originalAttachments) {
+           // Preserve the sender's display order: sort by explicit position
+           // (falling back to createdAt/id for legacy rows), then stamp a fresh
+           // strictly-increasing position + createdAt on each copy so the
+           // forwarded message renders in the same order as the source.
+           const orderedOriginalAttachments = [...originalAttachments].sort(
+             (a, b) =>
+               (a.position ?? Number.MAX_SAFE_INTEGER) -
+                 (b.position ?? Number.MAX_SAFE_INTEGER) ||
+               a.createdAt.getTime() - b.createdAt.getTime() ||
+               a.id.localeCompare(b.id)
+           );
+           const forwardCloneBaseTs = Date.now();
+           for (const [attIndex, attachment] of orderedOriginalAttachments.entries()) {
              const copiedAttachment = await tx.messageAttachment.create({
                data: {
                  entityId: createdMessage.messageId,
@@ -572,6 +622,8 @@ export class ChannelController {
                 metadata: (attachment.metadata as Record<string, any>) || {},
                  width: attachment.width ?? undefined,
                  height: attachment.height ?? undefined,
+                 createdAt: new Date(forwardCloneBaseTs + attIndex),
+                 position: attIndex,
                },
              });
              copiedAttachments.push(copiedAttachment);
@@ -623,7 +675,15 @@ export class ChannelController {
               });
 
               const botChannelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
-              for (const originalAtt of botOriginalAttachments) {
+              const orderedBotAttachments = [...botOriginalAttachments].sort(
+                (a, b) =>
+                  (a.position ?? Number.MAX_SAFE_INTEGER) -
+                    (b.position ?? Number.MAX_SAFE_INTEGER) ||
+                  a.createdAt.getTime() - b.createdAt.getTime() ||
+                  a.id.localeCompare(b.id)
+              );
+              const botCloneBaseTs = Date.now();
+              for (const [botAttIndex, originalAtt] of orderedBotAttachments.entries()) {
                 await tx.messageAttachment.create({
                   data: {
                     entityId: clonedMessage.messageId,
@@ -641,6 +701,8 @@ export class ChannelController {
                     metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
                     width: originalAtt.width ?? undefined,
                     height: originalAtt.height ?? undefined,
+                    createdAt: new Date(botCloneBaseTs + botAttIndex),
+                    position: botAttIndex,
                   }
                 });
               }
@@ -934,15 +996,6 @@ export class ChannelController {
           res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
           return;
         }
-        const sourceName = buildAppDeskSourceName(installedAppId);
-        const existingSource = await db.externalSource.findUnique({
-          where: { name: sourceName },
-          select: { id: true, isActive: true },
-        });
-        if (existingSource?.isActive) {
-          res.status(409).json({ error: 'A desk already exists for this app' });
-          return;
-        }
       }
 
       // For DM channels, ensure scopeId is provided (other user's ID)
@@ -973,6 +1026,17 @@ export class ChannelController {
             scopeType: existingDM.scopeType,
             createdAt: existingDM.createdAt,
           });
+          return;
+        }
+      }
+
+      // The DM target is caller-supplied; scope it to the caller's workspace (from
+      // the session, not the request) so a member cannot DM a user in another
+      // workspace by id substitution. Rejected before the channel is created.
+      if (scopeType === 'DM' && scopeId) {
+        const dmTarget = await this.userRepository.findByIdInWorkspace(scopeId, req.user!.workspaceId!);
+        if (!dmTarget || dmTarget.status !== 'ACTIVE') {
+          res.status(404).json({ error: 'Participant not found or inactive' });
           return;
         }
       }
@@ -1026,8 +1090,9 @@ export class ChannelController {
 
         for (const participantId of validParticipants) {
           try {
-            // Check if user exists before adding
-            const user = await this.userRepository.findById(participantId);
+            // Scope the caller-supplied id to the session workspace: a participant
+            // in another workspace resolves to null and is refused, not added.
+            const user = await this.userRepository.findByIdInWorkspace(participantId, req.user!.workspaceId!);
             if (user && user.status === 'ACTIVE') {
               await this.channelParticipantRepository.addParticipant(
                 channel.id,
@@ -1257,30 +1322,12 @@ export class ChannelController {
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
 
-          const sourceName = buildAppDeskSourceName(installedAppId);
-          const appCredentials = encrypt(JSON.stringify({ installedAppId }));
-          const existingAppSource = await db.externalSource.findUnique({
-            where: { name: sourceName },
-            select: { id: true },
+          await this.externalSourceRepository.connectAppToChannel({
+            channelId: channel.id,
+            installedAppId,
+            workspaceId: req.user!.workspaceId!,
+            displayName: name!,
           });
-          if (existingAppSource) {
-            await db.externalSource.update({
-              where: { id: existingAppSource.id },
-              data: { isActive: true, credentials: appCredentials, channelId: channel.id, displayName: name! },
-            });
-          } else {
-            await db.externalSource.create({
-              data: {
-                name: sourceName,
-                sourceType: 'app-desk',
-                displayName: name!,
-                channelId: channel.id,
-                credentials: appCredentials,
-                isActive: true,
-                workspaceId: req.user!.workspaceId!,
-              },
-            });
-          }
 
           await this.channelParticipantRepository.addParticipant(
             channel.id,
@@ -1294,13 +1341,16 @@ export class ChannelController {
           });
           const code = (error as { code?: string })?.code;
           if (code === 'P2002') {
-            res.status(409).json({ error: 'A desk already exists for this app' });
+            res.status(409).json({ error: 'A desk already exists for this channel' });
           } else {
             res.status(500).json({ error: 'Failed to create app desk' });
           }
           return;
         }
       }
+
+      // ChannelBoardMapping is now populated by ChannelRepository.create itself
+      // (dual-write for any channel creation path), so no manual createMany here.
 
       // Create activities for all channel members (excluding creator)
       await createChannelCreatedActivity(channel.id, userId);
@@ -1310,7 +1360,6 @@ export class ChannelController {
         channelId: channel.id,
         name: channel.name,
         scopeType: channel.scopeType,
-        projectId: channel.projectId,
       });
 
       // Queue channel for Vespa ingestion AFTER participants are added
@@ -1411,15 +1460,16 @@ export class ChannelController {
   // POST /api/channels/check-duplicate - Check if channel name is duplicate
   checkDuplicate = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, projectId }: { name: string; projectId: string } = req.body;
+      // projectId is accepted for backwards compatibility with older clients but
+      // is no longer required or used: duplicate-channel checks are workspace-scoped.
+      const { name, projectId }: { name: string; projectId?: string } = req.body;
 
       // Validate required fields
-      if (!name || !projectId) {
+      if (!name) {
         res.status(400).json({
-          error: 'Name and projectId are required',
+          error: 'Name is required',
           details: {
-            name: !name ? 'Name is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            name: 'Name is required',
           }
         });
         return;
@@ -1436,7 +1486,7 @@ export class ChannelController {
       const response: CheckDuplicateChannelResponse = {
         isDuplicate,
         name: name.trim(),
-        projectId,
+        ...(projectId ? { projectId } : {}),
       };
 
       res.status(200).json(response);
@@ -1479,18 +1529,24 @@ export class ChannelController {
       res.setHeader('Cache-Control', 'private, no-cache');
 
       const source = await db.externalSource.findFirst({
-        where: { channelId },
-        select: { name: true, displayName: true, sourceType: true, isActive: true },
+        where: { channelId, workspaceId },
+        select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
       const hasSource = !!source;
-      const isConnected = source?.isActive === true;
+      let isConnected = source?.isActive === true;
       const sourceType = source?.sourceType ?? null;
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      if (source?.sourceType === 'app-desk') {
-        const installedAppId = extractInstalledAppId(source.name) ?? '';
+      let googlePlayApps: Array<{
+        id: string;
+        displayName: string;
+        packageName: string | null;
+        isActive: boolean;
+      }> = [];
+      if (source?.sourceType === ExternalSourcePlatform.APP_DESK) {
+        const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
           select: { webhookUrl: true, app: { select: { name: true, signingSecret: true } } },
@@ -1499,8 +1555,30 @@ export class ChannelController {
         outboundConfigured = Boolean(
           installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
         );
-      } else if (source?.sourceType === 'slack-desk') {
+      } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
+      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+        const reviewSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
+        isConnected = activeReviewSources.length > 0;
+        googlePlayApps = reviewSources.map(reviewSource => ({
+          id: reviewSource.id,
+          displayName: reviewSource.displayName,
+          packageName: reviewSource.externalIdentifier,
+          isActive: reviewSource.isActive,
+        }));
+        connectedLabel = activeReviewSources
+          .map(reviewSource => reviewSource.displayName)
+          .join(', ') || 'No active Google Play apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1508,7 +1586,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
         return;
       }
 
@@ -1525,12 +1603,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1936,7 +2014,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           createdBy: channel.createdBy,
           conversationCount: conversations.length,
           participantCount: participants.length,
@@ -2034,11 +2111,13 @@ export class ChannelController {
         return;
       }
 
-      // Validate all participants exist and are active (skip for self-DM)
-      const participantUsers = [];
+      // Scope participants to the caller's workspace, taken from the session rather
+      // than the request body, so a caller-supplied id cannot reference a user
+      // outside it.
+      const participantUsers: User[] = [];
       if (!isSelfDm) {
         for (const participantId of otherParticipantIds) {
-          const user = await this.userRepository.findById(participantId);
+          const user = await this.userRepository.findByIdInWorkspace(participantId, workspaceId);
           if (!user || user.status !== 'ACTIVE') {
             res.status(404).json({
               error: 'Participant not found or inactive',
@@ -2077,7 +2156,6 @@ export class ChannelController {
             scopeType: existingSelfDm.scopeType,
             description: existingSelfDm.description,
             visibility: existingSelfDm.visibility,
-            projectId: existingSelfDm.projectId,
             conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
             participantCount: participants.length,
             unreadCount,
@@ -2129,7 +2207,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 1,
           unreadCount: 0,
@@ -2252,7 +2329,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 2,
           unreadCount: 0,
@@ -2390,7 +2466,6 @@ export class ChannelController {
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          projectId: channel.projectId,
           conversationCount: initialConversation ? 1 : 0,
           participantCount: allMemberIds.length,
           unreadCount: 0,
@@ -2429,258 +2504,119 @@ export class ChannelController {
     }
   };
 
-  // POST /api/users/me/dms/:channelId/add - Add participants to GROUP_DM
+  getDmHistoryPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const currentUserId = req.user!.id;
+      const { channelId } = req.params;
+      const sinceParam = typeof req.query.since === 'string' ? Number(req.query.since) : NaN;
+      const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : NaN;
+
+      const since = Number.isFinite(sinceParam) ? new Date(sinceParam) : null;
+      const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 20;
+
+      const { conversations, total } = await groupDmParticipantService.getHistoryPreview({
+        channelId,
+        currentUserId,
+        since,
+        limit,
+      });
+
+      res.status(200).json({ conversations, total });
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Error building DM history preview:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   addGroupDmParticipants = async (req: Request, res: Response): Promise<void> => {
     try {
       const currentUserId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
       const { channelId } = req.params;
-      const { userIds, includeHistory }: { userIds: string[], includeHistory: boolean } = req.body;
+      const body = req.body as AddGroupDmParticipantsRequest;
 
-      // Validate request body
-      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-        res.status(400).json({
-          error: 'userIds array is required and cannot be empty'
-        });
-        return;
-      }
+      const result = await groupDmParticipantService.addParticipants({
+        channelId,
+        currentUserId,
+        workspaceId,
+        userIds: body.userIds,
+        historyScope: normalizeHistoryScope(body),
+      });
 
-      if (typeof includeHistory !== 'boolean') {
-        res.status(400).json({
-          error: 'includeHistory must be a boolean'
-        });
-        return;
-      }
+      const movedHistory = result.conversationsMoved > 0;
 
-      // Get DM project ID for this workspace
-      const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
-      if (!dmProjectId) {
-        res.status(500).json({ error: 'DM project not found for workspace' });
-        return;
-      }
-
-      // Remove duplicates and filter out current user
-      const uniqueUserIds = [...new Set(userIds)].filter(id => id !== currentUserId);
-
-      if (uniqueUserIds.length === 0) {
-        res.status(400).json({
-          error: 'No valid participants provided'
-        });
-        return;
-      }
-
-      // 1. Validate channel exists
-      const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
-        res.status(404).json({
-          error: 'Channel not found'
-        });
-        return;
-      }
-
-      // 2. Validate channel is GROUP_DM
-      if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-        res.status(400).json({
-          error: 'This endpoint is only for GROUP_DM channels',
-          channelScopeType: channel.scopeType
-        });
-        return;
-      }
-
-      // 3. Validate requesting user is a participant
-      const currentParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
-      const isParticipant = currentParticipants.some(p => p.userId === currentUserId);
-
-      if (!isParticipant) {
-        res.status(403).json({
-          error: 'You must be a participant to add others to this GROUP_DM'
-        });
-        return;
-      }
-
-      // 4. Validate all new userIds are valid, active users
-      const newUsers = [];
-      for (const userId of uniqueUserIds) {
-        const user = await this.userRepository.findById(userId);
-        if (!user || user.status !== 'ACTIVE') {
-          res.status(404).json({
-            error: 'One or more participants not found or inactive',
-            invalidUserId: userId
-          });
-          return;
-        }
-        newUsers.push(user);
-      }
-
-      // 5. Calculate combined participant list (current + new, sorted)
-      const currentUserIds = currentParticipants.map(p => p.userId);
-      const allParticipantIds = [...currentUserIds, ...uniqueUserIds].sort();
-
-      // 5.1 Validate total participant count doesn't exceed 10
-      if (allParticipantIds.length > 10) {
-        res.status(400).json({
-          error: 'Too many participants',
-          details: 'Maximum 10 participants allowed in a GROUP_DM',
-          currentParticipants: currentUserIds.length,
-          attemptingToAdd: uniqueUserIds.length,
-          totalWouldBe: allParticipantIds.length,
-          maxParticipants: 10
-        });
-        return;
-      }
-
-      // 6. Check for existing GROUP_DM with same participants
-      const existingGroupDM = await this.channelRepository.getGroupChannelByMembers(allParticipantIds);
-
-      // 7. Handle different scenarios
-      if (existingGroupDM) {
-        // Existing GROUP_DM found
-        let conversationsMigrated = 0;
-
-        if (includeHistory) {
-          // Migrate conversations to existing channel
-          const conversations = await this.conversationRepository.getChannelConversations(channelId);
-          const conversationIds = conversations.map(c => c.conversationId);
-
-          if (conversationIds.length > 0) {
-            conversationsMigrated = await this.conversationRepository.migrateConversationsToChannel(
-              conversationIds,
-              existingGroupDM.id
+      if (result.addedParticipants.length > 0 || movedHistory) {
+        const authData = await this.getUserInfo(currentUserId);
+        try {
+          // A brand-new group announces the people. Merging into an existing one announces the
+          // move instead, since its members were already there — and only if anything moved.
+          if (!result.isExisting) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.channelId,
+              result.addedParticipants,
+              authData,
+              'participants_added'
+            );
+          } else if (movedHistory) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.channelId,
+              [],
+              authData,
+              'conversation_moved_target'
             );
           }
-
-          res.status(200).json({
-            channelId: existingGroupDM.id,
-            isExisting: true,
-            participantsAdded: 0,
-            conversationsMigrated,
-            message: conversationsMigrated > 0
-              ? `${conversationsMigrated} conversation(s) migrated to existing group DM`
-              : 'Navigated to existing group DM'
-          });
-        } else {
-          // Just navigate to existing channel, no migration
-          res.status(200).json({
-            channelId: existingGroupDM.id,
-            isExisting: true,
-            participantsAdded: 0,
-            conversationsMigrated: 0,
-            message: 'Navigated to existing group DM'
-          });
-        }
-      } else {
-        // No existing GROUP_DM with these participants
-        if (includeHistory) {
-          // Add participants to current channel
-          let participantsAdded = 0;
-          const participantsAddedList: string[] = [];
-          for (const userId of uniqueUserIds) {
-            // Check if already a participant
-            const alreadyParticipant = currentParticipants.some(p => p.userId === userId);
-            if (!alreadyParticipant) {
-              await this.channelParticipantRepository.addParticipant(channelId, userId, ChannelRole.MEMBER);
-              participantsAddedList.push(userId);
-              participantsAdded++;
-            }
-          }
-
-          // Get all participant user IDs (current + newly added)
-          const currentUserIds = currentParticipants.map(p => p.userId);
-          const allParticipantIds = [...currentUserIds, ...participantsAddedList].sort();
-
-          // Update channel name to reflect all participants (using user IDs)
-          const newChannelName = allParticipantIds.join(',');
-          
-          await this.channelRepository.update(channelId, {
-            name: newChannelName
-          });
-
-          // Send system message for added participants
-          if (participantsAddedList.length > 0) {
-            const validUsers = await Promise.all(
-              participantsAddedList.map(async (userId) => {
-                const user = await this.userRepository.findById(userId);
-                return user ? { userId: user.id, userName: user.displayName || user.name } : null;
-              })
+          if (movedHistory) {
+            await this.sendAddAndRemoveParticipantsSystemMessage(
+              result.sourceChannelId,
+              result.destinationMembers,
+              authData,
+              'conversation_moved_source',
+              {
+                movedEverything: result.movedEverything,
+                destinationChannelId: result.channelId,
+              }
             );
-            const filteredUsers = validUsers.filter((u): u is { userId: string; userName: string } => u !== null);
-
-            if (filteredUsers.length > 0) {
-              const authData = await this.getUserInfo(currentUserId);
-              await this.sendAddAndRemoveParticipantsSystemMessage(
-                channelId,
-                filteredUsers,
-                authData,
-                'participants_added'
-              );
-
-              const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
-              for (const user of filteredUsers) {
-                const participant = await this.channelParticipantRepository.findParticipant(channelId, user.userId);
-                if (participant) {
-                  handler.onInsert({
-                    entityId: participant.id,
-                    entityType: 'channel_participants',
-                    operation: 'insert'
-                  }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-                }
-              }
-            }
           }
+        } catch (error) {
+          // Message can carry user-supplied names; strip newlines so it can't forge log lines.
+          const message = (error instanceof Error ? error.message : String(error)).replace(/\n|\r/g, ' ');
+          logger.error('Failed to post add-people system messages', { error: message });
+        }
 
-          res.status(200).json({
-            channelId: channel.id,
-            isExisting: false,
-            participantsAdded,
-            conversationsMigrated: 0,
-            message: `${participantsAdded} participant(s) added to current group DM`
-          });
-        } else {
-          // Create new GROUP_DM with all participants
-          const channelData: CreateChannelInput = {
-            scopeType: ChannelScopeType.GROUP_DM,
-            name: allParticipantIds.join(','),
-            visibility: ChannelVisibility.PRIVATE,
-            createdBy: currentUserId,
-            projectId: dmProjectId,
-            workspaceId,
-          };
-
-          const newChannel = await this.channelRepository.create(channelData);
-
-          // Add all participants to the new channel
-          let participantsAdded = 0;
-          for (const participantId of allParticipantIds) {
-            const role = participantId === currentUserId ? 'ADMIN' : 'MEMBER';
-            await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role as ChannelRole);
-            participantsAdded++;
-          }
-
-          const newlyAddedUserIds = uniqueUserIds.filter(id => id !== currentUserId);
-          const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
-          if (newlyAddedUserIds.length > 0) {
-            for (const userId of newlyAddedUserIds) {
-              const participant = await this.channelParticipantRepository.findParticipant(newChannel.id, userId);
-              if (participant) {
-                handler.onInsert({
-                  entityId: participant.id,
-                  entityType: 'channel_participants',
-                  operation: 'insert'
-                }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert (new DM)', err));
-              }
-            }
-          }
-
-          res.status(201).json({
-            channelId: newChannel.id,
-            isExisting: false,
-            participantsAdded,
-            conversationsMigrated: 0,
-            message: 'New group DM created'
-          });
+        const handler = new ChannelParticipantsSideEffectHandler({
+          userID: currentUserId,
+          workspaceId: req.user!.workspaceId,
+          role: req.user!.role,
+          orgRole: req.user!.orgRole,
+          memberId: req.user!.memberId,
+        });
+        for (const participant of result.addedParticipants) {
+          handler.onInsert({
+            entityId: participant.participantId,
+            entityType: 'channel_participants',
+            operation: 'insert'
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
         }
       }
+
+      const response: AddGroupDmParticipantsResponse = {
+        channelId: result.channelId,
+        isExisting: result.isExisting,
+        participantsAdded: result.participantsAdded,
+        conversationsMoved: result.conversationsMoved,
+        message: result.message,
+      };
+
+      res.status(result.isExisting ? 200 : 201).json(response);
     } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
       logger.error('Error adding GROUP_DM participants:', error);
       res.status(500).json({ error: 'Internal server error' });
     }

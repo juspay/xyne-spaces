@@ -3,8 +3,12 @@ import { Link, useParams } from 'react-router-dom';
 import { ChevronRight, LucideIcon, SparklesIcon } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import TeamIntelligenceSidebarHeader from './TeamIntelligenceSidebarHeader';
-import { useTeams } from '@/hooks/useTeamIntelligence';
+import { useTeamGoalGroups } from '@/hooks/useTeamIntelligence';
 import { getTeamColor } from '@/utils/teamIntelligenceUtils';
+import {
+  TeamGoalGroupKey,
+  TeamGoalGroupTeam,
+} from '@/services/TeamIntelligence/teamIntelligenceService';
 
 // ---------------------------------------------------------------------------
 // SidebarItems
@@ -118,7 +122,7 @@ const SidebarItems = ({
       )}
 
       {/* Collapsible children */}
-      {hasChildren && isExpanded && <div className='mt-0.5 flex flex-col'>{children}</div>}
+      {hasChildren && isExpanded && <div className='mt-0.5 flex flex-col pl-3'>{children}</div>}
     </div>
   );
 };
@@ -141,8 +145,7 @@ const TeamIntelligenceSidebar = ({
   const { teamId } = useParams<{ teamId?: string }>();
   const { memberEmail } = useParams<{ memberEmail?: string }>();
 
-  const { data } = useTeams();
-  const teams = [...(data?.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const { data, isLoading, isError } = useTeamGoalGroups();
 
   const isOrgView = !teamId && !memberEmail;
 
@@ -150,6 +153,47 @@ const TeamIntelligenceSidebar = ({
     if (closeOnNavigate) {
       setIsSidebarOpen(false);
     }
+  };
+
+  const groupConfig: Array<{
+    key: TeamGoalGroupKey;
+    label: string;
+    description: string;
+  }> = [
+    { key: '10X', label: '10X Goals', description: 'Teams aligned to a 10X goal.' },
+    { key: '5X', label: '5X Goals', description: 'Teams aligned to a 5X goal.' },
+    { key: '2X', label: '2X Goals', description: 'Teams aligned to a 2X goal.' },
+    {
+      key: 'READY_TO_ACCELERATE',
+      label: 'Ready to Accelerate',
+      description: 'Teams with active goals that are ready for stronger evidence of progress.',
+    },
+    {
+      key: 'NO_GOAL_DATA',
+      label: 'No Goal Data',
+      description: 'Teams without an active goal track.',
+    },
+  ];
+
+  const renderTeam = (team: TeamGoalGroupTeam): ReactElement => {
+    const teamColorHex = getTeamColor(team.name).primary;
+    return (
+      <SidebarItems
+        key={team.id}
+        label={
+          <span className='flex min-w-0 items-center gap-2'>
+            <span
+              className='inline-block size-1 shrink-0 rounded-full'
+              style={{ backgroundColor: teamColorHex }}
+            />
+            <span className='truncate'>{team.name}</span>
+          </span>
+        }
+        to={`/team-intelligence/team/${encodeURIComponent(team.id)}`}
+        isActive={teamId === team.id}
+        onClick={handleNav}
+      />
+    );
   };
 
   return (
@@ -161,41 +205,54 @@ const TeamIntelligenceSidebar = ({
       />
 
       <div className='flex-1 overflow-auto flex flex-col p-3 gap-1'>
-        {/* Org Insights — top-level leaf item */}
+        {/* Organization leadership — top-level leaf item */}
         <SidebarItems
-          label='Org Digest'
+          label='Founder Brief'
           to='/team-intelligence'
           isActive={isOrgView}
           onClick={handleNav}
           prefixIcon={SparklesIcon}
         />
 
-        {/* Team Insights — collapsible with all teams */}
-        {teams.length > 0 ? (
-          <SidebarItems label='Team Insights' defaultExpanded>
-            {teams?.map(team => {
-              const teamColorHex = getTeamColor(team.name).primary;
-
-              return (
-                <SidebarItems
-                  key={team.id}
-                  label={
-                    <span className='flex items-center gap-2'>
-                      <span
-                        className={cn('inline-block size-1 rounded-full shrink-0')}
-                        style={{ backgroundColor: teamColorHex }}
-                      />
-                      {team.name}
+        <p className='px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
+          Manager Briefs
+        </p>
+        {isLoading ? (
+          <p className='px-2 py-3 text-xs text-muted-foreground'>Grouping teams by goals…</p>
+        ) : isError || !data ? (
+          <p className='px-2 py-3 text-xs text-muted-foreground'>Goal grouping is unavailable.</p>
+        ) : data.totalTeams === 0 ? (
+          <p className='px-2 py-3 text-xs text-muted-foreground'>
+            No teams were returned by Mettle.
+          </p>
+        ) : (
+          groupConfig.map(group => {
+            const teams = data.groups[group.key];
+            return (
+              <SidebarItems
+                key={group.key}
+                defaultExpanded
+                label={
+                  <span
+                    className='flex min-w-0 items-center justify-between gap-2'
+                    title={group.description}
+                  >
+                    <span className='truncate'>{group.label}</span>
+                    <span className='rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground'>
+                      {teams.length}
                     </span>
-                  }
-                  to={`/team-intelligence/team/${encodeURIComponent(team.id)}`}
-                  isActive={teamId === team.id}
-                  onClick={handleNav}
-                />
-              );
-            })}
-          </SidebarItems>
-        ) : null}
+                  </span>
+                }
+              >
+                {teams.length > 0 ? (
+                  teams.map(renderTeam)
+                ) : (
+                  <p className='px-8 py-1.5 text-xs text-muted-foreground'>No teams</p>
+                )}
+              </SidebarItems>
+            );
+          })
+        )}
       </div>
     </div>
   );

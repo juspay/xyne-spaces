@@ -13,6 +13,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
+import { rankParticipantOptions } from '../../../utils/participantSearch';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -74,22 +75,24 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     );
   }, [allUsers, channelParticipantUserIds, currentUser?.id]);
 
-  // Filter channel users by search query
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return channelUsers;
-    const query = searchQuery.toLowerCase();
-    return channelUsers.filter(user => {
-      const name = user.name?.toLowerCase() || '';
-      const email = user.email?.toLowerCase() || '';
-      return name.includes(query) || email.includes(query);
-    });
+  // Normalize the channel-member payload before passing it to the shared
+  // participant matcher. Some channel members have no email, which the raw
+  // `searchUsers` matcher assumes is always present.
+  const rankedChannelUsers = useMemo(() => {
+    const options = channelUsers.map(user => ({
+      ...user,
+      label: getUserDisplayName(user),
+      value: `user:${user.id}`,
+    }));
+
+    return rankParticipantOptions(options, searchQuery);
   }, [channelUsers, searchQuery]);
 
   const inviteUserOptions = useMemo(
     () =>
-      filteredUsers.map(user => ({
-        label: getUserDisplayName(user),
-        value: `user:${user.id}`,
+      rankedChannelUsers.map(user => ({
+        label: user.label,
+        value: user.value,
         icon: (
           <Avatar
             userId={user.id}
@@ -101,7 +104,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
         subtitle: user.email,
         isDeactivated: isUserDeactivated(user),
       })),
-    [filteredUsers],
+    [rankedChannelUsers],
   );
 
   // Get selected users for display
@@ -217,13 +220,42 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
           <h2 className='text-[15px] font-semibold text-foreground leading-5'>
             Start an Instant Call
           </h2>
-          <Button variant='outline' size='icon' className='size-7 rounded-lg' onClick={handleClose}>
+          <Button
+            variant='outline'
+            size='icon'
+            className='size-7 rounded-lg'
+            onClick={handleClose}
+            data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+            data-track-name='CLOSE_PARTICIPANTS_MODAL'
+          >
             <X className='size-4' />
           </Button>
         </div>
         <div className='p-5 space-y-5'>
           <div className='space-y-2'>
-            <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+            <div className='flex items-center justify-between'>
+              <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
+              {selectedUsers.length > 0 && (
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='h-auto p-0 text-[13px] text-muted-foreground hover:text-foreground'
+                  onClick={() => {
+                    hasUserModifiedRef.current = true;
+                    setSelectedParticipants([]);
+                  }}
+                  data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+                  data-track-name='ClearAllCallParticipants'
+                  data-track-metadata={JSON.stringify({
+                    count: selectedUsers.length,
+                    channelId,
+                    conversationId,
+                  })}
+                >
+                  Clear All
+                </Button>
+              )}
+            </div>
             {/* Selected participants list - horizontal with wrap */}
             {selectedUsers.length > 0 && (
               <div className='flex flex-wrap gap-2 mb-3'>
@@ -276,6 +308,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 placeholder='Select participants'
                 searchPlaceholder='Select participants'
                 onSearchChange={setSearchQuery}
+                disableClientFiltering
                 variant='inline'
                 width='100%'
               />
@@ -287,12 +320,16 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               size='sm'
               className='rounded-lg text-[13px]'
               onClick={handleClose}
+              data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+              data-track-name='CANCEL_PARTICIPANTS_SELECTION'
             >
               Cancel
             </Button>
             <Button
               size='sm'
               onClick={handleSubmit}
+              data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
+              data-track-name='CONFIRM_PARTICIPANTS_SELECTION'
               disabled={selectedParticipants.length === 0}
               className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >

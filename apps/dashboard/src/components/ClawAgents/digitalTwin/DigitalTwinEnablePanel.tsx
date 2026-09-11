@@ -209,7 +209,13 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
 
           {/* CTA */}
           <div className='mt-6 flex flex-wrap items-center gap-x-4 gap-y-2'>
-            <Button onClick={submit} loading={enableMutation.isPending}>
+            <Button
+              onClick={submit}
+              trackId='digital_twin_enable_and_start'
+              data-track-category='Claw Agents'
+              data-track-name='ENABLE_DIGITAL_TWIN'
+              loading={enableMutation.isPending}
+            >
               {enableMutation.isPending ? 'Enabling…' : 'Enable & start'}
               {!enableMutation.isPending && <ArrowRight className='size-4' />}
             </Button>

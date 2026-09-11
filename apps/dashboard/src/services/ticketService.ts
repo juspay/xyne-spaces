@@ -1,14 +1,21 @@
 import { apiInstance } from './clients/apiClient';
-import { BaseTicketType, TicketPriority, FormFieldType } from '@xyne/shared';
+import {
+  BaseTicketType,
+  TicketPriority,
+  FormFieldType,
+  type FlowStepVisibilityOptions,
+} from '@xyne/shared';
 
 export interface CreateTicketRequest {
   title: string;
   description: string;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   ticketType: BaseTicketType;
   boardId?: string;
   sourceConversationId?: string;
+  sourceMessageId?: string;
+  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string };
 }
 
 export interface CreateTicketResponse {
@@ -61,7 +68,7 @@ export interface KanbanCountsFilters {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 
-export interface KanbanCountsRequest {
+export interface KanbanCountsRequest extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
   columnType?: 'stage' | 'status';
   projectId?: string;

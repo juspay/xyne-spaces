@@ -110,6 +110,8 @@ export const ClawAgentDetailHeader = ({
             size='sm'
             loading={moderating !== null}
             onClick={() => onModerate(isGlobal ? 'demote' : 'promote')}
+            data-track-category='Claw Agents'
+            data-track-name='MODERATE_AGENT'
           >
             {!moderating &&
               (isGlobal ? <ArrowDown className='size-4' /> : <ArrowUp className='size-4' />)}
@@ -131,13 +133,23 @@ export const ClawAgentDetailHeader = ({
             size='sm'
             loading={publishing}
             onClick={onPublish}
+            data-track-category='Claw Agents'
+            data-track-name='PUBLISH_AGENT'
           >
             {!publishing && <Globe className='size-4' />}
             <span className='hidden sm:inline'>{publishing ? 'Publishing…' : 'Publish'}</span>
           </Button>
         )}
 
-        <Button type='button' variant='outline' size='sm' loading={cloning} onClick={onClone}>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          loading={cloning}
+          onClick={onClone}
+          data-track-category='Claw Agents'
+          data-track-name='CLONE_AGENT'
+        >
           {!cloning && <Copy className='size-4' />}
           <span className='hidden sm:inline'>
             {permissions.canEdit ? 'Clone' : 'Request clone'}
@@ -151,6 +163,8 @@ export const ClawAgentDetailHeader = ({
             loading={saving}
             disabled={!dirty}
             onClick={onSave}
+            data-track-category='Claw Agents'
+            data-track-name='SAVE_AGENT'
             title={dirty ? 'Save changes' : 'Nothing to save'}
           >
             {!saving && <Save className='size-4' />}
@@ -179,6 +193,8 @@ export const ClawAgentDetailHeader = ({
               variant='ghost'
               size='iconSm'
               onClick={onDelete}
+              data-track-category='Claw Agents'
+              data-track-name='DELETE_AGENT'
               aria-label='Delete agent'
               className='text-muted-foreground hover:text-destructive'
             >

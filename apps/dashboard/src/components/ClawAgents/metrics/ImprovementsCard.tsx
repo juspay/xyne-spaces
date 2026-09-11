@@ -62,10 +62,26 @@ const ImprovementRow = ({
         Marking handled records a manual change; it does not edit the agent.
       </p>
       <div className='flex shrink-0 gap-2'>
-        <Button type='button' variant='outline' size='sm' disabled={busy} onClick={onDismiss}>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          disabled={busy}
+          onClick={onDismiss}
+          data-track-category='Claw Agents'
+          data-track-name='DISMISS_IMPROVEMENT'
+        >
           Dismiss
         </Button>
-        <Button type='button' size='sm' loading={busy} disabled={busy} onClick={onApply}>
+        <Button
+          type='button'
+          size='sm'
+          loading={busy}
+          disabled={busy}
+          onClick={onApply}
+          data-track-category='Claw Agents'
+          data-track-name='APPLY_IMPROVEMENT'
+        >
           Mark as handled
         </Button>
       </div>

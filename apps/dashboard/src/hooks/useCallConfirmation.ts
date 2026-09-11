@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ChannelScopeType } from '@xyne/shared';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
 
 interface CallConfirmationState {
   title: string;
@@ -76,18 +75,12 @@ export const useCallConfirmation = ({
 
     // Case 1: joining an existing call - proceed directly (no confirmation)
     if (hasActiveCallInChannel && !isUserInAnyCall) {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.START_CALL,
-      });
       onProceed();
       return;
     }
 
     // Case 2: User is leaving their call
     if (isUserInCurrentChannelCall) {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.END_CALL,
-      });
       onProceed();
       return;
     }
@@ -117,9 +110,6 @@ export const useCallConfirmation = ({
     }
 
     // Case 5: DM call when not in any call - proceed directly
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.START_CALL,
-    });
     onProceed();
   };
 
@@ -129,9 +119,6 @@ export const useCallConfirmation = ({
    */
   const handleConfirmCall = (onProceed: () => void): void => {
     setShowConfirmModal(false);
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.START_CALL,
-    });
     onProceed();
   };
 

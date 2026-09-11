@@ -41,6 +41,9 @@ export interface ElectronAPI {
     callerEmail: string;
     callType: CallType;
     callerPicture?: string;
+    body?: string;
+    /** Suppresses the OS notification sound; the dock still bounces. */
+    silent?: boolean;
   }) => void;
   closeCallNotification: (callId: string) => void;
   onCallNotificationClicked: (callback: (data: { callId: string }) => void) => () => void;
@@ -52,7 +55,10 @@ export interface ElectronAPI {
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
+  onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  // Optional: absent on Electron builds older than the one that added it.
+  onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
   onOpenXyneAIWithContext: (
     callback: (data: {
@@ -97,6 +103,10 @@ export interface ElectronAPI {
     html: string,
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
+  onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingStopForTeardown?: (callback: () => void) => () => void;
+  onRecordingResumeRequest?: (callback: () => void) => () => void;
+  onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
   getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;
   getErrorReportScreenSources?: () => Promise<{
@@ -118,6 +128,21 @@ export interface ElectronAPI {
     onStartRecordingFromMeeting: (callback: () => void) => () => void;
     onStopRecordingFromMeeting: (callback: () => void) => () => void;
     setEnabled: (enabled: boolean) => void;
+    /** Fires with the meeting on detection and with null when it ends. */
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => () => void;
+    /** Seeds state on mount — detection broadcasts are not replayed. */
+    getCurrentMeeting: () => Promise<{ app: string; startedAt: string } | null>;
+  };
+  /**
+   * Raw mic activity, meeting app or not. Separate from `meetingDetector`
+   * because the meeting-detection preference does not gate it: this is what
+   * keeps a call quiet while the user is talking to someone else.
+   */
+  micMonitor?: {
+    onStateChanged: (callback: (active: boolean) => void) => () => void;
+    getState: () => Promise<boolean>;
   };
   meetingPopup?: {
     onShow: (callback: (data: { app: string; startedAt: string }) => void) => () => void;
@@ -136,15 +161,34 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
   };
   recordingPill?: {
-    onShow: (callback: (startTime: number) => void) => () => void;
+    onShow: (
+      callback: (state: {
+        startTime: number;
+        paused: boolean;
+        pauseStartedAt: number | null;
+        accumulatedPausedMs: number;
+      }) => void,
+    ) => () => void;
     onHide: (callback: () => void) => () => void;
     onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
     onMinimizedChanged: (callback: (minimized: boolean) => void) => () => void;
     stopRecording: () => void;
+    resumeRecording: () => void;
     openApp: () => void;
     setIgnoreMouse: (ignore: boolean) => void;
     dragStart: () => void;
     dragEnd: () => void;
+  };
+  platform?: string;
+  tray?: {
+    getVisible: () => Promise<boolean>;
+    setVisible: (visible: boolean) => void;
+    onVisibleChanged: (callback: (visible: boolean) => void) => () => void;
+  };
+  recordingPillSettings?: {
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => void;
+    onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
   clawOverlay?: {
     setIgnoreMouse: (ignore: boolean) => void;
@@ -165,6 +209,16 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  localHarness?: {
+    getStatus: () => Promise<LocalHarnessStatus>;
+    detect: () => Promise<LocalHarnessInstallation[]>;
+    connect: () => Promise<LocalHarnessStatus>;
+    disconnect: () => Promise<LocalHarnessStatus>;
+    setProviderEnabled: (
+      provider: LocalHarnessInstallation['provider'],
+      enabled: boolean,
+    ) => Promise<LocalHarnessStatus>;
+  };
   saveErrorReportFile?(
     fileName: string,
     buffer: ArrayBuffer | null,
@@ -176,6 +230,25 @@ export interface ElectronAPI {
   readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
+}
+
+export interface LocalHarnessInstallation {
+  provider: 'claude-code' | 'codex-cli';
+  binaryPath: string;
+  version: string;
+  authenticated: boolean;
+  /** Whether the user connected this harness on this device. */
+  enabled?: boolean;
+}
+
+export interface LocalHarnessStatus {
+  supported: boolean;
+  connected: boolean;
+  deviceId: string | null;
+  deviceName: string;
+  platform: string;
+  installations: LocalHarnessInstallation[];
+  lastError: string | null;
 }
 
 declare global {

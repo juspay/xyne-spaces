@@ -19,9 +19,10 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
-import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
+import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
@@ -63,6 +64,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
 interface InfoProps {
@@ -108,8 +110,9 @@ const Info = ({
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
     isParticipant &&
-    !isDM &&
-    (channel.scopeType === ChannelScopeType.GROUP_DM ||
+    !isSelfDM &&
+    (isDM ||
+      channel.scopeType === ChannelScopeType.GROUP_DM ||
       currentUserParticipant?.role === ChannelRole.ADMIN ||
       addUserPolicy === ChannelAddUserPolicy.EVERYONE);
 
@@ -118,7 +121,40 @@ const Info = ({
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: channel.id }),
+  );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: channel.projectId }),
+  );
+
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'Info',
+        resolution: 'channel-board-mapping',
+        channelId: channel.id,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'Info',
+      resolution: 'project-boards-fallback',
+      channelId: channel.id,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {
@@ -139,11 +175,6 @@ const Info = ({
 
   const handleAddPeopleClick = (): void => {
     setShowAddPeopleDialog(true);
-  };
-
-  const handleAddPeopleSuccess = (): void => {
-    setShowAddPeopleDialog(false);
-    // Success - participants appear in the list automatically, no toast needed
   };
 
   const handleAddPeopleCancel = (): void => {
@@ -324,6 +355,7 @@ const Info = ({
             isStarred: channelUserStatus?.isStarred,
             channelId: channel.id,
           })}
+          data-ph-capture-attribute-track-id='toggle_channel_star'
         >
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} className='text-status-pending' fill='currentColor' />
@@ -392,7 +424,8 @@ const Info = ({
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
-            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+            data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
+            data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
             <div className='text-destructive text-[13px]'>Leave</div>
@@ -498,13 +531,11 @@ const Info = ({
         )}
       </Tabs.Root>
 
-      <Dialog open={showAddPeopleDialog} onOpenChange={setShowAddPeopleDialog} title='Add Members'>
-        <AddPeopleForm
-          channelId={channel.id}
-          onSuccess={handleAddPeopleSuccess}
-          onCancel={handleAddPeopleCancel}
-        />
-      </Dialog>
+      <AddPeopleDialog
+        channelId={channel.id}
+        open={showAddPeopleDialog}
+        onOpenChange={open => (open ? setShowAddPeopleDialog(true) : handleAddPeopleCancel())}
+      />
 
       <Dialog open={showPromoteDialog} onOpenChange={setShowPromoteDialog}>
         <div className='p-4'>
@@ -635,6 +666,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='REMOVE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='remove_channel_admin'
                     >
                       <LucideUserMinus size={14} />
                       <span className='text-[14px] text-foreground'>Remove admin</span>
@@ -646,6 +678,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='MAKE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='make_channel_admin'
                     >
                       <LucideUser size={14} />
                       <span className='text-[14px] text-foreground'>Make admin</span>
@@ -657,7 +690,7 @@ const ParticipantListItem = ({
                     onClick={() =>
                       onRemove(participant.userId, getUserDisplayName(user) || 'this user')
                     }
-                    data-track-category='ChatInfo'
+                    data-track-category='CHAT_INFO'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
@@ -949,13 +982,26 @@ const ChannelMembers = ({
               : 'This person will lose access to the channel but may rejoin later.'}
           </p>
           <div className='flex justify-end gap-3'>
-            <Button variant='secondary' onClick={() => setRemoveDialogOpen(false)} className='px-6'>
+            <Button
+              variant='secondary'
+              onClick={() => setRemoveDialogOpen(false)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CANCEL_REMOVE_PARTICIPANT'
+              className='px-6'
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CONFIRM_REMOVE_PARTICIPANT'
+              data-track-metadata={JSON.stringify({
+                ...channelTrackingMetadata(channel),
+                targetUserId: userToRemove?.id,
+              })}
               className='px-6'
+              trackId='remove_channel_participant'
             >
               Remove
             </Button>

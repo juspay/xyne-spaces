@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { type CSSProperties, type ReactElement, useCallback, useEffect } from 'react';
 import { Square } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,7 +62,11 @@ export function AgentProgressIndicator({
         new CustomEvent('agent-progress-cleared', { detail: { conversationId } }),
       );
     } catch (err) {
-      console.error('[AgentProgressIndicator] cancel failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AgentProgressIndicator] cancel failed:'),
+        error: err,
+      });
       toast.error('Failed to stop agent', {
         description: 'Only the person who started it can stop.',
       });
@@ -71,13 +76,13 @@ export function AgentProgressIndicator({
   if (agents.length === 0) return null;
 
   return (
-    <div className='mb-2 flex items-center gap-2 h-5 bg-background'>
+    <div className='flex w-full items-center gap-2 h-5 bg-background'>
       <div className='flex flex-wrap gap-3 text-[11px] text-muted-foreground flex-1 min-w-0'>
         {agents.map(a => (
           <span key={a.agentUserId ?? a.agentSlug ?? 'agent'} style={rowStyle}>
             <AgentSpinner variant={a.variant} size={12} />
             <span className='truncate max-w-[320px]'>
-              {a.agentSlug ? <strong className='mr-1'>{a.agentSlug}</strong> : null}
+              {a.agentName ? <strong className='mr-1'>{a.agentName}</strong> : null}
               {a.toolLabel ?? 'working…'}
             </span>
           </span>
@@ -89,6 +94,7 @@ export function AgentProgressIndicator({
           onClick={() => void handleAbortAgent()}
           className='p-1 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors shrink-0'
           aria-label='Stop agent'
+          data-ph-capture-attribute-track-id='stop_agent'
           data-track-category='CHAT_INPUT'
           data-track-name='STOP_AGENT'
         >

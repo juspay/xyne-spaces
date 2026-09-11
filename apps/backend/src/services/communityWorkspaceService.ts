@@ -1,6 +1,7 @@
 import { User } from '@prisma/client';
 import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
+  ChannelRole,
   OrgRole,
   WorkspaceJoinPolicy,
   WorkspaceJoinRequestAction,
@@ -11,7 +12,7 @@ import { CommunityJoinResultStatus,
   AuthProvider,
   Status,
   UserStatus,
-  WorkspaceRole, ChannelRole } from '@xyne/shared';
+  WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -23,6 +24,7 @@ import { organizationDomainService } from '@/services/organizationDomainService'
 import { repositories } from '@/database/repositories';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { UserService } from '@/services/userService';
 
 const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
@@ -87,6 +89,7 @@ type CommunityWorkspace = {
 
 export class CommunityWorkspaceService {
   private prisma = DatabaseClient.getInstance();
+  private userService = new UserService();
 
   async listCommunityWorkspaces(): Promise<CommunityWorkspaceOrganization[]> {
     const organizations = await this.prisma.organization.findMany({
@@ -328,6 +331,8 @@ export class CommunityWorkspaceService {
         });
       }
 
+      const hasCompletedOnboarding = await this.userService.hasCompletedOnboarding(email);
+
       let workspaceUser = await tx.user.findUnique({
         where: {
           email_workspaceId: {
@@ -337,7 +342,7 @@ export class CommunityWorkspaceService {
         },
       });
 
-      let isNewUser = false;
+      const isNewUser = !hasCompletedOnboarding;
       if (workspaceUser) {
         workspaceUser = await tx.user.update({
           where: { id: workspaceUser.id },
@@ -351,7 +356,6 @@ export class CommunityWorkspaceService {
           },
         });
       } else {
-        isNewUser = true;
         workspaceUser = await tx.user.create({
           data: {
             providerUserId: params.userData.providerUserId,
@@ -410,7 +414,7 @@ export class CommunityWorkspaceService {
     }
 
     try {
-      await aiProvisioningService.enqueueUserSync(result.workspaceUser.id);
+      await aiProvisioningService.enqueueUserSync(result.workspaceUser.orgMemberId);
     } catch (error) {
       logger.error('[CommunityWorkspaceService] Failed to enqueue AI provisioning job', {
         workspaceId: params.workspace.id,

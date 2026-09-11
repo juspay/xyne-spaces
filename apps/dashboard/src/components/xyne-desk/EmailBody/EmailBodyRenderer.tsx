@@ -51,6 +51,13 @@ const buildPurifier = (): DOMPurifyInstance => {
   return purifier;
 };
 
+let emailBodyPurifier: DOMPurifyInstance | undefined;
+
+const getEmailBodyPurifier = (): DOMPurifyInstance => {
+  emailBodyPurifier ??= buildPurifier();
+  return emailBodyPurifier;
+};
+
 const isRemoteUrl = (value: string): boolean => {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return false;
@@ -345,7 +352,7 @@ const buildIframeSrcdoc = (
     ? preprocessed
     : `<pre style="white-space:pre-wrap;font-family:inherit;margin:0;">${escapeHtml(preprocessed)}</pre>`;
 
-  const purifier = buildPurifier();
+  const purifier = getEmailBodyPurifier();
   const sanitized = purifier.sanitize(htmlInput, { RETURN_DOM_FRAGMENT: false });
   const cidResolved = rewriteCidRefs(sanitized);
 
@@ -400,7 +407,7 @@ export const EmailBodyRenderer = ({
     setShowRemoteImages(false);
   }, [emailId]);
 
-  const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments);
+  const { rewrite: rewriteCidRefs, blobUrlToAttachmentId } = useCidImageResolver(attachments, body);
 
   // Refs so the iframe's event handler always sees the latest values without
   // needing to re-register on every render.

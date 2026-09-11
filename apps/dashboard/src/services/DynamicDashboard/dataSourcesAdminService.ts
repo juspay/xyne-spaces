@@ -8,6 +8,7 @@ export interface ConnectionConfigInput {
   password: string;
   database: string;
   ssl?: boolean;
+  ca?: string;
 }
 
 export interface IncludedTable {

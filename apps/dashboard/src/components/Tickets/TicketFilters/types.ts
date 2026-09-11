@@ -27,6 +27,7 @@ export interface TicketFilters {
   aiCategory?: string[]; // AI classification categories (e.g. "Mandate", "Refund")
   generatedTags?: string[]; // AI-generated tags in "category:tag" format (e.g. "priority:high")
   hasAiDraft?: boolean; // filter to show only tickets with AI-generated email drafts
+  hasSubTickets?: boolean; // filter to show only tickets that have sub-tickets
   conversationLabelId?: string; // desk-only: single Gmail-style conversation label id
   // Dynamic form fields: fieldId -> filter value
   // For SELECT fields: string array of selected values
@@ -52,6 +53,12 @@ export interface TicketFiltersProps {
   sourceChannelProjectIds?: string[] | undefined;
   showBoardsFilter?: boolean;
   availableTags?: string[] | undefined;
+  /** Callback to load more tags (for pagination) */
+  onLoadMoreTags?: () => void;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean;
+  /** Callback for server-side tag search */
+  onSearchTags?: (query: string) => void;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   hideAssigneeFilter?: boolean;
   hasPrReviewers?: boolean;
@@ -62,6 +69,8 @@ export interface TicketFiltersProps {
   onBoardDropdownOpenChange?: (open: boolean) => void;
   /** True while the Source channels submenu is open; drives lazy board→project resolution in the parent */
   onSourceChannelsOpenChange?: (open: boolean) => void;
+  /** True while the More Filters dropdown is open; drives lazy board data fetch in parent */
+  onFiltersDropdownOpenChange?: (open: boolean) => void;
   isTicketsSyncing?: boolean;
   /** True when the selected board is a non-linear board */
   isNonLinearBoard?: boolean;

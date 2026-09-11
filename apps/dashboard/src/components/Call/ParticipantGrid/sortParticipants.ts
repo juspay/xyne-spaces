@@ -47,12 +47,23 @@ export function compareParticipants(a: ParticipantInfo, b: ParticipantInfo): num
  * that .find() lands on the most-active caller (mic→camera→joinedAt order).
  * MVP limitation: does not switch to active speaker dynamically.
  */
-export function findRemotePresenter(
+/**
+ * The participant to feature on screen: a remote human if there is one, falling
+ * back to ourselves when nobody else has joined.
+ *
+ * Named for what it returns rather than "remote presenter" — it can hand back the
+ * local participant, and a name promising otherwise would mislead future callers.
+ * The fallback exists for presentation mode: a telepresence wall alone in a room
+ * should show itself rather than an empty "waiting for remote participant" screen,
+ * which is its normal resting state rather than an error.
+ */
+export function findPresentationParticipant(
   participants: ParticipantInfo[],
   localParticipantId: string | null,
 ): ParticipantInfo | undefined {
-  return participants.find(
-    p => p.identity !== localParticipantId && !p.identity.startsWith('agent-'),
+  return (
+    participants.find(p => p.identity !== localParticipantId && !p.identity.startsWith('agent-')) ??
+    participants.find(p => p.identity === localParticipantId)
   );
 }
 

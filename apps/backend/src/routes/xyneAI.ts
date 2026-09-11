@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { xyneAIControllerV2 } from '@/controllers/xyneAIControllerV2';
 import { authMiddleware } from '@/middleware/auth';
-import { listClawAgentsInChannel } from '@/services/clawAgentService';
+import { listClawAgentsInChannel } from '@/services/channelClawAgentService';
+import { ShareAgentConversationController } from '@/controllers/shareAgentConversationController';
 import { logger } from '@/utils/logger';
 
 const router = Router();
+const shareAgentConversationController = new ShareAgentConversationController();
+
+router.get('/agent-conversation-preview', shareAgentConversationController.getPreview);
 
 /**
  * Xyne AI Routes
@@ -88,14 +92,14 @@ router.get('/v2/conversations/:convId/live', authMiddleware.authenticate, xyneAI
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);
 
 // GET /api/xyne-ai/v2/attachments/:attachmentId/download - Download attachment from claw
-router.get('/v2/attachments/:attachmentId/download', authMiddleware.authenticate, xyneAIControllerV2.downloadAttachment);
+router.get(
+  '/v2/attachments/:attachmentId/download',
+  authMiddleware.authenticate,
+  xyneAIControllerV2.downloadAttachment
+);
 
 // GET /api/xyne-ai/agents - List all claw agents accessible to the current user
-router.get(
-  '/agents',
-  authMiddleware.authenticate,
-  xyneAIControllerV2.listAccessibleAgents,
-);
+router.get('/agents', authMiddleware.authenticate, xyneAIControllerV2.listAccessibleAgents);
 
 // GET /api/xyne-ai/agents/:slug/models - Models the agent's LiteLLM key can serve
 router.get(
@@ -105,23 +109,24 @@ router.get(
 );
 
 // GET /api/xyne-ai/channel-agents/:channelId - List claw agents in a channel
-router.get(
-  '/channel-agents/:channelId',
-  authMiddleware.authenticate,
-  async (req, res) => {
-    try {
-      const { channelId } = req.params;
-      if (!channelId) {
-        res.status(400).json({ error: 'channelId is required' });
-        return;
-      }
-      const agents = await listClawAgentsInChannel(channelId);
-      res.json({ agents });
-    } catch (error) {
-      logger.error('[xyne-ai] Failed to list channel claw agents:', error);
-      res.status(500).json({ error: 'Failed to list channel claw agents' });
+router.get('/channel-agents/:channelId', authMiddleware.authenticate, async (req, res) => {
+  try {
+    const { channelId } = req.params;
+    if (!channelId) {
+      res.status(400).json({ error: 'channelId is required' });
+      return;
     }
-  },
-);
+    const requesterUserId = req.user?.id;
+    if (!requesterUserId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const agents = await listClawAgentsInChannel(channelId, requesterUserId);
+    res.json({ agents });
+  } catch (error) {
+    logger.error('[xyne-ai] Failed to list channel claw agents:', error);
+    res.status(500).json({ error: 'Failed to list channel claw agents' });
+  }
+});
 
 export default router;

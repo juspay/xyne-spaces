@@ -3,6 +3,7 @@
  * Common time formatting and display helpers for recording screens
  */
 
+import { normalizeTagName, TAG_FORMAT_REGEX } from '@xyne/shared';
 import { logger, Event } from './logger';
 
 /**
@@ -92,8 +93,9 @@ export const generateRecordingTitle = (startTime: number | null): string => {
 export const DEFAULT_RECORDING_TITLE = 'Impromptu Recording';
 export const NO_TRANSCRIPT_RECORDING_TITLE = 'Recording (no transcript)';
 
-/** How long after the call ends a title still counts as on its way. */
-export const TITLE_SHIMMER_WINDOW_MS = 90 * 1000;
+/** Trims a recording's title, falling back to `DEFAULT_RECORDING_TITLE` when blank. */
+export const resolveRecordingTitle = (title: string | null | undefined): string =>
+  title?.trim() || DEFAULT_RECORDING_TITLE;
 
 /** How long a recording gets to produce a transcript before we say it has none. */
 export const NO_TRANSCRIPT_AFTER_MS = 5 * 60 * 1000;
@@ -125,7 +127,7 @@ export const getRecordingTitleState = (
 
   const sinceEndedMs = now - endedAtMs;
 
-  if (recording.hasTranscript && !recording.hasSummary && sinceEndedMs < TITLE_SHIMMER_WINDOW_MS) {
+  if (recording.hasTranscript && !recording.hasSummary) {
     return { kind: 'generating' };
   }
   if (!recording.hasTranscript && sinceEndedMs >= NO_TRANSCRIPT_AFTER_MS) {
@@ -170,37 +172,39 @@ export const getSpeakerColor = (name: string): string => {
 };
 
 /**
- * Dot colors for recording labels
- */
-const TAG_DOT_COLORS = [
-  'bg-cyan-600',
-  'bg-yellow-600',
-  'bg-purple-600',
-  'bg-green-600',
-  'bg-pink-600',
-  'bg-blue-600',
-] as const;
-
-/**
- * Assigns the same palette color to a label on every render using a stable string hash.
- *
- * @example
- * getRecordingTagDotColor('customer-call'); // e.g. 'bg-purple-600'
- */
-export const getRecordingTagDotColor = (tag: string): (typeof TAG_DOT_COLORS)[number] => {
-  let hash = 0;
-  for (let index = 0; index < tag.length; index += 1) {
-    hash = tag.charCodeAt(index) + ((hash << 5) - hash);
-  }
-
-  return TAG_DOT_COLORS[Math.abs(hash) % TAG_DOT_COLORS.length] ?? TAG_DOT_COLORS[0];
-};
-
-/**
  * Trims labels and drops blanks and duplicates, preserving order.
  */
 export const normalizeRecordingTags = (tags: string[]): string[] => {
   return [...new Set(tags.map(tag => tag.trim()).filter(Boolean))];
+};
+
+/**
+ * Reads `calls.recordingParticipants` (stringified JSON string[]) into user ids,
+ * prepending the creator so older rows still resolve to at least one person.
+ */
+export const getRecordingParticipantIds = (
+  createdByUserId: string | undefined,
+  stored: string | null | undefined,
+): string[] => {
+  let ids: string[] = [];
+  if (stored) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === 'string');
+    } catch {
+      ids = [];
+    }
+  }
+  if (createdByUserId && !ids.includes(createdByUserId)) return [createdByUserId, ...ids];
+  return ids;
+};
+
+/** Canonical tag name, or null when the text can't make one — tags must start with a letter. */
+export const slugifyRecordingLabel = (raw: string): string | null => {
+  const slug = normalizeTagName(raw);
+  if (!slug) return null;
+  const safe = /^[a-z]/.test(slug) ? slug : `l-${slug}`;
+  return TAG_FORMAT_REGEX.test(safe) ? safe : null;
 };
 
 /**
@@ -230,6 +234,29 @@ export const logRecordingError = (context: string, error: unknown): void => {
   });
 };
 
+/** Recording share post details. */
+export interface RecordingSharePost {
+  channelId: string;
+  conversationId: string;
+  messageId: string;
+}
+
+export const isRecordingTicketLinkShare = (metadata: unknown): boolean => {
+  if (!metadata || typeof metadata !== 'object') return false;
+  return (metadata as Record<string, unknown>)['intent'] === 'ticket_link';
+};
+
+/** Reads post details from share metadata. */
+export const getRecordingSharePost = (metadata: unknown): RecordingSharePost | null => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const { channelId, conversationId, messageId } = metadata as Record<string, unknown>;
+  return typeof channelId === 'string' &&
+    typeof conversationId === 'string' &&
+    typeof messageId === 'string'
+    ? { channelId, conversationId, messageId }
+    : null;
+};
+
 /**
  * STT model labels for display
  */
@@ -245,3 +272,23 @@ export const STT_MODEL_LABELS: Record<string, string> = {
 export const STT_MODELS = ['google', 'azure', 'deepgram'] as const;
 
 export type SttModel = (typeof STT_MODELS)[number];
+
+/**
+ * Pull a recording's two document ids out of `Call.metadata`.
+ *
+ * Neither has a column of its own: the note-taker webhook stamps `notesCanvasId`
+ * (older rows carry `notesCanvasViewAccessId` instead) and the summary pipeline
+ * stamps `detailedSummaryCanvasId`. Both are absent for recordings created before
+ * those canvases existed, so every caller must handle nulls.
+ */
+export const readRecordingCanvasIds = (
+  metadata: unknown,
+): { summaryCanvasId: string | null; notesCanvasId: string | null } => {
+  const meta = (metadata ?? null) as Record<string, unknown> | null;
+  const rawSummary = meta?.['detailedSummaryCanvasId'];
+  const rawNotes = meta?.['notesCanvasId'] ?? meta?.['notesCanvasViewAccessId'];
+  return {
+    summaryCanvasId: typeof rawSummary === 'string' && rawSummary ? rawSummary : null,
+    notesCanvasId: typeof rawNotes === 'string' && rawNotes ? rawNotes : null,
+  };
+};

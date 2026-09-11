@@ -60,7 +60,7 @@ services:
       # OTEL metrics export — only set when observability is enabled, otherwise
       # zero-cache floods logs with ECONNREFUSED and may crash.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.6.0
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.9.0
       - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
     ports:
       # Core

@@ -44,10 +44,22 @@ export const ResetDraftsConfirmOverlay = ({
           </div>
         </div>
         <div className='flex items-center justify-end gap-2 mt-5'>
-          <Button variant='secondary' onClick={onCancel}>
+          <Button
+            variant='secondary'
+            onClick={onCancel}
+            data-track-category='COMPONENT_EDITOR'
+            data-track-name='CANCEL_RESET_DRAFTS'
+          >
             Cancel
           </Button>
-          <Button onClick={onConfirm}>Reset &amp; continue</Button>
+          <Button
+            onClick={onConfirm}
+            trackId='reset_component_drafts'
+            data-track-category='COMPONENT_EDITOR'
+            data-track-name='CONFIRM_RESET_DRAFTS'
+          >
+            Reset &amp; continue
+          </Button>
         </div>
       </div>
     </div>

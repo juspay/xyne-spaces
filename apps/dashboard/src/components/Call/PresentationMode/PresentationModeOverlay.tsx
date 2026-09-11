@@ -50,6 +50,16 @@ export function PresentationModeOverlay({
     }
     if (fullscreenRequestedRef.current) return;
     fullscreenRequestedRef.current = true;
+
+    // The Fullscreen API requires transient user activation. When presentation
+    // mode is opened programmatically rather than by a click — an unattended wall
+    // launched with ?telepresence=1 — there is no activation and the request is
+    // guaranteed to reject, which would light up the "Failed to enter presentation
+    // mode" hint for something that isn't broken. Skip it instead: the overlay is
+    // `fixed inset-0` so it already covers the viewport, and such a display is
+    // normally run in a kiosk browser where the viewport is the whole screen.
+    if (navigator.userActivation && !navigator.userActivation.isActive) return;
+
     void overlayRef.current?.requestFullscreen()?.catch((err: Error) => {
       logger.error(Event.LIVEKIT_ROOM_EVENT, {
         callId,
@@ -95,6 +105,8 @@ export function PresentationModeOverlay({
           transition={{ duration: 0.25, ease: 'easeInOut' }}
           // Fallback: click anywhere to exit when fullscreen API is unavailable
           onClick={fullscreenFailed ? onExit : undefined}
+          data-track-category='CALLS'
+          data-track-name='EXIT_PRESENTATION_MODE'
         >
           {participant ? (
             <ParticipantTile
@@ -103,6 +115,10 @@ export function PresentationModeOverlay({
               avatarSize='large'
               aiController={aiController}
               requestedAiController={requestedAiController}
+              // Presentation mode is a clean full-bleed view: no name label and no
+              // speaking/raised-hand ring (a coloured frame around the whole screen).
+              hideNameLabel={true}
+              hideSpeakingIndicator={true}
             />
           ) : (
             <p className='text-white/40 text-sm'>Waiting for remote participant…</p>

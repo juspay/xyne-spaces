@@ -19,7 +19,7 @@
  *
  * Paired with the `todo-write` / `todo-read` tools (tools/todo/todo-tools.ts),
  * the `propose-plan` terminal tool (plan mode), and the claw-auth
- * /webhook/progress `kind:"plan"` + /webhook/result `pendingPlan` handlers that
+ * unified `ui-widget` progress + /webhook/result `pendingPlan` handlers that
  * do the post-then-update.
  */
 
@@ -133,8 +133,10 @@ export function buildPlanFlow(
 
   const planComponent: FlowComponent = { id: PLAN_COMPONENT_ID, type: 'plan', props };
 
+  // No flow title: FlowRenderer paints `flowJSON.title` as an <h2> ABOVE the
+  // card, and the card's own TitleBlock already shows `props.title` — the same
+  // string twice, once outside the artifact and once inside it.
   return new FlowBuilder(screenId)
-    .setTitle(title)
     .addComponent(planComponent)
     .setData({ kind: 'plan', ...(opts?.data ?? {}) })
     .build();

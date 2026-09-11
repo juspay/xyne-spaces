@@ -10,9 +10,10 @@ import { entityExtractionService } from '@/services/entityExtraction/entityExtra
 /**
  * Consumer for the entity-extraction queue.
  *
- * Jobs are delayed until midnight IST, so this worker sits idle during the day
- * and drains the night's threads in priority (timestamp) order. Each job is one
- * settled thread: extract mentions → resolve → write entity ids back to Vespa.
+ * Each job is one thread: extract mentions → resolve → write entity ids back to
+ * Vespa. Jobs are produced by live message/ticket mutations but held for a
+ * debounce window, so this worker sees one job per busy thread per window rather
+ * than one per message — a job re-reads the whole thread either way.
  *
  * Concurrency is bounded by the shared LiteLLM key's parallel-request limit.
  */
@@ -21,6 +22,11 @@ class EntityExtractionWorker {
 
   async start(): Promise<void> {
     if (this.started) return;
+    const entityExtractionEnabled = config.entityExtraction.enabled;
+    if (!entityExtractionEnabled) {
+      logger.info('[ENTITY-EXTRACTION-WORKER] Disabled; not starting');
+      return;
+    }
 
     await entityExtractionQueue.initialize();
     const queue = entityExtractionQueue.getQueue();

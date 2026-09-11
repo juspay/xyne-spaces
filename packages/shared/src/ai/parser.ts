@@ -11,6 +11,7 @@ import {
   AIControllerEvent,
   AIControlRequestEvent,
   AIControlRequestDeniedEvent,
+  AITranscriptionStateEvent,
   AIInviteUser,
 } from './types';
 
@@ -74,6 +75,16 @@ export function parseAIDataMessage(data: RawDataMessage): AIEvent | null {
     const event: AIControlRequestDeniedEvent = {
       type: 'AI_CONTROL_REQUEST_DENIED',
       requesterId: data.requester_id,
+    };
+    return event;
+  }
+
+  // Handle authoritative transcription-state broadcasts (from the agent)
+  if (data.type === 'transcription_state' && typeof data.enabled === 'boolean') {
+    const event: AITranscriptionStateEvent = {
+      type: 'AI_TRANSCRIPTION_STATE',
+      enabled: data.enabled,
+      at: data.at ?? Date.now(),
     };
     return event;
   }

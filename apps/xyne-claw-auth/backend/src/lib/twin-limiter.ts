@@ -20,6 +20,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { errMsg } from "./errors.js";
 import { redisService } from "../redis.js";
 import { createLogger } from "../logger.js";
 
@@ -69,7 +70,7 @@ export async function acquireTwinSlot(): Promise<string | null> {
       await new Promise((r) => setTimeout(r, jitter));
     }
   } catch (err) {
-    log.warn("[twin-limiter] Redis error — failing OPEN (dispatching without a slot):", err instanceof Error ? err.message : String(err));
+    log.warn("[twin-limiter] Redis error — failing OPEN (dispatching without a slot):", errMsg(err));
     return token; // fail-open: release becomes a no-op ZREM later
   }
 }
@@ -81,7 +82,7 @@ export async function renameTwinSlot(token: string, sessionId: string): Promise<
     await redis.zrem(KEY, token);
     await redis.zadd(KEY, Date.now(), sessionId);
   } catch (err) {
-    log.warn("[twin-limiter] rename failed (slot will TTL out):", err instanceof Error ? err.message : String(err));
+    log.warn("[twin-limiter] rename failed (slot will TTL out):", errMsg(err));
   }
 }
 

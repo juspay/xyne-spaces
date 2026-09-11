@@ -1,4 +1,4 @@
-import { mustGetQuery, mustGetMutator } from '@rocicorp/zero';
+import { mustGetQuery, mustGetMutator, type AnyCustomQuery } from '@rocicorp/zero';
 import { handleMutateRequest, handleQueryRequest } from '@rocicorp/zero/server';
 import { zeroNodePg } from '@rocicorp/zero/server/adapters/pg';
 // Zero internal APIs for fallback system (mapped via #imports in package.json)
@@ -11,6 +11,7 @@ import { Pool } from 'pg';
 import { Context, schema } from '@xyne/shared';
 import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
+import { scopeQueryToTenant } from './tenant-scope';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
 import { getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
@@ -32,6 +33,30 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
+import { superpositionClient } from '@/services/superpositionClient';
+
+const mustGetBackendQuery = (name: string): AnyCustomQuery =>
+  mustGetQuery(queries as never, name) as AnyCustomQuery;
+
+const ZERO_DISABLED_QUERIES_KEY = 'zero_disabled_queries';
+
+const parseDisabledQueries = (raw: string): Set<string> =>
+  new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  );
+
+const isQueryDisabled = async (name: string): Promise<boolean> => {
+  try {
+    const raw = await superpositionClient.getStringValue(ZERO_DISABLED_QUERIES_KEY, '', {});
+    return parseDisabledQueries(raw).has(name);
+  } catch (error) {
+    logger.error('Failed to read disabled queries from superposition', { error });
+    return false;
+  }
+};
 
 // Create database connection pool
 const isDev = process.env['NODE_ENV'] === 'development';
@@ -59,7 +84,7 @@ if (replicaDbProvider) {
 
 let serverSchemaCache: any | null = null;
 
-async function fetchServerSchema(): Promise<any> {
+export async function fetchServerSchema(): Promise<any> {
   if (!serverSchemaCache) {
     serverSchemaCache = await dbProvider.transaction(async (tx) => {
       return await getServerSchema(tx.dbTransaction, schema);
@@ -178,6 +203,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
   const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
   let vespaJobs: VespaJobsAccumulator = [];
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
@@ -228,13 +254,24 @@ export async function handleMutate(request: Request): Promise<unknown> {
       request,
       handler: transact => {
         const mutationAsyncTasks: (() => Promise<void>)[] = [];
+        const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
-          const mutators = createMutators(authData, mutationAsyncTasks);
-          const wrappedTx = wrapTransactionWithACL(tx, context, mutationVespaJobs, mutationSideEffectJobs);
+          const mutators = createMutators(
+            authData,
+            mutationAsyncTasks,
+            mutationAwaitedPostCommitTasks,
+          );
+          const wrappedTx = wrapTransactionWithACL(
+            tx,
+            context,
+            mutationVespaJobs,
+            mutationSideEffectJobs,
+            mutatorName,
+          );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
         }).then((mutatorResult) => {
@@ -242,6 +279,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
           // back the transaction. Do not dispatch work staged by that rollback.
           if (!('error' in mutatorResult.result)) {
             asyncTasks.push(...mutationAsyncTasks);
+            awaitedPostCommitTasks.push(...mutationAwaitedPostCommitTasks);
             vespaJobs.push(...mutationVespaJobs);
             sideEffectJobs.push(...mutationSideEffectJobs);
           }
@@ -274,6 +312,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
       });
     }
 
+    await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
     Promise.allSettled(asyncTasks.map((task) => task()));
 
     Promise.allSettled(
@@ -361,12 +400,20 @@ export async function handleQueries(request: Request): Promise<any> {
 
   try {
     const result = await handleQueryRequest(
-      (queryName, args) => {
-        capturedQueryName = queryName;
-        const query = mustGetQuery(queries, queryName);
-        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
-        return query.fn({ args, ctx: context });
-      },
+      // zero's QueryRequestHandler type is sync-only but the runtime awaits the
+      // handler result, so returning a promise (typed as any) is safe.
+      (queryName, args): any =>
+        (async () => {
+          capturedQueryName = queryName;
+          if (await isQueryDisabled(queryName)) {
+            getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
+            logger.warn('zero_query_disabled', { query: queryName });
+            throw new Error(`Query '${queryName}' is disabled`);
+          }
+          const query = mustGetBackendQuery(queryName);
+          const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
+          return scopeQueryToTenant(query.fn({ args, ctx: context }), context, queryName);
+        })(),
       schema,
       request
     );
@@ -395,12 +442,12 @@ export async function handleQueries(request: Request): Promise<any> {
   }
 }
 
-type ZeroResultFormat = {
+export type ZeroResultFormat = {
   singular?: boolean;
   relationships?: Record<string, ZeroResultFormat>;
 };
 
-function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined): void {
+export function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined): void {
   if (!node || !format?.relationships) return;
   if (Array.isArray(node)) {
     for (const item of node) conformToZeroShape(item, format);
@@ -415,6 +462,92 @@ function conformToZeroShape(node: unknown, format: ZeroResultFormat | undefined)
       continue;
     }
     conformToZeroShape(value, childFormat);
+  }
+}
+
+/** Which step of `runCatalogQuery` failed. Callers map this to a status code. */
+export type CatalogQueryPhase = 'unknown' | 'build' | 'execute';
+
+/**
+ * A catalog query that could not be run, tagged with the step that failed.
+ *
+ * The three cases mean different things to a caller — the operation does not
+ * exist, its arguments were rejected, or the database was unreachable — and an
+ * HTTP surface needs to tell them apart. Carrying the phase here keeps that
+ * distinction without this module knowing anything about status codes.
+ */
+export class CatalogQueryError extends Error {
+  constructor(
+    readonly phase: CatalogQueryPhase,
+    message: string,
+    readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'CatalogQueryError';
+  }
+}
+
+/**
+ * Build a query's AST and result format, or report why the arguments failed.
+ *
+ * Separate from `runCatalogQuery` so the compiled types survive: destructuring
+ * into pre-declared `unknown` variables to widen a try/catch loses the `AST` and
+ * `Format` that `executePostgresQuery` requires.
+ */
+function buildQueryInternals(
+  queryDef: AnyCustomQuery,
+  name: string,
+  args: unknown,
+  ctx: Context,
+) {
+  try {
+    // Scope the read to the caller's tenant before it is compiled to SQL, the same
+    // as the primary and zql-to-sql query paths.
+    const query = scopeQueryToTenant(queryDef.fn({ args: args ?? {}, ctx }), ctx, name);
+    // @ts-ignore - asQueryInternals works with any Query type at runtime
+    return asQueryInternals(query);
+  } catch (error) {
+    // Raised by the query body or its zod validator: the arguments were bad.
+    throw new CatalogQueryError(
+      'build',
+      error instanceof Error ? error.message : `Invalid arguments for "${name}".`,
+      error,
+    );
+  }
+}
+
+/**
+ * Run one catalog query against `provider` and return its rows.
+ *
+ * `queryDef.fn` is the same `defineQuery` wrapper the app uses, so the per-table
+ * read ACL is folded into the AST before any SQL is generated — there is no
+ * second authorization path. `provider` is the caller's to choose: the replica
+ * for ordinary reads, the primary when a read must not be stale.
+ */
+export async function runCatalogQuery(
+  name: string,
+  args: unknown,
+  ctx: Context,
+  provider: typeof dbProvider,
+): Promise<unknown> {
+  let queryDef: AnyCustomQuery;
+  try {
+    queryDef = mustGetBackendQuery(name);
+  } catch (error) {
+    throw new CatalogQueryError('unknown', `Unknown catalog query "${name}".`, error);
+  }
+
+  const { ast, format } = buildQueryInternals(queryDef, name, args, ctx);
+
+  try {
+    const serverSchema = await fetchServerSchema();
+    const data = await provider.transaction(async (tx) =>
+      executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema),
+    );
+    conformToZeroShape(data, format as ZeroResultFormat);
+    return data;
+  } catch (error) {
+    throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
   }
 }
 
@@ -434,42 +567,16 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
 
     logger.info(`Fallback executing ${queryRequests.length} queries from read replica pool`);
 
-    if (!replicaDbProvider) {
+    const provider = replicaDbProvider;
+    if (!provider) {
       throw new Error('Read replica pool not configured. Set DATABASE_READ_REPLICA_POOL_URL environment variable.');
     }
-
-    const serverSchema = await fetchServerSchema();
 
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
-          const query = queryDef.fn({
-            args: req.args || {},
-            ctx: context,
-          });
-
-          // @ts-ignore - asQueryInternals works with any Query type at runtime
-          const { ast, format } = asQueryInternals(query);
-
           logger.debug(`Executing fallback query: ${req.name}`);
-
-          const data = await replicaDbProvider.transaction(async (tx) => {
-            return await executePostgresQuery(
-              tx.dbTransaction,
-              ast,
-              format,
-              schema,
-              serverSchema
-            );
-          });
-
-          conformToZeroShape(data, format as ZeroResultFormat);
-
-          return {
-            name: req.name,
-            data,
-          };
+          return { name: req.name, data: await runCatalogQuery(req.name, req.args, context, provider) };
         } catch (error) {
           logger.error(`Fallback query ${req.name} failed:`, error);
           throw error;
@@ -498,7 +605,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
       queries: Array<{ name: string; args?: any }>;  
     };
 
-    console.log(`ZQL-to-SQL executing ${queryRequests.length} queries`);
+    logger.info(`ZQL-to-SQL executing ${queryRequests.length} queries`);
 
     const serverSchema = await fetchServerSchema();
     const prisma = DatabaseClient.getInstance();
@@ -506,17 +613,21 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
     const results = await Promise.all(
       queryRequests.map(async (req) => {
         try {
-          const queryDef = mustGetQuery(queries, req.name);
-          const query = queryDef.fn({
-            args: req.args || {},
-            ctx: context,
-          });
+          const queryDef = mustGetBackendQuery(req.name);
+          const query = scopeQueryToTenant(
+            queryDef.fn({
+              args: req.args || {},
+              ctx: context,
+            }),
+            context,
+            req.name,
+          );
 
           // Extract AST and Format from ZQL query
           // @ts-ignore - asQueryInternals works with any Query type at runtime
           const { ast, format } = asQueryInternals(query);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
 
           // Use z2s to compile ZQL → SQL
           const compiledOutput = compile(serverSchema, schema, ast, format);
@@ -524,7 +635,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             compiledOutput
           );
 
-          console.log(`Executing SQL via Prisma:`, sqlQuery.text);
+          logger.info(`Executing SQL via Prisma:`, sqlQuery.text);
 
           // Execute via Prisma
           const pgResult = await prisma.$queryRawUnsafe(
@@ -544,17 +655,17 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           // Extract ZQL result from JSON-wrapped response
           const data = extractZqlResult(pgArrayResult);
 
-          console.log(`Converting ZQL to SQL: ${req.name}`);
-          console.log('Full SQL query:', sqlQuery.text);
-          console.log('SQL length:', sqlQuery.text.length);
-          console.log('Values:', sqlQuery.values);
+          logger.info(`Converting ZQL to SQL: ${req.name}`);
+          logger.info('Full SQL query:', sqlQuery.text);
+          logger.info('SQL length:', sqlQuery.text.length);
+          logger.info('Values:', sqlQuery.values);
 
           return {
             name: req.name,
             data,
           };
         } catch (error) {
-          console.error(`ZQL-to-SQL query ${req.name} failed:`, error);
+          logger.error(`ZQL-to-SQL query ${req.name} failed`, error);
           throw error;
         }
       })
@@ -562,9 +673,110 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
 
     return { results };
   } catch (error) {
-    console.error('ZQL-to-SQL request failed:', error);
+    logger.error('ZQL-to-SQL request failed', error);
     throw error;
   }
+}
+
+function mustGetCatalogMutator(mutators: ReturnType<typeof createMutators>, name: string) {
+  try {
+    return mustGetMutator(mutators, name);
+  } catch (error) {
+    throw new CatalogQueryError('unknown', `Unknown catalog mutator "${name}".`, error);
+  }
+}
+
+/**
+ * Run one catalog mutator in a transaction, then drain its post-commit work.
+ *
+ * `createMutators` + `wrapTransactionWithACL` + `mustGetMutator` is the sequence
+ * the app itself uses, so write ACL, Vespa indexing, and side-effect jobs behave
+ * identically for every caller. Throws on failure; callers decide what that looks
+ * like on the wire.
+ *
+ * Everything after the commit is deliberately fire-and-forget except the awaited
+ * post-commit tasks: a failed notification must not fail a write that already
+ * landed.
+ */
+export async function runCatalogMutation(
+  name: string,
+  args: unknown,
+  authData: AuthData,
+): Promise<void> {
+  const ctx: Context = {
+    userID: authData.sub,
+    workspaceId: authData.workspaceId,
+    role: authData.role,
+    orgRole: authData.orgRole,
+    memberId: authData.memberId,
+  };
+
+  const asyncTasks: (() => Promise<void>)[] = [];
+  const awaitedPostCommitTasks: (() => Promise<void>)[] = [];
+  const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
+  const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
+  const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
+  const mutator = mustGetCatalogMutator(mutators, name);
+
+  await dbProvider.transaction(async (tx) => {
+    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name);
+    // Args are validated by the mutator's own zod schema; the cast only satisfies
+    // Zero's ReadonlyJSONValue parameter type.
+    await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
+  });
+
+  await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
+  void Promise.allSettled(asyncTasks.map(task => task()));
+
+  void Promise.allSettled(
+    vespaJobs.map(async (job) => {
+      try {
+        await vespaQueue.addJob({
+          schema: job.schema,
+          jobType: job.jobType,
+          docId: job.docId,
+          userId: authData.sub,
+          workspaceId: authData.workspaceId,
+          ...(job.jobType === "update" ? { data: job.data } : {})
+        });
+      } catch (err) {
+        try {
+          await db.vespaInsertionLogs.create({
+            data: {
+              status: "FAILED",
+              type: VespaOperationType[job.jobType],
+              entityId: job.docId,
+              entityType: job.schema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
+              errorDetails: JSON.stringify(err),
+              userId: authData.sub,
+              workspaceId: authData.workspaceId,
+              createdAt: new Date(),
+            },
+          });
+        } catch (dbError) {
+          logger.error('Failed to log insertion error to database', dbError);
+        }
+      }
+    })
+  );
+
+  // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
+  // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
+  // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
+  // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
+  // async chain scheduled inside the callback.
+  void runWithContext(
+    {
+      userId: authData.sub,
+      workspaceId: authData.workspaceId,
+      role: authData.role,
+      orgRole: authData.orgRole,
+      memberId: authData.memberId,
+    },
+    () => processSideEffectJobs(sideEffectJobs, ctx),
+  );
 }
 
 export async function handleMutateFallback(request: Request): Promise<unknown> {
@@ -573,86 +785,18 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
     throw new Error("Unauthorized");
   }
 
-  const asyncTasks: (() => Promise<void>)[] = [];
-  const vespaJobs: VespaJobsAccumulator = createVespaJobsAccumulator();
-  const sideEffectJobs: SideEffectJobsAccumulator = createSideEffectJobsAccumulator();
-
   try {
     const mutation = await request.json() as {
       name: string;
       args: any;
     };
 
-    console.log(`Fallback executing mutation: ${mutation.name}`);
+    logger.info(`Fallback executing mutation: ${mutation.name}`);
 
-    await dbProvider.transaction(async (tx) => {
-      const mutators = createMutators(authData, asyncTasks);
-      const wrappedTx = wrapTransactionWithACL(
-        tx,
-        { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
-        vespaJobs,
-        sideEffectJobs
-      );
-      const mutator = mustGetMutator(mutators, mutation.name);
-      await mutator.fn({
-        tx: wrappedTx,
-        args: mutation.args,
-        ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }
-      });
-    });
-    Promise.allSettled(asyncTasks.map(task => task()));
-    Promise.allSettled(
-      vespaJobs.map(async (job) => {
-        try {
-          await vespaQueue.addJob({
-            schema: job.schema,
-            jobType: job.jobType,
-            docId: job.docId,
-            userId: authData.sub,
-            workspaceId: authData.workspaceId,
-            ...(job.jobType === "update" ? { data: job.data } : {})
-          });
-        } catch (err) {
-          try {
-            await db.vespaInsertionLogs.create({
-              data: {
-                status: "FAILED",
-                type: VespaOperationType[job.jobType],
-                entityId: job.docId,
-                entityType: job.schema,
-                namespace: NAMESPACE,
-                errorMessage: `Failed to enqueue a job ${JSON.stringify(err)}`,
-                errorDetails: JSON.stringify(err),
-                userId: authData.sub,
-                workspaceId: authData.workspaceId,
-                createdAt: new Date(),
-              },
-            });
-          } catch (dbError) {
-            console.error(`Failed to log insertion error to database:
-              ${dbError instanceof Error ? dbError.message : String(dbError)}`);
-          }
-        }
-      })
-    );
-    // Side-effect handlers run on the Zero server, which has NO tenantScopeMiddleware and writes via
-    // Prisma db.* (not tx.mutate, so the Zero stamp misses them too). Open a Prisma tenant context
-    // from authData.workspaceId so the stamp fills workspaceId on every side-effect create (message,
-    // conversation, ticketActivity, …). Fire-and-forget is fine — AsyncLocalStorage propagates to the
-    // async chain scheduled inside the callback.
-    void runWithContext(
-      {
-        userId: authData.sub,
-        workspaceId: authData.workspaceId,
-        role: authData.role,
-        orgRole: authData.orgRole,
-        memberId: authData.memberId,
-      },
-      () => processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }),
-    );
+    await runCatalogMutation(mutation.name, mutation.args, authData);
     return { success: true };
   } catch (error) {
-    console.error('Fallback mutate request failed:', error);
+    logger.error('Fallback mutate request failed', error);
     return {
       success: false,
       error: "app",

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Settings } from 'lucide-react';
 import { BaseViewerProps } from './utils';
-import { BASE_URL } from '../../services/clients/apiClient';
+import { BASE_URL, apiInstance } from '../../services/clients/apiClient';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
@@ -410,9 +410,26 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           }
         }, delay);
       } else {
-        // Retries exhausted → show error UI
+        // Retries exhausted → show error UI. A file that never finished uploading 404s
+        // here and surfaces as the same MediaError as an undecodable one, so ask the
+        // server which it is instead of always blaming the format.
         setIsLoading(false);
         setError('Failed to load video. The video format may not be supported.');
+        if (attachmentId) {
+          void apiInstance
+            .get(`/attachments/${attachmentId}/stream`, {
+              headers: { Range: 'bytes=0-0' },
+              validateStatus: () => true,
+            })
+            .then(res => {
+              if (res.status === 404) {
+                setError('This video did not finish uploading, so there is nothing to play.');
+              }
+            })
+            .catch(() => {
+              // Offline or blocked — leave the generic message in place.
+            });
+        }
       }
     };
 

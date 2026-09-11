@@ -416,6 +416,8 @@ const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement =
           loading={saving}
           disabled={!dirty}
           onClick={() => void handleSave()}
+          data-track-category='Claw Agents'
+          data-track-name='SAVE_KNOWLEDGE'
         >
           {saving ? 'Saving…' : 'Save changes'}
         </Button>

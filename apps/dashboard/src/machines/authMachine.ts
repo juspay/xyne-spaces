@@ -3,8 +3,8 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isTestEnv } from '../config';
+import { posthogService } from '../services/Analytics/posthogService';
+import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -14,6 +14,12 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -69,6 +75,7 @@ type AuthEvent =
   | { type: 'GOOGLE_SIGNIN' }
   | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'EMAIL_SIGNIN' }
+  | { type: 'EMAIL_REGISTER' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
@@ -86,6 +93,7 @@ export type AuthState =
   | 'authenticated'
   | 'unauthenticated'
   | 'authenticating'
+  | 'registering'
   | 'loggingOut'
   | 'validatingSession'
   | 'processingOAuthCallback'
@@ -179,6 +187,27 @@ const createClearedContext = (): AuthContext => ({
 
 const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
   return output?.workspaces || [];
+};
+
+// Domain-conflict fields arrive as URL params on the web callback (processingOAuthCallback) and
+// on the OAUTH_CALLBACK_COMPLETE event from the Electron IPC / React Native bridge. Both paths
+// end in a creatingOrg transition, so both must translate them into the request-to-join context.
+const getEnterpriseJoinContext = (
+  output?: OAuthCallbackOutput,
+): { error: string | null; enterpriseJoinTarget: EnterpriseJoinTarget | null } => {
+  return {
+    error: output?.domainConflictError ?? output?.publicEmailDomainError ?? null,
+    enterpriseJoinTarget:
+      output?.enterpriseJoinOrgName && output.enterpriseJoinWorkspaces
+        ? {
+            orgName: output.enterpriseJoinOrgName,
+            workspaces: JSON.parse(output.enterpriseJoinWorkspaces) as Array<{
+              id: string;
+              name: string;
+            }>,
+          }
+        : null,
+  };
 };
 
 export const authMachine = createMachine(
@@ -719,7 +748,7 @@ export const authMachine = createMachine(
       authenticated: {
         entry: ({ context }) => {
           if (context.user?.id) {
-            mixpanelService.identify(context.user);
+            posthogService.identify(context.user);
           }
         },
         on: {
@@ -786,6 +815,9 @@ export const authMachine = createMachine(
           EMAIL_SIGNIN: {
             target: 'authenticating',
           },
+          EMAIL_REGISTER: {
+            target: 'registering',
+          },
           SESSION_VALIDATED: {
             target: 'authenticated',
             actions: {
@@ -848,7 +880,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -895,6 +927,23 @@ export const authMachine = createMachine(
               }),
             },
             {
+              // Single-workspace auto-login (e.g. email login with exactly one workspace):
+              // skip the picker and log straight into the returned workspace, mirroring OAuth.
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
               guard: 'hasLastActiveWorkspace',
               target: 'loggingInToWorkspace',
               actions: assign(({ context, event }) => {
@@ -934,7 +983,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -955,6 +1004,90 @@ export const authMachine = createMachine(
             actions: [
               'clearSessionCookies',
               { type: 'notifySignOut', params: { reason: 'User canceled sign-in' } },
+              assign(() => createClearedContext()),
+            ],
+          },
+        },
+      },
+      registering: {
+        on: {
+          OAUTH_CALLBACK_COMPLETE: [
+            {
+              guard: 'hasPendingWorkspace',
+              target: 'joiningWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: localStorage.getItem(PENDING_WORKSPACE_ID_KEY),
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasLastActiveWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasWorkspaces',
+              target: 'selectingWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  ...getEnterpriseJoinContext(output),
+                };
+              }),
+            },
+          ],
+          AUTH_ERROR: {
+            target: 'unauthenticated',
+            actions: {
+              type: 'setError',
+            },
+          },
+          CLEAR_ERROR: {
+            actions: {
+              type: 'clearError',
+            },
+          },
+          LOGOUT: {
+            target: 'unauthenticated',
+            actions: [
+              'clearSessionCookies',
+              { type: 'notifySignOut', params: { reason: 'User canceled registration' } },
               assign(() => createClearedContext()),
             ],
           },
@@ -1074,6 +1207,10 @@ export const authMachine = createMachine(
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1208,17 +1345,11 @@ export const authMachine = createMachine(
       }),
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
-          mixpanelService.identify(context.user);
-          mixpanelService.track(EVENTS.AUTHENTICATION, {
-            type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
-          });
+          posthogService.identify(context.user);
         }
       },
       trackLogoutSuccess: () => {
-        mixpanelService.track(EVENTS.AUTHENTICATION, {
-          type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
-        });
-        mixpanelService.reset();
+        posthogService.reset();
       },
     },
     actors: {
@@ -1238,6 +1369,11 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        // Logout is the one place a cross-lane drop is right: both bundles are going
+        // away. The lane must not take out its host's store, so it only drops its own.
+        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

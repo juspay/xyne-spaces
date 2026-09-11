@@ -62,7 +62,9 @@ export function Dialog({
             maxWidth,
             maxHeight: maxHeight !== undefined ? (typeof maxHeight === "number" ? `${maxHeight}px` : maxHeight) : "70vh",
             ...(height !== undefined ? { height: typeof height === "number" ? `${height}px` : height } : {}),
-            width: "calc(100vw - 32px)",
+            width: leftOffset
+              ? `calc(100vw - 32px - ${Math.abs(leftOffset) * 2}px)`
+              : "calc(100vw - 32px)",
             position: "fixed",
             top: "50%",
             left: leftOffset ? `calc(50% + ${leftOffset}px)` : "50%",

@@ -7,6 +7,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -118,7 +119,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errMsg(error);
       return {
         content: [{ type: "text", text: `Error calling query_routing: ${message}` }],
         isError: true,

@@ -35,6 +35,9 @@ export const KB_TOOLS: McpToolInfo[] = [
       "  • Allowlist mode — returns the explicit collections/files granted on this agent.\n" +
       "  • User-scoped mode — returns the calling user's root collections (with file counts). Drill into a " +
       "specific one via `kb-list-files`, or hunt by name via `kb-search`.\n" +
+      "This tool lists TOP-LEVEL entries only — it never shows what is inside a collection. `file_count` is " +
+      "recursive and `folder_count` counts immediate sub-folders; when either is non-zero, call `kb-list-files` " +
+      "(with `depth`) to see the actual layout before concluding anything about what the KB contains.\n" +
       "Either way, the result is the authoritative list of what you can read — do NOT attempt kb-read-file " +
       "on anything not surfaced here (or via kb-list-files / kb-search); it will be rejected at the access layer.",
     inputSchema: {
@@ -87,13 +90,34 @@ export const KB_TOOLS: McpToolInfo[] = [
   {
     name: "kb-list-files",
     description:
-      "List all files inside an allowed collection (root or sub-folder). Use when the user wants an inventory " +
-      "of what's in a specific collection rather than a search. `collectionId` MUST be one that appears in " +
-      "kb-list-resources — otherwise the call is rejected.",
+      "Directory listing for an allowed collection — the `ls` of the Knowledge Base. Use when you want an " +
+      "inventory of what exists rather than a relevance search. `collectionId` MUST be one that appears in " +
+      "kb-list-resources (or a folder id returned by an earlier kb-list-files) — otherwise the call is rejected.\n\n" +
+      "Returns BOTH:\n" +
+      "  • `<file>` rows — with `id` (pass to kb-read-file / kb-search-within-doc) and `path` (the full path " +
+      "from the root collection, e.g. `services/release-deploy/service.md`).\n" +
+      "  • `<folder>` rows — sub-folders, with their `id`, a recursive `file_count`, and `folder_count`. " +
+      "Collapsed folders are rendered self-closing; re-call with that folder's `id` to open it.\n\n" +
+      "## Depth\n" +
+      "`depth` defaults to 1: the collection's own files plus its immediate sub-folders, collapsed. Pass a " +
+      "larger number to expand that many levels, or `-1` for the entire subtree. **If a collection looks " +
+      "empty of files but reports folders, you have not seen its contents yet — expand them.** Many KBs keep " +
+      "everything in sub-folders (`services/<area>/service.md`), so a depth-1 listing of the root is only the " +
+      "skeleton. Prefer `depth: -1` on a small collection (a few hundred files) to get the whole map in one call; " +
+      "output is capped at 400 rows and says so explicitly when it truncates.",
     inputSchema: {
       type: "object",
       properties: {
-        collectionId: { type: "string", description: "Required. The collection id to enumerate." },
+        collectionId: { type: "string", description: "Required. The collection or folder id to enumerate." },
+        depth: {
+          type: "number",
+          minimum: -1,
+          maximum: 10,
+          default: 1,
+          description:
+            "How many levels to expand. 1 (default) = this collection's files + collapsed sub-folder rows. " +
+            "N = expand N levels. -1 = the whole subtree. Use -1 or a high value when you need the full layout.",
+        },
       },
       required: ["collectionId"],
       additionalProperties: false,

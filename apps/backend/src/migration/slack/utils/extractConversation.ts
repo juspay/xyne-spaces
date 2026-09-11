@@ -38,6 +38,7 @@ export interface SlackFile {
   mimetype: string;
   url_private: string;
   size: number;
+  prefetchedStoragePath?: string;
 }
 
 export interface SlackReply {
@@ -305,7 +306,7 @@ async function processBatch<T>(
  * @param allowedBots - Array of bot names (case-insensitive) to include (default: [])
  * @param includeBotMessages - When allowedBots is empty, include all (non-ignored) bot messages (default: false)
  */
-function isHumanMessage(
+export function isHumanMessage(
   message: any,
   context: 'channel' | 'thread' = 'channel',
   allowedBots: string[] = [],
@@ -344,7 +345,7 @@ function isHumanMessage(
  * plus files nested inside `msg.attachments[]` (forwarded/shared messages).
  * De-duplicated by Slack file id so a file referenced in both places is kept once.
  */
-function collectRawFiles(msg: any): any[] {
+export function collectRawFiles(msg: any): any[] {
   const out: any[] = [];
   const seen = new Set<string>();
   const push = (f: any) => {
@@ -380,6 +381,8 @@ function transformFiles(msg: any, includeAttachments: boolean): SlackFile[] | un
       mimetype: f.mimetype,
       url_private: f.url_private,
       size: f.size,
+      // Preserve the collector's storage annotation so ingestion can attach offline.
+      ...(f.prefetchedStoragePath ? { prefetchedStoragePath: f.prefetchedStoragePath as string } : {}),
     }));
 
   return validFiles.length ? validFiles : undefined;
@@ -985,7 +988,7 @@ export async function transformReply(
 /**
  * Transform raw Slack message to SlackMessage
  */
-async function transformMessage(
+export async function transformMessage(
   rawMessage: any,
   threadReplies: any[] | undefined,
   cache: UserInfoCache,

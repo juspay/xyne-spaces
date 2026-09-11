@@ -65,6 +65,9 @@ export const AppActions: React.FC<AppActionsProps> = ({
           <button
             key={action.actionId}
             onClick={() => void handleClick(action)}
+            data-track-category='MESSAGE'
+            data-track-name='CLICK_APP_ACTION'
+            data-track-metadata={JSON.stringify({ actionId: action.actionId })}
             disabled={isLoading || loadingAction !== null}
             className='inline-flex items-center rounded-md px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
             style={{ backgroundColor: action.color }}

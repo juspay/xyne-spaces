@@ -4,6 +4,7 @@ import { Check, ChevronDown, X } from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
+import { Checkbox } from '../ui/Checkbox/Checkbox';
 import Input from '../ui/Input/Input';
 import { calculateExpiryTime } from '../../utils/statusUtils';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -37,6 +38,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
   const [customDate, setCustomDate] = useState<Date | undefined>(new Date());
   const [customTime, setCustomTime] = useState('23:59');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [reassignExistingTickets, setReassignExistingTickets] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +49,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
       setCustomDate(new Date());
       setCustomTime('23:59');
       setShowDatePicker(false);
+      setReassignExistingTickets(false);
       setError(null);
     }
   }, [isOpen]);
@@ -91,6 +94,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
       await apiInstance.post('/user-assignment-state/toggle', {
         isUnavailable: true,
         unavailableUntil: unavailableUntilTimestamp,
+        reassignExistingTickets,
       });
 
       // Update Zero directly for real-time sync (like UpdateStatusModal does)
@@ -195,6 +199,18 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             </div>
           )}
 
+          <div className='space-y-1 rounded-lg border border-border bg-muted/30 p-3'>
+            <Checkbox
+              checked={reassignExistingTickets}
+              onChange={setReassignExistingTickets}
+              label='Reassign my existing open tickets'
+            />
+            <p className='pl-[26px] text-xs leading-[1.4] text-muted-foreground'>
+              If unchecked, you will still be excluded from new auto-assignment while paused.
+              Existing tickets will stay with you.
+            </p>
+          </div>
+
           {error && (
             <div className='p-3 rounded-lg bg-red-50 border border-red-200'>
               <p className='text-sm text-red-800'>{error}</p>
@@ -220,7 +236,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             style={{ backgroundColor: '#6276BE' }}
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Save_Assignment_Availability'
-            data-track-metadata={JSON.stringify({ expiryOption })}
+            data-track-metadata={JSON.stringify({ expiryOption, reassignExistingTickets })}
           >
             {isLoading ? 'Saving...' : 'Save'}
           </Button>

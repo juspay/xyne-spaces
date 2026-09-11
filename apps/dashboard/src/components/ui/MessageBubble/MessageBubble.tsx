@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -54,14 +55,18 @@ import {
   stripCitationMarks,
 } from '../TipTapExtensions/CitationMark';
 import { registerClawIcons } from '../../Chat/XyneAISidebar/utils/clawCitationUrl';
+import { isSlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts';
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
+import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
+import { MicOn } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
@@ -73,6 +78,8 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
+import { RecordingBubble } from './RecordingBubble';
+import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
@@ -93,7 +100,10 @@ import { isPreviewableDocument } from '../../../services/documentThumbnailServic
 import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
+import { InlineVideoPreview } from './InlineVideoPreview';
 import { loadEmojiData } from '../../../utils/emojiLookup';
+import { RecordingShareContent } from './RecordingShareContent';
+import { useRecordingShareMessage } from './recordingShareMessage';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -125,50 +135,6 @@ const isHtmlAttachment = (attachment: AttachmentType): boolean => {
   return attachment.mimetype === 'text/html' || /\.html?$/i.test(attachment.originalFilename);
 };
 
-function InlineVideoPreview({
-  callId,
-  recordingId,
-}: {
-  callId: string;
-  recordingId?: string;
-}): React.ReactElement {
-  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
-  const blobUrlRef = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    // Per-recording download when we have a recordingId; fall back to the legacy
-    // latest-recording path for older messages that predate the field.
-    const fetchBlob = recordingId
-      ? recordingService.downloadCallRecordingBlob(callId, recordingId)
-      : recordingService.downloadRecordingBlob(callId);
-    fetchBlob
-      .then(blob => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        blobUrlRef.current = url;
-        setBlobUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    };
-  }, [callId, recordingId]);
-
-  if (!blobUrl) return <></>;
-  return (
-    <video
-      src={blobUrl}
-      controls
-      className='mt-2 rounded-md max-w-sm w-full'
-      style={{ maxHeight: '240px' }}
-    >
-      <track kind='captions' />
-    </video>
-  );
-}
-
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
  * Videos are rendered in separate rows first, then other attachments.
@@ -196,7 +162,10 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   }
 
   const orderedAttachments = [...attachments].sort(
-    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt ||
+      a.id.localeCompare(b.id),
   );
 
   // Separate attachments by deleted status first
@@ -275,7 +244,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 ? `${activeAttachments.length} files`
                 : activeAttachments[0]?.originalFilename}
             </span>
-            <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+            <button
+              type='button'
+              onClick={() => setIsExpanded(!isExpanded)}
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_ATTACHMENT_LIST'
+            >
               {isExpanded ? (
                 <ChevronDown className='w-4 h-4 text-muted-foreground' />
               ) : (
@@ -294,6 +268,8 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                     void downloadAttachment(attachment.id, attachment.originalFilename);
                   });
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='DOWNLOAD_ALL_ATTACHMENTS'
                 className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
               >
                 <span>Download all</span>
@@ -520,6 +496,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelId,
   conversation,
   contentOnly = false,
+  disableLinks = false,
   onClick,
   threadInfo,
   channelScopeType,
@@ -532,6 +509,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   headerContent,
   onUserClick,
 }) => {
+  const renderConversationBadge = useContext(ConversationBadgeContext);
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
@@ -575,6 +553,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return forwardedMessageData.content;
   }, [forwardedMessageData, forwardedOriginalConversation]);
+  const recordingShare = useRecordingShareMessage(
+    isForwardedMessage ? resolvedForwardedContent : message.content,
+  );
 
   const systemMessageStyles: React.CSSProperties = {
     color: 'hsl(var(--muted-foreground))',
@@ -590,6 +571,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
+  // Anchor message for a headless recording started from a thread (see
+  // RecordingBubble) — deliberately independent of isCallMessage so it never
+  // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
+  // buttons, etc).
+  const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  const isCallShareMessage = metadata?.['isCallShareMessage'] === true;
+  // Only live recording anchors use the system-style sender.
+  const isHeadlessRecordingAnchor =
+    isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
+  // Synchronous end-signal from the message's own metadata (stamped by
+  // noteTakerCallRepository.updateThreadMessageOnEnd) — mirrors isActiveCall's
+  // active/ended split for the avatar box below, without needing a live query
+  // at this level (RecordingBubble already does that for its own rendering).
+  const isRecordingEnded = metadata?.['operation'] === 'recording_ended';
   const hasTranscript = attachments.some(
     a =>
       a.mimetype === 'text/plain' ||
@@ -597,6 +592,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'transcript' ||
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
   );
+  // The recording message carries its own attachment row (filtered out of the
+  // attachments block below). Its id lets InlineVideoPreview stream the file
+  // through the range-request endpoint instead of downloading it whole.
+  const recordingAttachmentId =
+    metadata?.messageSubtype === 'recording'
+      ? attachments.find(a => {
+          const attMeta = a.metadata as { type?: string; recordingId?: string } | null;
+          if (attMeta?.type !== 'recording' || !a.mimetype.startsWith('video/')) return false;
+          // Older messages predate recordingId on the metadata — match on type alone there.
+          return !metadata?.recordingId || attMeta.recordingId === String(metadata.recordingId);
+        })?.id
+      : undefined;
   const isCallNoTranscript =
     isCallMessage && !isActiveCall && !isForwardedMessage && !hasTranscript;
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
@@ -746,7 +753,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   // For mobile "my" messages, use the specialized mobile component
-  if (isMobile && isMe) {
+  const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
+
+  const isSharedAgentTranscript = metadata?.['sharedAgentTranscript'] === true;
+
+  if (isMobile && isMe && !isSlashCommandArtifact && !isSharedAgentTranscript) {
     return (
       <MobileMessageMyBubble
         message={message}
@@ -764,6 +775,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
         workflowNumber={workflowNumber}
+        {...(recordingShare && {
+          recordingShare,
+        })}
         {...(onClick && { onClick })}
       />
     );
@@ -814,6 +828,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {
@@ -831,7 +853,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
           <div
-            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage ? 'pt-[4px]' : ''}`}
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
           >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
@@ -852,9 +874,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
+            ) : showAvatar && isHeadlessRecordingAnchor && !isForwardedMessage ? (
+              <div
+                className={`w-8 h-8 rounded-md flex items-center justify-center self-center shrink-0 border ${isRecordingEnded ? 'bg-muted-foreground/10 border-border/25' : 'bg-status-failure/15 border-status-failure/30'}`}
+              >
+                <MicOn
+                  size={16}
+                  color={
+                    isRecordingEnded ? 'hsl(var(--foreground) / 0.8)' : 'var(--status-failure)'
+                  }
+                />
+              </div>
             ) : showAvatar && sender?.userType === UserType.APP ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -874,11 +909,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -961,6 +992,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ) : showAvatar && sender ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
                 role='button'
                 tabIndex={0}
@@ -980,11 +1013,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.REGULAR}
-                      showActiveStatus={false}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -1007,7 +1036,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* ================== RIGHT SIDE ================== */}
-        <div className='flex-1 flex flex-col gap-1 min-w-0'>
+        <div className='flex-1 flex flex-col min-w-0'>
           {isBookmarked && variant !== 'pinned' && (
             <div className='inline-flex items-center gap-1 text-blue-700 dark:text-blue-200 text-[11px] font-medium'>
               <Bookmark className='w-3 h-3 fill-current' />
@@ -1031,6 +1060,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       message.content ||
                       'A call happened'}
                 </h3>
+              ) : isHeadlessRecordingAnchor && !isForwardedMessage ? (
+                <h3 className='text-sm font-medium text-foreground'>Recording</h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>
                   {getUserDisplayName(sender) || 'AI Assistant'}
@@ -1058,6 +1089,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
+                      data-track-category='MESSAGE'
+                      data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                       className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
@@ -1078,6 +1111,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <Button
                           variant='ghost'
                           onClick={() => handleUserClick(sender.id)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_SENDER_PROFILE_FROM_NAME'
                           className='text-sm font-semibold text-foreground hover:underline p-0 h-auto min-w-0'
                           aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                         >
@@ -1119,6 +1154,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <Tooltip content={formatFullTimestamp(message.createdAt)} side='top'>
                 <h3
                   onClick={searchItemView ? undefined : handleTimestampClick}
+                  data-track-category='MESSAGE'
+                  data-track-name='OPEN_THREAD_FROM_TIMESTAMP'
                   onKeyDown={
                     searchItemView
                       ? undefined
@@ -1136,6 +1173,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
+              {/* Host-supplied mark for where this conversation belongs. Null in
+                  every surface that does not provide one. */}
+              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
               {headerContent}
             </div>
           )}
@@ -1162,7 +1205,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallMessage && metadata?.callId && !isForwardedMessage ? (
+          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+            <CallShareBubble message={{ content: message.content, metadata }} />
+          ) : isRecordingMessage &&
+            metadata?.callId &&
+            !isForwardedMessage &&
+            !message.isDeleted ? (
+            <RecordingBubble
+              message={{
+                messageId: message.messageId,
+                content: message.content,
+                createdAt: message.createdAt,
+                metadata,
+              }}
+              callId={metadata.callId}
+            />
+          ) : isCallMessage && metadata?.callId && !isForwardedMessage ? (
             <CallBubble
               message={{
                 messageId: message.messageId,
@@ -1210,6 +1268,69 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
+              ) : isSharedAgentTranscript ? (
+                <div className='flex flex-col gap-2'>
+                  {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={metadata['shareNote']}
+                          showEdited={message.edited}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={DOMPurify.sanitize(metadata['shareNote'])}
+                            showEdited={message.edited}
+                            preserveThreadRoute={context === 'thread'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <SharedTranscriptCard
+                    content={citationContent}
+                    agentName={
+                      typeof metadata?.['agentName'] === 'string'
+                        ? metadata['agentName']
+                        : typeof metadata?.['agentSlug'] === 'string'
+                          ? metadata['agentSlug']
+                          : 'agent'
+                    }
+                    {...(typeof metadata?.['messageCount'] === 'number'
+                      ? { messageCount: metadata['messageCount'] }
+                      : {})}
+                    defaultCollapsed
+                    renderBody={content => (
+                      <MarkdownMessageRenderer
+                        content={content}
+                        markdownComponents={markdownComponents}
+                      />
+                    )}
+                  />
+                </div>
+              ) : recordingShare && !isForwardedMessage ? (
+                <RecordingShareContent
+                  recordingShare={recordingShare}
+                  renderNote={noteHtml => (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
+                    >
+                      <RenderMessageWithHTML
+                        disableLinks={disableLinks}
+                        message={noteHtml}
+                        showEdited={message.edited}
+                        messageId={message.messageId}
+                        conversationId={message.conversationId}
+                        preserveThreadRoute={context === 'thread'}
+                      />
+                    </div>
+                  )}
+                  afterContent={afterTextContent}
+                />
               ) : isMarkdownContent ? (
                 <>
                   <MarkdownMessageRenderer
@@ -1225,6 +1346,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {...(metadata?.recordingId
                           ? { recordingId: String(metadata.recordingId) }
                           : {})}
+                        {...(recordingAttachmentId ? { attachmentId: recordingAttachmentId } : {})}
                       />
                     ) : (
                       <div className='mt-2'>
@@ -1282,6 +1404,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
                             preserveThreadRoute={context === 'thread'}
@@ -1310,6 +1433,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <button
                           type='button'
                           onClick={() => handleUserClick(forwardedMessageData.originalSenderId)}
+                          data-track-category='MESSAGE'
+                          data-track-name='OPEN_ORIGINAL_SENDER_PROFILE'
                           className='text-xs font-medium text-foreground hover:underline cursor-pointer bg-transparent border-0 p-0'
                         >
                           {getUserDisplayName(originalSender) ||
@@ -1327,7 +1452,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </span>
                       )}
                     </div>
-                    {metadata?.isCallMessage && metadata?.callId ? (
+                    {recordingShare ? (
+                      <RecordingShareContent
+                        recordingShare={recordingShare}
+                        renderNote={noteHtml => (
+                          <div
+                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
+                          >
+                            {isMobile ? (
+                              <ExpandableMessage
+                                message={noteHtml}
+                                showEdited={false}
+                                maxHeight={500}
+                              />
+                            ) : (
+                              <RenderMessageWithHTML
+                                disableLinks={disableLinks}
+                                message={noteHtml}
+                                showEdited={false}
+                                preserveThreadRoute={context === 'thread'}
+                              />
+                            )}
+                          </div>
+                        )}
+                      />
+                    ) : metadata?.isCallMessage && metadata?.callId ? (
                       <>
                         <CallBubble
                           message={{
@@ -1359,6 +1508,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={resolvedForwardedContent}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1408,16 +1558,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           isSystemMessage={isSystemMessage}
                           messageId={message.messageId}
                           conversationId={message.conversationId}
+                          slashCommandArtifactContext={{
+                            ...(channelId && { channelId }),
+                            senderId: message.senderId,
+                            createdAt: message.createdAt,
+                            surface: context === 'thread' ? 'thread' : 'channel',
+                          }}
                         />
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}
                             messageId={message.messageId}
                             conversationId={message.conversationId}
                             preserveThreadRoute={context === 'thread'}
+                            slashCommandArtifactContext={{
+                              ...(channelId && { channelId }),
+                              senderId: message.senderId,
+                              createdAt: message.createdAt,
+                              surface: context === 'thread' ? 'thread' : 'channel',
+                            }}
                           />
                         </div>
                       )}
@@ -1481,7 +1644,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {shouldRenderLinkPreview && showLinkPreview && previewResult && (
+              {shouldRenderLinkPreview && showLinkPreview && previewResult && !recordingShare && (
                 <div className='mt-2 max-w-full'>
                   {previewResult.type === 'message_preview' ? (
                     <InternalMessagePreview
@@ -1540,6 +1703,28 @@ export interface GroupedReaction {
   userHasReacted: boolean;
   orderIndex: number;
 }
+
+const MAX_TOOLTIP_REACTOR_NAMES = 50;
+
+const formatReactorNames = (
+  users: GroupedReaction['users'],
+  currentUserId: string | undefined,
+): string => {
+  const names = users.map(u => (u.userId === currentUserId ? 'You' : u.name));
+  const selfIndex = currentUserId ? users.findIndex(u => u.userId === currentUserId) : -1;
+  if (selfIndex > 0) {
+    names.unshift(...names.splice(selfIndex, 1));
+  }
+
+  const overflow = names.length - MAX_TOOLTIP_REACTOR_NAMES;
+  if (overflow > 0) {
+    const shown = names.slice(0, MAX_TOOLTIP_REACTOR_NAMES).join(', ');
+    return `${shown} and ${overflow} ${overflow === 1 ? 'other' : 'others'}`;
+  }
+
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+};
 
 /**
  * Displays reaction emojis for a message with user tooltips.
@@ -1657,13 +1842,8 @@ export const ReactionView = ({
     <>
       <div className='flex items-center gap-1 flex-wrap'>
         {groupedReactionsArray.map(reaction => {
-          const visibleUserNames = reaction.users.slice(0, 2).map(u => u.name);
-          const remainingUserCount = reaction.users.length - visibleUserNames.length;
-          const userNames =
-            remainingUserCount > 0
-              ? `${visibleUserNames.join(', ')} and ${remainingUserCount} ${remainingUserCount === 1 ? 'other' : 'others'}`
-              : visibleUserNames.join(', ');
-          const verb = reaction.users.length === 1 ? 'has' : 'have';
+          const userNames = formatReactorNames(reaction.users, user?.id);
+          const verb = reaction.users.length === 1 && !reaction.userHasReacted ? 'has' : 'have';
           // For custom emojis, show the emoji name instead of the full ID
           const displayEmojiName = getEmojiDisplayName(reaction.emojiName);
           const tooltipContent = (
@@ -1699,6 +1879,8 @@ export const ReactionView = ({
                   });
                   e.stopPropagation();
                 }}
+                data-track-category='MESSAGE'
+                data-track-name='TOGGLE_REACTION'
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1759,6 +1941,8 @@ export const ReactionView = ({
                 type='button'
                 className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
                 onClick={e => e.stopPropagation()}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_EMOJI_PICKER'
               >
                 <span className='text-sm font-medium'>+</span>
               </button>
@@ -1798,7 +1982,7 @@ export const ReactionView = ({
                       setEmojiPickerOpen(false);
                     }}
                     customEmojis={customEmojis || []}
-                    previewConfig={{ showPreview: false }}
+                    previewConfig={{ showPreview: true }}
                   />
                 </Popover.Content>
               </>

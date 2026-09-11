@@ -111,7 +111,13 @@ const ClawOrganizationScreen = (): ReactElement => {
           <h1 className='text-base font-semibold text-foreground'>Organization unavailable</h1>
           <p className='mt-1 text-sm text-muted-foreground'>{error.message}</p>
         </div>
-        <Button variant='outline' size='sm' onClick={() => void refetch()}>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => void refetch()}
+          data-track-category='Claw Agents'
+          data-track-name='RELOAD_ORGANIZATION'
+        >
           Try again
         </Button>
       </div>
@@ -209,6 +215,8 @@ const ClawOrganizationScreen = (): ReactElement => {
               loading={addMember.isPending}
               disabled={!newMember.trim()}
               onClick={() => void submitMember()}
+              data-track-category='Claw Agents'
+              data-track-name='ADD_ORGANIZATION_MEMBER'
             >
               Add member
             </Button>
@@ -288,6 +296,8 @@ const ClawOrganizationScreen = (): ReactElement => {
                             size='iconSm'
                             aria-label={`Remove ${member.email}`}
                             onClick={() => setRemoveTarget(member)}
+                            data-track-category='Claw Agents'
+                            data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
                           >
                             <Trash2 className='size-4 text-muted-foreground' />
                           </Button>

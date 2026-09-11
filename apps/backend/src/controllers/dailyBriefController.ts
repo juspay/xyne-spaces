@@ -7,6 +7,9 @@ import {
   saveDailyBriefSettings,
   getLatestDailyBrief,
   getDailyBriefHistory,
+  getDailyBriefDates,
+  getDailyBriefByDate,
+  postDailyBriefSwitched,
   regenerateDailyBriefStream,
 } from '../services/clawAgentService';
 
@@ -31,13 +34,17 @@ export async function getConfig(req: Request, res: Response) {
   }
 }
 
-/** PUT /api/daily-brief/config — { enabled?, instructions? }. */
+/** PUT /api/daily-brief/config — { enabled?, instructions?, instructionsEnabled? }. */
 export async function saveConfig(req: Request, res: Response) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const { enabled, instructions } = req.body ?? {};
-    const result = await saveDailyBriefConfig(req, userId, { enabled, instructions });
+    const { enabled, instructions, instructionsEnabled } = req.body ?? {};
+    const result = await saveDailyBriefConfig(req, userId, {
+      enabled,
+      instructions,
+      instructionsEnabled,
+    });
     return res.json(unwrap(result));
   } catch (error) {
     logger.error('[DailyBrief] Error saving config:', error);
@@ -101,6 +108,48 @@ export async function getHistory(req: Request, res: Response) {
   } catch (error) {
     logger.error('[DailyBrief] Error fetching history:', error);
     return res.status(500).json({ error: 'Failed to load daily brief history' });
+  }
+}
+
+/** GET /api/daily-brief/dates — days the user has briefs for (date + status only). */
+export async function getDates(req: Request, res: Response) {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? limitRaw : undefined;
+    const result = await getDailyBriefDates(req, userId, limit);
+    return res.json(unwrap(result));
+  } catch (error) {
+    logger.error('[DailyBrief] Error fetching dates:', error);
+    return res.status(500).json({ error: 'Failed to load daily brief dates' });
+  }
+}
+
+/** GET /api/daily-brief/by-date/:date — the stored brief for one YYYY-MM-DD bucket. */
+export async function getByDate(req: Request, res: Response) {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { status, json } = await getDailyBriefByDate(req, userId, String(req.params.date ?? ''));
+    return res.status(status).json(unwrap(json));
+  } catch (error) {
+    logger.error('[DailyBrief] Error fetching brief by date:', error);
+    return res.status(500).json({ error: 'Failed to load daily brief' });
+  }
+}
+
+/** POST /api/daily-brief/switched — beacon: the user switched to another brief. */
+export async function postSwitched(req: Request, res: Response) {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const source = typeof req.body?.source === 'string' ? req.body.source : 'history_menu';
+    const status = await postDailyBriefSwitched(req, userId, source);
+    return res.status(status === 204 ? 204 : 500).end();
+  } catch (error) {
+    logger.error('[DailyBrief] Error recording brief switch:', error);
+    return res.status(500).end();
   }
 }
 

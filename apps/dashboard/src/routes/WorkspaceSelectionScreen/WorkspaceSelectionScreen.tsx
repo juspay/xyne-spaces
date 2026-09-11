@@ -113,7 +113,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
 
       const targetWorkspaceId = response.data.user?.workspaceId || workspaceId;
       localStorage.setItem('user_id', response.data.user?.id ?? '');
-      window.location.href = `/${targetWorkspaceId}/chat/dir`;
+      window.location.href = `/${targetWorkspaceId}`;
     } catch (err) {
       if (err instanceof AxiosError) {
         const msg = (err.response?.data as { message?: string } | undefined)?.message;
@@ -138,7 +138,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
       );
       const newWorkspaceId = response.data.user.workspaceId;
       localStorage.setItem('user_id', response.data.user.id);
-      window.location.href = `/${newWorkspaceId}/chat/dir`;
+      window.location.href = `/${newWorkspaceId}`;
     } catch (err) {
       if (err instanceof AxiosError) {
         const msg = (err.response?.data as { message?: string } | undefined)?.message;

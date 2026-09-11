@@ -282,6 +282,7 @@ export const BookmarkItem = ({
               className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
               data-testid='bookmark-mark-as-done-btn'
+              data-ph-capture-attribute-track-id='mark_bookmark_done'
               data-track-category='CHAT_BOOKMARK'
               data-track-name='Mark_Bookmark_Done'
               data-track-metadata={JSON.stringify({ entityId })}
@@ -406,10 +407,18 @@ export const BookmarkItem = ({
                 e.stopPropagation();
                 setIsCustomReminderModalOpen(false);
               }}
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='OPEN_CUSTOM_REMINDER'
             >
               Cancel
             </Button>
-            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+            <Button
+              onClick={handleSaveCustomReminder}
+              trackId='save_bookmark_reminder'
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='SAVE_CUSTOM_REMINDER'
+              disabled={!customReminderDate}
+            >
               Save
             </Button>
           </div>

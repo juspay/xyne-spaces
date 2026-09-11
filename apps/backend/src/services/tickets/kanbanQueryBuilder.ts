@@ -1,5 +1,10 @@
 import { Prisma } from '@prisma/client';
-import { TicketPriority, TicketStatusV2, UserResponsibility } from '@xyne/shared';
+import {
+  TicketPriority,
+  TicketStatusV2,
+  UserResponsibility,
+  type FlowStepVisibilityOptions,
+} from '@xyne/shared';
 import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 
 const SUPPORT_TICKET_TYPE = 'Support';
@@ -42,7 +47,7 @@ export type KanbanTicketFilters = {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 };
 
-export type KanbanTicketQueryContext = {
+export type KanbanTicketQueryContext = FlowStepVisibilityOptions & {
   workspaceId: string;
   currentUserId?: string;
   viewMode: KanbanTicketViewMode;
@@ -211,6 +216,7 @@ export const buildKanbanTicketWhere = (
       { isArchived: false },
       buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
+      context.excludeFlowSteps ? { rootId: null } : undefined,
       {
         OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }],
       },
@@ -259,15 +265,10 @@ export const buildKanbanTicketWhere = (
       hasItems(filters.stages) ? { stageName: { in: [...filters.stages] } } : undefined,
       hasItems(filters.ticketTypes) ? { ticketType: { in: [...filters.ticketTypes] } } : undefined,
       context.showOverdueOnly
-        ? {
+        ? ({
             statusV2: { notIn: [TicketStatusV2.COMPLETED, TicketStatusV2.CANCELLED] },
-            stageEtaEntries: {
-              some: {
-                stageLeftAt: null,
-                stageEta: { lt: new Date() },
-              },
-            },
-          }
+            isStageOverdue: true,
+          } as Prisma.TicketWhereInput)
         : undefined,
     ]),
   };

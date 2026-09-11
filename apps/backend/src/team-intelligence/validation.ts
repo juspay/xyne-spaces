@@ -4,6 +4,51 @@
 
 import { z } from 'zod';
 
+export interface TeamIntelligencePayloadValidationError {
+  fieldName: string;
+  fieldPath: string;
+  code: z.ZodIssueCode;
+  message: string;
+  expected?: string;
+  received?: string;
+}
+
+function formatValidationPath(path: (string | number)[]): string {
+  if (path.length === 0) return '$';
+
+  return path.reduce<string>((formatted, segment) => {
+    if (typeof segment === 'number') return `${formatted}[${segment}]`;
+    return formatted ? `${formatted}.${segment}` : segment;
+  }, '');
+}
+
+/**
+ * Preserve complete nested Zod paths for ingestion logs. ZodError.flatten()
+ * groups nested failures under their top-level field (for example `users`),
+ * which makes malformed Mettle records difficult to locate.
+ */
+export function formatTeamIntelligenceValidationErrors(
+  issues: z.ZodIssue[]
+): TeamIntelligencePayloadValidationError[] {
+  return issues.map((issue) => {
+    const fieldPath = formatValidationPath(issue.path);
+    const fieldName = String(issue.path.at(-1) ?? '$');
+    const formatted: TeamIntelligencePayloadValidationError = {
+      fieldName,
+      fieldPath,
+      code: issue.code,
+      message: issue.message,
+    };
+
+    if (issue.code === z.ZodIssueCode.invalid_type) {
+      formatted.expected = issue.expected;
+      formatted.received = issue.received;
+    }
+
+    return formatted;
+  });
+}
+
 const TeamIntelligenceCommitSchema = z.object({
   commitId: z.string().min(1),
   commitMessage: z.string().min(1),

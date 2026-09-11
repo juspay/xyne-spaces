@@ -63,20 +63,20 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       );
     }
 
-    const stepCount = Object.keys(context.steps).length;
-    const currentIndex = Math.max(0, stepCount - 1);
+    const stepName = store.stepName ?? `step_${Math.max(0, Object.keys(context.steps).length - 1)}`;
 
-    const sessionId = `${store.runId}:step_${currentIndex}`;
-    const callbackUrl = buildCallbackUrl(store.runId, `step_${currentIndex}`);
+    const sessionId = `${store.runId}:${stepName}`;
+    const callbackUrl = buildCallbackUrl(store.runId, stepName);
 
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
 
     logger.info(
-      `[RUN_AGENT] firing — executionId=${store.runId} stepIndex=${currentIndex} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
+      `[RUN_AGENT] firing — executionId=${store.runId} stepName=${stepName} agentSlug=${agentSlug} sessionId=${sessionId} userId=${runUserId}`,
     );
 
     try {
@@ -86,12 +86,13 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         agentSlug,
         task: prompt,
         userId: runUserId,
+        ...identityContext,
         callbackUrl,
         ...(visibleContext ? visibleContext : {}),
       });
     } catch (err) {
       logger.error(
-        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepIndex=${currentIndex}:`,
+        `[RUN_AGENT] claw rejected the run — executionId=${store.runId} stepName=${stepName}:`,
         err,
       );
       throw err;
@@ -164,7 +165,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const stepName =
       typeof rowData['stepName'] === 'string'
         ? (rowData['stepName'] as string)
-        : deriveStepNameFromCtx(context);
+        : (store.stepName ?? deriveStepNameFromCtx(context));
     if (!stepName) {
       throw new Error('[RUN_AGENT] cannot derive stepName for retry');
     }
@@ -180,6 +181,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     );
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
     const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
 
@@ -194,6 +196,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
         agentSlug,
         task: retryPrompt,
         userId: runUserId,
+        ...identityContext,
         callbackUrl,
         ...(visibleContext ? visibleContext : {}),
       });
@@ -219,12 +222,16 @@ function resolveVisibleConversationContext(
   context: AutomationContext,
 ): { conversationId: string; channelId: string } | null {
   const trigger = context.trigger as Record<string, unknown> | undefined;
+  const message = trigger?.message as Record<string, unknown> | undefined;
+  const ticket = trigger?.ticket as Record<string, unknown> | undefined;
   const conversationId =
     asNonEmptyString(trigger?.conversationId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.conversationId);
+    asNonEmptyString(message?.conversationId) ??
+    asNonEmptyString(ticket?.conversationId);
   const channelId =
     asNonEmptyString(trigger?.channelId) ??
-    asNonEmptyString((trigger?.message as Record<string, unknown> | undefined)?.channelId);
+    asNonEmptyString(message?.channelId) ??
+    asNonEmptyString(ticket?.channelId);
   return conversationId && channelId ? { conversationId, channelId } : null;
 }
 
@@ -322,6 +329,32 @@ async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Pr
     );
   }
   return fallbackUserId;
+}
+
+/**
+ * Queue workers do not have a browser cookie. Resolve the workspace context
+ * from Spaces itself and send it as optional metadata, preserving the legacy
+ * raw userId field for older Claw deployments.
+ */
+async function resolveHeadlessIdentityContext(
+  userId: string,
+  workspaceId: string,
+): Promise<{ spacesWorkspaceId: string; spacesOrgId: string; spacesOrgMemberId: string }> {
+  const [workspace, user] = await Promise.all([
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
+    db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
+  ]);
+  if (!workspace?.orgId) {
+    throw new Error(`[RUN_AGENT] workspace ${workspaceId} has no organization`);
+  }
+  if (!user?.orgMemberId) {
+    throw new Error(`[RUN_AGENT] user ${userId} has no orgMemberId`);
+  }
+  return {
+    spacesWorkspaceId: workspaceId,
+    spacesOrgId: workspace.orgId,
+    spacesOrgMemberId: user.orgMemberId,
+  };
 }
 
 function deriveStepNameFromCtx(context: AutomationContext): string | null {

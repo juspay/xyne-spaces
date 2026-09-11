@@ -971,6 +971,8 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
           variant='ghost'
           size='iconSm'
           onClick={() => removeCondition(condition.id)}
+          data-track-category='QueryBuilder'
+          data-track-name='REMOVE_FILTER_CONDITION'
           className='text-red-600 hover:bg-red-50'
         >
           <X className='w-4 h-4' />
@@ -1017,7 +1019,14 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
       </div>
 
       {/* Add condition button */}
-      <Button variant='outline' size='sm' onClick={addCondition} className='w-full'>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={addCondition}
+        data-track-category='QueryBuilder'
+        data-track-name='ADD_FILTER_CONDITION'
+        className='w-full'
+      >
         <Plus className='w-4 h-4 mr-2' />
         Add Condition
       </Button>

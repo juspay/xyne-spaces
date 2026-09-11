@@ -5,8 +5,9 @@
 
 import { ReactElement, useEffect, useState, useRef } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
-import { formatElapsedTime } from '../../../utils/recordingUtils';
+import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import { Waveform } from '../../../utils/recordingWaveform';
+import { ShortcutTooltip } from '../../../components/ui/ShortcutTooltip';
 
 /**
  * Returns true when the dashboard is running inside a mobile browser or
@@ -35,6 +36,8 @@ interface RecordingControlBarProps {
   isPaused: boolean;
   isStarting: boolean;
   startTime: number | null;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
   onStart: () => void;
   onStop: () => void;
   onPause: () => void;
@@ -46,6 +49,8 @@ export function RecordingControlBar({
   isPaused,
   isStarting,
   startTime,
+  pauseStartedAt,
+  accumulatedPausedMs,
   onStart,
   onStop,
   onPause,
@@ -55,11 +60,13 @@ export function RecordingControlBar({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (isRecording && !isPaused && startTime) {
-      setElapsed(Date.now() - startTime);
-      intervalRef.current = setInterval(() => {
-        setElapsed(Date.now() - startTime);
-      }, 1000);
+    if (isRecording && startTime) {
+      setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+      if (!isPaused) {
+        intervalRef.current = setInterval(() => {
+          setElapsed(calculateRecordingElapsedMs(startTime, pauseStartedAt, accumulatedPausedMs));
+        }, 1000);
+      }
     }
 
     return (): void => {
@@ -68,7 +75,7 @@ export function RecordingControlBar({
         intervalRef.current = null;
       }
     };
-  }, [isRecording, isPaused, startTime]);
+  }, [isRecording, isPaused, startTime, pauseStartedAt, accumulatedPausedMs]);
 
   const isMobileWeb = useMobileWebPadding();
   // MOBILE_NAV_H ≈ height of the MobileNavbar pill (44 px items + py-2 + bottom-2)
@@ -120,21 +127,23 @@ export function RecordingControlBar({
             </button>
           </>
         ) : (
-          <button
-            onClick={onStart}
-            disabled={isStarting}
-            className='flex items-center justify-center w-14 h-14 rounded-full bg-destructive hover:bg-destructive/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
-            title='Start recording'
-            data-track-category='RecordingControlBar'
-            data-track-name='start_recording'
-          >
-            {isStarting ? (
-              <Loader2 className='w-6 h-6 text-white animate-spin' />
-            ) : (
-              /* Circle record icon */
-              <div className='w-6 h-6 rounded-full bg-background' />
-            )}
-          </button>
+          <ShortcutTooltip label='Start recording' shortcut='recording.start' side='top'>
+            <button
+              onClick={onStart}
+              disabled={isStarting}
+              className='flex items-center justify-center w-14 h-14 rounded-full bg-destructive hover:bg-destructive/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg'
+              aria-label='Start recording'
+              data-track-category='RecordingControlBar'
+              data-track-name='start_recording'
+            >
+              {isStarting ? (
+                <Loader2 className='w-6 h-6 text-white animate-spin' />
+              ) : (
+                /* Circle record icon */
+                <div className='w-6 h-6 rounded-full bg-background' />
+              )}
+            </button>
+          </ShortcutTooltip>
         )}
 
         {/* Waveform bars (right side, visible when actively recording) */}

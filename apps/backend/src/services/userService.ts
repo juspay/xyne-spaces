@@ -3,6 +3,7 @@ import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
 import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
@@ -21,6 +22,9 @@ import { isOrganizationPolicyError, organizationDomainService } from '@/services
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
+import { redisService } from '@/services/redisService';
+import { createId } from '@paralleldrive/cuid2';
+import { getEncryptionProvider } from '@/services/encryption';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -39,7 +43,7 @@ interface GoogleUserData {
 }
 
 export interface UserWithOrgRole extends User {
-  orgRole?: string;
+  orgRole: string;
 }
 
 export class UserService {
@@ -47,6 +51,21 @@ export class UserService {
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
+  }
+
+  async hasCompletedOnboarding(email: string): Promise<boolean> {
+    const normalizedEmail = email.toLowerCase().trim();
+    return await runAsSystem(async () => {
+      const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
+        where: {
+          questionnaireType: 'onboarding',
+          email: normalizedEmail,
+        },
+        select: { id: true },
+      });
+
+      return Boolean(onboardingResponse);
+    });
   }
 
   /**
@@ -98,8 +117,11 @@ export class UserService {
    */
   async findUserByEmail(email: string, workspaceId: string): Promise<User | null> {
     try {
-      return await this.prisma.user.findUnique({
-        where: { email_workspaceId: { email, workspaceId } }
+      return await this.prisma.user.findFirst({
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          workspaceId,
+        }
       });
     } catch (error) {
       logger.error('Error finding user by email:', error);
@@ -128,7 +150,11 @@ export class UserService {
     }
     try {
       const result = await this.prisma.user.updateMany({
-        where: { email, authProvider, providerUserId: oldProviderUserId },
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          authProvider,
+          providerUserId: oldProviderUserId,
+        },
         data: { providerUserId: newProviderUserId },
       });
       if (result.count > 0) {
@@ -154,7 +180,7 @@ export class UserService {
   ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
     try {
       const user = await this.prisma.user.findFirst({
-        where: { email },
+        where: { email: { equals: email, mode: 'insensitive' } },
         select: { authProvider: true, providerUserId: true },
         orderBy: { createdAt: 'asc' },
       });
@@ -178,8 +204,8 @@ export class UserService {
 
       // Fetch existing orgMember by email to get memberId
       // orgMember should already exist (created during invitation or org setup)
-      const orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      const orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 
@@ -202,6 +228,17 @@ export class UserService {
       logger.info(
         `Created new user: ${user.email} (${user.id}) without assigning to a default group.`
       );
+
+      try {
+        await aiProvisioningService.enqueueUserSync(user.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for created user', {
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          orgMemberId: user.orgMemberId,
+          error,
+        });
+      }
 
       // grantPermissionsForRole swallows errors internally — user creation must not rollback on grant failure
       await grantPermissionsForRole(user.id, user.email, WorkspaceRole.MEMBER, user.workspaceId);
@@ -381,7 +418,8 @@ export class UserService {
         }
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -402,7 +440,8 @@ export class UserService {
         });
 
         // Fetch org role
-        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+        const orgRole = await this.getOrgRole(user.orgMemberId);
+        if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
         return { user: { ...user, orgRole }, isNewUser };
       }
@@ -413,7 +452,8 @@ export class UserService {
       isNewUser = true;
 
       // Fetch org role for new user
-      const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+      const orgRole = await this.getOrgRole(user.orgMemberId);
+      if (!orgRole) throw new Error(`orgRole not found for user ${user.id}`);
 
       // Note: ensureUserPresence is called in createUser(), so no need to call it here
 
@@ -451,7 +491,7 @@ export class UserService {
   /**
    * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<(User & { orgMember?: { memberId: string; role: string } | null }) | null> {
+  async getUserById(userId: string): Promise<(User & { orgMember: { memberId: string; role: string } }) | null> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -462,14 +502,19 @@ export class UserService {
       }
       
       // Fetch org member separately since there's no explicit relation
-      const orgMember = user.orgMemberId ? await this.prisma.orgMember.findUnique({
+      const orgMember = await this.prisma.orgMember.findUnique({
         where: { memberId: user.orgMemberId },
         select: {
           memberId: true,
           role: true,
         },
-      }) : null;
-      
+      });
+
+      if (!orgMember) {
+        logger.warn(`getUserById: orgMember not found for user ${userId}`);
+        return null;
+      }
+
       return {
         ...user,
         orgMember,
@@ -603,109 +648,111 @@ export class UserService {
     memberCount: number;
   }>> {
     try {
-      logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
-      const workspaceUsers = await this.prisma.user.findMany({
-        where: {
-          email,
-          status: UserStatus.ACTIVE,
-          leftAt: null,
-        },
-        include: {
-          workspace: {
-            include: {
-              organization: true
+      return await runAsSystem(async () => {
+        logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
+        const workspaceUsers = await this.prisma.user.findMany({
+          where: {
+            email: { equals: email, mode: 'insensitive' },
+            status: UserStatus.ACTIVE,
+            leftAt: null,
+          },
+          include: {
+            workspace: {
+              include: {
+                organization: true
+              }
             }
           }
-        }
-      });
+        });
 
-      const visibleWorkspaceUsers = workspaceUsers;
+        const visibleWorkspaceUsers = workspaceUsers;
 
-      logger.info(`[getWorkspacesByEmail] Found ${visibleWorkspaceUsers.length} active workspace users for email: ${email}`);
-      visibleWorkspaceUsers.forEach(u => {
-        logger.info(`[getWorkspacesByEmail] - User ${u.id} in workspace ${u.workspace?.id}`);
-      });
+        logger.info(`[getWorkspacesByEmail] Found ${visibleWorkspaceUsers.length} active workspace users for email: ${email}`);
+        visibleWorkspaceUsers.forEach(u => {
+          logger.info(`[getWorkspacesByEmail] - User ${u.id} in workspace ${u.workspace?.id}`);
+        });
 
-      const existingWorkspaceIds = new Set(
-        visibleWorkspaceUsers
-          .map(wsUser => wsUser.workspaceId)
-          .filter((workspaceId): workspaceId is string => Boolean(workspaceId)),
-      );
+        const existingWorkspaceIds = new Set(
+          visibleWorkspaceUsers
+            .map(wsUser => wsUser.workspaceId)
+            .filter((workspaceId): workspaceId is string => Boolean(workspaceId)),
+        );
 
-      const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
-        where: {
-          email: email,
-          status: WorkspaceJoinRequestStatus.APPROVED,
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
+        const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
+          where: {
+            email: { equals: email, mode: 'insensitive' },
+            status: WorkspaceJoinRequestStatus.APPROVED,
+          },
+          orderBy: { updatedAt: 'desc' },
+        });
 
-      const approvedJoinRequestWorkspaces = approvedJoinRequests.length > 0
-        ? await this.prisma.workspace.findMany({
-            where: {
-              id: { in: approvedJoinRequests.map(request => request.workspaceId) },
-              status: Status.ACTIVE,
-              OR: [{ workspaceType: WorkspaceType.ENTERPRISE }, { workspaceType: null }],
-            },
-            include: {
-              organization: true,
-            },
-          })
-        : [];
-      const approvedJoinRequestWorkspacesById = new Map(
-        approvedJoinRequestWorkspaces.map(workspace => [workspace.id, workspace]),
-      );
+        const approvedJoinRequestWorkspaces = approvedJoinRequests.length > 0
+          ? await this.prisma.workspace.findMany({
+              where: {
+                id: { in: approvedJoinRequests.map(request => request.workspaceId) },
+                status: Status.ACTIVE,
+                OR: [{ workspaceType: WorkspaceType.ENTERPRISE }, { workspaceType: null }],
+              },
+              include: {
+                organization: true,
+              },
+            })
+          : [];
+        const approvedJoinRequestWorkspacesById = new Map(
+          approvedJoinRequestWorkspaces.map(workspace => [workspace.id, workspace]),
+        );
 
-      const workspaceIds = [
-        ...new Set([
-          ...visibleWorkspaceUsers.map(wsUser => wsUser.workspaceId),
-          ...approvedJoinRequestWorkspaces.map(ws => ws.id),
-        ].filter((id): id is string => Boolean(id))),
-      ];
+        const workspaceIds = [
+          ...new Set([
+            ...visibleWorkspaceUsers.map(wsUser => wsUser.workspaceId),
+            ...approvedJoinRequestWorkspaces.map(ws => ws.id),
+          ].filter((id): id is string => Boolean(id))),
+        ];
 
-      const memberCounts = await this.prisma.user.groupBy({
-        by: ['workspaceId'],
-        where: {
-          workspaceId: { in: workspaceIds },
-          status: UserStatus.ACTIVE,
-          leftAt: null,
-        },
-        _count: { workspaceId: true },
-      });
+        const memberCounts = await this.prisma.user.groupBy({
+          by: ['workspaceId'],
+          where: {
+            workspaceId: { in: workspaceIds },
+            status: UserStatus.ACTIVE,
+            leftAt: null,
+          },
+          _count: { workspaceId: true },
+        });
 
-      const memberCountByWorkspaceId = new Map(
-        memberCounts.map(group => [group.workspaceId, group._count.workspaceId]),
-      );
+        const memberCountByWorkspaceId = new Map(
+          memberCounts.map(group => [group.workspaceId, group._count.workspaceId]),
+        );
 
-      // Return flat list of workspaces for frontend
-      const activeWorkspaces = visibleWorkspaceUsers.map(wsUser => ({
-        id: wsUser.workspace!.id,
-        name: wsUser.workspace!.name,
-        role: wsUser.role || 'MEMBER',
-        orgId: wsUser.workspace!.organization.orgId,
-        orgName: wsUser.workspace!.organization.name,
-        workspaceType: wsUser.workspace!.workspaceType,
-        memberCount: memberCountByWorkspaceId.get(wsUser.workspace!.id) ?? 0,
-      }));
-
-      const approvedRequestWorkspaces = approvedJoinRequests
-        .filter(request => !existingWorkspaceIds.has(request.workspaceId))
-        .map(request => approvedJoinRequestWorkspacesById.get(request.workspaceId))
-        .filter(
-          (workspace): workspace is (typeof approvedJoinRequestWorkspaces)[number] =>
-            Boolean(workspace),
-        )
-        .map(workspace => ({
-          id: workspace.id,
-          name: workspace.name,
-          role: 'MEMBER',
-          orgId: workspace.organization.orgId,
-          orgName: workspace.organization.name,
-          workspaceType: workspace.workspaceType,
-          memberCount: memberCountByWorkspaceId.get(workspace.id) ?? 0,
+        // Return flat list of workspaces for frontend
+        const activeWorkspaces = visibleWorkspaceUsers.map(wsUser => ({
+          id: wsUser.workspace!.id,
+          name: wsUser.workspace!.name,
+          role: wsUser.role || 'MEMBER',
+          orgId: wsUser.workspace!.organization.orgId,
+          orgName: wsUser.workspace!.organization.name,
+          workspaceType: wsUser.workspace!.workspaceType,
+          memberCount: memberCountByWorkspaceId.get(wsUser.workspace!.id) ?? 0,
         }));
 
-      return [...activeWorkspaces, ...approvedRequestWorkspaces];
+        const approvedRequestWorkspaces = approvedJoinRequests
+          .filter(request => !existingWorkspaceIds.has(request.workspaceId))
+          .map(request => approvedJoinRequestWorkspacesById.get(request.workspaceId))
+          .filter(
+            (workspace): workspace is (typeof approvedJoinRequestWorkspaces)[number] =>
+              Boolean(workspace),
+          )
+          .map(workspace => ({
+            id: workspace.id,
+            name: workspace.name,
+            role: 'MEMBER',
+            orgId: workspace.organization.orgId,
+            orgName: workspace.organization.name,
+            workspaceType: workspace.workspaceType,
+            memberCount: memberCountByWorkspaceId.get(workspace.id) ?? 0,
+          }));
+
+        return [...activeWorkspaces, ...approvedRequestWorkspaces];
+      });
     } catch (error) {
       logger.error('Error getting workspaces by email:', error);
       throw new Error('Failed to get workspaces');
@@ -720,13 +767,13 @@ export class UserService {
     try {
       const userCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
         },
       });
 
       const activeCount = await this.prisma.user.count({
         where: {
-          email,
+          email: { equals: email, mode: 'insensitive' },
           status: UserStatus.ACTIVE,
           leftAt: null,
         },
@@ -766,13 +813,14 @@ export class UserService {
       }
 
       const normalizedAuthProvider = (userData.authProvider?.toUpperCase() as AuthProvider) || AuthProvider.GOOGLE;
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
 
       if (workspaceUser) {
         workspaceUser = await this.prisma.user.update({
           where: { id: workspaceUser.id },
           data: { authProvider: normalizedAuthProvider }
         });
-        return { user: workspaceUser, isNewUser: false };
+        return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
       }
 
       // Also check by email (for users created by seed script or when providerUserId is unavailable)
@@ -806,29 +854,27 @@ export class UserService {
         throw new Error('Workspace not found');
       }
 
-      // Check if user is invited to this workspace
+      // A live, unconsumed invitation for this workspace. Revoking sets the expiry to the
+      // moment of revocation, so one comparison covers both a lapsed invitation and a
+      // withdrawn one. An already-accepted invitation is not a second entry: whoever used it
+      // holds an account in the workspace and is resolved before this point.
       const invitation = await this.prisma.invitation.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email
+          email: { equals: userData.email, mode: 'insensitive' },
+          acceptedAt: null,
+          expiredAt: { gt: new Date() }
         }
       });
 
-      // Find if there's an existing user with this email in the org
-      const existingOrgUsers = await this.prisma.user.findMany({
-        where: {
-          email: userData.email,
-          workspace: {
-            orgId: workspace.orgId
-          }
-        }
-      });
-
-      const hasAccess = invitation || existingOrgUsers.length > 0;
+      // Entry to a workspace comes from an invitation to that workspace, or an approved join
+      // request for it. Holding an account in another workspace of the same organisation is
+      // not itself entry to this one.
+      const hasAccess = !!invitation;
       const approvedJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
         where: {
           workspaceId: userData.workspaceId,
-          email: userData.email,
+          email: { equals: userData.email, mode: 'insensitive' },
           status: WorkspaceJoinRequestStatus.APPROVED,
         },
         orderBy: { updatedAt: 'desc' },
@@ -841,8 +887,8 @@ export class UserService {
       const role = invitation?.role || 'MEMBER';
 
       // Fetch existing orgMember by email
-      let orgMember = await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
+      let orgMember = await this.prisma.orgMember.findFirst({
+        where: { email: { equals: userData.email, mode: 'insensitive' } },
         select: { memberId: true }
       });
 
@@ -879,6 +925,17 @@ export class UserService {
         }
       });
 
+      try {
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI user provisioning for workspace user', {
+          userId: workspaceUser.id,
+          workspaceId: workspaceUser.workspaceId,
+          orgMemberId: workspaceUser.orgMemberId,
+          error,
+        });
+      }
+
       // Grant permissions based on invitation role (fixes V2 auth zero-permissions bug)
       await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, role as WorkspaceRole, userData.workspaceId);
 
@@ -894,10 +951,27 @@ export class UserService {
       });
 
       logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
-      return { user: workspaceUser, isNewUser: true };
+      return { user: workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating workspace user:', error);
       throw error instanceof Error ? error : new Error('Failed to create workspace user');
+    }
+  }
+
+  /**
+   * Check Redis for a verified email-password registration's passwordHash.
+   * Returns { passwordHash } if found, so it can be set on the OrgMember
+   * during org creation. Cleans up the Redis key after reading.
+   */
+  private async getVerifiedPasswordHash(email: string): Promise<{ passwordHash?: string }> {
+    try {
+      const raw = await redisService.get(`emailreg:verified:${email.toLowerCase().trim()}`);
+      if (!raw) return {};
+      const data = JSON.parse(raw) as { passwordHash?: string };
+      await redisService.del(`emailreg:verified:${email.toLowerCase().trim()}`);
+      return data.passwordHash ? { passwordHash: data.passwordHash } : {};
+    } catch {
+      return {};
     }
   }
 
@@ -928,25 +1002,37 @@ export class UserService {
         throw new Error(`Organization with name "${orgName}" already exists. Please choose a different name.`);
       }
 
-      // Step 1: Create organization with temporary createdBy (will update later)
-      const organization = await this.prisma.organization.create({
-        data: {
-          name: orgName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE
-        }
-      });
+      const orgId = createId();
+      await getEncryptionProvider().initializeOrg(orgId);
 
-      // Step 2: Create workspace with temporary createdBy (will update later)
-      let workspace = await this.prisma.workspace.create({
-        data: {
-          orgId: organization.orgId,
-          name: workspaceName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE,
-          workspaceType: WorkspaceType.ENTERPRISE,
-          joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-        }
+      const { organization, workspace } = await this.prisma.$transaction(async (tx) => {
+        // Step 1: Create organization with temporary createdBy (will update later)
+        const organization = await tx.organization.create({
+          data: {
+            orgId,
+            name: orgName,
+            createdBy: userData.providerUserId, // Temporary: will update after user creation
+            status: Status.ACTIVE
+          }
+        });
+
+        // Step 2: Create workspace with temporary createdBy (will update later)
+        const workspace = await tx.workspace.create({
+          data: {
+            orgId: organization.orgId,
+            name: workspaceName,
+            createdBy: userData.providerUserId, // Temporary: will update after user creation
+            status: Status.ACTIVE,
+            workspaceType: WorkspaceType.ENTERPRISE,
+            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
+          }
+        });
+        await getEncryptionProvider().provisionEntity({
+          entityId: workspace.id,
+          orgId: workspace.orgId,
+          entityType: 'WORKSPACE',
+        });
+        return { organization, workspace };
       });
 
       // Step 3: Link workspace to organization
@@ -961,6 +1047,8 @@ export class UserService {
       // Step 4: Add/upgrade user as OrgMember first so they can create additional workspaces later.
       // A COMMUNITY_MEMBER row is the only global OrgMember row public users have before
       // joining/creating an enterprise workspace. Move that row to the enterprise org.
+      const hasCompletedOnboarding = await this.hasCompletedOnboarding(userData.email);
+
       const existingOrgMember = await this.prisma.orgMember.findUnique({
         where: { email: userData.email },
       });
@@ -976,6 +1064,7 @@ export class UserService {
               orgId: organization.orgId,
               role: OrgRole.OWNER,
               leftAt: null,
+              ...(existingOrgMember.passwordHash ? {} : await this.getVerifiedPasswordHash(userData.email)),
             },
           })
         : await this.prisma.orgMember.create({
@@ -983,6 +1072,7 @@ export class UserService {
               orgId: organization.orgId,
               email: userData.email,
               role: OrgRole.OWNER,
+              ...(await this.getVerifiedPasswordHash(userData.email)),
             }
           });
 
@@ -1055,7 +1145,7 @@ export class UserService {
       try {
         await aiProvisioningService.enqueueOrgSync(organization.orgId);
         await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
-        await aiProvisioningService.enqueueUserSync(workspaceUser.id);
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
       } catch (error) {
         logger.error('[UserService] Failed to enqueue AI provisioning jobs for new organization', {
           orgId: organization.orgId,
@@ -1066,7 +1156,7 @@ export class UserService {
       }
 
       logger.info(`Created organization ${orgName} with workspace ${workspaceName} for ${userData.email}`);
-      return { organization, workspace, workspaceUser, isNewUser: true };
+      return { organization, workspace, workspaceUser, isNewUser: !hasCompletedOnboarding };
     } catch (error) {
       logger.error('Error creating organization:', error);
       if (isOrganizationPolicyError(error) || (error as Error & { statusCode?: number }).statusCode) {
@@ -1118,107 +1208,122 @@ export class UserService {
       }
     }
 
-    // Step 1: Create workspace under existing org with temporary createdBy
-    let workspace;
-    try {
-      workspace = await this.prisma.workspace.create({
+    // Creating a workspace is inherently cross-tenant: the row being created/updated can
+    // never satisfy "must belong to the caller's current workspace" (there is no current
+    // workspace for something that doesn't exist yet). Bootstrap it as `system` — every
+    // write below already carries its own workspaceId explicitly, so nothing relies on the
+    // ambient-context stamper this bypasses. See WorkspacesACL.getMutateWhere / runAsSystem.
+    return runAsSystem(async () => {
+      // Step 1: Create workspace under existing org with temporary createdBy
+      let workspace;
+      try {
+        workspace = await this.prisma.$transaction(async (tx) => {
+          const createdWorkspace = await tx.workspace.create({
+            data: {
+              orgId: org.orgId,
+              name: workspaceName,
+              createdBy: userData.providerUserId, // Temporary: will update after user creation
+              status: Status.ACTIVE,
+              workspaceType,
+              joinPolicy,
+            },
+          });
+          await getEncryptionProvider().provisionEntity({
+            entityId: createdWorkspace.id,
+            orgId: createdWorkspace.orgId,
+            entityType: 'WORKSPACE',
+          });
+          return createdWorkspace;
+        });
+      } catch (error) {
+        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+          this.raiseWorkspaceCreateError('A workspace with this name already exists. Please choose a different name.', 409);
+        }
+        throw error;
+      }
+
+      // Step 2: Link workspace to organization
+      await this.prisma.workspaceOrganization.create({
         data: {
           orgId: org.orgId,
-          name: workspaceName,
-          createdBy: userData.providerUserId, // Temporary: will update after user creation
-          status: Status.ACTIVE,
-          workspaceType,
-          joinPolicy,
+          workspaceId: workspace.id,
+          role: WorkspaceRole.ADMIN,
         },
       });
-    } catch (error) {
-      if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
-        this.raiseWorkspaceCreateError('A workspace with this name already exists. Please choose a different name.', 409);
-      }
-      throw error;
-    }
 
-    // Step 2: Link workspace to organization
-    await this.prisma.workspaceOrganization.create({
-      data: {
-        orgId: org.orgId,
-        workspaceId: workspace.id,
-        role: WorkspaceRole.ADMIN,
-      },
-    });
-
-    // Step 3: Fetch orgMember for the user (reuse existing orgMember if available)
-    const userOrgMember = orgMember || await this.prisma.orgMember.findUnique({
-      where: { email: userData.email },
-      select: { memberId: true }
-    });
-
-    if (!userOrgMember) {
-      throw new Error(`orgMember not found for email ${userData.email}. User must be added to the organization first.`);
-    }
-
-    // Step 4: Create workspace-scoped user as OWNER
-    const workspaceUser = await this.prisma.user.create({
-      data: {
-        providerUserId: userData.providerUserId,
-        email: userData.email,
-        name: userData.name,
-        picture: userData.picture,
-        authProvider: AuthProvider.GOOGLE,
-        workspace: { connect: { id: workspace.id } },
-        role: WorkspaceRole.OWNER,
-        orgMember: { connect: { memberId: orgMember.memberId } },
-      },
-    });
-
-    // Step 5: Update workspace with correct createdBy (actual user ID)
-    await this.prisma.workspace.update({
-      where: { id: workspace.id },
-      data: { createdBy: workspaceUser.id }
-    });
-
-    // Step 6: Create DM project for the workspace with correct createdBy
-    await this.prisma.project.create({
-      data: {
-        name: 'Direct Messages',
-        code: 'DM',
-        description: 'DM project for direct message channels',
-        type: ProjectType.DM,
-        workspaceId: workspace.id,
-        createdBy: workspaceUser.id,
-      }
-    });
-
-    const defaults = await createCommunityWorkspaceDefaults({
-      db: this.prisma,
-      workspaceId: workspace.id,
-      workspaceName,
-      createdBy: workspaceUser.id,
-    });
-
-    workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
-    await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
-
-    // Grant full admin resource access to the workspace owner
-    await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
-
-    // Sync all hardcoded bots into the new workspace
-    await unifiedBotUserService.syncAllBotUsers(workspace.id);
-
-    try {
-      await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
-      await aiProvisioningService.enqueueUserSync(workspaceUser.id);
-    } catch (error) {
-      logger.error('[UserService] Failed to enqueue AI provisioning jobs for new workspace', {
-        orgId: org.orgId,
-        workspaceId: workspace.id,
-        userId: workspaceUser.id,
-        error,
+      // Step 3: Fetch orgMember for the user (reuse existing orgMember if available)
+      const userOrgMember = orgMember || await this.prisma.orgMember.findUnique({
+        where: { email: userData.email },
+        select: { memberId: true }
       });
-    }
 
-    logger.info(`Created workspace "${workspaceName}" under org "${org.name}" for ${userData.email}`);
-    return { organization: org, workspace, workspaceUser };
+      if (!userOrgMember) {
+        throw new Error(`orgMember not found for email ${userData.email}. User must be added to the organization first.`);
+      }
+
+      // Step 4: Create workspace-scoped user as OWNER
+      const workspaceUser = await this.prisma.user.create({
+        data: {
+          providerUserId: userData.providerUserId,
+          email: userData.email,
+          name: userData.name,
+          picture: userData.picture,
+          authProvider: AuthProvider.GOOGLE,
+          workspace: { connect: { id: workspace.id } },
+          role: WorkspaceRole.OWNER,
+          orgMember: { connect: { memberId: orgMember.memberId } },
+        },
+      });
+
+      // Step 5: Update workspace with correct createdBy (actual user ID)
+      await this.prisma.workspace.update({
+        where: { id: workspace.id },
+        data: { createdBy: workspaceUser.id }
+      });
+
+      // Step 6: Create DM project for the workspace with correct createdBy
+      await this.prisma.project.create({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project for direct message channels',
+          type: ProjectType.DM,
+          workspaceId: workspace.id,
+          createdBy: workspaceUser.id,
+        }
+      });
+
+      const defaults = await createCommunityWorkspaceDefaults({
+        db: this.prisma,
+        workspaceId: workspace.id,
+        workspaceName,
+        createdBy: workspaceUser.id,
+      });
+
+      workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
+      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
+
+      // Grant full admin resource access to the workspace owner
+      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
+
+      // Sync all hardcoded bots into the new workspace
+      await unifiedBotUserService.syncAllBotUsers(workspace.id);
+
+      try {
+        await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
+        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
+      } catch (error) {
+        logger.error('[UserService] Failed to enqueue AI provisioning jobs for new workspace', {
+          orgId: org.orgId,
+          workspaceId: workspace.id,
+          userId: workspaceUser.id,
+          error,
+        });
+      }
+
+      logger.info(`Created workspace "${workspaceName}" under org "${org.name}" for ${userData.email}`);
+      return { organization: org, workspace, workspaceUser };
+    });
   }
 
   /**

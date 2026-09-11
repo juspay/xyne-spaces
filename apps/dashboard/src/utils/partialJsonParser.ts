@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 /**
  * Partial JSON Parser for Streaming Content
  *
@@ -135,8 +136,11 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
 
     return result;
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[PartialJSONParser] Error parsing partial JSON:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[PartialJSONParser] Error parsing partial JSON:'),
+      error: error,
+    });
     return null;
   }
 }

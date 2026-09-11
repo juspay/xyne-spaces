@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Download, Maximize2, X } from 'lucide-react';
 import type {
@@ -356,7 +357,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
   const exitPresent = useCallback(() => {
     setPresenting(false);
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
+      document.exitFullscreen().catch(() => undefined);
     }
   }, []);
 
@@ -629,7 +630,11 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
       </>
     );
   } catch (err) {
-    console.error('Error rendering PPT preview:', err);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Error rendering PPT preview:'),
+      error: err,
+    });
     return (
       <div className='w-full rounded-xl border border-red-200 bg-red-50 p-4 text-red-600'>
         <p className='text-sm font-medium'>Failed to render presentation preview</p>

@@ -11,9 +11,10 @@ interface SeedConfig {
   name: string;
   filters: TicketFilters;
   groupBy?: string;
+  columns?: string[];
 }
 
-// Decode the #cfg= share-link payload.
+// Decode the #cfg= share-link payload (legacy).
 function decodeSharedConfig(hash: string): SeedConfig | null {
   const match = hash.match(/cfg=([^&]+)/);
   const encoded = match?.[1];
@@ -37,6 +38,10 @@ const ProjectViewBuilder = (): ReactElement => {
   const [configs] = useCachedQuery(queries.savedConfigsByUser({ userId: user?.id ?? '' }), {
     enabled: isExistingView && !!user?.id,
   });
+  const [sharedConfigs] = useCachedQuery(
+    queries.savedConfigsSharedWithUser({ userId: user?.id ?? '' }),
+    { enabled: isExistingView && !!user?.id },
+  );
 
   const sharedConfig = useMemo(
     () => (isExistingView ? null : decodeSharedConfig(location.hash)),
@@ -48,26 +53,39 @@ const ProjectViewBuilder = (): ReactElement => {
     [isExistingView, configs, viewId],
   );
 
+  const sharedView = useMemo(() => {
+    if (!isExistingView) return undefined;
+    const entry = sharedConfigs?.find(va => va.viewId === viewId);
+    return entry?.view;
+  }, [isExistingView, sharedConfigs, viewId]);
+
+  const activeView = ownView ?? sharedView;
+
   const seed = useMemo<SeedConfig | null>(() => {
     if (isExistingView) {
-      if (!ownView) return null;
-      const values = ownView.values ?? [];
+      if (!activeView) return null;
+      const values = activeView.values ?? [];
       const groupBy = values.find(v => v.fieldName === '__groupBy')?.fieldValue;
+      const columns = values
+        .find(v => v.fieldName === '__columns')
+        ?.fieldValue.split(',')
+        .filter(Boolean);
       const filters = valuesToFilters(values);
       // Legacy per-board saved views store their board in contextId (no 'boards' value rows).
-      if (!filters.boards?.length && ownView.contextId) {
-        filters.boards = [ownView.contextId];
+      if (!filters.boards?.length && activeView.contextId) {
+        filters.boards = [activeView.contextId];
       }
       return {
-        name: ownView.name,
+        name: activeView.name,
         filters,
         ...(groupBy ? { groupBy } : {}),
+        ...(columns ? { columns } : {}),
       };
     }
     return sharedConfig;
-  }, [isExistingView, ownView, sharedConfig]);
+  }, [isExistingView, activeView, sharedConfig]);
 
-  if (isExistingView && configs === undefined) {
+  if (isExistingView && configs === undefined && sharedConfigs === undefined) {
     return (
       <div className='h-full flex items-center justify-center text-[13px] text-muted-foreground'>
         Loading view…
@@ -75,10 +93,12 @@ const ProjectViewBuilder = (): ReactElement => {
     );
   }
 
-  if (isExistingView && !ownView) {
+  if (isExistingView && !activeView) {
     return (
       <div className='h-full flex flex-col items-center justify-center gap-2'>
-        <p className='text-sm text-foreground'>This view doesn’t exist or isn’t available.</p>
+        <p className='text-sm text-foreground'>
+          This view doesn&apos;t exist or isn&apos;t available.
+        </p>
         <Link to='/projects' className='text-[13px] text-primary hover:underline'>
           Back to Projects
         </Link>
@@ -92,9 +112,12 @@ const ProjectViewBuilder = (): ReactElement => {
       viewMode='workspace-view'
       {...(user?.workspaceId ? { workspaceId: user.workspaceId } : {})}
       {...(isExistingView && viewId ? { viewId } : {})}
+      {...(isExistingView && activeView ? { initialViewVersion: activeView.updatedAt } : {})}
+      {...(sharedConfig ? { hasSharedSeed: true } : {})}
       {...(seed?.name ? { initialName: seed.name } : {})}
       {...(seed?.filters ? { initialFilters: seed.filters } : {})}
       {...(seed?.groupBy ? { initialGroupBy: seed.groupBy } : {})}
+      {...(seed?.columns ? { initialColumns: seed.columns } : {})}
     />
   );
 };

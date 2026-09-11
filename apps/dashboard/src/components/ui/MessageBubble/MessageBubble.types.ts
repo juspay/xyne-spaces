@@ -6,6 +6,7 @@ import {
   ChannelScopeType,
   Conversation,
   ConversationParticipant,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
@@ -24,6 +25,8 @@ export type MessageWithOptionalNudgeCounts = Message & {
 export interface ThreadInfo {
   preview: string;
   conversationId: string;
+  channelId?: string;
+  anchorType?: ConversationAnchorType;
 }
 
 // Conversation type extended with related fields used in the component tree
@@ -66,6 +69,8 @@ export interface MessageBubbleProps {
   conversation?: ConversationWithTicket;
   context?: 'channel' | 'thread';
   contentOnly?: boolean;
+  /** Render URLs/links as inert plain text (activity sidebar previews). */
+  disableLinks?: boolean;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   threadInfo?: ThreadInfo;
   channelScopeType?: ChannelScopeType | undefined;

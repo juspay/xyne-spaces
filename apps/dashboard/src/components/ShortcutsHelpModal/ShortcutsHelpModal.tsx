@@ -1,20 +1,9 @@
 import type { ReactElement } from 'react';
 import { Dialog } from '../ui/Dialog';
-import { getShortcutsByCategory } from '../../shortcuts';
+import { getShortcutsByCategory, formatShortcut } from '../../shortcuts';
 import { X, Keyboard } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
-
-const formatKey = (key: string, isMac: boolean): string => {
-  return key
-    .replace('mod+', isMac ? '⌘' : 'Ctrl+')
-    .replace('shift+', isMac ? '⇧' : 'Shift+')
-    .replace('alt+', isMac ? '⌥' : 'Alt+')
-    .replace('ctrl+', isMac ? '⌃' : 'Ctrl+')
-    .split('+')
-    .map(k => k.trim())
-    .map(k => k.charAt(0).toUpperCase() + k.slice(1))
-    .join(' ');
-};
+import { isElectronApp } from '../../utils/electronApp';
 
 // Category order for consistent display
 const CATEGORY_ORDER = ['Navigation', 'Messages', 'Composer', 'Canvas', 'Huddle', 'Sidebar'];
@@ -35,7 +24,9 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
   const filteredShortcuts = Object.entries(shortcuts).reduce(
     (acc, [category, items]) => {
       if (EXCLUDED_CATEGORIES.includes(category)) return acc;
-      const filtered = items.filter(item => item.description);
+      const filtered = items.filter(
+        item => item.description && (!item.electronOnly || isElectronApp()),
+      );
       if (filtered.length > 0) {
         acc[category] = filtered;
       }
@@ -104,8 +95,9 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
                   )}
                 </div>
                 <div className='space-y-1'>
-                  {items.map(({ id, keys, description }) => {
-                    const keyList = Array.isArray(keys) ? keys : [keys];
+                  {items.map(({ id, keys, displayKeys, description }) => {
+                    const shown = displayKeys ?? keys;
+                    const keyList = Array.isArray(shown) ? shown : [shown];
                     return (
                       <div
                         key={id}
@@ -120,7 +112,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
                               key={idx}
                               className='inline-flex items-center justify-center px-2 py-1 text-xs font-medium font-mono bg-background dark:bg-gray-700 text-foreground dark:text-gray-200 rounded-md border border-border dark:border-gray-600 shadow-sm min-w-[28px]'
                             >
-                              {formatKey(key, isMac)}
+                              {formatShortcut(key, isMac)}
                             </kbd>
                           ))}
                         </div>

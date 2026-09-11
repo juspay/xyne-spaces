@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 /**
  * Search Navigation Utilities
  *
@@ -79,51 +80,59 @@ export const navigateToSearchResult = async (
       break;
 
     default:
-      console.warn('[SEARCH-NAVIGATION] Unknown result type:', result.type);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[SEARCH-NAVIGATION] Unknown result type:'),
+        context: [result.type],
+      });
   }
 };
 
 /**
- * Navigate to a user (create or open DM channel)
- *
- * Logic:
- * 1. Check if DM channel already exists with this user
- * 2. If exists, navigate to it
- * 3. If not, create new DM channel and navigate
+ * Resolve the 1:1 DM channel id for a user — returns the existing DM if there is
+ * one, otherwise creates it. Shared by navigateToUser (navigates to it) and the
+ * full-screen search pane (opens the chat in-pane) so both take the same path.
  */
+export const resolveOrCreateDmChannelId = async (
+  userId: string,
+  channelData: Channel[],
+): Promise<string> => {
+  const existingDmChannel = channelData.find(
+    channel =>
+      channel.scopeType === ChannelScopeType.DM &&
+      channel.participants?.length === 2 &&
+      channel.participants?.some(p => p.userId === userId),
+  );
+  if (existingDmChannel) return existingDmChannel.id;
+
+  const dmResponse = await channelService.createDm({ participantIds: [userId] });
+  return dmResponse.id;
+};
+
+/** Open (or create) the user's 1:1 DM and navigate to it. */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
 ): Promise<void> => {
   if (!channelData) {
-    console.warn('[SEARCH-NAVIGATION] No channel data available for user navigation');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String('[SEARCH-NAVIGATION] No channel data available for user navigation'),
+    });
     return;
   }
 
-  // Look for existing 1:1 DM channel with this user
-  const existingDmChannel = channelData.find(channel => {
-    // Check if it's a 1:1 DM channel (scopeType DM with exactly 2 participants)
-    // and if the searched user is the other participant
-    return (
-      channel.scopeType === ChannelScopeType.DM &&
-      channel.participants?.length === 2 &&
-      channel.participants?.some(p => p.userId === result.id)
-    );
-  });
-
-  if (existingDmChannel) {
-    void navigate(`/chat/dir/${existingDmChannel.id}`);
-  } else {
-    try {
-      const dmResponse = await channelService.createDm({
-        participantIds: [result.id],
-      });
-      void navigate(`/chat/dir/${dmResponse.id}`);
-    } catch (error) {
-      console.error('[SEARCH-NAVIGATION] Failed to create DM:', error);
-      throw new Error('Failed to start conversation with user');
-    }
+  try {
+    const channelId = await resolveOrCreateDmChannelId(result.id, channelData);
+    void navigate(`/chat/dir/${channelId}`);
+  } catch (error) {
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
+      error: error,
+    });
+    throw new Error('Failed to start conversation with user');
   }
 };
 
@@ -200,7 +209,10 @@ export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFu
   params.set('conversationId', conversationId);
   if (ticketId) params.set('ticketId', ticketId);
   if (mailId) params.set('mail', mailId);
-  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`);
+
+  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`, {
+    state: { shouldNavigateBack: true },
+  });
 };
 
 /**
@@ -229,7 +241,7 @@ export const navigateToTicket = (
   // If EMAIL channel (Support/Desk ticket) AND has xyneId → Support view
   if (isDeskChannelType(channel?.type) && xyneId) {
     void navigate(`/support/${channelId}/${xyneId}`, {
-      state: { conversationId, ticketId },
+      state: { conversationId, ticketId, shouldNavigateBack: true },
     });
     return;
   }
@@ -264,7 +276,12 @@ export const navigateToAttachment = (
       },
     });
   } else {
-    console.warn('[SEARCH-NAVIGATION] Cannot navigate to attachment: missing channel information');
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(
+        '[SEARCH-NAVIGATION] Cannot navigate to attachment: missing channel information',
+      ),
+    });
   }
 };
 
@@ -537,7 +554,11 @@ export const openSearchResult = async (
           panelUrl = withTheme.toString();
         }
       } catch (error) {
-        console.warn('[openSearchResult] failed to attach theme param:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[openSearchResult] failed to attach theme param:'),
+          context: [error],
+        });
       }
     }
 
@@ -549,7 +570,11 @@ export const openSearchResult = async (
       try {
         await window.electronAPI?.syncXyneCookiesToBrowserPanel?.(panelUrl);
       } catch (error) {
-        console.warn('[openSearchResult] cookie sync failed:', error);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[openSearchResult] cookie sync failed:'),
+          context: [error],
+        });
       }
     }
 
@@ -589,9 +614,12 @@ export const navigateToCollection = (
 
   // Navigate to knowledge base file viewer
   if (!projectId || !channelId || !collectionId || !docId) {
-    console.warn(
-      '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
-    );
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(
+        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
+      ),
+    });
     return;
   }
 

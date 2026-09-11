@@ -6,7 +6,6 @@ import {
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
-import { hasGuestProjectAccess } from '../core/guest-access';
 
 export class ProjectTagsACL extends BaseACL<'project_tags'> {
 
@@ -26,7 +25,7 @@ export class ProjectTagsACL extends BaseACL<'project_tags'> {
     if (project.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Project tag failed: not in this workspace', 'project_tags');
     }
-    const hasAccess = await hasGuestProjectAccess(this.ctx, tx, projectId);
+    const hasAccess = false;
     if (!hasAccess) {
       throw new MutationACLError('Project tag failed: guest does not have access to this project', 'project_tags');
     }

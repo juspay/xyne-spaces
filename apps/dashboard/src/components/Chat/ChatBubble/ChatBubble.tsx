@@ -18,7 +18,7 @@ import {
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
@@ -29,11 +29,15 @@ import {
   parseForwardedMessageXml,
   parsePreviewMd,
   isDeskChannelType,
+  resolveConversationAnchorType,
+  type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
+import { MessageTags } from '../../tags/MessageTags';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { isSlashCommandArtifactMessage } from '../SlashCommandArtifacts';
 import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
@@ -49,11 +53,6 @@ import { isMessageEditable } from '../../../utils/chatUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import {
   extractOriginFromHash,
   extractMessageIdFromHash,
@@ -97,7 +96,11 @@ import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUt
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { useChannelShortcuts } from '../../../hooks/useChannelAppCommands';
 import { ShortcutPickerModal } from '../../Apps/ShortcutPickerModal/ShortcutPickerModal';
+import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../../hooks/useRecordingDefaultLayout';
+import { parseRecordingShareMessage } from '../../ui/MessageBubble/recordingShareMessage';
 
 export interface ThreadData {
   replyCount: number;
@@ -120,17 +123,21 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
+  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
   isPrevActivity?: boolean;
   isNextActivity?: boolean;
   linkedConversationId?: string | null;
   /** Message ID to highlight when this bubble is rendered in a thread context (e.g. search screen sidebar). */
   highlightMessageId?: string | null;
+  /** Tag being inspected from the thread header; messages carrying it show a chip. */
+  inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
   isThreadTicketSubTicket?: boolean;
 }
@@ -149,16 +156,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
+  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
+  spawnedTicketMessageIds,
   isPrevActivity = false,
   isNextActivity = false,
   linkedConversationId,
   highlightMessageId,
+  inspectedTag = null,
   afterTextContent,
   isThreadTicketSubTicket = false,
 }) => {
@@ -179,7 +189,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
-  const { editingMessageId, requestEdit, stopEditing } = useEditContext();
+  const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
@@ -187,14 +197,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const sender = useUser(message.senderId);
 
   // Message shortcuts — fetched per channel, used by HoverActionsToolbar
-  const [messageShortcuts, setMessageShortcuts] = useState<AppShortcutWithApp[]>([]);
+  const messageShortcuts = useChannelShortcuts(channelId, 'MESSAGE');
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
-  useEffect(() => {
-    appsService
-      .getChannelShortcuts(channelId, { type: 'MESSAGE' })
-      .then(setMessageShortcuts)
-      .catch(() => {});
-  }, [channelId]);
 
   const messageConversationId = message.conversationId;
 
@@ -243,7 +247,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   ]);
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -252,10 +255,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchEndedInsideRef = useRef(false);
-
-  useEffect(() => {
-    setIsEditing(editingMessageId === message.messageId);
-  }, [editingMessageId, message.messageId]);
 
   const { isEntityBookmarked, getBookmarkByEntity } = useUserBookmarks();
 
@@ -270,6 +269,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     : undefined;
 
   const metadata = message?.metadata as Record<string, unknown> | null;
+
+  // Shared recording and call anchors both use entity-specific actions.
+  const isSharedEntityMessage =
+    metadata?.['isRecordingMessage'] === true || metadata?.['isCallShareMessage'] === true;
 
   // Both internal and external link previews are stored in link_preview_md.
   // Memoized: ChatBubble re-renders on every hover, and parsing per render
@@ -291,6 +294,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
+
+  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
@@ -415,7 +420,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleEditMessage = (): void => {
     requestEdit(message.messageId, () => {
-      setIsEditing(true);
       // Scroll the message into view when editing starts
       setTimeout(() => {
         if (containerRef.current) {
@@ -442,9 +446,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         channelId,
         conversationId: message['conversationId'],
       });
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
-      });
       toast.success('Message deleted', {
         description: 'Your message has been deleted successfully',
         duration: 3000,
@@ -467,6 +468,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleInitiateCall = (): void => {
     setShowParticipantsModal(true);
+  };
+
+  // Starts a headless ("take notes") recording anchored to this message's
+  // thread — directly via the recording store (no navigation), same as the
+  // ThreadPannel "Take notes" button. Only rendered for the thread's root
+  // message (see HoverActionsToolbar's messageId === initialMessageId gate).
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const handleStartRecordingFromMessage = (): void => {
+    const targetConversationId = conversation?.conversationId || message.conversationId;
+    if (!targetConversationId || !channelId) return;
+    if (recordingStatus !== 'idle' && recordingStatus !== 'error') {
+      toast.info('A recording is already in progress');
+      return;
+    }
+    sendRecordingEvent({ type: 'clearTranscripts' });
+    sendRecordingEvent({
+      type: 'startRecording',
+      defaultLayout: getRecordingDefaultLayout(),
+      conversationId: targetConversationId,
+      channelId,
+    });
+    toast.success('Recording started', {
+      description: 'Taking notes in the background \u2014 open Recordings anytime to view it live.',
+    });
   };
 
   const handleAddBookmark = (): void => {
@@ -495,10 +520,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           );
         })
         .catch(() => undefined);
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: 'addBookmark',
-      });
     } catch {
       toast.error('Action failed', {
         description: 'Could not add bookmark',
@@ -518,9 +539,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             markAsDone: false,
           }),
         );
-        mixpanelService.track(EVENTS.INITIATE_ACTION, {
-          type: 'removeBookmark',
-        });
       } catch {
         toast.error('Action failed', {
           description: 'Could not remove bookmark',
@@ -637,14 +655,23 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const onCopyLink = (): void => {
     // Get conversation ID from conversation object or fallback to message
     const conversationId = conversation?.conversationId || message.conversationId;
+    // Include the message's createdAt (epoch ms) as a temporal anchor. Without it
+    // the receiver resolves the target via a Zero-cache ID lookup that is slow or
+    // misses for older, uncached messages, so the link lands at the bottom of the
+    // channel instead of on the linked message.
+    const linkCreatedAt = conversation?.createdAt ?? message.createdAt;
+    const createdAtParam =
+      typeof linkCreatedAt === 'number' && Number.isFinite(linkCreatedAt)
+        ? `&createdAt=${linkCreatedAt}`
+        : '';
     let messageLink = '';
     if (conversationId) {
       if (context === 'thread') {
         // Thread message: include full path with conversation + messageId in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}${createdAtParam}`;
       } else {
         // Channel message: only channel in path, conversation in hash
-        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}${createdAtParam}`;
       }
     }
 
@@ -680,7 +707,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ? markdownToHtml(contentToCopy)
             .then(html => copyHtmlToClipboard(html))
             .catch(error => {
-              console.warn('Markdown processing failed, falling back to raw content:', error);
+              logger.warn(Event.FRONTEND_ERROR, {
+                type: 'migrated_console_warn',
+                message: String('Markdown processing failed, falling back to raw content:'),
+                context: [error],
+              });
               return copyHtmlToClipboard(contentToCopy);
             })
         : copyHtmlToClipboard(contentToCopy);
@@ -765,14 +796,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }
       toast.success('Marked as unread');
     } catch (error) {
-      console.error('Failed to mark as unread:', error);
+      logger.error(Event.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to mark as unread:'),
+        error: error,
+      });
       toast.error('Failed to mark as unread. Please try again.');
       setSkipMarkAsRead(false);
     }
   };
 
   const finishEditing = (): void => {
-    setIsEditing(false);
     stopEditing(); // release global lock
   };
 
@@ -792,7 +826,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       });
   };
 
-  const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
+  // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
+  // but do not open this message in the generic editor, which would discard that wrapper.
+  const canEditMessage =
+    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isSharedEntityMessage;
+  const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
@@ -814,17 +853,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // Only show copy button if there's text content to copy
   const shouldShowCopyButton = hasTextContent;
 
-  const isCurrentEditing = editingMessageId === message.messageId;
+  const isCurrentEditing = isEditingMessage(message.messageId);
 
   // Check for canvas link
   const msgContent = message?.content as string | undefined;
   const canvasIdMatch = msgContent?.match(/\/chat\/canvas\/([a-zA-Z0-9-]+)/);
   const canvasId = canvasIdMatch ? canvasIdMatch[1] : null;
+  const recordingShare = useMemo(() => {
+    if (!msgContent) return null;
+    const recordingContent =
+      message.msgType === MessageType.FORWARDED
+        ? parseForwardedMessageXml(msgContent)?.content
+        : msgContent;
+    return recordingContent ? parseRecordingShareMessage(recordingContent) : null;
+  }, [message.msgType, msgContent]);
   const shouldShowStandaloneLinkPreview =
     variant !== 'pinned' &&
     showLinkPreview &&
     !!previewResult &&
     !canvasId &&
+    !recordingShare &&
     !(isMobile && message.senderId === user?.id) &&
     !isMessageDeleted;
 
@@ -861,8 +909,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ?.parentMessage)
     : undefined;
 
-  const threadPreviewText =
-    isShowInChannel && parentMessage?.content ? createMessagePreview(parentMessage.content) : null;
+  const threadPreviewText = parentMessage?.content
+    ? createMessagePreview(parentMessage.content)
+    : null;
 
   // For showInChannel messages, check if there are newer replies in the original thread
   // by checking if replyCount meets the minimum threshold
@@ -877,6 +926,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     !isDeskChannelType(channel?.type) &&
     channel?.type !== ChannelType.SUPPORT &&
     (context === 'channel' || context === 'thread');
+
+  const showSubscription =
+    (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+    (!isMessageDeleted || context === 'channel') &&
+    (context === 'thread' || (!!replies?.onOpenThread && !isShowInChannel));
 
   const shouldEnableMobileThreadOpen =
     isMobile &&
@@ -907,12 +961,27 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // the overlay can derive them at show time. Hover never sets state here.
 
   const hoverToolbarKey = useId();
+
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
     [conversation?.threadType],
   );
   const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
   const { showThreadTags } = useShowThreadTags();
+  // The thread types this message was cited as evidence for. Composed onto afterTextContent
+  // rather than the header slot: the header only renders for the first message in a group,
+  // and the second and third messages of a burst are exactly the ones you need to see marked.
+  const messageTags =
+    showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
+      <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
+    ) : null;
+  const textTrailer =
+    afterTextContent !== undefined || messageTags ? (
+      <>
+        {afterTextContent}
+        {messageTags}
+      </>
+    ) : undefined;
 
   const canShowHoverToolbar =
     !isMobile &&
@@ -920,7 +989,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !(isEditing && isCurrentEditing);
+    !isCurrentEditing;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -979,8 +1048,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
-        !isFirstInThread && {
+        canNestSubTicket &&
+        !isFirstInThread &&
+        !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
         }),
       ...((!isSystemMessage || isTicketCreationMessage) &&
@@ -993,21 +1063,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onRemindMeOption: handleReminderPresetSelect,
         }),
       ...(!isMessageDeleted &&
-        (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage }),
+        (isCallMessage || !isSystemMessage) &&
+        !isSharedEntityMessage && { onForwardMessage: handleForwardMessage }),
       isPinned: conversation?.pinned || false,
       ...(shouldShowSendToChannel && !isMessageDeleted && { onSendToChannel: handleSendToChannel }),
       ...(canEditMessage && { onEditMessage: handleEditMessage }),
-      ...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage }),
+      ...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage }),
       ...(replies?.onOpenThread &&
         (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
         !isShowInChannel &&
         (!isMessageDeleted || context === 'channel') && {
           onReplyInThread: replies.onOpenThread,
         }),
+      showSubscription,
       ...(!isSystemMessage &&
         !isMessageDeleted && {
           onInitiateCall: handleInitiateCall,
           isCallDisabled: hasActiveCallForConversation,
+          onStartRecording: handleStartRecordingFromMessage,
+          isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
         }),
       ...(conversation &&
         (!isSystemMessage || isTicketCreationMessage) &&
@@ -1036,7 +1110,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 plainText,
                 message.messageId,
               )
-              .catch(() => {});
+              .catch(() => undefined);
           },
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),
@@ -1189,7 +1263,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
     >
-      {isEditing && isCurrentEditing ? (
+      {isCurrentEditing ? (
         <ChatInput
           autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
           channelId={channelId}
@@ -1227,7 +1301,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
-            {...(afterTextContent !== undefined && { afterTextContent })}
+            {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
             {...(context === 'channel' &&
               !isSystemMessage &&
               !isMessageDeleted && {
@@ -1243,13 +1317,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
             })}
-            {...(isShowInChannel &&
+            {...((isShowInChannel || conversation?.initialMessageId === message.messageId) &&
               parentMessage &&
               threadPreviewText &&
               parentMessage.conversationId && {
                 threadInfo: {
                   preview: threadPreviewText,
                   conversationId: parentMessage.conversationId,
+                  ...((parentMessage as { channelId?: string }).channelId && {
+                    channelId: (parentMessage as { channelId?: string }).channelId,
+                  }),
+                  anchorType: resolveConversationAnchorType(
+                    parentMessage as { anchorType?: ConversationAnchorType },
+                  ),
                 },
               })}
           />
@@ -1311,11 +1391,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...((!isSystemMessage || isTicketCreationMessage) &&
                 !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
-                (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
+                (isCallMessage || !isSystemMessage) &&
+                !isSharedEntityMessage && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
               {...(canEditMessage && { onEditMessage: handleEditMessage })}
-              {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
+              {...(canDeleteMessage && { onDeleteMessage: handleDeleteMessage })}
               {...(canEditMessage && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(replies &&
                 (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
@@ -1329,10 +1410,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                     replies?.onOpenThread?.(e);
                   },
                 })}
+              showSubscription={showSubscription}
               {...(!isSystemMessage &&
                 !isMessageDeleted && {
                   onInitiateCall: handleInitiateCall,
                   isCallDisabled: hasActiveCallForConversation,
+                  onStartRecording: handleStartRecordingFromMessage,
+                  isRecordingDisabled: recordingStatus !== 'idle' && recordingStatus !== 'error',
                 })}
               {...(conversation &&
                 (!isSystemMessage || isTicketCreationMessage) &&
@@ -1429,13 +1513,14 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {conversation &&
         context === 'thread' &&
         isTicketThread &&
-        !isThreadTicketSubTicket &&
+        canNestSubTicket &&
         isSubTicketModalOpen && (
           <SubTicketModal
             isOpen
             onClose={() => setIsSubTicketModalOpen(false)}
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
+            sourceMessageId={message.messageId}
           />
         )}
 
@@ -1454,6 +1539,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 variant='ghost'
                 className='w-full justify-start'
                 onClick={e => handleReminderPresetSelect(option.option, e)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SELECT_REMINDER_PRESET'
               >
                 {option.label}
               </Button>
@@ -1527,10 +1614,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             </div>
 
             <div className='flex justify-end gap-2 pt-2'>
-              <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
+              <Button
+                variant='outline'
+                onClick={() => setIsCustomReminderModalOpen(false)}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='CANCEL_CUSTOM_REMINDER'
+              >
                 Cancel
               </Button>
-              <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              <Button
+                onClick={handleSaveCustomReminder}
+                data-track-category='CHAT_BUBBLE'
+                data-track-name='SAVE_CUSTOM_REMINDER'
+                disabled={!customReminderDate}
+              >
                 Save
               </Button>
             </div>
@@ -1672,6 +1769,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <ForwardMessageForm
             message={message}
             channelId={channelId}
+            channelScopeType={channelScopeType}
             onCancel={() => setIsForwardModalOpen(false)}
             onSuccess={() => setIsForwardModalOpen(false)}
           />

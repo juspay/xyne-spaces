@@ -73,10 +73,10 @@ async function isEligibleThreadMessage(params: {
 
   const channel = await db.channel.findUnique({
     where: { id: channelId },
-    select: { projectId: true, scopeType: true },
+    select: { scopeType: true },
   });
 
-  if (!channel?.projectId) return false;
+  if (!channel) return false;
   if (channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM) return false;
 
   const conversation = await db.conversation.findUnique({

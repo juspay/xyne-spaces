@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -124,7 +125,11 @@ export function useFileUpload() {
 
         localStorage.setItem('kb_test_files', JSON.stringify(storedFiles));
       } catch (error) {
-        console.error('Failed to store file in localStorage:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to store file in localStorage:'),
+          error: error,
+        });
       }
     }
   }, []);

@@ -7,6 +7,7 @@ export type {
   SwitchStepConfig,
   SwitchCaseEntry,
   AutomationRun,
+  AutomationRunSummary,
   Condition,
   LeafCondition,
   JsonSchema,
@@ -38,6 +39,8 @@ export {
   isProposalStatus,
   isTerminalProposalStatus,
 } from '../../api/automationsApi';
+
+export { WorkflowEventType } from '@xyne/shared';
 
 export const CONDITIONAL_STEP_TYPE = 'CONDITIONAL';
 export const SWITCH_STEP_TYPE = 'SWITCH';

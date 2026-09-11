@@ -30,7 +30,7 @@ interface GeneralChannelResult {
 export async function ensureGeneralChannelForWorkspace(
   params: EnsureGeneralChannelParams,
 ): Promise<GeneralChannelResult> {
-  const { db, workspaceId, workspaceName, createdBy, userId, role = 'MEMBER' } = params;
+  const { db, workspaceId, workspaceName, createdBy, userId, role = ChannelRole.MEMBER } = params;
 
   const existing = await db.channel.findFirst({
     where: {
@@ -75,6 +75,28 @@ export async function ensureGeneralChannelForWorkspace(
       },
       select: { id: true, projectId: true },
     });
+
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping.
+    const boards = await db.board.findMany({
+      where: { projectId: project.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (boards.length > 0) {
+      const now = new Date();
+      await db.channelBoardMapping.createMany({
+        data: boards.map((board, index) => ({
+          channelId: channel!.id,
+          boardId: board.id,
+          workspaceId,
+          isDefault: index === 0,
+          createdBy,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   await db.workspace.updateMany({

@@ -10,23 +10,30 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  Automation,
   ChevronBigDown,
   ChevronBigUp,
   FileText,
+  FolderDefault,
   Globe,
   Hashtag,
   LockClose,
-  MicOn,
   MultipleCrossCancelDefault,
   Notebook,
   PhoneDefault,
   TicketToken,
 } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Avatar from '../../../ui/Avatar/Avatar';
 import useMeasure from '../../../../hooks/useMeasure';
 import { ContextPicker } from './ContextPicker';
-import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type {
+  ThreadInfo,
+  CanvasInfo,
+  SelectionInfo,
+  WorkflowInfo,
+} from '../../../../machines/xyneAIMachine';
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 import type { Attachment, BrowserContext } from './XyneAIInputBox';
 import type {
@@ -118,6 +125,7 @@ const DEBUG_PILLS: {
   recordings: SelectedRecording[];
   collections: NamedItem[];
   fileScopes: NamedItem[];
+  folderScopes: NamedItem[];
 } = {
   channels: [
     { id: 'dbg-ch-public', name: 'general', isPrivate: false },
@@ -130,6 +138,7 @@ const DEBUG_PILLS: {
   recordings: [{ id: 'dbg-recording', title: 'Design review' }],
   collections: [{ id: 'dbg-collection', name: 'Engineering Handbook' }],
   fileScopes: [{ id: 'dbg-filescope', name: 'architecture-overview.md' }],
+  folderScopes: [{ id: 'dbg-folderscope', name: 'design-docs' }],
 };
 
 type DebugPillKind = keyof typeof DEBUG_PILLS;
@@ -156,6 +165,9 @@ export interface ContextPillRowProps {
   onCanvasInfoClick: () => void;
   onRemoveCanvasInfo: (e: React.MouseEvent) => void;
 
+  workflowInfo: WorkflowInfo | null;
+  onRemoveWorkflowInfo: (e: React.MouseEvent) => void;
+
   selectionInfos: SelectionInfo[];
   onSelectionClick: (selection: SelectionInfo) => void;
   onRemoveSelection: (index: number) => void;
@@ -169,6 +181,9 @@ export interface ContextPillRowProps {
 
   fileScopes: NamedItem[];
   onFileScopesChange?: (fileScopes: NamedItem[]) => void;
+
+  folderScopes?: NamedItem[];
+  onFolderScopesChange?: (folderScopes: NamedItem[]) => void;
 
   collections: NamedItem[];
   onRemoveCollection: (id: string) => void;
@@ -232,6 +247,8 @@ export const ContextPillRow = ({
   canvasInfo,
   onCanvasInfoClick,
   onRemoveCanvasInfo,
+  workflowInfo,
+  onRemoveWorkflowInfo,
   selectionInfos,
   onSelectionClick,
   onRemoveSelection,
@@ -242,6 +259,8 @@ export const ContextPillRow = ({
   onRemoveChannel,
   fileScopes,
   onFileScopesChange,
+  folderScopes = [],
+  onFolderScopesChange,
   collections,
   onRemoveCollection,
   attachments,
@@ -283,6 +302,7 @@ export const ContextPillRow = ({
   const rowRecordings = DEBUG_CONTEXT_PILLS ? debugPills.recordings : recordings;
   const rowCollections = DEBUG_CONTEXT_PILLS ? debugPills.collections : collections;
   const rowFileScopes = DEBUG_CONTEXT_PILLS ? debugPills.fileScopes : fileScopes;
+  const rowFolderScopes = DEBUG_CONTEXT_PILLS ? debugPills.folderScopes : folderScopes;
 
   // Flattened so the row can slice by "how many fit" without caring which kind
   // each pill is. Order is the display order.
@@ -303,7 +323,7 @@ export const ContextPillRow = ({
                 : 'Navigate to thread'
             }
             {...(threadInfo.senderName && { title: threadInfo.senderName })}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickThreadContextPill'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
@@ -330,7 +350,7 @@ export const ContextPillRow = ({
             onClick={onRemoveThread}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove thread context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveThreadContext'
             data-track-metadata={JSON.stringify({ thread: threadInfo })}
           >
@@ -351,7 +371,7 @@ export const ContextPillRow = ({
             onClick={onCanvasInfoClick}
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Navigate to canvas: ${canvasInfo.title || 'Untitled Canvas'}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickCanvasContextPill'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
           >
@@ -365,9 +385,39 @@ export const ContextPillRow = ({
             onClick={onRemoveCanvasInfo}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove canvas context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveCanvasContext'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
+          >
+            <MultipleCrossCancelDefault className='w-3 h-3' />
+          </button>
+        </div>
+      ),
+    });
+  }
+
+  if (workflowInfo) {
+    pills.push({
+      key: 'workflow-info',
+      node: (
+        <div className={CONTEXT_PILL_CLASS}>
+          {/* Static, not a trigger: the workflow is already the screen behind the panel,
+              so there is nowhere to navigate to. */}
+          <div className={CONTEXT_PILL_TRIGGER_CLASS}>
+            <Automation className={CONTEXT_PILL_ICON_CLASS} />
+            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[200px] truncate`}>
+              {workflowInfo.title || 'This workflow'}
+              {workflowInfo.executionId ? ' · run' : ''}
+            </span>
+          </div>
+          <button
+            type='button'
+            onClick={onRemoveWorkflowInfo}
+            className={CONTEXT_PILL_REMOVE_CLASS}
+            aria-label='Remove workflow context'
+            data-track-category='XyneAI'
+            data-track-name='RemoveWorkflowContext'
+            data-track-metadata={JSON.stringify({ workflowId: workflowInfo.workflowId })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
           </button>
@@ -386,7 +436,7 @@ export const ContextPillRow = ({
             onClick={() => onSelectionClick(selection)}
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Navigate to canvas with selection: ${selection.preview}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickSelectionContextPill'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
@@ -400,7 +450,7 @@ export const ContextPillRow = ({
             onClick={() => onRemoveSelection(index)}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove selection context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveSelectionContext'
             data-track-metadata={JSON.stringify({ canvasId: selection.canvasId })}
           >
@@ -422,7 +472,7 @@ export const ContextPillRow = ({
             className={CONTEXT_PILL_TRIGGER_CLASS}
             aria-label={`Open ${browserContext.domain}`}
             title={`${browserContext.title}\n${browserContext.url}`}
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='ClickBrowserContextPill'
             data-track-metadata={JSON.stringify({
               url: browserContext.url,
@@ -440,7 +490,7 @@ export const ContextPillRow = ({
             onClick={onRemoveBrowserContext}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove browser context'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveBrowserContext'
             data-track-metadata={JSON.stringify({ url: browserContext.url })}
           >
@@ -507,6 +557,36 @@ export const ContextPillRow = ({
               aria-label={`Remove file scope ${fs.name}`}
               data-track-category='XyneAI'
               data-track-name='REMOVE_FILE_SCOPE'
+            >
+              <MultipleCrossCancelDefault className='w-3 h-3' />
+            </button>
+          )}
+        </div>
+      ),
+    });
+  });
+
+  rowFolderScopes.forEach(fo => {
+    pills.push({
+      key: `fo-${fo.id}`,
+      node: (
+        <div className={CONTEXT_PILL_CLASS}>
+          <div className='flex items-center gap-1.5'>
+            <div className='flex-shrink-0'>
+              <FolderDefault className={CONTEXT_PILL_ICON_CLASS} />
+            </div>
+            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[160px] truncate`}>{fo.name}</span>
+          </div>
+          {(DEBUG_CONTEXT_PILLS || onFolderScopesChange) && (
+            <button
+              onClick={() => {
+                removeDebugPill('folderScopes', fo.id);
+                onFolderScopesChange?.(folderScopes.filter(f => f.id !== fo.id));
+              }}
+              className={CONTEXT_PILL_REMOVE_CLASS}
+              aria-label={`Remove folder scope ${fo.name}`}
+              data-track-category='XyneAI'
+              data-track-name='REMOVE_FOLDER_SCOPE'
             >
               <MultipleCrossCancelDefault className='w-3 h-3' />
             </button>
@@ -693,7 +773,7 @@ export const ContextPillRow = ({
           {pillContent(
             <>
               <div className='flex-shrink-0'>
-                <MicOn className={CONTEXT_PILL_ICON_CLASS} />
+                <AudioLines className={CONTEXT_PILL_ICON_CLASS} />
               </div>
               <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[120px] truncate`}>
                 {recording.title}
@@ -702,7 +782,9 @@ export const ContextPillRow = ({
             onRecordingClick && (recording.externalId || recording.channelId)
               ? {
                   onClick: (): void => onRecordingClick(recording),
-                  ariaLabel: `Open recording ${recording.title}`,
+                  ariaLabel: recording.externalId
+                    ? `Open transcript for ${recording.title}`
+                    : `Open recording ${recording.title}`,
                   trackName: 'CLICK_RECORDING_CONTEXT_PILL',
                   trackMetadata: JSON.stringify({ recordingId: recording.id }),
                 }
@@ -740,7 +822,7 @@ export const ContextPillRow = ({
             onClick={() => onActivitiesChange?.([])}
             className={CONTEXT_PILL_REMOVE_CLASS}
             aria-label='Remove all activities'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='RemoveAllActivities'
             data-track-metadata={JSON.stringify({ activityCount: activities.length })}
           >

@@ -21,6 +21,7 @@ import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { logger } from '@/utils/logger';
+import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
 
 const TAG = '[WorkspaceDesk]';
 const router = express.Router();
@@ -102,6 +103,9 @@ router.post(
         res.status(404).json({ error: 'No shared mailbox configured for this workspace' });
         return;
       }
+
+      // Must run BEFORE the OAuth revoke below, since stop() needs a valid token.
+      await stopGmailWatchBeforeDeactivation(source, TAG);
 
       // Best-effort token revocation at the provider.
       try {

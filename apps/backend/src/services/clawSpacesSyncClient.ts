@@ -23,6 +23,8 @@ export interface ClawSyncUserPayload {
   spacesUserId: string;
   spacesWorkspaceId: string;
   spacesOrgId: string;
+  /** Stable identity for one person within a Spaces organization. */
+  spacesOrgMemberId: string;
   email: string;
   name: string;
   role?: string | null;
@@ -30,6 +32,7 @@ export interface ClawSyncUserPayload {
   orgName?: string | null;
   createdBySpacesUserId?: string | null;
   status?: string;
+  grantClawAdmin?: boolean;
 }
 
 export class ClawSpacesSyncError extends Error {
@@ -166,6 +169,7 @@ class ClawSpacesSyncClient {
       spacesUserId: value.spacesUserId,
       role: value.role,
       status: value.status,
+      grantClawAdmin: value.grantClawAdmin,
     };
 
     return JSON.stringify(safePayload);

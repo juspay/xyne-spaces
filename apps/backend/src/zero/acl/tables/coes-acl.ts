@@ -42,6 +42,13 @@ export class CoesACL extends BaseACL<'coes'> {
       throw new MutationACLError('COE update failed: COE does not exist', 'coes');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'coes');
+    // Gate on the stored row's RCA/ticket channel — non-participants of the private
+    // channel must not tamper with the COE.
+    await this.verifyRcaAccess(row.rcaId, tx);
+    // rcaId can be repointed on update — re-verify access to the new RCA too.
+    if (args.rcaId !== undefined) {
+      await this.verifyRcaAccess(args.rcaId, tx);
+    }
   }
 
   async canDelete(args: DeleteID<TableSchema<'coes'>>, tx: Transaction<Schema>): Promise<void> {
@@ -50,6 +57,7 @@ export class CoesACL extends BaseACL<'coes'> {
       throw new MutationACLError('COE delete failed: COE does not exist', 'coes');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'coes');
+    await this.verifyRcaAccess(row.rcaId, tx);
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'coes'>>, _tx: Transaction<Schema>): Promise<void> {

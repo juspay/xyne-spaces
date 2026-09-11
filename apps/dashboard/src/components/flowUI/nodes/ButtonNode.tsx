@@ -16,13 +16,21 @@ export const ButtonNode: React.FC<ButtonNodeProps> = ({ node }) => {
         variant?: 'primary' | 'secondary' | 'destructive' | 'ghost' | 'outline';
         size?: 'sm' | 'md' | 'lg';
         icon?: string;
+        url?: string;
         action?: { id: string };
       }
     | undefined;
 
   const { executeAction, validateAllFields, isSubmitting, state, compact } = useFlow();
 
+  const url = props?.url;
+  const isLinkButton = !!url && /^https?:\/\//i.test(url);
+
   const handleClick = () => {
+    if (isLinkButton) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     void (async () => {
       const action = (node.props as { action?: Parameters<typeof executeAction>[0] }).action;
       if (!action) return;
@@ -86,6 +94,8 @@ export const ButtonNode: React.FC<ButtonNodeProps> = ({ node }) => {
     <div className='pt-2'>
       <Button
         onClick={handleClick}
+        data-track-category='flowUI'
+        data-track-name='CLICK_FLOW_BUTTON'
         disabled={isDisabled()}
         variant={getVariant()}
         size={getSize()}

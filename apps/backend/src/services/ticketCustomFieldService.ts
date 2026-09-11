@@ -16,7 +16,7 @@ import { websocketService } from '@/services/websocketService';
 import { emitEventToWorkspaceApps } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, type AdditionalFormFieldUpdatedPayload, type BaseAppEvent } from '@/apps/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
-import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { emitTicketUpdated, type FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 
 /**
  * Shared ticket custom-field (form field) engine.
@@ -373,6 +373,31 @@ const toTicketChangeValue = (value: unknown): string | number | null => {
   if (typeof value === 'string' || typeof value === 'number') return value;
   if (value === null || value === undefined) return null;
   return String(value);
+};
+
+/**
+ * Build the formFieldChanges record for a freshly created ticket: every field
+ * becomes `{ previousValue: null, newValue }` and is keyed three ways (id, name,
+ * lowercase name) so automation conditions resolve regardless of which form the
+ * user referenced. Mirrors the keying used by emitCustomFieldWriteSideEffects.
+ */
+export const buildCreationFormFieldChanges = (
+  fields: ReadonlyArray<{ fieldId: string; fieldName: string; actualFieldValue: unknown }>,
+): FormFieldChanges => {
+  const changes = new Map<
+    string,
+    { previousValue: string | number | null; newValue: string | number | null }
+  >();
+  for (const field of fields) {
+    const entry = {
+      previousValue: null,
+      newValue: toTicketChangeValue(field.actualFieldValue),
+    };
+    changes.set(field.fieldId, entry);
+    changes.set(field.fieldName, entry);
+    changes.set(field.fieldName.toLowerCase(), entry);
+  }
+  return Object.fromEntries(changes);
 };
 
 /** Structural equality for custom-field values (handles arrays/objects, not just scalars). */

@@ -1,7 +1,6 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { apiInstance } from '../clients/apiClient';
 import { AxiosError } from 'axios';
-import { mixpanelService } from '../Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanel.types';
 import { getFilesDimensions } from '../../components/ui/utils/files';
 
 // ============================================================================
@@ -93,7 +92,13 @@ export interface MarkTicketSuggestionAsCreatedResponse {
   conversationId: string;
 }
 
-export type ThreadListSection = 'unread' | 'read';
+export type ThreadListSection = 'unread' | 'read' | 'recent';
+
+// Threads inbox sort mode.
+// - 'sections' (default): unread threads first, then read threads.
+// - 'recent': flat list ordered by lastReplyAt desc, no read/unread divider,
+//   without marking threads as read.
+export type ThreadListSort = 'sections' | 'recent';
 
 export interface ThreadListEntry {
   conversationId: string;
@@ -149,37 +154,18 @@ export class ConversationService {
     cursor: string | null,
     limit: number,
     signal?: AbortSignal,
+    sort: ThreadListSort = 'sections',
   ): Promise<ThreadListResponse> {
     const response = await apiInstance.get<ThreadListResponse>('/conversations/threads', {
       params: {
         limit,
         ...(cursor ? { cursor } : {}),
+        ...(sort !== 'sections' ? { sort } : {}),
       },
       ...(signal ? { signal } : {}),
     });
 
     return response.data;
-  }
-
-  /**
-   * Private helper to track file upload analytics (no sensitive data)
-   */
-  private trackFileUpload(
-    files: File[],
-    uploadContext: 'NewConversation' | 'ConversationReply',
-  ): void {
-    if (files && files.length > 0) {
-      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-      const fileTypes = files.map(file => file.type);
-
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.FILE_UPLOADED,
-        uploadContext,
-        fileCount: files.length,
-        totalSizeBytes: totalSize,
-        fileTypes,
-      });
-    }
   }
 
   /**
@@ -191,14 +177,20 @@ export class ConversationService {
     data: CreateConversationRequest,
   ): Promise<CreateConversationResponse> {
     try {
-      console.log('📤 [FRONTEND-ATTACHMENT] Starting conversation creation with files:', {
-        channelId,
-        hasContent: !!data.content,
-        contentLength: data.content?.length || 0,
-        filesCount: data.files?.length || 0,
-        thumbnailsCount: data.videoThumbnails?.size || 0,
-        msgType: data.msgType,
-        timestamp: new Date().toISOString(),
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('📤 [FRONTEND-ATTACHMENT] Starting conversation creation with files:'),
+        context: [
+          {
+            channelId,
+            hasContent: !!data.content,
+            contentLength: data.content?.length || 0,
+            filesCount: data.files?.length || 0,
+            thumbnailsCount: data.videoThumbnails?.size || 0,
+            msgType: data.msgType,
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
 
       const formData = new FormData();
@@ -213,16 +205,19 @@ export class ConversationService {
 
       // Add files if present
       if (data.files && data.files.length > 0) {
-        console.log(
-          '📎 [FRONTEND-ATTACHMENT] Processing files for upload:',
-          data.files.map((file, index) => ({
-            index,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            hasThumbnail: data.videoThumbnails?.has(file) || false,
-          })),
-        );
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('📎 [FRONTEND-ATTACHMENT] Processing files for upload:'),
+          context: [
+            data.files.map((file, index) => ({
+              index,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              hasThumbnail: data.videoThumbnails?.has(file) || false,
+            })),
+          ],
+        });
 
         // Extract dimensions for all files (images/videos only)
         const dimensionsMap = await getFilesDimensions(data.files);
@@ -240,10 +235,16 @@ export class ConversationService {
         let thumbnailIndex = 0;
 
         data.files.forEach((file: File, fileIndex: number) => {
-          console.log(`📤 [FRONTEND-ATTACHMENT] Adding file ${fileIndex} to form data:`, {
-            name: file.name,
-            size: file.size,
-            type: file.type,
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(`📤 [FRONTEND-ATTACHMENT] Adding file ${fileIndex} to form data:`),
+            context: [
+              {
+                name: file.name,
+                size: file.size,
+                type: file.type,
+              },
+            ],
           });
           formData.append('files', file);
 
@@ -253,9 +254,15 @@ export class ConversationService {
           // Check if this file has a thumbnail
           const thumbnail = data.videoThumbnails?.get(file);
           if (thumbnail) {
-            console.log(`🖼️ [FRONTEND-ATTACHMENT] Adding thumbnail for file ${fileIndex}:`, {
-              thumbnailSize: thumbnail.size,
-              thumbnailType: thumbnail.type,
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String(`🖼️ [FRONTEND-ATTACHMENT] Adding thumbnail for file ${fileIndex}:`),
+              context: [
+                {
+                  thumbnailSize: thumbnail.size,
+                  thumbnailType: thumbnail.type,
+                },
+              ],
             });
             // Add thumbnail to form data
             formData.append('thumbnails', thumbnail, `thumb_${thumbnailIndex}.jpg`);
@@ -283,14 +290,24 @@ export class ConversationService {
 
         // Add metadata as JSON
         const fileMetadataJson = JSON.stringify(fileMetadata);
-        console.log('📋 [FRONTEND-ATTACHMENT] File metadata prepared:', fileMetadata);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('📋 [FRONTEND-ATTACHMENT] File metadata prepared:'),
+          context: [fileMetadata],
+        });
         formData.append('fileMetadata', fileMetadataJson);
       }
 
-      console.log('🚀 [FRONTEND-ATTACHMENT] Sending API request to create conversation:', {
-        endpoint: `/channels/${channelId}/conversations`,
-        formDataKeys: Array.from(formData.keys()),
-        timestamp: new Date().toISOString(),
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('🚀 [FRONTEND-ATTACHMENT] Sending API request to create conversation:'),
+        context: [
+          {
+            endpoint: `/channels/${channelId}/conversations`,
+            formDataKeys: Array.from(formData.keys()),
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
 
       const response = await apiInstance.post<CreateConversationResponse>(
@@ -298,18 +315,19 @@ export class ConversationService {
         formData,
       );
 
-      console.log('✅ [FRONTEND-ATTACHMENT] Conversation created successfully:', {
-        conversationId: response.data.conversationId,
-        messageId: response.data.initialMessage.messageId,
-        hasAttachments: (response.data.initialMessage.attachments?.length ?? 0) > 0,
-        attachmentsCount: response.data.initialMessage.attachments?.length ?? 0,
-        timestamp: new Date().toISOString(),
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_log',
+        message: String('✅ [FRONTEND-ATTACHMENT] Conversation created successfully:'),
+        context: [
+          {
+            conversationId: response.data.conversationId,
+            messageId: response.data.initialMessage.messageId,
+            hasAttachments: (response.data.initialMessage.attachments?.length ?? 0) > 0,
+            attachmentsCount: response.data.initialMessage.attachments?.length ?? 0,
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
-
-      // Track file upload using helper (no sensitive data - only metadata)
-      if (data.files && data.files.length > 0) {
-        this.trackFileUpload(data.files, 'NewConversation');
-      }
 
       return response.data;
     } catch (error) {
@@ -412,11 +430,6 @@ export class ConversationService {
         `/conversations/${conversationId}/messages`,
         formData,
       );
-
-      // Track file upload using helper (no sensitive data - only metadata)
-      if (data.files && data.files.length > 0) {
-        this.trackFileUpload(data.files, 'ConversationReply');
-      }
 
       return response.data;
     } catch (error) {

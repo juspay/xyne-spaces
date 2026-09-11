@@ -3,9 +3,8 @@
  * Encryption and decryption for backend secrets
  */
 
-import crypto from "node:crypto";
 import { CONFIG } from "../../config.js";
-import { ENCRYPTION } from "../config/index.js";
+import { decrypt, encrypt } from "../../crypto.js";
 import type { EncryptedSecretPayload } from "../types/index.js";
 
 /**
@@ -54,16 +53,12 @@ function getEncryptionKey(): Buffer {
  */
 export function encryptSecret(secret: string): EncryptedSecretPayload {
   const key = getEncryptionKey();
-  const iv = crypto.randomBytes(ENCRYPTION.IV_LENGTH);
-  const cipher = crypto.createCipheriv(ENCRYPTION.ALGORITHM, key, iv);
-
-  const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
+  const encrypted = encrypt(secret, key);
 
   return {
-    encryptedSecret: encrypted.toString("base64"),
-    iv: iv.toString("base64"),
-    authTag: authTag.toString("base64"),
+    encryptedSecret: encrypted.ciphertext,
+    iv: encrypted.iv,
+    authTag: encrypted.authTag,
   };
 }
 
@@ -71,19 +66,5 @@ export function encryptSecret(secret: string): EncryptedSecretPayload {
  * Decrypt a secret using AES-256-GCM
  */
 export function decryptSecret(payload: EncryptedSecretPayload): string {
-  const key = getEncryptionKey();
-  const decipher = crypto.createDecipheriv(
-    ENCRYPTION.ALGORITHM,
-    key,
-    Buffer.from(payload.iv, "base64")
-  );
-  decipher.setAuthTag(Buffer.from(payload.authTag, "base64"));
-
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(payload.encryptedSecret, "base64")),
-    decipher.final(),
-  ]);
-
-  return decrypted.toString("utf8");
+  return decrypt(payload.encryptedSecret, payload.iv, payload.authTag, getEncryptionKey());
 }
-

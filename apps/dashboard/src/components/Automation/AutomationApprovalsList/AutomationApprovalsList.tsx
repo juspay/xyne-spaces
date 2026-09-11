@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Loader2, X } from 'lucide-react';
+import { CheckTickSingle, MultipleCrossCancelDefault, SearchDefault, Spinner } from '@xyne/icons';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
 import { Button } from '../../ui/Button/Button';
 import { Dialog } from '../../ui/Dialog/Dialog';
+import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -18,20 +19,19 @@ import { queries } from '../../../zero/queries';
 import { workflowToAutomation } from '../automation.adapter';
 import { AutomationStatusValues, type Automation } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
-
-export interface AutomationApprovalsListProps {
-  /** When provided, only proposals passing this predicate are shown. */
-  filterPredicate?: (automation: Automation) => boolean;
-}
+import { AutomationFiltersBar } from '../AutomationsList/AutomationFiltersBar/AutomationFiltersBar';
+import {
+  DEFAULT_AUTOMATION_FILTERS,
+  filterAutomations,
+  type AutomationFilters,
+} from '../AutomationsList/AutomationFiltersBar/filters';
 
 /**
  * Approvals inbox — lists every PROPOSAL row in `PENDING_APPROVAL` status
  * across the workspace, with Approve / Reject buttons. Visible only to
  * users with `ADMIN` on the `AUTOMATIONS` resource.
  */
-export function AutomationApprovalsList({
-  filterPredicate,
-}: AutomationApprovalsListProps = {}): React.ReactElement {
+export function AutomationApprovalsList(): React.ReactElement {
   const navigate = useNavigate();
   const me = useSelf();
   const zero = useZero();
@@ -39,18 +39,26 @@ export function AutomationApprovalsList({
   const { workspaceId } = useAuthContextValues();
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+  const [query, setQuery] = useState('');
+  // Status stays fixed at PENDING_APPROVAL for this view (the filter bar hides
+  // that pill via `hideStatus`) — every other field stays user-adjustable.
+  const [filters, setFilters] = useState<AutomationFilters>(DEFAULT_AUTOMATION_FILTERS);
 
   const [rows, rowsMeta] = useCachedQuery(queries.automationsList({ workspaceId }));
   const isLoading = !rows || rowsMeta?.type !== 'complete';
 
   const pending: Automation[] = useMemo(() => {
     if (!rows) return [];
-    const mapped = rows
+    return rows
       .map(workflowToAutomation)
       .filter(a => a.status === AutomationStatusValues.PENDING_APPROVAL)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return filterPredicate ? mapped.filter(filterPredicate) : mapped;
-  }, [rows, filterPredicate]);
+  }, [rows]);
+
+  const filtered: Automation[] = useMemo(
+    () => filterAutomations(pending, query, filters),
+    [pending, query, filters],
+  );
 
   const approveMutation = useMutation({
     mutationFn: (id: string): Promise<void> => {
@@ -83,48 +91,59 @@ export function AutomationApprovalsList({
   // Approve / Reject buttons on each row (the action buttons in PendingRow
   // are themselves gated by `isAdmin`).
   return (
-    <div className='flex h-full w-full flex-col'>
-      <div className='border-b border-border bg-background px-6 py-4'>
-        <div className='flex items-start gap-3'>
-          <button
-            type='button'
-            onClick={() => void navigate('/automations')}
-            aria-label='Back to automations'
-            data-track-category='automation-approvals'
-            data-track-name='back-to-list'
-            className={cn(
-              'mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground',
-              'hover:text-foreground hover:bg-accent/40',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-            )}
-          >
-            <ArrowLeft className='size-4' aria-hidden='true' />
-          </button>
-          <div className='flex flex-1 flex-col'>
-            <h1 className='text-base font-semibold text-foreground'>Automation approvals</h1>
-            <p className='mt-1 text-xs text-muted-foreground'>
-              Proposed automations waiting on an admin decision. Admins can approve or reject;
-              approving one promotes it to live, and any other pending proposals in the same
-              automation are auto-revoked.
-            </p>
-          </div>
+    <div className='flex h-full w-full flex-col bg-background'>
+      <header className='sticky top-0 z-10 flex flex-col gap-4 border-b border-border bg-background px-6 pt-5 pb-4'>
+        <div className='flex flex-col gap-1'>
+          <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
+            Approvals
+          </h1>
+          <p className='max-w-2xl text-sm leading-relaxed text-muted-foreground'>
+            Proposed automations waiting on an admin decision. Approving one promotes it to live,
+            and any other pending proposals for the same automation are auto-revoked.
+          </p>
         </div>
-      </div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <div className='relative w-56 max-w-full'>
+            <SearchDefault
+              aria-hidden='true'
+              className='pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground'
+            />
+            <Input
+              type='search'
+              aria-label='Search proposals'
+              placeholder='Search proposals…'
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              className='h-8 rounded-md pl-8 text-xs'
+            />
+          </div>
+          <AutomationFiltersBar
+            query={query}
+            filters={filters}
+            onChange={setFilters}
+            onClearQuery={() => setQuery('')}
+            items={pending}
+            hideStatus
+          />
+        </div>
+      </header>
 
       <div className='flex-1 overflow-y-auto bg-muted/30 px-6 py-6'>
         <div className='mx-auto w-full max-w-4xl'>
           {isLoading ? (
             <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-              <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+              <Spinner className='size-4 animate-spin' aria-hidden='true' />
               Loading proposals…
             </div>
-          ) : pending.length === 0 ? (
+          ) : filtered.length === 0 ? (
             <div className='rounded-md border border-dashed border-border bg-background p-8 text-center text-sm text-muted-foreground'>
-              No proposals waiting for approval.
+              {pending.length === 0
+                ? 'No proposals waiting for approval.'
+                : 'No proposals match your search.'}
             </div>
           ) : (
             <ul className='flex flex-col gap-3'>
-              {pending.map(item => (
+              {filtered.map(item => (
                 <PendingRow
                   key={item.id}
                   proposal={item}
@@ -251,8 +270,8 @@ function PendingRow({
         onClick={handleCardClick}
         onKeyDown={handleCardKeyDown}
         className={cn(
-          'flex cursor-pointer flex-col gap-3 rounded-md border border-border bg-background p-4 transition-colors',
-          'hover:border-foreground/30 hover:bg-accent/20',
+          'flex cursor-pointer flex-col gap-3 rounded-xl border border-border bg-background p-4 transition-colors',
+          'hover:border-foreground/20 hover:bg-muted/40',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
           'sm:flex-row sm:items-start sm:justify-between',
         )}
@@ -287,7 +306,7 @@ function PendingRow({
               data-track-category='automation-approvals'
               data-track-name='reject-open'
             >
-              <X className='size-4' />
+              <MultipleCrossCancelDefault className='size-4' />
               Reject
             </Button>
             <Button
@@ -299,7 +318,7 @@ function PendingRow({
               data-track-category='automation-approvals'
               data-track-name='approve'
             >
-              <Check className='size-4' />
+              <CheckTickSingle className='size-4' />
               Approve
             </Button>
           </div>

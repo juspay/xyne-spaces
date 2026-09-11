@@ -9,6 +9,7 @@
  */
 
 import { CONFIG } from "../config.js";
+import { errMsg } from "./errors.js";
 import type { MentionLookups } from "./mention-transform.js";
 import {
   getSpacesGroupByAlias,
@@ -102,7 +103,7 @@ export function buildSpacesMentionLookups(auth: SpacesMentionAuth): MentionLooku
       const out = (body.data ?? []).map((u) => ({ id: u.id, name: u.name }));
       return out;
     } catch (err) {
-      log.warn(`[mention-lookups] queryUsers where=${JSON.stringify(where)} threw: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[mention-lookups] queryUsers where=${JSON.stringify(where)} threw: ${errMsg(err)}`);
       return [];
     }
   };
@@ -171,7 +172,7 @@ export function buildSpacesMentionLookups(auth: SpacesMentionAuth): MentionLooku
         return result;
       } catch (err) {
         // Previously swallowed — surfaces timeouts/DNS/abort that only happen in prod.
-        log.warn(`[mention-lookups] byName q="${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[mention-lookups] byName q="${name}" threw: ${errMsg(err)}`);
         return [];
       }
     },

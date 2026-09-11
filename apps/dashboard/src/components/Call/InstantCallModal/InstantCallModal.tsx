@@ -1,21 +1,25 @@
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
-import { Hash, Lock, Users, X } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChannelScopeType } from '@xyne/shared';
+import type { VisibleChannel } from '@xyne/shared/hooks';
+import { X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useUserGroupSearch } from '@xyne/shared/hooks';
-import { useSelf, useActiveUsers, useUsers } from '../../../hooks/useUsers';
+import { useSelf, useActiveUsers, useUsersById } from '../../../hooks/useUsers';
+import { useParticipantCandidates } from '../../../hooks/useParticipantCandidates';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
 import {
   parseParticipants,
   matchParticipants,
   looksLikeBulkEntry,
 } from '../../../utils/participantUtils';
-import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
+import {
+  buildChannelParticipantOption,
+  buildUserGroupParticipantOption,
+  buildUserParticipantOption,
+} from '../participantOptions';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -35,8 +39,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [notFoundUsers, setNotFoundUsers] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Full roster — used ONLY by the bulk-paste matcher below, which runs on Enter
+  // rather than per keystroke. Reading the array is free; nothing maps over it.
   const activeUsers = useActiveUsers();
-  const allUsers = useUsers();
+  const usersById = useUsersById();
+  const allVisibleChannels = useAllVisibleChannels();
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {
@@ -47,89 +54,51 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     }
   }, [isOpen]);
 
-  const allVisibleChannels = useAllVisibleChannels();
-  const userGroups = useUserGroupSearch(searchQuery, 10);
+  const excludedUserIds = useMemo(
+    () => (user?.id ? new Set([user.id]) : new Set<string>()),
+    [user?.id],
+  );
 
-  // Filter for DEFAULT public channels only (not DMs)
-  const channels = useMemo(() => {
-    return allVisibleChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT);
-  }, [allVisibleChannels]);
+  // DEFAULT-scope channels only (no DMs, no group DMs).
+  const channelFilter = useCallback(
+    (channel: VisibleChannel) => channel.scopeType === ChannelScopeType.DEFAULT,
+    [],
+  );
 
-  const inviteUserOrChannelOptions = useMemo(() => {
-    const userOptions =
-      activeUsers
-        .filter(u => u.id !== user?.id)
-        .map(user => ({
-          ...user,
-          label: user.name ?? user.email,
-          value: `user:${user.id}`,
-          icon: (
-            <Avatar
-              userId={user.id}
-              size={'sm'}
-              showActiveStatus={false}
-              className='rounded-md size-[18px] flex items-center justify-center bg-background'
-            />
-          ),
-          children: (
-            <div className='flex items-center gap-2'>
-              <Avatar
-                userId={user.id}
-                size={'sm'}
-                showActiveStatus={false}
-                className='rounded-md size-[18px] flex items-center justify-center bg-background'
-              />
-              <div className='flex-1 w-full flex items-center gap-1.5'>
-                <span
-                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : ''}`}
-                >
-                  {user.name.split(' ')[0]}
-                </span>
-                {!isUserDeactivated(user) && (
-                  <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-                )}
-                <span
-                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-muted-foreground'}`}
-                >
-                  {user.name}
-                </span>
-                {isUserDeactivated(user) && (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                    Deactivated
-                  </span>
-                )}
-              </div>
-            </div>
-          ),
-          type: 'user' as const,
-        })) || [];
+  // Bounded + ranked candidates. Only these get turned into rows, so a keystroke
+  // decorates ~40 entities instead of the whole workspace.
+  const { users, userGroups, channels } = useParticipantCandidates({
+    query: searchQuery,
+    excludeUserIds: excludedUserIds,
+    channelFilter,
+  });
 
-    const channelOptions = channels.map(channel => ({
-      ...channel,
-      label: channel.name,
-      value: `channel:${channel.id}`,
-      icon:
-        channel.visibility === ChannelVisibility.PRIVATE ? (
-          <Lock className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
-        ) : (
-          <Hash className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
-        ),
-      type: 'channel' as const,
-    }));
+  const participantOptions = useMemo(
+    () => [
+      ...users.map(buildUserParticipantOption),
+      ...channels.map(buildChannelParticipantOption),
+      ...userGroups.map(buildUserGroupParticipantOption),
+    ],
+    [users, channels, userGroups],
+  );
 
-    const userGroupOptions = userGroups.map(group => ({
-      ...group,
-      label: group.name,
-      value: `user_group:${group.id}`,
-      icon: <Users className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />,
-      subtitle: group.alias || group.description,
-      type: 'user_group' as const,
-    }));
-
-    return [...userOptions, ...channelOptions, ...userGroupOptions].sort((a, b) =>
-      a.label.localeCompare(b.label),
-    );
-  }, [activeUsers, channels, userGroups, allUsers, user?.id]);
+  // Pills for the current selection. Bulk paste can add people the ranked slice
+  // never contained, and a picked channel drops out of the list as soon as the
+  // query changes — both would leave a selected value with no renderable pill.
+  const selectedOptions = useMemo(() => {
+    const channelsById = new Map(allVisibleChannels.map(c => [c.id, c]));
+    return selectedParticipants.flatMap(value => {
+      if (value.startsWith('user:')) {
+        const found = usersById.get(value.slice('user:'.length));
+        return found ? [buildUserParticipantOption(found)] : [];
+      }
+      if (value.startsWith('channel:')) {
+        const found = channelsById.get(value.slice('channel:'.length));
+        return found ? [buildChannelParticipantOption(found)] : [];
+      }
+      return [];
+    });
+  }, [selectedParticipants, usersById, allVisibleChannels]);
 
   const handleSubmit = () => {
     onSubmit(selectedParticipants);
@@ -238,6 +207,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               tabIndex={-1}
               className='size-7 rounded-lg'
               onClick={handleClose}
+              data-track-category='CALLS'
+              data-track-name='CLOSE_INSTANT_CALL_MODAL'
               data-testid='instant-call-modal-close'
             >
               <X className='size-4' />
@@ -247,7 +218,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <div className='space-y-2'>
               <p className='text-muted-foreground text-[13px] leading-5'>{participantLabel}</p>
               <SearchParticipants
-                options={inviteUserOrChannelOptions}
+                options={participantOptions}
+                prefilledOptions={selectedOptions}
                 selectedValues={selectedParticipants}
                 onMultiSelect={handleMultiSelect}
                 searchQuery={searchQuery}
@@ -255,6 +227,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 ref={inputRef}
                 onEnterQuerySubmit={handleBulkUserEntry}
                 helperText={notFoundMessage}
+                disableClientFiltering
               />
             </div>
             <div className='flex items-center justify-between'>
@@ -263,6 +236,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 size='sm'
                 className='rounded-lg text-[13px]'
                 onClick={handleClose}
+                data-track-category='CALLS'
+                data-track-name='CANCEL_INSTANT_CALL'
                 data-testid='instant-call-cancel-button'
               >
                 Cancel
@@ -271,6 +246,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 size='sm'
                 type='submit'
                 onClick={handleSubmit}
+                data-track-category='CALLS'
+                data-track-name='START_INSTANT_CALL'
                 disabled={selectedParticipants.length === 0}
                 className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
                 data-testid='instant-call-start-button'

@@ -25,6 +25,7 @@ import { MakeCallStepForm } from './MakeCallStepForm';
 import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
 import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
+import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -245,6 +246,14 @@ export function StepCard({
                 step.type === 'NOTIFY_GROUP' ? (
                 <NotifyStepForm
                   recipient={step.type === 'NOTIFY_GROUP' ? 'group' : 'user'}
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'APPLY_CONVERSATION_LABEL' ? (
+                <ApplyConversationLabelStepForm
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}

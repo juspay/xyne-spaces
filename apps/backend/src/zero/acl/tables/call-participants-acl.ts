@@ -14,14 +14,6 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
     }
   }
 
-  private async isChannelParticipant(channelId: string, userId: string, tx: Transaction<Schema>): Promise<boolean> {
-    const row = await tx.run(zql.channel_participants
-      .where('channelId', channelId)
-      .where('userId', userId)
-      .one());
-    return !!row;
-  }
-
   // The caller may add themselves to a call they can access (self-join), but
   // inviting another user requires the caller to be the call creator or an
   // existing call participant.
@@ -58,12 +50,26 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
       throw new MutationACLError('Call participant insert failed: guest does not have access to this channel', 'call_participants');
     }
 
-    // The invited user (args.userId), not just the caller, must be a
-    // participant of the call's channel.
-    if (!(await this.isChannelParticipant(callData.channel.id, args.userId, tx))) {
-      throw new MutationACLError('Call participant insert failed: the invited user must be a participant of the call\'s channel', 'call_participants');
+    // Self-join: the caller adds themselves to the call. They must be a
+    // participant of the call's channel to join.
+    if (args.userId === this.ctx.userID) {
+      const isParticipant = await tx.run(
+        zql.channel_participants
+          .where('channelId', callData.channel.id)
+          .where('userId', this.ctx.userID)
+          .one(),
+      );
+
+      if (!isParticipant) {
+        throw new MutationACLError('Call participant insert failed: you must be a channel participant to join calls', 'call_participants');
+      }
+      return;
     }
 
+    // Inviting another user: the caller must be the call creator or an existing
+    // call participant. Channel membership is NOT required here, so a user who
+    // joined via link or "Add people" (a call participant but not a channel
+    // member) can still invite others.
     await this.verifyCallerMayInvite(callData.id, callData.createdByUserId, args.userId, tx);
   }
 

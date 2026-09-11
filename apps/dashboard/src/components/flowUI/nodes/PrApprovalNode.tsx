@@ -185,6 +185,7 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_APPROVE'
+        data-ph-capture-attribute-track-id='pr_approval_approve'
       >
         {inFlight === 'approved' && <Spinner size={14} className='animate-spin' />}
         Approve
@@ -200,6 +201,7 @@ const Actions: React.FC = () => {
         )}
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='CLICK_DENY'
+        data-ph-capture-attribute-track-id='pr_approval_deny'
       >
         {inFlight === 'denied' && <Spinner size={14} className='animate-spin' />}
         Deny

@@ -130,10 +130,23 @@ const DirtyActions = ({
   onCancel: () => void;
 }): ReactElement => (
   <div className='flex gap-2'>
-    <Button size='sm' loading={saving} onClick={onSave}>
+    <Button
+      size='sm'
+      loading={saving}
+      onClick={onSave}
+      data-track-category='Claw Agents'
+      data-track-name='SAVE_SKILL'
+    >
       Save
     </Button>
-    <Button variant='ghost' size='sm' disabled={saving} onClick={onCancel}>
+    <Button
+      variant='ghost'
+      size='sm'
+      disabled={saving}
+      onClick={onCancel}
+      data-track-category='Claw Agents'
+      data-track-name='CANCEL_SKILL_EDIT'
+    >
       Cancel
     </Button>
   </div>
@@ -239,6 +252,8 @@ const FilesSection = ({
             size='sm'
             disabled={uploading}
             onClick={() => dirInputRef.current?.click()}
+            data-track-category='Claw Agents'
+            data-track-name='PICK_SKILL_DIRECTORY'
           >
             <FolderOpen className='size-3.5' />
             Upload folder
@@ -248,6 +263,8 @@ const FilesSection = ({
             size='sm'
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
+            data-track-category='Claw Agents'
+            data-track-name='PICK_SKILL_FILES'
           >
             <Upload className='size-3.5' />
             Upload files
@@ -673,6 +690,8 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           variant='ghost'
                           size='sm'
                           onClick={() => mdInputRef.current?.click()}
+                          data-track-category='Claw Agents'
+                          data-track-name='PICK_SKILL_MARKDOWN'
                         >
                           <Upload className='size-3.5' />
                           Upload .md
@@ -740,6 +759,8 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           size='sm'
                           loading={publishing}
                           onClick={() => void handlePublish()}
+                          data-track-category='Claw Agents'
+                          data-track-name='PUBLISH_SKILL'
                         >
                           <Globe className='size-3.5' />
                           Publish
@@ -758,6 +779,8 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           variant='destructive'
                           size='sm'
                           onClick={() => setShowDeleteDialog(true)}
+                          data-track-category='Claw Agents'
+                          data-track-name='OPEN_DELETE_SKILL_CONFIRM'
                         >
                           <Trash2 className='size-3.5' />
                           Delete

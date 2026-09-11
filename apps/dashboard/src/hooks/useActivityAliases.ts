@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useEffect } from 'react';
 import { apiInstance } from '../services/clients/apiClient';
 import type {
@@ -37,7 +38,11 @@ export const useActivityAliases = (): UseActivityAliasesReturn => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch aliases';
       setError(message);
-      console.error('Error fetching activity aliases:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error fetching activity aliases:'),
+        error: err,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -64,7 +69,11 @@ export const useActivityAliases = (): UseActivityAliasesReturn => {
         return newAlias;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create alias';
-        console.error('Error creating activity alias:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error creating activity alias:'),
+          error: err,
+        });
         throw new Error(message);
       }
     },
@@ -83,7 +92,11 @@ export const useActivityAliases = (): UseActivityAliasesReturn => {
         return updatedAlias;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update alias';
-        console.error('Error updating activity alias:', err);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error updating activity alias:'),
+          error: err,
+        });
         throw new Error(message);
       }
     },
@@ -96,7 +109,11 @@ export const useActivityAliases = (): UseActivityAliasesReturn => {
       setAliases(prev => prev.filter(a => a.id !== id));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete alias';
-      console.error('Error deleting activity alias:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Error deleting activity alias:'),
+        error: err,
+      });
       throw new Error(message);
     }
   }, []);

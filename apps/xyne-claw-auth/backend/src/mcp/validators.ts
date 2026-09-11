@@ -1,5 +1,7 @@
 import { createLogger } from "../logger.js";
-import { spacesFetch, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { errMsg } from "../lib/errors.js";
+import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -45,6 +47,46 @@ function targetChannelId(params: Record<string, unknown>): string | undefined {
   return stringField(params["channelId"]);
 }
 
+/**
+ * App-MEMBERSHIP check for a write target channel, AT QUEUE TIME. Existence
+ * (`interact` findMany) is not enough: a real channel the agent's Spaces app is
+ * not a member of passes existence but 403s at card-post time in webhook.ts
+ * (`pendingActionTargetValidation` → `/channel/info`), so the action queued,
+ * the model said "queued, approve it", and the approval card was silently
+ * dropped (prod 2026-08-24, Arya Doctor spaces-create-ticket into a HyperCredit
+ * channel). Hitting the SAME `/api/apps/channel/info` endpoint here — with the
+ * same app token that will later try to post the card — makes tool-time and
+ * card-time agree, so the model narrates the failure instead of a false queue.
+ *
+ * Fails OPEN on anything other than a definitive 403/404: the authoritative
+ * Spaces API stays the final judge, matching the delivery-boundary semantics.
+ */
+async function validateChannelAppAccess(
+  channelId: string,
+  auth: SpacesAuthContext,
+): Promise<string | null> {
+  try {
+    await appFetch("/channel/info", { method: "POST", body: JSON.stringify({ channelId }) }, auth);
+    return null;
+  } catch (err) {
+    // Branch on the typed HTTP status, not the message text. Only a definitive
+    // 403 (app not a member) or 404 (gone) rejects; anything else fails open so
+    // the authoritative Spaces API stays the final judge.
+    const status = err instanceof SpacesApiError ? err.status : undefined;
+    if (status === 403) {
+      return `channel ${channelId} is not accessible — add the app to the channel or choose a channel it can access`;
+    }
+    if (status === 404) {
+      return `channel ${channelId} not found — use a real Spaces channel id`;
+    }
+    log.warn(
+      `[validator] channel access check failed open channelId=${channelId} status=${status ?? "n/a"}:`,
+      errMsg(err),
+    );
+    return null;
+  }
+}
+
 async function validateTargetConversationId(
   serverType: string,
   tool: string,
@@ -61,31 +103,94 @@ async function validateTargetConversationId(
     }
   }
 
-  if (!conversationId) return null;
+  const auth: SpacesAuthContext = {};
+  const token = stringField(credentials["token"]);
+  const sessionId = stringField(credentials["sessionId"]);
+  const workspaceId = stringField(credentials["workspaceId"]);
+  const baseUrl = stringField(credentials["url"]);
+  if (token) auth.token = token;
+  if (sessionId) auth.sessionId = sessionId;
+  if (workspaceId) auth.workspaceId = workspaceId;
+  if (baseUrl) auth.baseUrl = baseUrl;
 
-  try {
-    const auth: SpacesAuthContext = {};
-    const token = stringField(credentials["token"]);
-    const sessionId = stringField(credentials["sessionId"]);
-    const workspaceId = stringField(credentials["workspaceId"]);
-    const baseUrl = stringField(credentials["url"]);
-    if (token) auth.token = token;
-    if (sessionId) auth.sessionId = sessionId;
-    if (workspaceId) auth.workspaceId = workspaceId;
-    if (baseUrl) auth.baseUrl = baseUrl;
-
-    await spacesFetch(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
-      { method: "GET" },
-      auth,
-    );
-    return null;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
-      return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
+  if (conversationId) {
+    try {
+      await spacesFetch(
+        `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,
+        { method: "GET" },
+        auth,
+      );
+      return null;
+    } catch (err) {
+      const msg = errMsg(err);
+      if (/Spaces API 404/i.test(msg) || (/conversation not found/i.test(msg) && /\b404\b/.test(msg))) {
+        return `conversation ${conversationId} not found — use a real Spaces conversation id, e.g. from the triggering thread`;
+      }
+      log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+      return null;
     }
-    log.warn(`[validator] ${serverType}/${tool} conversation lookup failed open conversationId=${conversationId}:`, msg);
+  }
+
+  if (!channelId) return null;
+
+  // Reject a hallucinated channelId AT QUEUE TIME, while the model can still
+  // self-correct in the same run. Without this, the action queues ("Action
+  // queued for approval: ..."), and the card-time target validation in
+  // webhook.ts then skips the approval card with only a server log — the user
+  // was promised an approval that never arrives, and retrying repeats the
+  // identical dead end (prod 2026-08-07, fe-autocoder spaces-create-ticket).
+  //
+  // This is an EXACT-id findMany, not the paginated workspace list whose
+  // `.includes` false-negatives got pre-checks removed here before (see the
+  // create-ticket note below): only a definitive empty result rejects; any
+  // lookup failure fails open so the authoritative Spaces API stays the
+  // final judge.
+  try {
+    const rows = (await interact(
+      { model: "channel", operation: "findMany", where: { id: { equals: channelId } }, take: 1 },
+      auth,
+    )) as unknown[];
+    if (Array.isArray(rows) && rows.length === 0) {
+      // Did-you-mean recovery: ids that reach us corrupted are almost always
+      // near-misses of a real id the model re-typed from its own prose
+      // (prod 2026-08-10: fe-autocoder dropped 2 chars mid-cuid). Cuids share
+      // long time-ordered prefixes, so a prefix lookup names the intended
+      // channel and lets the agent self-correct in ONE step instead of
+      // guessing. Suggestions only — never silently substitute a write target.
+      let suggestion = "";
+      try {
+        const prefix = channelId.slice(0, 12);
+        if (prefix.length >= 8) {
+          const near = (await interact(
+            {
+              model: "channel",
+              operation: "findMany",
+              where: { id: { startsWith: prefix } },
+              select: { id: true, name: true },
+              take: 3,
+            },
+            auth,
+          )) as Array<{ id?: string; name?: string }>;
+          if (Array.isArray(near) && near.length > 0) {
+            suggestion =
+              " Close id matches: " +
+              near.map((c) => `${c.name ?? "(unnamed)"} = ${c.id}`).join("; ") +
+              ". If one of these is the intended channel, retry with that EXACT id (copy it verbatim).";
+          }
+        }
+      } catch {
+        // best-effort — the not-found error below stands on its own
+      }
+      return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
+    }
+    // The channel exists — now confirm the agent's app can actually reach it, so
+    // a write into a channel the app isn't a member of fails HERE (model can
+    // retry a reachable channel) instead of queuing and then losing its approval
+    // card at delivery time. Same app token, same endpoint as the card path.
+    return await validateChannelAppAccess(channelId, auth);
+  } catch (err) {
+    const msg = errMsg(err);
+    log.warn(`[validator] ${serverType}/${tool} channel lookup failed open channelId=${channelId}:`, msg);
     return null;
   }
 }
@@ -210,3 +315,202 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
 
   return null;
 });
+
+register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
+  const artifactType = String(params["artifactType"] ?? "");
+  const action = String(params["action"] ?? "");
+  const folderId = String(params["folderId"] ?? "").trim();
+  if (folderId && action === "create") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["title", "markdown", "trackId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
+    }
+    return null;
+  }
+  if (!artifactType && action === "update") {
+    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+    for (const key of ["canvasId", "markdown"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
+    }
+    return null;
+  }
+  if (!["WIKI", "BASELINE"].includes(artifactType)) {
+    return "artifactType must be WIKI or BASELINE (artifact creates use folderId; updates use canvasId)";
+  }
+  if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+  if (artifactType === "BASELINE") {
+    if (!["begin", "upsert_section", "finalize"].includes(action)) {
+      return "BASELINE action must be begin, upsert_section, or finalize";
+    }
+    for (const key of ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (action === "upsert_section") {
+      for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
+        if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
+      }
+    }
+    return null;
+  }
+  for (const key of ["executionId", "sessionId", "commitSha"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required for WIKI`;
+  }
+  if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
+    return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
+  }
+  if (!["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore"].includes(action)) {
+    return "unsupported WIKI action";
+  }
+  const path = String(params["path"] ?? "").trim();
+  if (!path) return "path is required for WIKI";
+  if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
+    return "path must be a normalized relative Markdown path";
+  }
+  const requireString = (key: string): string | null =>
+    String(params[key] ?? "").trim() ? null : `${key} is required for ${action}`;
+  const requireSourcePaths = (allowEmpty = false): string | null => {
+    const value = params["sourcePaths"];
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+      return `sourcePaths is required for ${action}`;
+    }
+    if (value.length > 500 || value.some(item => typeof item !== "string" || !item.trim() || item.length > 1024)) {
+      return "sourcePaths must contain at most 500 non-empty repository-relative paths";
+    }
+    return null;
+  };
+  if (action === "move") {
+    for (const key of ["destinationPath", "expectedContentHash"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required for move`;
+    }
+    if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(String(params["destinationPath"]))) {
+      return "destinationPath must be a normalized relative Markdown path";
+    }
+    return null;
+  }
+  const requiredStringsByAction: Record<string, string[]> = {
+    create: ["title", "markdown"],
+    update: ["expectedContentHash", "title", "markdown"],
+    restore: ["expectedContentHash", "title", "markdown"],
+    archive: ["expectedContentHash"],
+    replace_section: ["expectedContentHash", "heading", "markdown"],
+    insert_section: ["expectedContentHash", "heading", "markdown"],
+    remove_section: ["expectedContentHash", "heading"],
+  };
+  for (const key of requiredStringsByAction[action] ?? []) {
+    const error = requireString(key);
+    if (error) return error;
+  }
+  const sourcePathsError = requireSourcePaths(action === "archive");
+  if (sourcePathsError) return sourcePathsError;
+  const references = params["sourceReferences"];
+  if (references !== undefined) {
+    if (!Array.isArray(references) || references.length > 500) {
+      return "sourceReferences must be an array with at most 500 entries";
+    }
+    for (const reference of references) {
+      if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
+        return "sourceReferences entries must be objects";
+      }
+      const item = reference as Record<string, unknown>;
+      if (!String(item["path"] ?? "").trim()) return "sourceReferences.path is required";
+    }
+  }
+  return null;
+});
+
+register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
+  for (const key of ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
+    return "commitHash must be a full 40-character Git commit SHA";
+  }
+  if (String(params["title"]).trim().length > 256) return "title must be at most 256 characters";
+  if (String(params["body"] ?? "").length > 65_536) return "body must be at most 65536 characters";
+  if (String(params["head"]).trim().length > 255) return "head must be at most 255 characters";
+  if (String(params["base"]).trim().length > 255) return "base must be at most 255 characters";
+  if (params["head"] === params["base"]) return "head must differ from base";
+  return null;
+});
+
+for (const tool of [
+  SDLC_TOOL_NAMES.beginWikiCheckpoint,
+  SDLC_TOOL_NAMES.verifyWikiSources,
+  SDLC_TOOL_NAMES.finalizeWikiCommit,
+]) {
+  register("xyne-spaces", tool, async (params) => {
+    for (const key of ["executionId", "sessionId", "repoId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (
+      tool === SDLC_TOOL_NAMES.beginWikiCheckpoint ||
+      tool === SDLC_TOOL_NAMES.verifyWikiSources ||
+      tool === SDLC_TOOL_NAMES.finalizeWikiCommit
+    ) {
+      if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
+        return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
+      }
+    }
+    if (tool === SDLC_TOOL_NAMES.verifyWikiSources) {
+      if (!Array.isArray(params["paths"]) || params["paths"].length === 0) return "paths is required";
+      if (params["paths"].length > 500) return "paths must contain at most 500 entries";
+      if (params["paths"].some(path => typeof path !== "string" || !path.trim() || path.length > 1024)) {
+        return "paths must contain non-empty repository-relative paths";
+      }
+    }
+    if (tool === SDLC_TOOL_NAMES.finalizeWikiCommit) {
+      const summary = String(params["summary"] ?? "").trim();
+      if (!summary) return "summary is required";
+      if (summary.length > 4_000) return "summary must be at most 4000 characters";
+      if (!['changes', 'noop'].includes(String(params["outcome"] ?? ''))) {
+        return "outcome must be changes or noop";
+      }
+    }
+    return null;
+  });
+}
+
+for (const tool of [
+  SDLC_TOOL_NAMES.listArtifacts,
+  SDLC_TOOL_NAMES.readArtifact,
+  SDLC_TOOL_NAMES.listArtifactVersions,
+  SDLC_TOOL_NAMES.readArtifactVersion,
+]) {
+  register("xyne-spaces", tool, async (params) => {
+    for (const key of ["repoId", "workspaceId", "actorUserId"]) {
+      if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifacts) return null;
+    const selector = params["selector"];
+    if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
+      return "selector is required";
+    }
+    const selected = selector as Record<string, unknown>;
+    if (selected["type"] === "WIKI_PAGE") {
+      const path = String(selected["path"] ?? "").trim();
+      if (!path) return "selector.path is required";
+      if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
+        return "selector.path must be a normalized relative Markdown path";
+      }
+    } else if (selected["type"] === "SDLC_CANVAS") {
+      const canvasId = String(selected["canvasId"] ?? "").trim();
+      if (!canvasId) return "selector.canvasId is required";
+      if (canvasId.length > 256) return "selector.canvasId must be at most 256 characters";
+    } else {
+      return "selector.type must be WIKI_PAGE or SDLC_CANVAS";
+    }
+    if (tool === SDLC_TOOL_NAMES.readArtifactVersion && !String(params["versionId"] ?? "").trim()) {
+      return "versionId is required";
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["limit"] !== undefined) {
+      const limit = Number(params["limit"]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+        return "limit must be an integer between 1 and 25";
+      }
+    }
+    if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["cursor"] !== undefined) {
+      if (!String(params["cursor"] ?? "").trim()) return "cursor must not be empty";
+    }
+    return null;
+  });
+}

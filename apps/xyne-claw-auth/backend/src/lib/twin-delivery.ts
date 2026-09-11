@@ -1,5 +1,7 @@
 import { CONFIG } from "../config.js";
-import { expandSpacesMentions } from "./mention-transform.js";
+import { errMsg } from "./errors.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "./mention-transform.js";
+import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
 import { createLogger } from "../logger.js";
 import { resolveTwinReplyTarget } from "./twin-reply-target.js";
 
@@ -124,13 +126,31 @@ export async function executeTwinApprovalDelivery(
         destinationConversationId: ctx.destinationConversationId,
       });
     }
+    // Resolve bare `@Name` / `@email` shorthand in the Twin's reply into real,
+    // notifying Spaces mentions BEFORE posting. Every other result-posting path
+    // (webhook, scheduled-jobs, attachments, app-tools) already runs this step;
+    // twin delivery historically ran only the sync expander, so an approved
+    // reply containing a plain `@Anurag Dwivedi` never became a clickable,
+    // notifying mention. Post-as-user is S2S (no user JWT), so resolve via the
+    // Spaces DB scoped to the delivery workspace. Fail-open: on any error, post
+    // the text unchanged so the reply still goes out.
+    let markdownText = finalContent;
+    try {
+      markdownText = await resolveUnboundMentions(finalContent, buildSpacesMentionLookupsDb(ctx.workspaceId));
+    } catch (err) {
+      log.warn(
+        `[twin-delivery] mention resolution failed — posting raw: ${errMsg(err)}`,
+      );
+    }
+    markdownText = expandSpacesMentions(markdownText);
+
     const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/postAsUser`, {
       method: "POST",
       headers: s2sHeaders,
       body: JSON.stringify({
         channelId: target.channelId,
         ...(target.conversationId ? { conversationId: target.conversationId } : {}),
-        markdownText: expandSpacesMentions(finalContent),
+        markdownText,
         userId: ctx.mentionedUserId,
         workspaceId: ctx.workspaceId,
         metadata: { contentFormat: "markdown" },

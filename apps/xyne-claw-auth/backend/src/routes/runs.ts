@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
-import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
@@ -9,6 +10,7 @@ import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
 import { gcsService } from "../services/storageService.js";
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("runs");
@@ -30,66 +32,51 @@ function quoteMarkdown(value: string): string {
 }
 
 // GET /runs — list runs for the requesting user
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "Unauthorized" });
-      return;
-    }
-    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
-    const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
-    const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
-    const limit = typeof req.query["limit"] === "string" ? Math.min(parseInt(req.query["limit"], 10) || 50, 200) : 50;
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+  const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
+  const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+  const limit = typeof req.query["limit"] === "string" ? Math.min(parseInt(req.query["limit"], 10) || 50, 200) : 50;
 
-    // "All Runs": every user's runs of a single agent, ACL-filtered
-    // (your own always; other users' only when usedUserToken=false). Requires
-    // an agentSlug (scoped to one agent) and claw-admin or contributor access.
-    const scopeAll = req.query["scope"] === "all";
-    if (scopeAll) {
-      if (!agentSlug) {
-        res.status(400).json({ success: false, error: "agentSlug is required for scope=all" });
-        return;
-      }
-      const orgId = getOrgId(req);
-      if (!orgId) {
-        log.warn(`[runs/all] orgId is required userId=${userId} agentSlug=${agentSlug}`);
-        res.status(400).json({ success: false, error: "orgId is required" });
-        return;
-      }
-      const access = await getAgentEditAccess(userId, agentSlug, orgId);
-      if (!access) {
-        log.warn(`[runs/all] agent org-scoped miss userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
-        res.status(404).json({ success: false, error: "Agent not found" });
-        return;
-      }
-      const admin = await isClawAdmin(userId);
-      if (!admin && !access.canEdit) {
-        log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
-        res.status(403).json({ success: false, error: "Only admins, the owner, or contributors can view all runs for this agent" });
-        return;
-      }
-      const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, userId, {
-        ...(status ? { status } : {}),
-        ...(conversationId ? { conversationId } : {}),
-        limit,
-      });
-      res.json({ success: true, data: allRuns });
-      return;
+  // "All Runs": every user's runs of a single agent, ACL-filtered
+  // (your own always; other users' only when usedUserToken=false). Requires
+  // an agentSlug (scoped to one agent) and claw-admin or contributor access.
+  const scopeAll = req.query["scope"] === "all";
+  if (scopeAll) {
+    if (!agentSlug) throw badRequest("agentSlug is required for scope=all");
+    const orgId = getOrgId(req);
+    if (!orgId) {
+      log.warn(`[runs/all] orgId is required userId=${userId} agentSlug=${agentSlug}`);
+      throw badRequest("orgId is required");
     }
-
-    const runs = await agentRunRepository.listByUser(userId, {
+    const access = await getAgentEditAccess(userId, agentSlug, orgId);
+    if (!access) {
+      log.warn(`[runs/all] agent org-scoped miss userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
+      throw notFound("Agent not found");
+    }
+    const admin = await isClawAdmin(userId);
+    if (!admin && !access.canEdit) {
+      log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
+      throw forbidden("Only admins, the owner, or contributors can view all runs for this agent");
+    }
+    const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, userId, {
       ...(status ? { status } : {}),
       ...(conversationId ? { conversationId } : {}),
-      ...(agentSlug ? { agentSlug } : {}),
       limit,
     });
-    res.json({ success: true, data: runs });
-  } catch (err) {
-    log.error("[runs] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    ok(res, allRuns);
+    return;
   }
-});
+
+  const runs = await agentRunRepository.listByUser(userId, {
+    ...(status ? { status } : {}),
+    ...(conversationId ? { conversationId } : {}),
+    ...(agentSlug ? { agentSlug } : {}),
+    limit,
+  });
+  ok(res, runs);
+}));
 
 // GET /runs/light — minimal-payload variant for the v3 home page.
 //
@@ -105,35 +92,26 @@ router.get("/", async (req: Request, res: Response) => {
 //   - status / agentSlug — optional pass-through filters
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
-router.get("/light", async (req: Request, res: Response) => {
-  try {
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "Unauthorized" });
-      return;
-    }
-    const sinceDaysRaw = typeof req.query["sinceDays"] === "string" ? parseInt(req.query["sinceDays"], 10) : NaN;
-    const sinceDays = Number.isFinite(sinceDaysRaw) ? Math.min(Math.max(sinceDaysRaw, 1), 90) : 7;
-    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-    const limit = typeof req.query["limit"] === "string"
-      ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 500, 1), 500)
-      : 500;
-    const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
-    const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
-    const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
-    const runs = await agentRunRepository.listByUserLight(userId, {
-      since,
-      limit,
-      ...(status ? { status } : {}),
-      ...(agentSlug ? { agentSlug } : {}),
-      ...(conversationId ? { conversationId } : {}),
-    });
-    res.json({ success: true, data: runs });
-  } catch (err) {
-    log.error("[runs] /light error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.get("/light", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const sinceDaysRaw = typeof req.query["sinceDays"] === "string" ? parseInt(req.query["sinceDays"], 10) : NaN;
+  const sinceDays = Number.isFinite(sinceDaysRaw) ? Math.min(Math.max(sinceDaysRaw, 1), 90) : 7;
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
+  const limit = typeof req.query["limit"] === "string"
+    ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 500, 1), 500)
+    : 500;
+  const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+  const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+  const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
+  const runs = await agentRunRepository.listByUserLight(userId, {
+    since,
+    limit,
+    ...(status ? { status } : {}),
+    ...(agentSlug ? { agentSlug } : {}),
+    ...(conversationId ? { conversationId } : {}),
+  });
+  ok(res, runs);
+}));
 
 // GET /runs/search — content search over the requester's OWN runs.
 //
@@ -152,41 +130,29 @@ router.get("/light", async (req: Request, res: Response) => {
 // shipping multi-KB task bodies.
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
-router.get("/search", async (req: Request, res: Response) => {
-  try {
-    const userId = getRequesterId(req);
-    if (!userId) {
-      res.status(401).json({ success: false, error: "Unauthorized" });
-      return;
-    }
-    const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
-    if (q.length < 2) {
-      res.status(400).json({ success: false, error: "q (min 2 chars) is required" });
-      return;
-    }
-    const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
-    const limit = typeof req.query["limit"] === "string"
-      ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 20, 1), 50)
-      : 20;
-    const rows = await agentRunRepository.searchByUser(userId, q, {
-      ...(agentSlug ? { agentSlug } : {}),
-      limit,
-    });
-    const data = rows.map(({ task, ...rest }) => {
-      const at = task.toLowerCase().indexOf(q.toLowerCase());
-      const start = Math.max(0, at - 120);
-      const end = Math.min(task.length, at + q.length + 120);
-      return {
-        ...rest,
-        snippet: `${start > 0 ? "…" : ""}${task.slice(start, end)}${end < task.length ? "…" : ""}`,
-      };
-    });
-    res.json({ success: true, data });
-  } catch (err) {
-    log.error("[runs] /search error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+router.get("/search", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
+  if (q.length < 2) throw badRequest("q (min 2 chars) is required");
+  const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
+  const limit = typeof req.query["limit"] === "string"
+    ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 20, 1), 50)
+    : 20;
+  const rows = await agentRunRepository.searchByUser(userId, q, {
+    ...(agentSlug ? { agentSlug } : {}),
+    limit,
+  });
+  const data = rows.map(({ task, ...rest }) => {
+    const at = task.toLowerCase().indexOf(q.toLowerCase());
+    const start = Math.max(0, at - 120);
+    const end = Math.min(task.length, at + q.length + 120);
+    return {
+      ...rest,
+      snippet: `${start > 0 ? "…" : ""}${task.slice(start, end)}${end < task.length ? "…" : ""}`,
+    };
+  });
+  ok(res, data);
+}));
 
 // GET /runs/by-agent/:slug — cross-user run history for one agent.
 //
@@ -525,7 +491,7 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
         }
       } catch (err) {
         log.warn(
-          `[runs/share] continuity copy failed sessionId=${sessionId} agent=${run.agentSlug}: ${err instanceof Error ? err.message : String(err)}`,
+          `[runs/share] continuity copy failed sessionId=${sessionId} agent=${run.agentSlug}: ${errMsg(err)}`,
         );
       }
     }

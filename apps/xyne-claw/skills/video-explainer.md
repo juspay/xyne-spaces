@@ -1,17 +1,21 @@
 ---
 name: video-explainer
-description: Create narrated MP4 explainers from approved storyboard JSON. Load when a user asks for a video walkthrough, narrated explainer, visual commit explanation, or architecture video. Includes the storyboard contract, commit-walkthrough recipe, and the mandatory approval gate before rendering.
+description: Create narrated MP4 explainers from storyboard JSON. Load when a user asks for a video walkthrough, narrated explainer, visual commit explanation, or architecture video. Includes the storyboard contract, command-mode behavior, and commit-walkthrough recipe.
 ---
 
 # Video Explainer
 
-Use `create-video-explainer` to turn a concise storyboard into a narrated MP4. The tool renders deterministic HTML scenes in a writable sandbox, synthesizes narration through the trusted TTS proxy, burns in captions, and writes `results/explainer.mp4`.
+Use `create-video-explainer` to turn a concise storyboard into a narrated MP4. The tool renders HTML, Manim, and D2 scenes in a writable sandbox and synthesizes narration through the trusted TTS proxy. It attaches the resulting MP4 directly.
 
-## Mandatory approval gate
+## Approval behavior
 
-**ALWAYS show the complete storyboard text to the user and receive explicit approval BEFORE calling `create-video-explainer`.**
+### `/explainer` command mode
 
-Rendering is the expensive step. Drafting and revising storyboard text is cheap. Never treat a request for a video as implicit approval of a storyboard the user has not seen. After showing it, stop and ask the user to approve or request edits. Render only after an affirmative response.
+When the user's task starts with `/explainer`, the command itself is explicit approval to draft and render. Do not show the storyboard, ask for confirmation, or stop between drafting and rendering. Call `create-video-explainer` in the same run. The renderer never burns captions into the video and attaches the MP4 automatically; do not call `sandbox-deliver-files` and do not add a textual final response.
+
+### Ordinary video requests
+
+Outside `/explainer` command mode, show the complete storyboard and receive explicit approval before rendering. Rendering is the expensive step; stop after presenting the storyboard and render only after an affirmative response. Narration remains audio-only; never add visible captions.
 
 ## Storyboard shape
 
@@ -53,7 +57,7 @@ Rendering is the expensive step. Drafting and revising storyboard text is cheap.
 Rules:
 
 - Use 1–12 scenes.
-- Supported kinds are `title`, `diagram`, `code`, `diff`, and `bullets`.
+- Supported kinds are `title`, `diagram`, `code`, `diff`, `bullets`, `manim`, and `d2`.
 - Every scene needs narration. Keep each narration under 2,000 characters and the whole storyboard under 4,000 words.
 - `code.file` is a path inside the current sandbox; `highlight` is an inclusive `[startLine, endLine]` range.
 - Use `voice: "default"` unless the user asks for a particular configured voice.
@@ -68,8 +72,8 @@ Rules:
 5. Use **2–4 code scenes** for load-bearing changes only. Never create one scene per changed file. Prefer the smallest line ranges that make the behavior understandable.
 6. Add a diff scene only when a before/after contrast communicates the change better than another code scene.
 7. End with a bullets scene whose narration explicitly answers: **“what this means for you.”**
-8. Show the full storyboard to the user and wait for approval.
-9. Ensure the conversation has a writable sandbox (`sandbox-repo-setup` with `write: true` when the current repo is read-first), then call `create-video-explainer`.
-10. Deliver the returned MP4 path with `sandbox-deliver-files`.
+8. In ordinary mode, show the full storyboard and wait for approval. In `/explainer` command mode, skip this gate and continue immediately.
+9. Ensure the conversation has a writable sandbox, then call `create-video-explainer`.
+10. The tool attaches the MP4 directly. Never deliver it a second time with `sandbox-deliver-files`.
 
 Aim for a coherent 2–4 minute explanation, not an exhaustive screen-recorded code review.

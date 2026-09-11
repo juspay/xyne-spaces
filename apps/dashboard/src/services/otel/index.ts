@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import { ENABLE_OTEL_METRICS } from '../../config';
 
 export { httpRequestDuration, httpRequestTotal, httpRequestErrors } from './apiMetrics';
@@ -60,6 +61,10 @@ export function safeRecordMetric(fn: () => void): void {
   try {
     fn();
   } catch (error) {
-    console.error('[OTel] Error recording metric:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[OTel] Error recording metric:'),
+      error: error,
+    });
   }
 }

@@ -1,3 +1,4 @@
+import { ChannelScopeType } from '@xyne/shared';
 import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBubble.types';
 
 export type MessageType = MessageWithOptionalNudgeCounts;
@@ -13,6 +14,7 @@ export interface ForwardTarget {
 export interface ForwardMessageFormProps {
   message: MessageType;
   channelId: string;
+  channelScopeType?: ChannelScopeType | undefined;
   onCancel: () => void;
   onSuccess?: () => void;
 }

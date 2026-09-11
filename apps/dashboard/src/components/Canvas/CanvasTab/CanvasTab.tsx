@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { CanvasEditor } from '../CanvasEditor/CanvasEditor';
@@ -26,14 +26,17 @@ import {
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { isBaselineCanvasType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
+  AudioLines,
   ArrowLeft,
+  Archive,
   Folder,
   FolderPlus,
   GitCompare,
   History,
   Loader2,
+  MessageSquare,
   Plus,
   RotateCcw,
   Star,
@@ -47,11 +50,15 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannel } from '../../../hooks/useChannels';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
-import { filterExcludedCallGeneratedCanvases } from '../canvasFilters';
+import {
+  filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
+  getRecordingCanvasCallId,
+  isExcludedRecordingGeneratedCanvas,
+} from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
-import { CanvasExitTitleDialog } from '../CanvasExitTitleDialog';
-import { useCanvasExitTitleGuard } from '../../../hooks/useCanvasExitTitleGuard';
+import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -64,6 +71,8 @@ import {
   useCanvasVersionRestore,
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 
 interface CanvasTabProps {
   channelId: string;
@@ -73,13 +82,12 @@ function isCanvasArray(value: unknown): value is Canvas[] {
   return Array.isArray(value);
 }
 
-function nextChannelFolderName(channelProjectId: string, folders: CanvasFolder[]): string {
+function nextChannelFolderName(channelId: string, folders: CanvasFolder[]): string {
   const prefix = 'Untitled folder';
   const usedNumbers = new Set<number>();
 
   for (const folder of folders) {
-    if (folder.projectId !== channelProjectId) continue;
-    if (!folder.channelId) continue;
+    if (folder.channelId !== channelId) continue;
     const match = folder.name.match(/^Untitled folder (\d+)$/i);
     if (match?.[1]) usedNumbers.add(Number(match[1]));
   }
@@ -121,14 +129,22 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const z = useZero();
   const { filter: activeFilter, setFilter: setActiveFilter } = usePersistedCanvasPreferences();
   const [excludeCallGeneratedCanvases, setExcludeCallGeneratedCanvases] = useState(true);
+  const [onlyRecordingGeneratedCanvases, setOnlyRecordingGeneratedCanvases] = useState(false);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
-  const [canvasList] = useCachedQuery(
+  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = useMemo(
+    () => (adminParticipations ?? []).some(participant => participant.channelId === channelId),
+    [adminParticipations, channelId],
+  );
+  const [canvasList, canvasListDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'channel',
       channelId,
+      onlyArchived: onlyArchivedCanvases,
     }),
     { enabled: view === 'list' },
   );
@@ -142,13 +158,25 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     [canvasList],
   );
   const canvases = useMemo(
-    () => filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
-    [canvasItems, excludeCallGeneratedCanvases],
+    () =>
+      onlyRecordingGeneratedCanvases
+        ? canvasItems.filter(isExcludedRecordingGeneratedCanvas)
+        : filterExcludedRecordingGeneratedCanvases(
+            filterExcludedCallGeneratedCanvases(canvasItems, excludeCallGeneratedCanvases),
+            true,
+          ),
+    [canvasItems, excludeCallGeneratedCanvases, onlyRecordingGeneratedCanvases],
   );
   const folders = useMemo(() => (zeroFolders as CanvasFolder[] | undefined) ?? [], [zeroFolders]);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
+  const [openCommentCount, setOpenCommentCount] = useState(0);
+  useEffect(() => {
+    setOpenCommentCount(0);
+  }, [canvas?.id]);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
+  const titleAutoFocusCanvasIdRef = useRef<string | null>(null);
+  const titleAutoFocusConsumedCanvasIdRef = useRef<string | null>(null);
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
@@ -181,6 +209,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
+      if (isChannelAdmin && isBaselineCanvasType(targetCanvas.sdlcArtifact?.artifactType)) {
+        return CanvasRole.EDITOR;
+      }
       const inheritedRoles = participants
         .filter(
           participant =>
@@ -192,7 +223,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       return getStrongestCanvasRole([targetCanvas.accessLevel, ...inheritedRoles]);
     },
-    [channelId, currentUserGroupIds, user?.id],
+    [channelId, currentUserGroupIds, isChannelAdmin, user?.id],
   );
 
   // Reset state when channelId changes
@@ -213,7 +244,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     latestContentRef.current = undefined;
     lastSavedContentRef.current = '';
     currentCanvasIdRef.current = null;
+    titleAutoFocusCanvasIdRef.current = null;
+    titleAutoFocusConsumedCanvasIdRef.current = null;
   }, [channelId]);
+
+  const handleCanvasTitleChange = useCallback((newTitle: string): void => {
+    setCurrentTitle(newTitle);
+    titleRef.current = newTitle;
+  }, []);
+
+  const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
+    if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
+    titleAutoFocusCanvasIdRef.current = targetCanvasId;
+  }, []);
+
+  const handleTitleAutoFocused = useCallback((): void => {
+    if (titleAutoFocusCanvasIdRef.current) {
+      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
+    }
+    titleAutoFocusCanvasIdRef.current = null;
+  }, []);
 
   const handleFileUpload = useCallback(
     async (file: File) => {
@@ -230,9 +280,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const effectiveAccessLevel = resolveCanvasAccessLevel(canvas);
   const canEdit =
-    canvas?.createdBy === user?.id ||
-    effectiveAccessLevel === CanvasRole.EDITOR ||
-    effectiveAccessLevel === CanvasRole.OWNER;
+    !canvas?.isArchived &&
+    (canvas?.createdBy === user?.id ||
+      effectiveAccessLevel === CanvasRole.EDITOR ||
+      effectiveAccessLevel === CanvasRole.OWNER);
+  const canArchiveCanvas = canvas?.createdBy === user?.id;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -248,6 +300,15 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
+  const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
+
+  const handleOpenRecordingNotes = useCallback((): void => {
+    if (!recordingCallId) return;
+
+    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+      state: { from: `${location.pathname}${location.search}` },
+    });
+  }, [location.pathname, location.search, navigate, recordingCallId]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -320,6 +381,12 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     };
   }, []);
 
+  const getCanvasPath = useCallback(
+    (id: string): string =>
+      isMobile ? `/chat/canvas/${id}` : `${baseRoute}/${channelId}?tab=canvas&canvasId=${id}`,
+    [baseRoute, channelId, isMobile],
+  );
+
   const showArchivedChannelCreateError = useCallback((entity: 'canvas' | 'folder'): void => {
     toast.error(`Cannot create ${entity}`, {
       description: 'This channel is archived.',
@@ -334,7 +401,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     sourceCanvas: canvas,
     userId: user?.id,
     navigate,
-    getCanvasRoute: id => (isMobile ? `/chat/canvas/${id}` : `${baseRoute}/canvas/${id}`),
+    getCanvasRoute: getCanvasPath,
     getNavigationState: newCanvas =>
       isMobile ? { canvas: newCanvas, previousPath: location.pathname } : { canvas: newCanvas },
     setCanvas,
@@ -364,27 +431,13 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       return;
     }
 
-    if (!channel?.projectId) {
-      toast.error('Unable to create folder', {
-        description: 'This channel is missing project information.',
-      });
-      return;
-    }
-
-    setNewFolderName(nextChannelFolderName(channel.projectId, folders));
+    setNewFolderName(nextChannelFolderName(channelId, folders));
     setShowCreateFolderDialog(true);
-  }, [channel?.projectId, folders, isChannelArchived, showArchivedChannelCreateError]);
+  }, [channelId, folders, isChannelArchived, showArchivedChannelCreateError]);
 
   const handleCreateFolder = useCallback((): void => {
     if (isChannelArchived) {
       showArchivedChannelCreateError('folder');
-      return;
-    }
-
-    if (!channel?.projectId) {
-      toast.error('Unable to create folder', {
-        description: 'This channel is missing project information.',
-      });
       return;
     }
 
@@ -400,7 +453,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         const result = z.mutate(
           mutators.canvasFolder.create({
             id: uuidv4(),
-            projectId: channel.projectId,
             channelId,
             name,
             timestamp: Date.now(),
@@ -422,14 +474,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         setIsCreatingFolder(false);
       }
     })();
-  }, [
-    channel?.projectId,
-    channelId,
-    isChannelArchived,
-    newFolderName,
-    showArchivedChannelCreateError,
-    z,
-  ]);
+  }, [channelId, isChannelArchived, newFolderName, showArchivedChannelCreateError, z]);
 
   const handleCreateCanvas = async (): Promise<void> => {
     if (isChannelArchived) {
@@ -456,6 +501,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         createdBy: user?.id || '',
         visibility: CanvasVisibility.PRIVATE,
         isTemplate: false,
+        isArchived: false,
         isCollaborative: true,
         isStarred: false,
         createdAt: now,
@@ -463,6 +509,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         accessLevel: CanvasRole.OWNER,
       };
 
+      queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
@@ -473,11 +520,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       currentCanvasIdRef.current = newCanvasId;
       setSelectedTheme('white');
 
-      // On mobile, always navigate to /chat/canvas/:canvasId (preserves back navigation to channel)
-      // On desktop, use baseRoute-based navigation
-      const canvasPath = isMobile
-        ? `/chat/canvas/${newCanvasId}`
-        : `${baseRoute}/canvas/${newCanvasId}`;
+      const canvasPath = getCanvasPath(newCanvasId);
 
       // Store the original path for back navigation on mobile
       if (isMobile) {
@@ -485,11 +528,12 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           state: {
             canvas: newCanvas,
             previousPath: location.pathname,
+            focusTitle: true,
           },
         });
       } else {
         void navigate(canvasPath, {
-          state: { canvas: newCanvas },
+          state: { canvas: newCanvas, focusTitle: true },
         });
       }
     } catch {
@@ -529,6 +573,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         createdBy: user?.id || '',
         visibility: CanvasVisibility.PRIVATE,
         isTemplate: false,
+        isArchived: false,
         isCollaborative: true,
         isStarred: false,
         createdAt: now,
@@ -537,6 +582,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         folder,
       };
 
+      queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
@@ -547,20 +593,19 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       currentCanvasIdRef.current = newCanvasId;
       setSelectedTheme('white');
 
-      const canvasPath = isMobile
-        ? `/chat/canvas/${newCanvasId}`
-        : `${baseRoute}/canvas/${newCanvasId}`;
+      const canvasPath = getCanvasPath(newCanvasId);
 
       if (isMobile) {
         void navigate(canvasPath, {
           state: {
             canvas: newCanvas,
             previousPath: location.pathname,
+            focusTitle: true,
           },
         });
       } else {
         void navigate(canvasPath, {
-          state: { canvas: newCanvas },
+          state: { canvas: newCanvas, focusTitle: true },
         });
       }
     } catch {
@@ -572,7 +617,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     }
   };
 
-  const performSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
+  const handleSelectCanvas = (_e: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
     if (!navigator.onLine) {
       toast.info('Canvas Unavailable', {
         description: 'Canvases are available online only. Please check your connection.',
@@ -597,11 +642,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     lastSavedContentRef.current = JSON.stringify(selectedCanvas.content || []);
     currentCanvasIdRef.current = selectedCanvas.id;
 
-    // On mobile, always navigate to /chat/canvas/:canvasId (preserves back navigation to channel)
-    // On desktop, use baseRoute-based navigation
-    const canvasPath = isMobile
-      ? `/chat/canvas/${selectedCanvas.id}`
-      : `${baseRoute}/canvas/${selectedCanvas.id}`;
+    const canvasPath = getCanvasPath(selectedCanvas.id);
 
     // Store the original path for back navigation on mobile
     if (isMobile) {
@@ -633,6 +674,18 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     },
     [z],
   );
+
+  const handleArchivedStateChange = useCallback((canvasId: string, isArchived: boolean): void => {
+    setCanvas(current => (current?.id === canvasId ? { ...current, isArchived } : current));
+  }, []);
+  const handleArchiveToggleCanvas = useCanvasArchiveToggle({
+    onArchivedStateChange: handleArchivedStateChange,
+  });
+
+  const handleUnarchiveCurrentCanvas = useCallback((): void => {
+    if (!canvas) return;
+    handleArchiveToggleCanvas({ ...canvas, isArchived: true });
+  }, [canvas, handleArchiveToggleCanvas]);
 
   const handleContentChange = (blocks: PartialBlock[]): void => {
     latestContentRef.current = blocks;
@@ -724,7 +777,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     },
   );
 
-  const navigateAwayFromEditor = useCallback((): void => {
+  const handleLeaveEditor = (): void => {
+    saveCanvasExitSnapshot();
+
     if (isMobile) {
       const state = location.state as { previousPath?: string };
       const backPath = state?.previousPath ? state.previousPath : '/chat';
@@ -732,54 +787,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     } else {
       setView('list');
     }
-  }, [isMobile, location.state, navigate]);
-
-  const exitTitleGuard = useCanvasExitTitleGuard({
-    getTitle: () => titleRef.current,
-    getContent: () => editorRef.current?.getBlocks() ?? latestContentRef.current,
-    canEdit,
-    canDelete: isCanvasOwner,
-    onExit: () => {
-      saveCanvasExitSnapshot();
-      navigateAwayFromEditor();
-    },
-    onSaveTitle: async nextTitle => {
-      if (!canvas?.id) throw new Error('Canvas is not ready to be titled');
-
-      const result = z.mutate(
-        mutators.canvas.update({
-          id: canvas.id,
-          title: nextTitle,
-          timestamp: Date.now(),
-        }),
-      );
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to save canvas title');
-      }
-
-      setCurrentTitle(nextTitle);
-      titleRef.current = nextTitle;
-    },
-    onDeleteAndExit: async () => {
-      if (!canvas?.id) throw new Error('Canvas is not ready to be deleted');
-
-      const result = z.mutate(mutators.canvas.delete({ id: canvas.id }));
-      const serverResult = await result.server;
-      if (serverResult.type === 'error') {
-        throw new Error(serverResult.error.message || 'Failed to delete canvas');
-      }
-    },
-  });
-
-  const handleLeaveEditor = exitTitleGuard.requestExit;
-  const handleSelectCanvas = (event: React.MouseEvent | KeyboardEvent, selected: Canvas): void => {
-    if (canvasRef.current?.id === selected.id) {
-      performSelectCanvas(event, selected);
-      return;
-    }
-
-    exitTitleGuard.requestExitWith(() => performSelectCanvas(event, selected));
   };
 
   if (view === 'list') {
@@ -820,6 +827,25 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </div>
               </Tooltip>
+              <Tooltip content='Only recording canvases' className='px-2 py-1 text-[10px]'>
+                <div className='origin-left scale-90'>
+                  <Switch
+                    id='only-channel-recording-generated-canvases'
+                    checked={onlyRecordingGeneratedCanvases}
+                    onCheckedChange={setOnlyRecordingGeneratedCanvases}
+                  />
+                </div>
+              </Tooltip>
+              <Tooltip content='Only archived' className='px-2 py-1 text-[10px]'>
+                <div className='flex origin-left scale-90 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground'>
+                  <Archive size={14} />
+                  <Switch
+                    id='only-archived-channel-canvases'
+                    checked={onlyArchivedCanvases}
+                    onCheckedChange={setOnlyArchivedCanvases}
+                  />
+                </div>
+              </Tooltip>
               <Button
                 variant='outline'
                 size='sm'
@@ -857,6 +883,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           <div className='flex-1 overflow-hidden'>
             <ChannelCanvasList
               canvases={canvases}
+              loading={canvasListDetails.type !== 'complete' && canvases.length === 0}
               folders={folders}
               onSelect={handleSelectCanvas}
               currentUserId={user?.id}
@@ -881,6 +908,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               isCreatingCanvas={isCreatingCanvas}
               showStarredOnly={showStarredOnly}
               onToggleStar={handleToggleStar}
+              onArchiveToggle={handleArchiveToggleCanvas}
             />
           </div>
         </div>
@@ -991,6 +1019,9 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         minute: '2-digit',
       })
     : null;
+  const shouldFocusCanvasTitleOnMount = Boolean(
+    canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
+  );
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1012,9 +1043,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
             type='text'
             value={currentTitle}
             onChange={e => {
-              const newTitle = e.target.value;
-              setCurrentTitle(newTitle);
-              titleRef.current = newTitle;
+              handleCanvasTitleChange(e.target.value);
             }}
             readOnly={!canEdit}
             onBlur={() => {
@@ -1059,6 +1088,24 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
+              {recordingCallId && (
+                <Button
+                  variant='secondary'
+                  size='iconSm'
+                  onClick={handleOpenRecordingNotes}
+                  title='Open recording notes'
+                  aria-label='Open recording notes'
+                  data-track-category='CANVAS'
+                  data-track-name='Open_Recording_Notes_From_Channel_Canvas'
+                  data-track-metadata={JSON.stringify({
+                    canvasId: canvas.id,
+                    recordingId: recordingCallId,
+                    channelId,
+                  })}
+                >
+                  <AudioLines size={16} strokeWidth={2.2} />
+                </Button>
+              )}
               <Button
                 variant='secondary'
                 size='sm'
@@ -1070,6 +1117,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               >
                 <History size={16} />
                 <span className='hidden lg:inline'>History</span>
+              </Button>
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={() => editorRef.current?.toggleComments()}
+                title='Comments'
+                aria-label='Open comment activity'
+                data-testid='canvas-comments-button'
+                data-track-category='CANVAS'
+                data-track-name='TOGGLE_CANVAS_COMMENT_ACTIVITY'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
+              >
+                <span className='relative inline-flex'>
+                  <MessageSquare size={16} />
+                  {openCommentCount > 0 && (
+                    <span className='absolute -right-2 -top-2 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground'>
+                      {openCommentCount > 99 ? '99+' : openCommentCount}
+                    </span>
+                  )}
+                </span>
               </Button>
               <Button
                 variant='default'
@@ -1093,7 +1160,13 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               <span className='font-medium text-foreground'>{previewUpdatedAtText}</span>
             </div>
             <div className='flex items-center gap-2'>
-              <Button variant='secondary' size='sm' onClick={handleBackToCurrentVersion}>
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={handleBackToCurrentVersion}
+                data-track-category='CANVAS'
+                data-track-name='BACK_TO_CURRENT_VERSION'
+              >
                 Back to current
               </Button>
               {hasVersionDiff && (
@@ -1101,6 +1174,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   variant={showVersionDiff ? 'default' : 'secondary'}
                   size='sm'
                   onClick={() => setShowVersionDiff(prev => !prev)}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_VERSION_DIFF'
                   aria-pressed={showVersionDiff}
                 >
                   <GitCompare size={14} />
@@ -1112,6 +1187,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   variant='default'
                   size='sm'
                   onClick={() => void handleRestoreVersion(previewVersion)}
+                  data-track-category='CANVAS'
+                  data-track-name='RESTORE_CANVAS_VERSION'
                   loading={restoringVersionId === previewVersion.id}
                 >
                   <RotateCcw size={14} />
@@ -1122,6 +1199,30 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           </div>
         )}
 
+        {canvas?.isArchived && (
+          <div
+            className='mx-2 mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 md:mx-4'
+            data-testid='channel-canvas-archived-banner'
+          >
+            <div className='flex min-w-0 items-center gap-2'>
+              <Archive size={16} className='shrink-0 text-amber-700' />
+              <span className='truncate font-medium'>This canvas is archived</span>
+            </div>
+            {canArchiveCanvas && (
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={handleUnarchiveCurrentCanvas}
+                data-track-category='CANVAS'
+                data-track-name='UNARCHIVE_CHANNEL_CANVAS_FROM_BANNER'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id, channelId })}
+              >
+                Unarchive
+              </Button>
+            )}
+          </div>
+        )}
+
         {previewVersion && showVersionDiff && hasVersionDiff && (
           <CanvasVersionDiffPanel parts={versionDiffParts} className='mx-2 mb-2 md:mx-4' />
         )}
@@ -1129,48 +1230,68 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         {/* Canvas Editor */}
         <div
           ref={canvasContentRef}
-          className='flex-1 overflow-hidden mx-2 md:mx-4'
+          className='mx-2 flex flex-1 flex-col overflow-hidden md:mx-4'
           data-testid='canvas-editor'
         >
-          {previewVersion ? (
-            <CanvasEditor
-              key={`preview-${previewVersion.id}`}
-              ref={editorRef}
-              content={displayedContent}
-              editable={false}
-              placeholder='Start writing your canvas...'
-              canvasId={canvas?.id}
-              canvasTitle={currentTitle}
-              autoFocus={false}
-            />
-          ) : canvas?.id && canvas.isCollaborative ? (
-            <CollaborativeCanvasEditor
-              key={canvas.id}
-              ref={editorRef}
-              canvasId={canvas.id}
-              channelId={channelId}
-              title={currentTitle}
-              editable={canEdit}
-              placeholder='Start writing your canvas...'
-              onFileUpload={handleFileUpload}
-              onChange={handleCollaborativeContentChange}
-              autoFocus={true}
-            />
-          ) : (
-            <CanvasEditor
-              key={canvas?.id || 'new-canvas'}
-              ref={editorRef}
-              content={displayedContent}
-              onChange={handleContentChange}
-              onSave={handleSave}
-              onFileUpload={handleFileUpload}
-              editable={canEdit}
-              placeholder='Start writing your canvas...'
-              canvasId={canvas?.id}
-              canvasTitle={currentTitle}
-              autoFocus={true}
-            />
+          {canvas?.id && (
+            <div className='canvas-editor-title-column shrink-0 pb-6 pt-8 md:pt-10'>
+              <CanvasEditorHeader
+                canvas={canvas}
+                workspaceId={user?.workspaceId}
+                canEdit={canEdit && !isChannelArchived && !previewVersion}
+                title={currentTitle}
+                focusTitleOnMount={shouldFocusCanvasTitleOnMount}
+                onTitleChange={handleCanvasTitleChange}
+                onTitleSave={handleTitleSave}
+                onTitleAutoFocused={handleTitleAutoFocused}
+              />
+            </div>
           )}
+
+          <div className='min-h-0 flex-1 overflow-hidden'>
+            {previewVersion ? (
+              <CanvasEditor
+                key={`preview-${previewVersion.id}`}
+                ref={editorRef}
+                content={displayedContent}
+                editable={false}
+                placeholder='Start writing your canvas...'
+                canvasId={canvas?.id}
+                canvasTitle={currentTitle}
+                onOpenCommentCountChange={setOpenCommentCount}
+                autoFocus={false}
+              />
+            ) : canvas?.id && canvas.isCollaborative ? (
+              <CollaborativeCanvasEditor
+                key={canvas.id}
+                ref={editorRef}
+                canvasId={canvas.id}
+                channelId={channelId}
+                title={currentTitle}
+                editable={canEdit}
+                placeholder='Start writing your canvas...'
+                onFileUpload={handleFileUpload}
+                onChange={handleCollaborativeContentChange}
+                onOpenCommentCountChange={setOpenCommentCount}
+                autoFocus={!shouldFocusCanvasTitleOnMount}
+              />
+            ) : (
+              <CanvasEditor
+                key={canvas?.id || 'new-canvas'}
+                ref={editorRef}
+                content={displayedContent}
+                onChange={handleContentChange}
+                onSave={handleSave}
+                onFileUpload={handleFileUpload}
+                editable={canEdit}
+                placeholder='Start writing your canvas...'
+                canvasId={canvas?.id}
+                canvasTitle={currentTitle}
+                onOpenCommentCountChange={setOpenCommentCount}
+                autoFocus={!shouldFocusCanvasTitleOnMount}
+              />
+            )}
+          </div>
         </div>
         {/* Share Modal */}
         {showShareModal && canvas && (
@@ -1205,7 +1326,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         onRename={handleRenameVersion}
         onMakeCopy={version => void handleMakeCopyVersion(version)}
       />
-      <CanvasExitTitleDialog {...exitTitleGuard.dialogProps} />
     </div>
   );
 };

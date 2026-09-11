@@ -17,8 +17,9 @@ concurrency:
         && !startsWith(github.head_ref, 'release') }}
 
 jobs:
-  # A Prisma schema change must ship with a matching migration, and new models/
-  # enums must be mirrored into shared/src/zero/schema.ts.
+  # A Prisma schema change must ship with a matching migration, new models/
+  # enums must be mirrored into shared/src/zero/schema.ts, and new models must
+  # carry a non-nullable tenant key.
   schema-migrations:
     name: Validate schema migrations
     runs-on: ubuntu-latest
@@ -43,6 +44,9 @@ jobs:
 
       - name: Validate schema migrations
         run: bash scripts/validate-schema-migrations.sh --ci-mode
+
+      - name: Validate tenant keys on new models
+        run: bash scripts/validate-workspace-id.sh
 
   # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
   # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls

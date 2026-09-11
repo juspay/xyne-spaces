@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  LightningIcon,
   PlusIcon,
   PaperPlaneTiltIcon,
   StopIcon,
@@ -33,6 +34,12 @@ import {
   SparkleIcon,
   BrainIcon,
   ArrowsClockwiseIcon,
+  CursorClickIcon,
+  ShareNetworkIcon,
+  CopySimpleIcon,
+  ArrowSquareOutIcon,
+  LinkBreakIcon,
+  FileIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../hooks/useChat";
@@ -50,7 +57,12 @@ import {
   setUserAgentConfig,
   approveChatAction,
   uploadChatAttachments,
+  chatAttachmentDownloadUrl,
+  publishDesignArtifact,
+  revokeDesignArtifactShare,
   type AttachedContextRef,
+  type ChatAttachmentMeta,
+  type DesignArtifactShare,
   type ContextItem,
   type ContextSearchType,
   type ConversationSummary,
@@ -65,13 +77,17 @@ import { DebugDrawer } from "../../components/DebugDrawer";
 import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
+import { ReadonlyContextPills } from "./ReadonlyContextPills";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { DesignSystemSheet } from "./DesignSystemSheet";
+import { DesignGallery } from "./DesignGallery";
 import { Menu, MenuItem } from "./ui/Menu";
 import { Menu as BaseMenu } from "@base-ui-components/react/menu";
 import { Badge } from "./ui/Badge";
 import { SidePanel } from "./ui/SidePanel";
+import { useSnackbar } from "./ui/Snackbar";
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -95,6 +111,125 @@ function fmtDateShort(iso: string): string {
   const now = new Date();
   if (d.toDateString() === now.toDateString()) return fmtTime(iso);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatAttachmentSize(size?: number): string | null {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) return null;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function attachmentKindLabel(attachment: ChatAttachmentMeta): string {
+  const name = attachment.originalFilename.toLowerCase();
+  const mime = attachment.mimeType.toLowerCase();
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (mime.startsWith("image/")) return "Image";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.includes("zip") || name.endsWith(".zip")) return "ZIP";
+  if (mime.includes("presentation") || name.endsWith(".pptx")) return "PPTX";
+  if (mime.includes("spreadsheet") || name.endsWith(".xlsx") || name.endsWith(".csv")) return "Sheet";
+  return "File";
+}
+
+async function fetchChatAttachmentBlob(attachment: ChatAttachmentMeta, userId: string): Promise<Blob> {
+  const response = await fetch(chatAttachmentDownloadUrl(attachment.id), {
+    credentials: "include",
+    headers: { "x-user-id": userId },
+  });
+  if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
+  return response.blob();
+}
+
+function ChatAttachmentList({
+  attachments,
+  userId,
+  align = "left",
+}: {
+  attachments: ChatAttachmentMeta[];
+  userId: string;
+  align?: "left" | "right";
+}) {
+  const { show: showSnackbar } = useSnackbar();
+  if (!attachments.length) return null;
+
+  const openAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Could not open attachment",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  const downloadAttachment = async (attachment: ChatAttachmentMeta): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(await fetchChatAttachmentBlob(attachment, userId));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.originalFilename;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      showSnackbar({
+        variant: "success",
+        title: "Download complete",
+        description: `${attachment.originalFilename} has been downloaded successfully`,
+      });
+    } catch (err) {
+      showSnackbar({
+        variant: "error",
+        title: "Download failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  return (
+    <div className={`flex flex-col gap-2 ${align === "right" ? "items-end" : "items-start"}`}>
+      {attachments.map((attachment) => {
+        const kind = attachmentKindLabel(attachment);
+        const size = formatAttachmentSize(attachment.size);
+        return (
+          <div
+            key={attachment.id}
+            data-id="chat-attachment-card"
+            className="flex w-[min(420px,75vw)] items-center gap-3 rounded-[12px] border border-xyne-border bg-xyne-surface px-3 py-2 shadow-sm"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-xyne-surface-subtle text-[10px] font-bold uppercase text-xyne-fg-secondary ring-1 ring-xyne-border-subtle">
+              {kind === "File" ? <FileIcon size={18} /> : kind}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{attachment.originalFilename}</p>
+              <p className="truncate text-[11px] text-xyne-fg-muted">
+                {[kind, size].filter(Boolean).join(" · ")}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void openAttachment(attachment); }}
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-xyne-border-subtle px-2 py-1 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                onClick={() => { void downloadAttachment(attachment); }}
+              >
+                Download
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 
@@ -180,63 +315,200 @@ function ProviderSelect({
  * lets any chat participant pin one for the current conversation. Empty models
  * ⇒ renders nothing (agent has no litellm credential). value "" = agent default
  * (no override). See ChatPageV3's fetch effect + handleSend(modelOverride). */
-function ModelSelect({
-  value,
+const CHAT_THINKING_OPTIONS: Array<{ value: "off" | "minimal" | "low" | "medium" | "high" | null; label: string }> = [
+  { value: null, label: "Default" },
+  { value: "off", label: "Off" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+export type ChatThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+
+/**
+ * Combined model + thinking picker for the chat composer, styled after the
+ * Claude app's model menu: the trigger leads with the model name
+ * ("Recommended" when no pin, thinking level beside it when set); the menu
+ * holds the Recommended row (agent's configured model in brackets), a search
+ * bar over the agent's allowed model list, and a Thinking entry whose options
+ * fly out to the right side.
+ */
+function ModelThinkingMenu({
   models,
   defaultModel,
+  selectedModel,
+  onSelectModel,
+  thinkingLevel,
+  onSelectThinking,
   disabled,
-  onChange,
 }: {
-  value: string;
   models: Array<{ id: string; name: string }>;
   defaultModel: string | null;
-  disabled: boolean;
-  onChange: (model: string) => void;
+  selectedModel: string;
+  onSelectModel: (model: string) => void;
+  thinkingLevel: ChatThinkingLevel | null;
+  onSelectThinking: (v: ChatThinkingLevel | null) => void;
+  disabled?: boolean;
 }) {
-  const options = useMemo(
-    () => [
-      { value: "", label: defaultModel ? `Default (${defaultModel})` : "Agent default" },
-      ...models.map((m) => ({ value: m.id, label: m.name })),
-    ],
-    [models, defaultModel],
-  );
-  if (models.length === 0) return null;
-  const current = options.find((o) => o.value === value) ?? options[0];
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const close = () => { setOpen(false); setQuery(""); setThinkingOpen(false); };
+
+  const selected = models.find((m) => m.id === selectedModel) ?? null;
+  const q = query.trim().toLowerCase();
+  const filtered = q ? models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : models;
+  const thinkingLabel = CHAT_THINKING_OPTIONS.find((o) => o.value === thinkingLevel)?.label ?? "Default";
+
+  const rowClass = (active: boolean) =>
+    `flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+      active ? "bg-xyne-surface-sunken font-medium text-xyne-fg-primary" : "text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+    }`;
 
   return (
-    <Menu
-      side="bottom"
-      align="start"
-      trigger={(triggerProps) => (
-        <button
-          {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
-          type="button"
-          data-id="model-select"
-          disabled={disabled}
-          className="flex w-full items-center gap-2 rounded-lg border border-xyne-border-subtle bg-xyne-surface px-3 py-2 text-left text-[13px] transition-colors hover:border-xyne-border hover:bg-xyne-surface-subtle disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-xyne-fg-muted">
-            Model
-          </span>
-          <span className="flex-1 truncate font-medium text-xyne-fg-primary">
-            {current?.label ?? value}
-          </span>
-          <CaretDownIcon size={12} className="shrink-0 text-xyne-fg-tertiary" />
-        </button>
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        data-id="model-thinking-trigger"
+        title={selected ? selected.id : defaultModel ? `Recommended (${defaultModel})` : "Recommended model"}
+        aria-label="Model and thinking"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={`flex h-8 items-center gap-1.5 rounded-full bg-xyne-surface-subtle px-3 text-[12px] font-medium transition-colors ${
+          disabled ? "cursor-not-allowed opacity-50" : "hover:bg-xyne-surface-sunken"
+        } text-xyne-fg-primary`}
+      >
+        <SparkleIcon size={13} className="shrink-0 text-xyne-brand" />
+        <span className="max-w-[150px] truncate">{selected ? selected.name : defaultModel ?? "Recommended"}</span>
+        {thinkingLevel && <span className="text-xyne-fg-tertiary">{thinkingLabel}</span>}
+        <CaretDownIcon size={11} className="shrink-0 text-xyne-fg-tertiary" />
+      </button>
+
+      {open && (
+        <>
+          {/* click-outside backdrop */}
+          <div className="fixed inset-0 z-40" onClick={close} aria-hidden />
+          <div
+            data-id="model-thinking-menu"
+            className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]"
+          >
+            {/* Recommended — clears the pin; the run uses the agent's configured model. */}
+            <button
+              type="button"
+              data-id="model-option-recommended"
+              onClick={() => { onSelectModel(""); close(); }}
+              className={rowClass(selectedModel === "")}
+            >
+              <span className="flex min-w-0 flex-col items-start gap-0.5">
+                <span className="font-medium">{defaultModel ?? "Recommended"}</span>
+                {defaultModel && (
+                  <span className="max-w-full truncate text-[11px] text-xyne-fg-tertiary">(Recommended)</span>
+                )}
+              </span>
+              {selectedModel === "" && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+            </button>
+
+            {models.length > 0 && (
+              <>
+                <div className="mx-1 my-1 h-px bg-xyne-border-subtle" />
+                <div className="mx-1 my-0.5 flex items-center gap-1.5 rounded-lg border border-xyne-border bg-xyne-surface-subtle px-2 py-1.5">
+                  <MagnifyingGlassIcon size={13} className="shrink-0 text-xyne-fg-muted" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search models…"
+                    data-id="model-search"
+                    className="w-full bg-transparent text-[13px] text-xyne-fg-primary outline-none placeholder:text-xyne-fg-muted"
+                  />
+                </div>
+                <div className="flex max-h-72 flex-col overflow-auto">
+                  {filtered.length === 0 ? (
+                    <div className="px-2.5 py-2 text-[13px] text-xyne-fg-tertiary">No models match</div>
+                  ) : (
+                    filtered.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        title={m.id}
+                        data-id={`model-option-${m.id}`}
+                        onClick={() => { onSelectModel(m.id); close(); }}
+                        className={rowClass(selectedModel === m.id)}
+                      >
+                        <span className="truncate font-mono text-[12.5px]">{m.name}</span>
+                        {selectedModel === m.id && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="mx-1 my-1 h-px bg-xyne-border-subtle" />
+            {/* Thinking — options fly out to the right side. */}
+            <div className="relative">
+              <button
+                type="button"
+                data-id="thinking-expand"
+                aria-expanded={thinkingOpen}
+                onClick={() => setThinkingOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+              >
+                <span className="flex items-center gap-1.5 font-medium">
+                  <BrainIcon size={13} className="shrink-0 text-xyne-fg-tertiary" />
+                  Thinking
+                </span>
+                <span className="flex items-center gap-1 text-xyne-fg-tertiary">
+                  {thinkingLabel}
+                  <CaretRightIcon size={11} className="shrink-0" />
+                </span>
+              </button>
+              {thinkingOpen && (
+                <div className="absolute bottom-0 right-0 z-50 w-36 translate-x-[calc(100%+8px)] rounded-xl border border-xyne-border bg-xyne-surface p-1 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.35)]">
+                  {CHAT_THINKING_OPTIONS.map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      data-id={`thinking-option-${o.label.toLowerCase()}`}
+                      onClick={() => { onSelectThinking(o.value); close(); }}
+                      className={rowClass(o.value === thinkingLevel)}
+                    >
+                      <span>{o.label}</span>
+                      {o.value === thinkingLevel && <CheckIcon size={13} className="shrink-0 text-xyne-brand" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
-    >
-      {options.map((opt) => (
-        <MenuItem
-          key={opt.value || "__default__"}
-          selected={opt.value === value}
-          onSelect={() => { if (opt.value !== value) onChange(opt.value); }}
-          trailing={opt.value === value ? <CheckIcon size={12} className="text-xyne-brand" /> : undefined}
-        >
-          {opt.label}
-        </MenuItem>
-      ))}
-    </Menu>
+    </div>
   );
+}
+
+/* ── fast mode toggle ────────────────────────────────────────────── */
+
+/** localStorage key for the per-agent chat fast-mode preference. */
+function fastModeStorageKey(agentSlug: string): string {
+  return `chat-fast-mode:${agentSlug}`;
+}
+
+export function readStoredFastMode(agentSlug: string | null | undefined): boolean {
+  if (!agentSlug) return false;
+  try {
+    return localStorage.getItem(fastModeStorageKey(agentSlug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredFastMode(agentSlug: string, enabled: boolean): void {
+  try {
+    if (enabled) localStorage.setItem(fastModeStorageKey(agentSlug), "1");
+    else localStorage.removeItem(fastModeStorageKey(agentSlug));
+  } catch {
+    /* storage unavailable (private mode / quota) — preference is session-only */
+  }
 }
 
 /* ── typing indicator ────────────────────────────────────────────── */
@@ -1319,6 +1591,9 @@ function MessageThread({
   userId,
   runByMsgId,
   onRated,
+  hideHtmlSource = false,
+  designVersionByMessageId,
+  onSelectDesignVersion,
 }: {
   messages: ChatMsg[];
   sending: boolean;
@@ -1349,6 +1624,11 @@ function MessageThread({
   userId: string;
   runByMsgId: Map<string, RunRatingInfo>;
   onRated: (msgId: string, rating: "up" | "down", comment?: string) => void;
+  /** Design consumes fenced HTML in the preview, so do not duplicate the
+   *  entire source document inside the adjacent conversation panel. */
+  hideHtmlSource?: boolean;
+  designVersionByMessageId?: Map<string, DesignVersion>;
+  onSelectDesignVersion?: (index: number) => void;
 }) {
   // Inline edit state for the latest visible user message. Older messages are
   // intentionally not editable — see comment in useChat.editLatestUserMessage.
@@ -1501,6 +1781,15 @@ function MessageThread({
                     {stripMalformedCitations(msg.content)}
                   </div>
                 )}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <ChatAttachmentList attachments={msg.attachments} userId={userId} align="right" />
+                )}
+                {/* Read-only attached-context chip below the message — collapsed
+                    by default, expands left into a horizontal scroll strip.
+                    Mirrors the Ask AI (Spaces) design. */}
+                {!isEditing && msg.contextItems && msg.contextItems.length > 0 && (
+                  <ReadonlyContextPills items={msg.contextItems} expandedWidthClass="max-w-[24rem]" />
+                )}
                 {ts && (
                   <span className="mr-1 flex items-center gap-1 text-[11px] text-xyne-fg-muted">
                     <TimerIcon size={10} />
@@ -1546,8 +1835,10 @@ function MessageThread({
         const hasInvocations = msgInvocations.length > 0;
         const hasPlan = isStream && livePlanTodos.length > 0;
         const hasReasoning = !!msgReasoning && msgReasoning.length > 0;
-        const hasText = msg.content.length > 0;
+        const displayContent = hideHtmlSource ? designChatContent(msg.content) : msg.content;
+        const hasText = displayContent.length > 0;
         const showThinkingPill = isStream && !hasInvocations && !hasReasoning && !hasText;
+        const designVersion = designVersionByMessageId?.get(msg.id);
 
         return (
           <div key={msg.id} data-id="agent-message" className="flex items-start gap-2">
@@ -1600,7 +1891,7 @@ function MessageThread({
                 >
                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2">
                     <CitationMarkdown
-                      content={msg.content}
+                      content={displayContent}
                       invocations={allConversationInvocations}
                       selectedCitationKey={selectedCitationKey}
                       onOpenCitation={onOpenCitation}
@@ -1612,7 +1903,11 @@ function MessageThread({
                 </div>
               )}
 
-              {ts && !isStream && (hasText || hasInvocations) && (
+              {msg.attachments && msg.attachments.length > 0 && (
+                <ChatAttachmentList attachments={msg.attachments} userId={userId} />
+              )}
+
+              {ts && !isStream && (hasText || hasInvocations || (msg.attachments?.length ?? 0) > 0) && (
                 <div className="ml-1 flex items-center gap-2 text-[11px] text-xyne-fg-muted">
                   <span className="flex items-center gap-1">
                     <TimerIcon size={10} />
@@ -1638,6 +1933,17 @@ function MessageThread({
                       sending={sending}
                       onSelectBranch={onSelectBranch}
                     />
+                  )}
+                  {designVersion && onSelectDesignVersion && (
+                    <button
+                      type="button"
+                      data-id="message-design-version-chip"
+                      onClick={() => onSelectDesignVersion(Number(designVersion.label.slice(1)) - 1)}
+                      className="inline-flex h-5 items-center rounded border border-xyne-brand/25 bg-xyne-brand/5 px-1.5 text-[10px] font-semibold text-xyne-brand transition-colors hover:bg-xyne-brand/10"
+                      title={`Preview ${designVersion.label}`}
+                    >
+                      {designVersion.label}
+                    </button>
                   )}
                 </div>
               )}
@@ -1893,10 +2199,6 @@ function LeftPanel({
   onPickAgent,
   onClearAgent,
   onProviderChange,
-  litellmModels,
-  litellmDefaultModel,
-  selectedModel,
-  onModelChange,
   onNewConversation,
   onSelectConv,
   onTogglePin,
@@ -1912,10 +2214,6 @@ function LeftPanel({
   selectedProvider: string;
   providers: ProviderCredential[];
   providerChanging: boolean;
-  litellmModels: Array<{ id: string; name: string }>;
-  litellmDefaultModel: string | null;
-  selectedModel: string;
-  onModelChange: (model: string) => void;
   isPinned: (convId: string) => boolean;
   titleFor: (conv: ConversationWithAgent) => string;
   onPickAgent: () => void;
@@ -2054,13 +2352,6 @@ function LeftPanel({
           providers={providers}
           disabled={!activeAgent || providerChanging}
           onChange={onProviderChange}
-        />
-        <ModelSelect
-          value={selectedModel}
-          models={litellmModels}
-          defaultModel={litellmDefaultModel}
-          disabled={!activeAgent}
-          onChange={onModelChange}
         />
       </div>
 
@@ -2476,7 +2767,7 @@ export interface InputAreaHandle {
 /** Local pending file (not yet uploaded). Lives on the parent until send. */
 export interface PendingFile {
   file: File;
-  previewUrl: string;
+  previewUrl: string | null;
 }
 
 export interface InputAreaProps {
@@ -2504,6 +2795,13 @@ export interface InputAreaProps {
    *  we slot it in as a render prop so positioning relative to the input
    *  card lives here. */
   renderMentionPicker?: () => React.ReactNode;
+  /** Per-chat provider fast mode (optional — only the agent chat wires it).
+   *  Rendered as a ⚡ pill in the button row next to attach / mention. */
+  fastMode?: boolean;
+  onToggleFastMode?: (enabled: boolean) => void;
+  /** Combined model + thinking picker (optional — only the agent chat wires
+   *  it). Rendered in the button row after the fast-mode pill. */
+  modelMenu?: React.ReactNode;
 }
 
 /**
@@ -2535,11 +2833,16 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     mentionOpen,
     onToggleMention,
     renderMentionPicker,
+    fastMode,
+    onToggleFastMode,
+    modelMenu,
   },
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
@@ -2588,6 +2891,37 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
     e.target.value = "";
   };
 
+  const hasDraggedFiles = (event: React.DragEvent): boolean =>
+    Array.from(event.dataTransfer.types).includes("Files");
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDraggingFiles(true);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingFiles(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) onAddFiles(files);
+  };
+
   const hasChips = pendingFiles.length > 0 || selectedContext.length > 0;
   const sendDisabled = !value.trim() && !hasChips ? true : disabled;
 
@@ -2603,8 +2937,21 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
         )}
 
         <div
-          className={`rounded-3xl border border-xyne-border-subtle bg-xyne-surface px-4 pb-2.5 pt-3 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.18)] transition-shadow focus-within:border-xyne-border focus-within:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.22)]`}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative rounded-3xl border bg-xyne-surface px-4 pb-2.5 pt-3 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.18)] transition-all focus-within:shadow-[0_10px_32px_-12px_rgba(0,0,0,0.22)] ${
+            isDraggingFiles
+              ? "border-xyne-brand ring-2 ring-xyne-brand/20"
+              : "border-xyne-border-subtle focus-within:border-xyne-border"
+          }`}
         >
+          {isDraggingFiles && (
+            <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-[20px] border border-dashed border-xyne-brand bg-xyne-surface/95 text-[13px] font-medium text-xyne-brand backdrop-blur-sm">
+              Drop files to attach
+            </div>
+          )}
           {/* Chip rail — context @-mentions + pending file previews, above the textarea */}
           {hasChips && (
             <div className="mb-2 flex flex-wrap gap-1.5">
@@ -2634,11 +2981,17 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle py-0.5 pl-0.5 pr-2.5 text-[11px] text-xyne-fg-secondary"
                   title={p.file.name}
                 >
-                  <img
-                    src={p.previewUrl}
-                    alt=""
-                    className="h-4 w-4 shrink-0 rounded-full object-cover"
-                  />
+                  {p.previewUrl ? (
+                    <img
+                      src={p.previewUrl}
+                      alt=""
+                      className="h-4 w-4 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-xyne-surface text-xyne-fg-muted">
+                      <FileIcon size={10} />
+                    </span>
+                  )}
                   <span className="truncate">{p.file.name}</span>
                   <button
                     type="button"
@@ -2677,7 +3030,6 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
                 multiple
                 onChange={handleFilePick}
                 className="hidden"
@@ -2685,8 +3037,8 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               <button
                 type="button"
                 data-id="input-btn-attach"
-                title="Attach images"
-                aria-label="Attach images"
+                title="Attach files"
+                aria-label="Attach files"
                 onClick={() => fileInputRef.current?.click()}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-xyne-surface-subtle text-xyne-fg-tertiary transition-colors hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
               >
@@ -2707,6 +3059,29 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
               >
                 <AtIcon size={14} />
               </button>
+              {onToggleFastMode && (
+                <button
+                  type="button"
+                  data-id="fast-mode-toggle"
+                  data-enabled={fastMode ? "1" : "0"}
+                  role="switch"
+                  aria-checked={!!fastMode}
+                  aria-label="Use fast mode"
+                  title={fastMode
+                    ? "Fast mode ON for this chat — click to use the agent's default"
+                    : "Fast mode OFF (agent default) — click for faster output from the provider's fast tier"}
+                  onClick={() => onToggleFastMode(!fastMode)}
+                  className={`flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors ${
+                    fastMode
+                      ? "bg-amber-500 text-white hover:bg-amber-600"
+                      : "bg-xyne-surface-subtle text-xyne-fg-tertiary hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+                  }`}
+                >
+                  <LightningIcon size={13} weight={fastMode ? "fill" : "bold"} />
+                  Fast mode
+                </button>
+              )}
+              {modelMenu}
             </div>
 
             {sending ? (
@@ -3208,7 +3583,1337 @@ function AgentPickerModal({
 
 /* ── main component ──────────────────────────────────────────────── */
 
-export function ChatPageV3() {
+type DesignPreviewSource =
+  | { kind: "attachment"; attachment: ChatAttachmentMeta }
+  | { kind: "inline"; html: string; fileName: string };
+
+type DesignVersion = {
+  source: DesignPreviewSource;
+  projectAttachment?: ChatAttachmentMeta;
+  messageId: string;
+  messageIndex: number;
+  createdAt: string;
+  label: string;
+};
+
+const DESIGN_STUDIO_COMPAT_INSTRUCTION = `Design Studio compatibility fallback: if this run does not include the server-owned /design command contract, create or revise a complete responsive self-contained HTML document. Return the complete document in one fenced html code block so the preview can render it. Use available sandbox and delivery tools when present. Do not ask for a plan or storyboard approval.`;
+
+export interface DesignNodeSelection {
+  selector: string;
+  tagName: string;
+  label: string;
+  id?: string;
+  classes: string[];
+  text: string;
+  ancestors: string[];
+  styles: Record<string, string>;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+export type DesignEditScope = "element" | "component" | "design-system";
+
+export interface DesignManualEdit {
+  selector: string;
+  oldText?: string;
+  newText?: string;
+  styles?: Record<string, string>;
+  stale?: boolean;
+}
+
+export interface AppliedManualEdits {
+  html: string;
+  edits: DesignManualEdit[];
+}
+
+const DESIGN_INSPECTOR_EVENT = "xyne-design-node-selected";
+const DESIGN_INSPECTOR_MODE_EVENT = "xyne-design-inspector-mode";
+const DESIGN_EDIT_EVENT = "xyne-design-text-edited";
+
+function serializeDesignDocument(document: Document): string {
+  const doctype = document.doctype;
+  const serializedDoctype = doctype
+    ? `<!DOCTYPE ${doctype.name}${doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : ""}${
+        doctype.systemId ? `${doctype.publicId ? "" : " SYSTEM"} "${doctype.systemId}"` : ""
+      }>`
+    : "";
+  return `${serializedDoctype}${document.documentElement.outerHTML}`;
+}
+
+/** Applies text/style edits without string-splicing the artifact. Stale edits remain
+ * in the returned list so callers can preserve and surface their status. */
+export function applyManualEdits(html: string, edits: DesignManualEdit[]): AppliedManualEdits {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  const appliedEdits = edits.map((edit) => {
+    let element: Element | null = null;
+    try {
+      element = document.querySelector(edit.selector);
+    } catch {
+      // A malformed selector is stale just like one that no longer matches.
+    }
+    if (!element) {
+      return { ...edit, stale: true };
+    }
+    if (edit.styles) {
+      if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+        return { ...edit, stale: true };
+      }
+      for (const [property, value] of Object.entries(edit.styles)) {
+        element.style.setProperty(property, value);
+      }
+      return { ...edit, stale: false };
+    }
+    if (
+      typeof edit.oldText !== "string" || typeof edit.newText !== "string" ||
+      (element.textContent ?? "").trim() !== edit.oldText.trim()
+    ) {
+      return { ...edit, stale: true };
+    }
+    element.textContent = edit.newText;
+    return { ...edit, stale: false };
+  });
+  return { html: serializeDesignDocument(document), edits: appliedEdits };
+}
+
+function normalizeDesignNodeSelection(input: unknown): DesignNodeSelection | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  if (typeof value["selector"] !== "string" || typeof value["tagName"] !== "string") return null;
+  const strings = (candidate: unknown, limit: number, itemLimit: number): string[] =>
+    Array.isArray(candidate)
+      ? candidate.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+      : [];
+  const styles = Object.fromEntries(
+    Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .slice(0, 30)
+      .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+  );
+  const rawRect = value["rect"] && typeof value["rect"] === "object"
+    ? value["rect"] as Record<string, unknown>
+    : {};
+  const number = (candidate: unknown): number =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? Math.round(candidate) : 0;
+  const selector = value["selector"].slice(0, 600);
+  const tagName = value["tagName"].slice(0, 80);
+  return {
+    selector,
+    tagName,
+    label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName,
+    ...(typeof value["id"] === "string" ? { id: value["id"].slice(0, 160) } : {}),
+    classes: strings(value["classes"], 16, 120),
+    text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+    ancestors: strings(value["ancestors"], 6, 600),
+    styles,
+    rect: {
+      x: number(rawRect["x"]),
+      y: number(rawRect["y"]),
+      width: number(rawRect["width"]),
+      height: number(rawRect["height"]),
+    },
+  };
+}
+
+/** Inject a tiny, isolated selection and text-edit bridge into the generated artifact. */
+function withDesignInspector(html: string): string {
+  const inspector = String.raw`
+(function () {
+  if (window.__xyneDesignInspector) return;
+  window.__xyneDesignInspector = true;
+  var enabled = false;
+  var editingElement = null;
+  var editingOriginalText = '';
+  var editingOutline = '';
+  var editingOutlineOffset = '';
+  var clickTimer = null;
+  var overlay = document.createElement('div');
+  overlay.setAttribute('data-xyne-design-inspector', 'true');
+  overlay.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147483647;border:2px solid #7657ff;background:rgba(118,87,255,.09);box-shadow:0 0 0 1px rgba(255,255,255,.7) inset;border-radius:3px;transition:all 60ms linear';
+
+  function mount() {
+    if (!overlay.isConnected && document.body) document.body.appendChild(overlay);
+  }
+  function esc(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+  function selectorFor(element) {
+    if (element.id) return '#' + esc(element.id);
+    var dataId = element.getAttribute('data-id');
+    if (dataId) return '[data-id="' + String(dataId).replace(/"/g, '\\"') + '"]';
+    var parts = [];
+    var current = element;
+    while (current && current.nodeType === 1 && current !== document.documentElement && parts.length < 6) {
+      var part = current.tagName.toLowerCase();
+      var classes = Array.prototype.slice.call(current.classList || []).filter(function (name) {
+        return name && name.length < 48 && !/^active$|^hover$|^focus$/.test(name);
+      }).slice(0, 2);
+      if (classes.length) part += '.' + classes.map(esc).join('.');
+      var parent = current.parentElement;
+      if (parent) {
+        var siblings = Array.prototype.filter.call(parent.children, function (node) { return node.tagName === current.tagName; });
+        if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return parts.join(' > ');
+  }
+  function shortName(element) {
+    var value = element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '';
+    value = value.replace(/\s+/g, ' ').trim().slice(0, 80);
+    return element.tagName.toLowerCase() + (value ? ' · ' + value : '');
+  }
+  function moveOverlay(element) {
+    mount();
+    var rect = element.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = rect.left + 'px';
+    overlay.style.top = rect.top + 'px';
+    overlay.style.width = Math.max(0, rect.width) + 'px';
+    overlay.style.height = Math.max(0, rect.height) + 'px';
+  }
+  function describe(element) {
+    var style = getComputedStyle(element);
+    var rect = element.getBoundingClientRect();
+    var styleNames = ['display','position','font-family','font-size','font-weight','line-height','color','background-color','fill','stroke','border-radius','border','padding','margin','gap','width','height','max-width','justify-content','align-items','grid-template-columns'];
+    var styles = {};
+    styleNames.forEach(function (name) {
+      var value = style.getPropertyValue(name);
+      if (value) styles[name] = value.trim();
+    });
+    var ancestors = [];
+    var parent = element.parentElement;
+    while (parent && parent !== document.documentElement && ancestors.length < 4) {
+      ancestors.unshift(selectorFor(parent));
+      parent = parent.parentElement;
+    }
+    return {
+      selector: selectorFor(element),
+      tagName: element.tagName.toLowerCase(),
+      label: shortName(element),
+      id: element.id || undefined,
+      classes: Array.prototype.slice.call(element.classList || []).slice(0, 12),
+      text: String(element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500),
+      ancestors: ancestors,
+      styles: styles,
+      rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+    };
+  }
+  function canEditText(element) {
+    if (element === overlay || element.isContentEditable) return false;
+    var text = String(element.textContent || '');
+    if (text.trim().length < 2) return false;
+    var allowed = { A: true, B: true, I: true, SPAN: true, STRONG: true, EM: true };
+    return Array.prototype.every.call(element.querySelectorAll('*'), function (child) { return allowed[child.tagName] === true; });
+  }
+  function finishEditing(commit) {
+    if (!editingElement) return;
+    var element = editingElement;
+    var originalText = editingOriginalText;
+    var newText = String(element.textContent || '');
+    editingElement = null;
+    if (!commit) element.textContent = originalText;
+    element.removeAttribute('contenteditable');
+    element.style.outline = editingOutline;
+    element.style.outlineOffset = editingOutlineOffset;
+    if (commit && newText !== originalText) {
+      window.parent.postMessage({
+        type: '${DESIGN_EDIT_EVENT}',
+        edit: { selector: selectorFor(element), oldText: originalText, newText: newText }
+      }, '*');
+    }
+  }
+  function beginEditing(element) {
+    if (!canEditText(element)) return;
+    if (editingElement) finishEditing(true);
+    editingElement = element;
+    editingOriginalText = String(element.textContent || '');
+    editingOutline = element.style.outline;
+    editingOutlineOffset = element.style.outlineOffset;
+    element.setAttribute('contenteditable', 'true');
+    element.style.outline = '2px dashed #7657ff';
+    element.style.outlineOffset = '2px';
+    element.focus();
+    var selection = window.getSelection();
+    var range = document.createRange();
+    range.selectNodeContents(element);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+  window.addEventListener('message', function (event) {
+    if (!event.data || event.data.type !== '${DESIGN_INSPECTOR_MODE_EVENT}') return;
+    enabled = event.data.enabled === true;
+    document.documentElement.style.cursor = enabled ? 'crosshair' : '';
+    if (!enabled) {
+      if (editingElement) finishEditing(true);
+      overlay.style.display = 'none';
+    }
+  });
+  document.addEventListener('mousemove', function (event) {
+    if (!enabled || editingElement) return;
+    var target = event.target;
+    if (!(target instanceof Element) || target === overlay) return;
+    moveOverlay(target);
+  }, true);
+  document.addEventListener('click', function (event) {
+    if (!enabled) return;
+    var target = event.target;
+    if (!(target instanceof Element) || target === overlay) return;
+    if (editingElement && editingElement.contains(target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    moveOverlay(target);
+    if (clickTimer) window.clearTimeout(clickTimer);
+    clickTimer = window.setTimeout(function () {
+      clickTimer = null;
+      window.parent.postMessage({ type: '${DESIGN_INSPECTOR_EVENT}', selection: describe(target) }, '*');
+    }, 220);
+  }, true);
+  document.addEventListener('dblclick', function (event) {
+    if (!enabled) return;
+    var target = event.target;
+    if (!(target instanceof Element) || !canEditText(target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (clickTimer) {
+      window.clearTimeout(clickTimer);
+      clickTimer = null;
+    }
+    beginEditing(target);
+  }, true);
+  document.addEventListener('focusout', function (event) {
+    if (editingElement && event.target === editingElement) finishEditing(true);
+  }, true);
+  document.addEventListener('keydown', function (event) {
+    if (editingElement && event.target instanceof Node && editingElement.contains(event.target)) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finishEditing(false);
+      } else if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        finishEditing(true);
+      }
+      return;
+    }
+    if (event.key === 'Escape') {
+      enabled = false;
+      overlay.style.display = 'none';
+      document.documentElement.style.cursor = '';
+      window.parent.postMessage({ type: '${DESIGN_INSPECTOR_MODE_EVENT}', enabled: false }, '*');
+    }
+  }, true);
+  mount();
+})();`;
+  const tag = `<script data-xyne-design-inspector>${inspector}<\/script>`;
+  return /<\/body\s*>/i.test(html)
+    ? html.replace(/<\/body\s*>/i, `${tag}</body>`)
+    : `${html}${tag}`;
+}
+
+function htmlFromMessage(message: ChatMsg): string | null {
+  // Accept a closing fence or the still-streaming remainder. This lets the
+  // preview update while the model is emitting a long HTML document.
+  // LAST fence wins: the /design contract drafts the document in an early
+  // fence (live WIP preview) and may emit a corrected fence after browser QA —
+  // the later one is the truth.
+  const matches = [...message.content.matchAll(/```html\s*([\s\S]*?)(?:```|$)/gi)];
+  const html = matches.length ? matches[matches.length - 1]?.[1]?.trim() : undefined;
+  if (!html || (!/<html[\s>]/i.test(html) && !/<!doctype\s+html/i.test(html))) return null;
+  return html;
+}
+
+function designChatContent(content: string): string {
+  const hadHtml = /```html\s*/i.test(content);
+  const withoutHtml = content.replace(/```html\s*[\s\S]*?(?:```|$)/gi, "").trim();
+  return withoutHtml || (hadHtml ? "Design updated in preview." : content);
+}
+
+function designVersionFileName(version: DesignVersion): string {
+  return version.source.kind === "attachment"
+    ? version.source.attachment.originalFilename
+    : version.source.fileName;
+}
+
+function designVersions(messages: ChatMsg[]): DesignVersion[] {
+  const versions: DesignVersion[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
+    const attachment = [...(message.attachments ?? [])].reverse().find((item) =>
+      item.mimeType.toLowerCase().includes("text/html") || item.originalFilename.toLowerCase().endsWith(".html"),
+    );
+    const projectAttachment = [...(message.attachments ?? [])].reverse().find((item) => {
+      const name = item.originalFilename.toLowerCase();
+      const archive = name.endsWith(".zip") || name.endsWith(".tar.gz") || name.endsWith(".tgz");
+      return archive && /(react|source|project)/.test(name);
+    });
+    const source: DesignPreviewSource | null = attachment
+      ? { kind: "attachment", attachment }
+      : (() => {
+          const html = htmlFromMessage(message);
+          return html ? { kind: "inline", html, fileName: "xyne-design.html" } : null;
+        })();
+    if (!source) continue;
+    versions.push({
+      source,
+      ...(projectAttachment ? { projectAttachment } : {}),
+      messageId: message.id,
+      messageIndex: i,
+      createdAt: message.createdAt,
+      label: `v${versions.length + 1}`,
+    });
+  }
+  return versions;
+}
+
+function cssColorToHex(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized;
+  const match = /^rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i.exec(normalized);
+  if (!match) return fallback;
+  return `#${[match[1], match[2], match[3]]
+    .map((part) => Math.max(0, Math.min(255, Number(part))).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function cssNumber(value: string | undefined, fallback = "0"): string {
+  const match = /-?\d+(?:\.\d+)?/.exec(value ?? "");
+  return match?.[0] ?? fallback;
+}
+
+function DesignStyleInspector({
+  selection,
+  onApply,
+  onClose,
+}: {
+  selection: DesignNodeSelection;
+  onApply: (property: string, value: string) => void;
+  onClose: () => void;
+}) {
+  const isSvg = selection.tagName === "svg" || selection.tagName === "path" || selection.tagName === "circle" || selection.tagName === "rect";
+  const [fontSize, setFontSize] = useState(cssNumber(selection.styles["font-size"], "16"));
+  const [radius, setRadius] = useState(cssNumber(selection.styles["border-radius"]));
+  const [padding, setPadding] = useState(selection.styles["padding"] ?? "0px");
+  const [gap, setGap] = useState(cssNumber(selection.styles["gap"]));
+
+  const commitPixels = (property: string, value: string) => {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) onApply(property, `${Math.max(0, parsed)}px`);
+  };
+
+  const applyForeground = (value: string) => {
+    onApply("color", value);
+    if (!isSvg) return;
+    if (selection.styles["fill"] && selection.styles["fill"] !== "none") onApply("fill", value);
+    if (selection.styles["stroke"] && selection.styles["stroke"] !== "none") onApply("stroke", value);
+  };
+
+  return (
+    <aside
+      data-id="design-style-inspector"
+      className="absolute right-6 top-6 z-20 w-64 overflow-hidden rounded-xl border border-black/10 bg-xyne-surface/95 shadow-[0_18px_50px_rgba(0,0,0,.22)] backdrop-blur"
+      aria-label="Visual style inspector"
+    >
+      <div className="flex items-start justify-between border-b border-xyne-border-subtle px-3 py-2.5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-muted">Inspector</p>
+          <p className="mt-0.5 truncate text-[12px] font-medium text-xyne-fg-primary">{selection.label}</p>
+          <p className="truncate font-mono text-[9px] text-xyne-fg-tertiary">{selection.selector}</p>
+        </div>
+        <button type="button" aria-label="Close inspector" onClick={onClose} className="rounded p-1 text-xyne-fg-muted hover:bg-xyne-surface-subtle">
+          <XIcon size={13} />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-3 text-[10px] text-xyne-fg-muted">
+        <label className="flex flex-col gap-1">
+          {isSvg ? "Icon color" : "Text color"}
+          <input
+            type="color"
+            defaultValue={cssColorToHex(selection.styles["color"], "#111827")}
+            onChange={(event) => applyForeground(event.target.value)}
+            className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          {isSvg ? "Fill" : "Background"}
+          <input
+            type="color"
+            defaultValue={cssColorToHex(isSvg ? selection.styles["fill"] : selection.styles["background-color"], "#ffffff")}
+            onChange={(event) => onApply(isSvg ? "fill" : "background-color", event.target.value)}
+            className="h-8 w-full cursor-pointer rounded border border-xyne-border-subtle bg-transparent p-0.5"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Font size
+          <input
+            type="number" min="1" max="240" value={fontSize}
+            onChange={(event) => setFontSize(event.target.value)}
+            onBlur={() => commitPixels("font-size", fontSize)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Weight
+          <select
+            defaultValue={cssNumber(selection.styles["font-weight"], "400")}
+            onChange={(event) => onApply("font-weight", event.target.value)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          >
+            {[300, 400, 500, 600, 700, 800].map((weight) => <option key={weight} value={weight}>{weight}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          Radius
+          <input
+            type="number" min="0" max="999" value={radius}
+            onChange={(event) => setRadius(event.target.value)}
+            onBlur={() => commitPixels("border-radius", radius)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          Gap
+          <input
+            type="number" min="0" max="240" value={gap}
+            onChange={(event) => setGap(event.target.value)}
+            onBlur={() => commitPixels("gap", gap)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          Padding
+          <input
+            value={padding}
+            onChange={(event) => setPadding(event.target.value)}
+            onBlur={() => { if (padding.trim()) onApply("padding", padding.trim().slice(0, 80)); }}
+            placeholder="12px 16px"
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 font-mono text-[11px] text-xyne-fg-primary"
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          Layout
+          <select
+            defaultValue={selection.styles["display"] ?? "block"}
+            onChange={(event) => onApply("display", event.target.value)}
+            className="h-8 rounded border border-xyne-border-subtle bg-xyne-surface-subtle px-2 text-[11px] text-xyne-fg-primary"
+          >
+            {["block", "flex", "grid", "inline", "inline-flex", "inline-block", "none"].map((display) => <option key={display}>{display}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="border-t border-xyne-border-subtle px-3 py-2 text-[9px] leading-4 text-xyne-fg-tertiary">
+        Changes are local and reversible. Send a message to materialize them as the next design version.
+      </p>
+    </aside>
+  );
+}
+
+function DesignPreviewPanel({
+  source,
+  versions,
+  activeVersionIndex,
+  latestVersionAvailable,
+  userId,
+  sending,
+  conversationId,
+  selection,
+  manualEdits,
+  onSelectVersion,
+  onFollowLatest,
+  onSelectionChange,
+  onManualEditsChange,
+  onEditedHtmlChange,
+  onOpenDesignSystem,
+}: {
+  source: DesignPreviewSource | null;
+  versions: DesignVersion[];
+  activeVersionIndex: number | null;
+  latestVersionAvailable: boolean;
+  userId: string;
+  sending: boolean;
+  conversationId: string | null;
+  selection: DesignNodeSelection | null;
+  manualEdits: DesignManualEdit[];
+  onSelectVersion: (index: number) => void;
+  onFollowLatest: () => void;
+  onSelectionChange: (selection: DesignNodeSelection | null) => void;
+  onManualEditsChange: React.Dispatch<React.SetStateAction<DesignManualEdit[]>>;
+  onEditedHtmlChange: (html: string | null) => void;
+  onOpenDesignSystem: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [rawHtml, setRawHtml] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [inspecting, setInspecting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareRecord, setShareRecord] = useState<DesignArtifactShare | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [devicePreset, setDevicePreset] = useState<"desktop" | "tablet" | "mobile" | "fit">("desktop");
+  const [canvasBackground, setCanvasBackground] = useState<"light" | "dark" | "checkerboard">("light");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [viewSource, setViewSource] = useState(false);
+  const [sourceCopied, setSourceCopied] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  const appliedManualEdits = useMemo(
+    () => rawHtml == null ? null : applyManualEdits(rawHtml, manualEdits),
+    [rawHtml, manualEdits],
+  );
+  const editedHtml = appliedManualEdits?.html ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (!source) {
+        setPreviewUrl(null);
+        setRawHtml(null);
+        setError(null);
+        return;
+      }
+
+      const load = async () => {
+        try {
+          let html: string;
+          if (source.kind === "inline") {
+            html = source.html;
+          } else {
+            const response = await fetch(chatAttachmentDownloadUrl(source.attachment.id), {
+              credentials: "include",
+              headers: { "x-user-id": userId },
+              signal: controller.signal,
+            });
+            if (!response.ok) throw new Error(`Preview failed: HTTP ${response.status}`);
+            html = await response.text();
+          }
+          if (cancelled) return;
+          setRawHtml(html);
+          setError(null);
+        } catch (err) {
+          if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+          setPreviewUrl(null);
+          setRawHtml(null);
+          setError(err instanceof Error ? err.message : "Unable to load this design");
+        }
+      };
+      void load();
+    }, source?.kind === "inline" && sending ? 250 : 0);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [source, userId, reloadVersion, sending]);
+
+  useEffect(() => {
+    if (!editedHtml) {
+      setPreviewUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(new Blob([withDesignInspector(editedHtml)], { type: "text/html" }));
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [editedHtml]);
+
+  useEffect(() => {
+    onEditedHtmlChange(editedHtml);
+    return () => onEditedHtmlChange(null);
+  }, [editedHtml, onEditedHtmlChange]);
+
+  useEffect(() => {
+    if (!appliedManualEdits) return;
+    const staleStatusChanged = appliedManualEdits.edits.some(
+      (edit, index) => edit.stale !== manualEdits[index]?.stale,
+    );
+    if (staleStatusChanged) onManualEditsChange(appliedManualEdits.edits);
+  }, [appliedManualEdits, manualEdits, onManualEditsChange]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (event.data?.type === DESIGN_INSPECTOR_MODE_EVENT && event.data.enabled === false) {
+        setInspecting(false);
+        setFullscreen(false);
+        return;
+      }
+      if (event.data?.type === DESIGN_EDIT_EVENT) {
+        const edit = event.data.edit as Partial<DesignManualEdit> | null | undefined;
+        if (typeof edit?.selector === "string" && typeof edit.oldText === "string" && typeof edit.newText === "string") {
+          onManualEditsChange((current) => [
+            ...current,
+            { selector: edit.selector!, oldText: edit.oldText!, newText: edit.newText!, stale: false },
+          ]);
+        }
+        return;
+      }
+      if (event.data?.type !== DESIGN_INSPECTOR_EVENT) return;
+      const candidate = normalizeDesignNodeSelection(event.data.selection);
+      if (candidate) onSelectionChange(candidate);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [onManualEditsChange, onSelectionChange]);
+
+  const syncInspectorMode = useCallback(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: DESIGN_INSPECTOR_MODE_EVENT, enabled: inspecting }, "*");
+  }, [inspecting]);
+
+  useEffect(() => {
+    syncInspectorMode();
+  }, [syncInspectorMode, previewUrl, reloadVersion]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const updateSize = () => {
+      const styles = window.getComputedStyle(canvas);
+      setCanvasSize({
+        width: Math.max(0, canvas.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)),
+        height: Math.max(0, canvas.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)),
+      });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", exitOnEscape);
+    return () => window.removeEventListener("keydown", exitOnEscape);
+  }, [fullscreen]);
+
+  const fileName = source?.kind === "attachment"
+    ? source.attachment.originalFilename
+    : source?.fileName ?? "Design preview";
+  const displayedVersionIndex = source && versions.length > 0
+    ? activeVersionIndex ?? versions.length - 1
+    : null;
+  const displayedVersion = displayedVersionIndex == null ? null : versions[displayedVersionIndex] ?? null;
+  const projectAttachment = displayedVersion?.projectAttachment ?? null;
+  const canGoPrev = displayedVersionIndex != null && displayedVersionIndex > 0;
+  const canGoNext = displayedVersionIndex != null && displayedVersionIndex < versions.length - 1;
+  const presetWidth = devicePreset === "tablet" ? 768 : devicePreset === "mobile" ? 390 : null;
+  const previewScale = presetWidth && canvasSize.width > 0
+    ? Math.min(1, canvasSize.width / presetWidth)
+    : 1;
+  const scaledPreviewHeight = canvasSize.height > 0 ? canvasSize.height : 1;
+  const naturalPreviewHeight = Math.max(1, Math.floor(scaledPreviewHeight / previewScale));
+  const canvasStyle: React.CSSProperties = canvasBackground === "dark"
+    ? { backgroundColor: "#111214" }
+    : canvasBackground === "checkerboard"
+      ? {
+          backgroundColor: "#e9eaec",
+          backgroundImage: "linear-gradient(45deg, #d7d9dd 25%, transparent 25%), linear-gradient(-45deg, #d7d9dd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d7d9dd 75%), linear-gradient(-45deg, transparent 75%, #d7d9dd 75%)",
+          backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
+          backgroundSize: "16px 16px",
+        }
+      : { backgroundColor: "#e9eaec" };
+  const devicePresets = [
+    { id: "desktop", label: "Desktop", title: "Desktop — use the full preview width", iconClass: "h-2.5 w-4" },
+    { id: "tablet", label: "Tablet 768", title: "Tablet — render at 768 CSS pixels", iconClass: "h-3.5 w-2.5" },
+    { id: "mobile", label: "Mobile 390", title: "Mobile — render at 390 CSS pixels", iconClass: "h-3.5 w-2" },
+    { id: "fit", label: "Fit", title: "Fit — use all available space", iconClass: "h-2.5 w-3.5 rounded-sm border-dashed" },
+  ] as const;
+
+  const download = () => {
+    if (!editedHtml) return;
+    const downloadUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
+    const anchor = document.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = fileName;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+  };
+
+  const downloadProject = async () => {
+    if (!projectAttachment) return;
+    const response = await fetch(chatAttachmentDownloadUrl(projectAttachment.id), {
+      credentials: "include",
+      headers: { "x-user-id": userId },
+    });
+    if (!response.ok) return;
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = projectAttachment.originalFilename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const applyVisualStyle = useCallback((property: string, value: string) => {
+    if (!selection) return;
+    onManualEditsChange((current) => [
+      ...current.filter((edit) => !(
+        edit.selector === selection.selector && edit.styles && Object.hasOwn(edit.styles, property)
+      )),
+      { selector: selection.selector, styles: { [property]: value }, stale: false },
+    ]);
+  }, [onManualEditsChange, selection]);
+
+  const openInNewTab = () => {
+    if (!editedHtml) return;
+    // The generated artifact must never be the top-level blob document: blob
+    // documents inherit this app's origin. Keep the trusted top-level wrapper
+    // code-only and run the artifact in an opaque-origin sandbox instead.
+    const artifactUrl = URL.createObjectURL(new Blob([editedHtml], { type: "text/html" }));
+    const escapedArtifactUrl = artifactUrl
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+    const wrapperHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src blob:; style-src 'unsafe-inline'">
+<style>html,body,iframe{width:100%;height:100%;margin:0;border:0}body{overflow:hidden;background:#fff}</style></head>
+<body><iframe title="Design preview" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" src="${escapedArtifactUrl}"></iframe></body></html>`;
+    const wrapperUrl = URL.createObjectURL(new Blob([wrapperHtml], { type: "text/html" }));
+    window.open(wrapperUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => {
+      URL.revokeObjectURL(wrapperUrl);
+      URL.revokeObjectURL(artifactUrl);
+    }, 60_000);
+  };
+
+  const copySource = async () => {
+    if (!editedHtml) return;
+    await navigator.clipboard.writeText(editedHtml);
+    setSourceCopied(true);
+    window.setTimeout(() => setSourceCopied(false), 1800);
+  };
+
+  const cycleCanvasBackground = () => {
+    setCanvasBackground((value) => value === "light" ? "dark" : value === "dark" ? "checkerboard" : "light");
+  };
+
+  const shareFile = async () => {
+    if (!editedHtml) return;
+    const file = new File([editedHtml], fileName, { type: "text/html" });
+    try {
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: fileName.replace(/\.html?$/i, ""),
+          text: "Shared from Xyne Design Studio",
+          files: [file],
+        });
+        return;
+      }
+      download();
+    } catch (err) {
+      // Closing the native share sheet is an intentional cancel, not an error
+      // and must not unexpectedly download the file.
+      if (!(err instanceof DOMException && err.name === "AbortError")) download();
+    }
+  };
+
+  const shareUrl = shareRecord
+    ? new URL(shareRecord.sharePath, window.location.origin).toString()
+    : "";
+
+  const openShare = async () => {
+    if (source?.kind !== "attachment" || !conversationId || manualEdits.length > 0) {
+      await shareFile();
+      return;
+    }
+    setShareOpen(true);
+    setShareBusy(true);
+    setShareError(null);
+    setShareCopied(false);
+    try {
+      const record = await publishDesignArtifact({
+        attachmentId: source.attachment.id,
+        conversationId,
+        title: fileName.replace(/\.html?$/i, ""),
+        expiresInDays: null,
+      });
+      setShareRecord(record);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : "Unable to publish this design");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1800);
+  };
+
+  const sharePublicLink = async () => {
+    if (!shareUrl) return;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: shareRecord?.title ?? fileName, url: shareUrl });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+    }
+    await copyShareLink();
+  };
+
+  const revokeShare = async () => {
+    if (!shareRecord) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      await revokeDesignArtifactShare(shareRecord.id);
+      setShareRecord(null);
+      setShareOpen(false);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : "Unable to revoke this link");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  return (
+    <section
+      data-id="design-preview-panel"
+      className={fullscreen
+        ? "fixed inset-0 z-50 flex min-w-0 flex-col bg-xyne-surface-subtle"
+        : "flex min-w-0 flex-1 flex-col bg-xyne-surface-subtle"
+      }
+    >
+      {/* min-h + wrap, not a fixed 54px row: the control set outgrew one line,
+          and a fixed-height overflow-x row overlapped adjacent panels at
+          moderate widths (Design system colliding with the status label). */}
+      <header className="flex min-h-[54px] shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-xyne-border-subtle bg-xyne-surface px-4 py-2">
+        <div className="flex min-w-0 max-w-[40%] items-center gap-2">
+          <AppWindowIcon size={17} className="shrink-0 text-xyne-brand" />
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-xyne-fg-primary">{fileName}</p>
+            <p className="truncate text-[10px] uppercase tracking-[0.08em] text-xyne-fg-muted">
+              {sending ? "Updating preview" : source ? "Live design" : "Preview"}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenDesignSystem}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            <SparkleIcon size={13} /> Design system
+          </button>
+          <div data-id="design-device-presets" className="flex shrink-0 items-center rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle p-0.5">
+            {devicePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                data-id={`design-device-${preset.id}`}
+                title={preset.title}
+                aria-label={preset.title}
+                aria-pressed={devicePreset === preset.id}
+                onClick={() => setDevicePreset(preset.id)}
+                className={devicePreset === preset.id
+                  ? "inline-flex h-7 items-center gap-1.5 rounded bg-xyne-surface px-2 text-[10px] font-medium text-xyne-fg-primary shadow-sm"
+                  : "inline-flex h-7 items-center gap-1.5 rounded px-2 text-[10px] font-medium text-xyne-fg-muted hover:text-xyne-fg-primary"
+                }
+              >
+                <span aria-hidden="true" className={`${preset.iconClass} inline-block rounded-[2px] border border-current`} />
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          {versions.length > 0 && displayedVersion && (
+            <div data-id="design-version-strip" className="flex items-center gap-1 rounded-md border border-xyne-border-subtle bg-xyne-surface-subtle px-1 py-1">
+              <button
+                type="button"
+                aria-label="Previous design version"
+                disabled={!canGoPrev}
+                onClick={() => {
+                  if (displayedVersionIndex != null) onSelectVersion(displayedVersionIndex - 1);
+                }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-xyne-fg-muted hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <CaretLeftIcon size={12} />
+              </button>
+              <BaseMenu.Root>
+                <BaseMenu.Trigger
+                  render={(triggerProps) => (
+                    <button
+                      {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+                      type="button"
+                      data-id="design-version-menu-trigger"
+                      className="inline-flex h-6 min-w-[62px] items-center justify-center gap-1 rounded px-1.5 text-[11px] font-medium text-xyne-fg-secondary hover:bg-xyne-surface hover:text-xyne-fg-primary"
+                    >
+                      {displayedVersion.label} of {versions.length}
+                      <CaretDownIcon size={10} />
+                    </button>
+                  )}
+                />
+                <BaseMenu.Portal>
+                  <BaseMenu.Positioner side="bottom" align="end" sideOffset={6}>
+                    <BaseMenu.Popup className="z-50 w-64 rounded-lg border border-xyne-border bg-xyne-surface p-1 shadow-lg">
+                      {versions.map((version, index) => (
+                        <BaseMenu.Item
+                          key={`${version.messageId}:${version.label}`}
+                          data-id="design-version-menu-item"
+                          onClick={() => onSelectVersion(index)}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] outline-none hover:bg-xyne-surface-subtle data-[highlighted]:bg-xyne-surface-subtle"
+                        >
+                          <span className={index === displayedVersionIndex
+                            ? "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-brand px-1.5 text-[10px] font-semibold text-xyne-fg-inverse"
+                            : "inline-flex h-5 min-w-7 items-center justify-center rounded bg-xyne-surface-subtle px-1.5 text-[10px] font-semibold text-xyne-fg-muted"
+                          }>
+                            {version.label}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-xyne-fg-primary">{designVersionFileName(version)}</span>
+                            <span className="block truncate text-[10px] text-xyne-fg-muted">
+                              Message {version.messageIndex + 1} · {fmtDateShort(version.createdAt)}
+                            </span>
+                          </span>
+                        </BaseMenu.Item>
+                      ))}
+                    </BaseMenu.Popup>
+                  </BaseMenu.Positioner>
+                </BaseMenu.Portal>
+              </BaseMenu.Root>
+              <button
+                type="button"
+                aria-label="Next design version"
+                disabled={!canGoNext}
+                onClick={() => {
+                  if (displayedVersionIndex != null) onSelectVersion(displayedVersionIndex + 1);
+                }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-xyne-fg-muted hover:bg-xyne-surface hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <CaretRightIcon size={12} />
+              </button>
+            </div>
+          )}
+          {latestVersionAvailable && (
+            <button
+              type="button"
+              data-id="design-latest-version-jump"
+              onClick={onFollowLatest}
+              className="inline-flex h-8 items-center rounded-md border border-xyne-brand/25 bg-xyne-brand/5 px-2.5 text-[11px] font-medium text-xyne-brand transition hover:bg-xyne-brand/10"
+            >
+              Latest: {versions.at(-1)?.label}
+            </button>
+          )}
+          <button
+            type="button"
+            data-id="design-canvas-background-toggle"
+            title={`Canvas background: ${canvasBackground}. Click to cycle.`}
+            aria-label={`Canvas background: ${canvasBackground}. Click to cycle.`}
+            onClick={cycleCanvasBackground}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            <ChartBarIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-view-source-toggle"
+            title={viewSource ? "Show rendered preview" : "View HTML source"}
+            aria-label={viewSource ? "Show rendered preview" : "View HTML source"}
+            aria-pressed={viewSource}
+            disabled={!rawHtml}
+            onClick={() => setViewSource((value) => !value)}
+            className={viewSource
+              ? "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-xyne-brand text-xyne-fg-inverse"
+              : "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+            }
+          >
+            <PencilSimpleIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-inspector-toggle"
+            disabled={!previewUrl || viewSource}
+            aria-pressed={inspecting}
+            onClick={() => setInspecting((value) => !value)}
+            className={inspecting
+              ? "inline-flex h-8 items-center gap-1.5 rounded-md bg-xyne-brand px-2.5 text-[11px] font-medium text-xyne-fg-inverse"
+              : "inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+            }
+          >
+            <CursorClickIcon size={13} /> {inspecting ? "Inspecting" : "Select"}
+          </button>
+          <button
+            type="button"
+            data-id="design-refresh-preview"
+            disabled={!source}
+            onClick={() => setReloadVersion((value) => value + 1)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowsClockwiseIcon size={12} /> Refresh
+          </button>
+          <button
+            type="button"
+            data-id="design-open-new-tab"
+            title="Open current HTML in a new tab"
+            disabled={!rawHtml}
+            onClick={openInNewTab}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowSquareOutIcon size={13} />
+          </button>
+          <button
+            type="button"
+            data-id="design-fullscreen-toggle"
+            title={fullscreen ? "Exit fullscreen (Escape)" : "Open fullscreen preview"}
+            aria-label={fullscreen ? "Exit fullscreen preview" : "Open fullscreen preview"}
+            onClick={() => setFullscreen((value) => !value)}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-xyne-border-subtle text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+          >
+            {fullscreen ? <XIcon size={14} /> : <AppWindowIcon size={14} />}
+          </button>
+          <button
+            type="button"
+            disabled={!rawHtml}
+            onClick={() => { void openShare(); }}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ShareNetworkIcon size={13} /> Share
+          </button>
+          {projectAttachment && (
+            <button
+              type="button"
+              data-id="design-download-react-project"
+              onClick={() => { void downloadProject(); }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-xyne-border-subtle px-2.5 text-[11px] font-medium text-xyne-fg-secondary transition hover:border-xyne-border-strong hover:text-xyne-fg-primary"
+            >
+              <FileIcon size={13} /> React project
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!rawHtml}
+            onClick={download}
+            className="inline-flex h-8 items-center rounded-md bg-xyne-fg-primary px-3 text-[11px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Download HTML
+          </button>
+        </div>
+      </header>
+
+      {manualEdits.length > 0 && (
+        <div
+          data-id="design-manual-edits-bar"
+          className="flex h-9 shrink-0 items-center justify-end gap-2 border-b border-xyne-border-subtle bg-xyne-surface px-4 text-[11px] text-xyne-fg-secondary"
+        >
+          <span data-id="design-manual-edits-count">
+            {manualEdits.length} manual {manualEdits.length === 1 ? "edit" : "edits"}
+          </span>
+          <button
+            type="button"
+            data-id="design-manual-edits-undo"
+            onClick={() => onManualEditsChange((current) => current.slice(0, -1))}
+            className="inline-flex h-6 items-center rounded px-2 font-medium text-xyne-fg-primary hover:bg-xyne-surface-subtle"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            data-id="design-manual-edits-reset"
+            onClick={() => onManualEditsChange([])}
+            className="inline-flex h-6 items-center rounded px-2 font-medium text-xyne-fg-muted hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+          >
+            Reset
+          </button>
+        </div>
+      )}
+
+      <div
+        ref={canvasRef}
+        data-id="design-preview-canvas"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4"
+        style={canvasStyle}
+      >
+        {selection && !viewSource && (
+          <DesignStyleInspector
+            key={selection.selector}
+            selection={selection}
+            onApply={applyVisualStyle}
+            onClose={() => onSelectionChange(null)}
+          />
+        )}
+        {viewSource && editedHtml ? (
+          <div data-id="design-source-view" className="relative h-full w-full overflow-hidden rounded-lg border border-black/10 bg-[#17181a] shadow-[0_18px_55px_rgba(0,0,0,0.16)]">
+            <button
+              type="button"
+              data-id="design-copy-source"
+              onClick={() => { void copySource(); }}
+              className="absolute right-3 top-3 z-10 inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/50 px-2.5 text-[11px] font-medium text-white shadow-sm backdrop-blur hover:bg-black/70"
+            >
+              {sourceCopied ? <CheckIcon size={13} /> : <CopySimpleIcon size={13} />}
+              {sourceCopied ? "Copied" : "Copy"}
+            </button>
+            <pre className="h-full overflow-auto p-5 pr-24 font-mono text-[12px] leading-relaxed text-zinc-200">
+              <code>{editedHtml}</code>
+            </pre>
+          </div>
+        ) : previewUrl ? (
+          presetWidth ? (
+            <div
+              data-id="design-device-frame"
+              className="relative shrink-0"
+              style={{ width: presetWidth * previewScale, height: scaledPreviewHeight }}
+            >
+              <iframe
+                ref={iframeRef}
+                key={`${previewUrl}:${reloadVersion}`}
+                src={previewUrl}
+                onLoad={syncInspectorMode}
+                title="Design preview"
+                // Deliberately omit allow-same-origin: generated scripts execute
+                // in an opaque origin and cannot access Claw's cookies or DOM.
+                sandbox="allow-scripts allow-forms allow-modals"
+                referrerPolicy="no-referrer"
+                className="absolute left-1/2 top-0 rounded-[14px] border-[5px] border-black/20 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.24)]"
+                style={{
+                  width: presetWidth,
+                  height: naturalPreviewHeight,
+                  transform: `translateX(-50%) scale(${previewScale})`,
+                  transformOrigin: "top center",
+                }}
+              />
+              <span
+                data-id="design-effective-zoom"
+                className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow-sm"
+              >
+                {Math.round(previewScale * 100)}%
+              </span>
+            </div>
+          ) : (
+            <iframe
+              ref={iframeRef}
+              key={`${previewUrl}:${reloadVersion}`}
+              src={previewUrl}
+              onLoad={syncInspectorMode}
+              title="Design preview"
+              // Deliberately omit allow-same-origin: generated scripts execute
+              // in an opaque origin and cannot access Claw's cookies or DOM.
+              sandbox="allow-scripts allow-forms allow-modals"
+              referrerPolicy="no-referrer"
+              className="h-full w-full rounded-lg border border-black/10 bg-white shadow-[0_18px_55px_rgba(0,0,0,0.16)]"
+            />
+          )
+        ) : error ? (
+          <div className="max-w-sm rounded-xl border border-xyne-error/25 bg-xyne-surface p-5 text-center shadow-sm">
+            <p className="text-[13px] font-semibold text-xyne-error">Preview unavailable</p>
+            <p className="mt-1 text-[12px] text-xyne-fg-muted">{error}</p>
+          </div>
+        ) : (
+          <div className="max-w-md text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-xyne-surface shadow-sm ring-1 ring-xyne-border-subtle">
+              <AppWindowIcon size={27} className="text-xyne-brand" />
+            </div>
+            <h2 className="mt-4 text-[18px] font-semibold text-xyne-fg-primary">Create your first design</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-xyne-fg-muted">
+              Pick an agent, describe the interface, website, diagram, or visual you need, and the generated HTML will appear here.
+            </p>
+          </div>
+        )}
+        {sending && (
+          <div className="absolute bottom-7 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-xyne-border-subtle bg-xyne-surface/95 px-3 py-1.5 text-[11px] text-xyne-fg-secondary shadow-md backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-xyne-brand" />
+            Agent is updating the design
+          </div>
+        )}
+        {selection && !sending && (
+          <div className="pointer-events-none absolute bottom-7 left-1/2 max-w-[70%] -translate-x-1/2 truncate rounded-full border border-xyne-brand/30 bg-xyne-surface/95 px-3 py-1.5 text-[11px] font-medium text-xyne-fg-primary shadow-md backdrop-blur">
+            Selected: {selection.label}
+          </div>
+        )}
+      </div>
+
+      <Dialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        title="Share design"
+        description="Anyone with this unlisted link can view the published artifact."
+        maxWidth={520}
+        footer={shareRecord ? (
+          <>
+            <button
+              type="button"
+              disabled={shareBusy}
+              onClick={() => { void revokeShare(); }}
+              className="mr-auto inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium text-xyne-error hover:bg-xyne-error/10 disabled:opacity-40"
+            >
+              <LinkBreakIcon size={14} /> Revoke link
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open(shareUrl, "_blank", "noopener,noreferrer")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-xyne-border px-3 text-[12px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
+            >
+              <ArrowSquareOutIcon size={14} /> Open
+            </button>
+            <button
+              type="button"
+              onClick={() => { void sharePublicLink(); }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-xyne-fg-primary px-3 text-[12px] font-medium text-xyne-fg-inverse"
+            >
+              <ShareNetworkIcon size={14} /> Share link
+            </button>
+          </>
+        ) : undefined}
+      >
+        {shareBusy && !shareRecord ? (
+          <div className="flex items-center gap-2 rounded-lg bg-xyne-surface-subtle px-3 py-4 text-[12px] text-xyne-fg-secondary">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-xyne-brand" /> Publishing current design…
+          </div>
+        ) : shareError ? (
+          <div className="rounded-lg border border-xyne-error/25 bg-xyne-error/5 px-3 py-3 text-[12px] text-xyne-error">
+            {shareError}
+          </div>
+        ) : shareRecord ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-2">
+              <input
+                readOnly
+                aria-label="Public design link"
+                value={shareUrl}
+                onFocus={(event) => event.currentTarget.select()}
+                className="min-w-0 flex-1 bg-transparent px-1 font-mono text-[11px] text-xyne-fg-secondary outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => { void copyShareLink(); }}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-xyne-surface px-2.5 text-[11px] font-medium text-xyne-fg-primary shadow-sm ring-1 ring-xyne-border-subtle"
+              >
+                {shareCopied ? <CheckIcon size={13} /> : <CopySimpleIcon size={13} />}
+                {shareCopied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-xyne-fg-muted">
+              <span>Published version updates when you share this design again.</span>
+              <span>{shareRecord.viewCount} view{shareRecord.viewCount === 1 ? "" : "s"}</span>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+    </section>
+  );
+}
+
+export interface ChatPageV3Props {
+  mode?: "chat" | "design";
+}
+
+export function ChatPageV3({ mode = "chat" }: ChatPageV3Props) {
   const navigate = useNavigate();
   const auth = useAuth();
   const userId = auth.status === "authenticated" ? auth.user.id : "";
@@ -3280,6 +4985,10 @@ export function ChatPageV3() {
   const [conversations, setConversations]     = useState<ConversationWithAgent[]>([]);
   const [convLoading, setConvLoading]         = useState(false);
   const [inputValue, setInputValue]           = useState("");
+  const [designSelection, setDesignSelection] = useState<DesignNodeSelection | null>(null);
+  const [manualEdits, setManualEdits]         = useState<DesignManualEdit[]>([]);
+  const [editedDesignHtml, setEditedDesignHtml] = useState<string | null>(null);
+  const [designEditScope, setDesignEditScope] = useState<DesignEditScope>("element");
   const [showModal, setShowModal]             = useState(false);
   const [showDebugger, setShowDebugger]       = useState(false);
   const [debugTurnIndex, setDebugTurnIndex]   = useState<number | null>(null);
@@ -3318,6 +5027,11 @@ export function ChatPageV3() {
   const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }>>([]);
   const [litellmDefaultModel, setLitellmDefaultModel] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  // Per-chat provider fast mode — remembered per agent in localStorage so the
+  // choice sticks across reloads. ON ⇒ every turn in this chat sends speed=fast.
+  const [fastMode, setFastMode] = useState<boolean>(false);
+  // Per-chat thinking level from the composer's model menu (null = agent default).
+  const [thinkingLevel, setThinkingLevel] = useState<ChatThinkingLevel | null>(null);
   const [leftPanelWidth, setLeftPanelWidth]   = useState<number>(() => {
     try {
       const saved = localStorage.getItem("chat-left-panel-width");
@@ -3337,25 +5051,29 @@ export function ChatPageV3() {
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
 
-  // Composer attachments — images queued for upload, kept on the parent so
+  // Composer attachments — files queued for upload, kept on the parent so
   // they survive composer re-renders. previewUrl is an object URL that we
   // revoke on removal / after upload completes.
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
 
   const handleAddFiles = useCallback((files: File[]) => {
-    const additions: PendingFile[] = [];
-    for (const file of files) {
-      if (!file.type.startsWith("image/")) continue;
-      if (file.size > 25 * 1024 * 1024) continue; // 25MB cap, matches V1
-      additions.push({ file, previewUrl: URL.createObjectURL(file) });
-    }
-    if (additions.length > 0) setPendingFiles((prev) => [...prev, ...additions]);
+    setPendingFiles((prev) => {
+      const available = Math.max(0, 10 - prev.length);
+      const accepted = files
+        .filter((file) => file.size <= 25 * 1024 * 1024)
+        .slice(0, available);
+      const additions = accepted.map((file) => ({
+        file,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      }));
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
   }, []);
 
   const handleRemoveFile = useCallback((idx: number) => {
     setPendingFiles((prev) => {
       const removed = prev[idx];
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
@@ -3368,9 +5086,13 @@ export function ChatPageV3() {
 
   const handleToggleMention = useCallback(() => setMentionOpen((v) => !v), []);
   const handleAddContext = useCallback((item: ContextItem) => {
-    setSelectedContext((prev) =>
-      prev.some((c) => c.type === item.type && c.id === item.id) ? prev : [...prev, item],
-    );
+    setSelectedContext((prev) => {
+      if (prev.some((c) => c.type === item.type && c.id === item.id)) return prev;
+      if (item.type === "repository") {
+        return [...prev.filter((c) => c.type !== "repository"), item];
+      }
+      return [...prev, item];
+    });
   }, []);
   const handleRemoveContext = useCallback((item: Pick<ContextItem, "type" | "id">) => {
     setSelectedContext((prev) =>
@@ -3539,6 +5261,8 @@ export function ChatPageV3() {
    * (no litellm credential, or error) ⇒ the picker hides itself. */
   useEffect(() => {
     setSelectedModel("");
+    setThinkingLevel(null);
+    setFastMode(readStoredFastMode(activeAgentSlug));
     if (!activeAgentSlug || !userId) {
       setLitellmModels([]);
       setLitellmDefaultModel(null);
@@ -3770,6 +5494,11 @@ export function ChatPageV3() {
     [activeAgentSlug, clear],
   );
 
+  const handleUseDesignTemplate = useCallback((prompt: string) => {
+    setInputValue(prompt);
+    window.setTimeout(() => inputAreaRef.current?.focus(), 0);
+  }, []);
+
   const handleProviderChange = useCallback(async (newProvider: string) => {
     if (!activeAgentSlug) return;
     const prev = selectedProvider;
@@ -3899,15 +5628,70 @@ export function ChatPageV3() {
     return null;
   }, [messages]);
 
+  const [activeVersionIndex, setActiveVersionIndex] = useState<number | null>(null);
+  const [designSystemOpen, setDesignSystemOpen] = useState(false);
+
+  const designVersionList = useMemo(
+    () => mode === "design" ? designVersions(messages) : [],
+    [messages, mode],
+  );
+  const displayedVersionIndex = activeVersionIndex == null
+    ? designVersionList.length - 1
+    : Math.min(activeVersionIndex, designVersionList.length - 1);
+  const displayedDesignVersion = displayedVersionIndex >= 0 ? designVersionList[displayedVersionIndex] ?? null : null;
+  const designPreviewSource = displayedDesignVersion?.source ?? null;
+  const designVersionByMessageId = useMemo(() => {
+    const next = new Map<string, DesignVersion>();
+    for (const version of designVersionList) next.set(version.messageId, version);
+    return next;
+  }, [designVersionList]);
+  const latestVersionAvailable = activeVersionIndex != null && activeVersionIndex < designVersionList.length - 1;
+
+  useEffect(() => {
+    setActiveVersionIndex(null);
+  }, [conversationId, mode]);
+
+  useEffect(() => {
+    if (activeVersionIndex != null && activeVersionIndex >= designVersionList.length) {
+      setActiveVersionIndex(designVersionList.length > 0 ? designVersionList.length - 1 : null);
+    }
+  }, [activeVersionIndex, designVersionList.length]);
+
+  const handleDesignSelection = useCallback((selection: DesignNodeSelection | null) => {
+    setDesignSelection(selection);
+    if (selection) {
+      setDesignEditScope("element");
+      window.setTimeout(() => inputAreaRef.current?.focus(), 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    setDesignSelection(null);
+  }, [displayedVersionIndex]);
+
+  useEffect(() => {
+    setManualEdits([]);
+    setEditedDesignHtml(null);
+  }, [conversationId, displayedDesignVersion?.messageId, mode]);
+
+  const handleFastModeChange = useCallback((enabled: boolean) => {
+    setFastMode(enabled);
+    if (activeAgentSlug) writeStoredFastMode(activeAgentSlug, enabled);
+  }, [activeAgentSlug]);
+  // Only an explicit ON is sent — OFF means "whatever the agent is configured
+  // with", so the agent-level setting still applies.
+  const speedOverride = fastMode ? ("fast" as const) : undefined;
+  const thinkingOverride = thinkingLevel ?? undefined;
+
   const handleRegenerate = useCallback((assistantMessageId: string) => {
     if (!activeAgentSlug || sending) return;
-    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined);
-  }, [activeAgentSlug, sending, regenerate, userId, selectedModel]);
+    void regenerate(activeAgentSlug, userId, assistantMessageId, selectedModel || undefined, speedOverride, thinkingOverride);
+  }, [activeAgentSlug, sending, regenerate, userId, selectedModel, speedOverride, thinkingOverride]);
 
   const handleEditUserMessage = useCallback((userMessageId: string, text: string) => {
     if (!activeAgentSlug || sending) return;
-    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined);
-  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel]);
+    void editLatestUserMessage(activeAgentSlug, userId, userMessageId, text, selectedModel || undefined, speedOverride, thinkingOverride);
+  }, [activeAgentSlug, sending, editLatestUserMessage, userId, selectedModel, speedOverride, thinkingOverride]);
 
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
@@ -3917,11 +5701,16 @@ export function ChatPageV3() {
     // behaviour as V1. Block while a stream is already in flight.
     if (!activeAgentSlug || sending) return;
     if (!text && !hasFiles && !hasContext) return;
+    if (mode === "design" && manualEdits.length > 0 && !editedDesignHtml) return;
 
     // Snapshot composer state and clear immediately for snappy UX.
     const filesSnapshot = pendingFiles.map((p) => p.file);
     const previewsToRevoke = pendingFiles.map((p) => p.previewUrl);
-    const contextSnapshot: AttachedContextRef[] = selectedContext.map((item) => ({
+    const selectedSnapshot = [...selectedContext];
+    const repositoryContext = selectedSnapshot.find((item) => item.type === "repository");
+    const contextSnapshot: AttachedContextRef[] = selectedSnapshot
+      .filter((item) => item.type !== "repository")
+      .map((item) => ({
       type: item.type,
       id: item.id,
       title: item.title,
@@ -3929,23 +5718,51 @@ export function ChatPageV3() {
       item.meta["conversationId"].trim().length > 0
         ? { threadId: item.meta["conversationId"].trim() }
         : {}),
-    }));
+    } as AttachedContextRef));
+    const designSelectionSnapshot = mode === "design" && designSelection
+      ? { ...designSelection, scope: designEditScope }
+      : undefined;
+    const manualEditsSnapshot = mode === "design" ? manualEdits : [];
+    const editedHtmlSnapshot = manualEditsSnapshot.length > 0 ? editedDesignHtml : null;
+    const designArtifactAttachmentId = mode === "design" && manualEditsSnapshot.length === 0 && designPreviewSource?.kind === "attachment"
+      ? designPreviewSource.attachment.id
+      : undefined;
+    const editedBaseFile = editedHtmlSnapshot
+      ? new File(
+          [editedHtmlSnapshot],
+          `${(designPreviewSource?.kind === "attachment"
+            ? designPreviewSource.attachment.originalFilename
+            : designPreviewSource?.fileName ?? "xyne-design").replace(/\.html?$/i, "") || "xyne-design"}-edited.html`,
+          { type: "text/html" },
+        )
+      : null;
+    const designCompatibilityInstruction = designSelectionSnapshot
+      ? [
+          DESIGN_STUDIO_COMPAT_INSTRUCTION,
+          `Selected node fallback — scope=${designSelectionSnapshot.scope}; selector=${designSelectionSnapshot.selector}; ` +
+            `node=${designSelectionSnapshot.tagName}; label=${designSelectionSnapshot.label}; ` +
+            `current styles=${JSON.stringify(designSelectionSnapshot.styles)}. Apply the user's request to that node. ` +
+            "For component or design-system scope, change the shared rule and all matching instances rather than adding one inline override.",
+        ].join("\n\n")
+      : DESIGN_STUDIO_COMPAT_INSTRUCTION;
     const placeholderText =
       text ||
       (hasFiles
-        ? `Sent ${filesSnapshot.length} image${filesSnapshot.length !== 1 ? "s" : ""}`
+        ? `Attached ${filesSnapshot.length} file${filesSnapshot.length !== 1 ? "s" : ""}`
         : `Attached ${contextSnapshot.length} context item${contextSnapshot.length !== 1 ? "s" : ""}`);
 
     setInputValue("");
     setPendingFiles([]);
     setSelectedContext([]);
     setMentionOpen(false);
+    if (mode === "design" && manualEditsSnapshot.length === 0) setActiveVersionIndex(null);
 
     const dispatch = async () => {
       let uploadedIds: string[] = [];
-      if (filesSnapshot.length > 0) {
+      const filesToUpload = editedBaseFile ? [...filesSnapshot, editedBaseFile] : filesSnapshot;
+      if (filesToUpload.length > 0) {
         try {
-          const uploaded = await uploadChatAttachments(activeAgentSlug, userId, filesSnapshot);
+          const uploaded = await uploadChatAttachments(activeAgentSlug, userId, filesToUpload);
           uploadedIds = uploaded.map((a) => a.id);
         } catch (err) {
           console.error("[chat] upload failed:", err);
@@ -3953,14 +5770,11 @@ export function ChatPageV3() {
           setPendingFiles((prev) => [
             ...filesSnapshot.map((f, i) => ({
               file: f,
-              previewUrl: previewsToRevoke[i] ?? URL.createObjectURL(f),
+              previewUrl: previewsToRevoke[i] ?? (f.type.startsWith("image/") ? URL.createObjectURL(f) : null),
             })),
             ...prev,
           ]);
-          setSelectedContext((prev) => [
-            ...contextSnapshot.map((c) => ({ id: c.id, type: c.type, title: c.title } as ContextItem)),
-            ...prev,
-          ]);
+          setSelectedContext((prev) => [...selectedSnapshot, ...prev]);
           setInputValue(text);
           return;
         }
@@ -3970,9 +5784,26 @@ export function ChatPageV3() {
         await send(activeAgentSlug, userId, placeholderText, {
           attachmentIds: uploadedIds.length > 0 ? uploadedIds : undefined,
           attachedContext: contextSnapshot.length > 0 ? contextSnapshot : undefined,
+          ...(mode === "design" ? { studioMode: "design" as const } : {}),
+          ...(mode === "design" ? { additionalInstructions: designCompatibilityInstruction } : {}),
+          // A materialized manual-edit upload is the revision base; sending the prior artifact too would duplicate it.
+          ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
+          ...(designSelectionSnapshot ? { designSelection: designSelectionSnapshot } : {}),
+          ...(repositoryContext ? {
+            researchContext: { type: "repository", id: repositoryContext.id, name: repositoryContext.title },
+          } : {}),
           // Per-chat model switch: pin the picked LiteLLM model for this turn.
           ...(selectedModel ? { modelOverride: selectedModel } : {}),
+          // Per-chat provider fast mode (composer toggle).
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          // Per-chat thinking level (composer model menu).
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
         });
+        if (designSelectionSnapshot) setDesignSelection(null);
+        if (manualEditsSnapshot.length > 0) {
+          setManualEdits([]);
+          setActiveVersionIndex(null);
+        }
         listChatConversations(activeAgentSlug, userId)
           .then((convs) => setConversations(convs.map((c) => ({ ...c, agentSlug: activeAgentSlug }))))
           .catch(() => {});
@@ -3980,14 +5811,14 @@ export function ChatPageV3() {
         // Revoke object URLs whether send succeeded or not — they're a memory leak.
         previewsToRevoke.forEach((u) => {
           try {
-            URL.revokeObjectURL(u);
+            if (u) URL.revokeObjectURL(u);
           } catch {}
         });
       }
     };
 
     void dispatch();
-  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send]);
+  }, [inputValue, pendingFiles, selectedContext, activeAgentSlug, userId, sending, send, mode, selectedModel, speedOverride, thinkingOverride, designSelection, designEditScope, designPreviewSource, manualEdits, editedDesignHtml]);
 
   const handleApproveAction = useCallback(async (msgId: string, action: PendingAction) => {
     if (!activeAgentSlug) throw new Error("No active agent selected");
@@ -4066,10 +5897,6 @@ export function ChatPageV3() {
             onPickAgent={() => setShowModal(true)}
             onClearAgent={handleClearAgent}
             onProviderChange={handleProviderChange}
-            litellmModels={litellmModels}
-            litellmDefaultModel={litellmDefaultModel}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
             onNewConversation={handleNewConversation}
             onSelectConv={handleSelectConv}
             onTogglePin={handleTogglePin}
@@ -4090,7 +5917,37 @@ export function ChatPageV3() {
 
         {activeAgent ? (
           <>
-            <div className="flex flex-1 min-w-0 overflow-hidden">
+            {mode === "design" && (
+              <DesignPreviewPanel
+                source={designPreviewSource}
+                versions={designVersionList}
+                activeVersionIndex={activeVersionIndex}
+                latestVersionAvailable={latestVersionAvailable}
+                userId={userId}
+                sending={sending}
+                conversationId={conversationId ?? null}
+                selection={designSelection}
+                manualEdits={manualEdits}
+                onSelectVersion={setActiveVersionIndex}
+                onFollowLatest={() => setActiveVersionIndex(null)}
+                onSelectionChange={handleDesignSelection}
+                onManualEditsChange={setManualEdits}
+                onEditedHtmlChange={setEditedDesignHtml}
+                onOpenDesignSystem={() => setDesignSystemOpen(true)}
+              />
+            )}
+            {mode === "design" && (
+              <DesignSystemSheet
+                open={designSystemOpen}
+                agentSlug={activeAgent.slug}
+                agentName={activeAgent.name}
+                onClose={() => setDesignSystemOpen(false)}
+              />
+            )}
+            <div className={mode === "design"
+              ? "flex w-[min(560px,44%)] min-w-[360px] shrink-0 overflow-hidden border-l border-xyne-border-subtle"
+              : "flex flex-1 min-w-0 overflow-hidden"
+            }>
               <div
                 data-id="chat-center-panel"
                 className="flex min-w-0 flex-1 flex-col overflow-hidden bg-xyne-surface-subtle"
@@ -4112,7 +5969,14 @@ export function ChatPageV3() {
                   }}
                 />
 
-                {messages.length === 0 && !sending ? (
+                {messages.length === 0 && !sending && mode === "design" ? (
+                  <DesignGallery
+                    conversations={conversations.filter((conv) => conv.agentSlug === activeAgent.slug)}
+                    userId={userId}
+                    onSelectConversation={handleSelectConv}
+                    onUseTemplate={handleUseDesignTemplate}
+                  />
+                ) : messages.length === 0 && !sending ? (
                   <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
                     <ChatCircleIcon size={48} className="text-xyne-brand" />
                     <p className="text-[15px] font-medium text-xyne-fg-primary">{activeAgent.name}</p>
@@ -4167,7 +6031,52 @@ export function ChatPageV3() {
                     onApproveAction={handleApproveAction}
                     onApproveAndContinueAction={handleApproveAndContinueAction}
                     onDeclineAction={handleDeclineAction}
+                    hideHtmlSource={mode === "design"}
+                    designVersionByMessageId={mode === "design" ? designVersionByMessageId : undefined}
+                    onSelectDesignVersion={mode === "design" ? setActiveVersionIndex : undefined}
                   />
+                )}
+
+                {mode === "design" && designSelection && (
+                  <div className="mx-3 mb-2 rounded-lg border border-xyne-brand/25 bg-xyne-surface px-3 py-2 shadow-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <CursorClickIcon size={13} className="shrink-0 text-xyne-brand" />
+                          <p className="truncate text-[11px] font-semibold text-xyne-fg-primary">{designSelection.label}</p>
+                        </div>
+                        <p className="mt-0.5 truncate font-mono text-[10px] text-xyne-fg-muted">{designSelection.selector}</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Clear selected design element"
+                        onClick={() => setDesignSelection(null)}
+                        className="rounded p-0.5 text-xyne-fg-muted hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary"
+                      >
+                        <XIcon size={13} />
+                      </button>
+                    </div>
+                    <div className="mt-2 flex gap-1" aria-label="Design edit scope">
+                      {([
+                        ["element", "This element"],
+                        ["component", "Component"],
+                        ["design-system", "Design system"],
+                      ] as const).map(([scope, label]) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          aria-pressed={designEditScope === scope}
+                          onClick={() => setDesignEditScope(scope)}
+                          className={designEditScope === scope
+                            ? "rounded-md bg-xyne-brand px-2 py-1 text-[10px] font-medium text-xyne-fg-inverse"
+                            : "rounded-md bg-xyne-surface-subtle px-2 py-1 text-[10px] font-medium text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 <InputArea
@@ -4187,6 +6096,19 @@ export function ChatPageV3() {
                   onRemoveContext={handleRemoveContext}
                   mentionOpen={mentionOpen}
                   onToggleMention={handleToggleMention}
+                  fastMode={fastMode}
+                  onToggleFastMode={handleFastModeChange}
+                  modelMenu={
+                    <ModelThinkingMenu
+                      models={litellmModels}
+                      defaultModel={litellmDefaultModel}
+                      selectedModel={selectedModel}
+                      onSelectModel={setSelectedModel}
+                      thinkingLevel={thinkingLevel}
+                      onSelectThinking={setThinkingLevel}
+                      disabled={sending}
+                    />
+                  }
                   renderMentionPicker={() => (
                     <ContextPicker
                       slug={activeAgent.slug}

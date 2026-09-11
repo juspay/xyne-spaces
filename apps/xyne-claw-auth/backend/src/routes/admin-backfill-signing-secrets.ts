@@ -25,6 +25,7 @@
  *   - SPACES_DB_URL configured with GRANT SELECT ON public.installed_apps
  */
 import { createHash } from "node:crypto";
+import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -98,7 +99,7 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
         const p = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
         stored = { ok: true, fp: fingerprint(p), len: p.length };
       } catch (err) {
-        stored = { ok: false, error: err instanceof Error ? err.message : String(err) };
+        stored = { ok: false, error: errMsg(err) };
       }
     }
   }
@@ -119,7 +120,7 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
         db = { ok: true, fp: fingerprint(p), len: p.length };
       }
     } catch (err) {
-      db = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      db = { ok: false, error: errMsg(err) };
     }
   }
 

@@ -9,7 +9,15 @@ const DAY_MS = 86_400_000;
 const PAGE_SIZE = 500;
 const DEFAULT_MIN_AGE_DAYS = 14;
 const DEFAULT_MAX_INVALIDATIONS = 2_000;
-const RETAINABLE_SOURCE_TAGS = new Set(["source:session-ingest", "source:claude-upload"]);
+// Every upload source must be listed, or its memories are permanently exempt
+// from the zero-hit sweep and accumulate forever (PR #333 added opencode/codex
+// uploads without extending this set).
+const RETAINABLE_SOURCE_TAGS = new Set([
+  "source:session-ingest",
+  "source:claude-upload",
+  "source:opencode-upload",
+  "source:codex-upload",
+]);
 const WARMUP_TAG = "warmup-tuning";
 
 /**

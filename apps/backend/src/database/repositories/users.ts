@@ -45,7 +45,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'feed');
     // } catch (error) {
     //   // Log error but don't fail the user creation
-    //   console.error('Failed to queue user for Vespa ingestion:', error);
     // }
 
     return user;
@@ -54,6 +53,19 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
   async findById(id: string): Promise<User | null> {
     return await this.db.user.findUnique({
       where: { id },
+    });
+  }
+
+  /**
+   * Resolve a caller-supplied user id, scoped to the caller's workspace. Use this
+   * for ids from a request body: `findById` matches installation-wide, so it would
+   * let a member reference any user in any workspace. Returns null both when the
+   * user does not exist and when they exist elsewhere, so the two cannot be told
+   * apart to enumerate accounts.
+   */
+  async findByIdInWorkspace(id: string, workspaceId: string): Promise<User | null> {
+    return await this.db.user.findFirst({
+      where: { id, workspaceId },
     });
   }
 
@@ -147,7 +159,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'update');
     // } catch (error) {
     //   // Log error but don't fail the user update
-    //   console.error('Failed to queue user update for Vespa ingestion:', error);
     // }
 
     return user;
@@ -169,7 +180,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //     await queueUserIngestion(user, 'delete');
     //   } catch (error) {
     //     // Log error but don't fail the user deletion
-    //     console.error('Failed to queue user deletion for Vespa:', error);
     //   }
     // }
 
@@ -254,6 +264,23 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
       where: { status },
       orderBy: { email: 'asc' },
     });
+  }
+
+  /**
+   * Resolve ids to ACTIVE users, reporting the first id that does not resolve.
+   */
+  async findActiveByIds(userIds: string[]): Promise<{ users: User[]; missingUserId: string | null }> {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) {
+      return { users: [], missingUserId: null };
+    }
+
+    const users = await this.db.user.findMany({
+      where: { id: { in: ids }, status: UserStatus.ACTIVE },
+    });
+
+    const found = new Set(users.map(user => user.id));
+    return { users, missingUserId: ids.find(id => !found.has(id)) ?? null };
   }
 
   /**
@@ -389,7 +416,6 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     //   await queueUserIngestion(user, 'update');
     // } catch (error) {
     //   // Log error but don't fail the status update
-    //   console.error('Failed to queue user status update for Vespa ingestion:', error);
     // }
 
     return user;
@@ -439,6 +465,21 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     return await tx.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, name: true, displayName: true },
+    });
+  }
+
+  /**
+   * Emails for a set of user ids, in one query. Used when a fan-out needs to
+   * address people outside Xyne — e.g. building the attendee list for a
+   * Google Calendar invite. Only ACTIVE members who have not left are
+   * returned, so a departed teammate is never re-invited.
+   */
+  async getEmailsByIds(userIds: string[]): Promise<Array<{ id: string; email: string }>> {
+    if (userIds.length === 0) return [];
+
+    return await this.db.user.findMany({
+      where: { id: { in: userIds }, status: UserStatus.ACTIVE, leftAt: null },
+      select: { id: true, email: true },
     });
   }
 }

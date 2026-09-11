@@ -273,31 +273,6 @@ export interface JiraMigrationMoveChannelProjectResponse {
   } | null;
 }
 
-export interface JiraMigrationChangeTicketCreatedByRequest {
-  ticketId: string;
-  newCreatedByUserId: string;
-  updatedAt?: string;
-  cascadeConversationAndMessages?: boolean;
-}
-
-export interface JiraMigrationChangeTicketCreatedByResponse {
-  updatedCount: number;
-  cascadeConversationAndMessages?: boolean;
-  conversationUpdatedCount?: number;
-  messageUpdatedCount?: number;
-  attachmentUpdatedCount?: number;
-  ticket: {
-    id: string;
-    xyneId: string;
-    title: string;
-    projectId: string;
-    channelId: string;
-    createdBy: string;
-    updatedBy: string;
-    updatedAt: string;
-  } | null;
-}
-
 export interface JiraMigrationMoveJiraProjectBoardRequest {
   jiraProjectKey: string;
   channelId: string;
@@ -508,16 +483,6 @@ class JiraMigrationService {
       success: true;
       data: JiraMigrationMoveChannelProjectResponse;
     }>(`${JIRA_MIGRATION_BASE_URL}/move-channel-project`, payload);
-    return response.data.data;
-  }
-
-  async changeTicketCreatedBy(
-    payload: JiraMigrationChangeTicketCreatedByRequest,
-  ): Promise<JiraMigrationChangeTicketCreatedByResponse> {
-    const response = await apiInstance.post<{
-      success: true;
-      data: JiraMigrationChangeTicketCreatedByResponse;
-    }>(`${JIRA_MIGRATION_BASE_URL}/change-ticket-created-by`, payload);
     return response.data.data;
   }
 

@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -100,13 +101,17 @@ export const MessageRepliedActivityV2 = ({
           showAvatar={false}
           variant='default'
           contentOnly={true}
+          disableLinks={true}
         />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          <RenderMessageWithHTML
-            message={latestReplyMessage.content}
-            showEdited={latestReplyMessage.edited}
-          />
+          {getFlowJsonPreviewText(latestReplyMessage.content) ?? (
+            <RenderMessageWithHTML
+              message={latestReplyMessage.content}
+              showEdited={latestReplyMessage.edited}
+              disableLinks
+            />
+          )}
         </div>
       )}
     </ActivityItemCard>

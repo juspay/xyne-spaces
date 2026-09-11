@@ -23,11 +23,12 @@
  * rendered unit is prefixed to tell the curator to extract facts about the user
  * only. Nothing co-participant is stored verbatim as the user's memory.
  *
- * Flag-gated: only runs when TWIN_CONTEXT_ASSEMBLER=1 (else the legacy flat
- * `fetchUserMessages` path is used), so the two can be A/B'd safely.
+ * Enabled by default. Set TWIN_CONTEXT_ASSEMBLER=0/false/off/no to use the
+ * legacy flat `fetchUserMessages` path for rollback or comparison.
  */
 
 import type { UserMemoryChannelType, UserMemoryRecord, UserMemoryThreadContext } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { interact } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
@@ -74,9 +75,8 @@ const MAX_CONVERSATIONS = Number(process.env["TWIN_ASM_MAX_CONVERSATIONS"] ?? 10
 /** Cap on how many of those get a FULL thread fetch. */
 const MAX_THREAD_FETCHES = Number(process.env["TWIN_ASM_MAX_THREADS"] ?? 1000);
 /** Max messages FETCHED per thread from Vespa (the whole thread, so behaviour
- *  derivation + smart-select see everything). 400 = Vespa's per-query hit ceiling.
- *  One conv per query (VESPA_THREAD_CHUNK=1) so a hot thread can't starve others
- *  sharing a chunk's budget — full coverage over fewer round-trips. */
+ *  derivation + smart-select see everything). 400 = Vespa's per-query hit ceiling,
+ *  so a thread given a query to itself can never be starved by a neighbour. */
 const THREAD_FETCH_CAP = 400;
 /** Above this many messages a thread is SMART-SELECTED for rendering (first N +
  *  last N + a ±window around each of the user's own turns) instead of rendered in
@@ -87,9 +87,10 @@ const THREAD_RENDER_CAP = 80;
 const THREAD_SELECT_HEAD = 20;
 const THREAD_SELECT_TAIL = 20;
 const THREAD_SELECT_USER_WINDOW = 5;
-/** Conversations per direct-Vespa thread-fetch query. chunk × THREAD_FETCH_CAP
- *  MUST stay ≤ Vespa's hard per-query hit ceiling of 400 (1 × 400 = 400). */
-const VESPA_THREAD_CHUNK = 1;
+/** Vespa's per-query hit ceiling — a thread-fetch chunk packs up to this. */
+const VESPA_MAX_HITS = 400;
+/** Headroom per conversation so small `replyCount` drift doesn't force a refetch. */
+const THREAD_SIZE_SLACK = 4;
 /** Parallelism for per-thread fetches (keep gentle on Spaces). */
 const THREAD_FETCH_CONCURRENCY = Number(process.env["TWIN_ASM_THREAD_CONCURRENCY"] ?? 6);
 
@@ -119,8 +120,8 @@ const MENTION_ACTIONS = ["mentioned_user", "group_mention"];
 
 // ─── Flag ────────────────────────────────────────────────────────────────
 export function isContextAssemblerEnabled(): boolean {
-  const v = process.env["TWIN_CONTEXT_ASSEMBLER"];
-  return v === "1" || v === "true";
+  const value = process.env["TWIN_CONTEXT_ASSEMBLER"]?.trim().toLowerCase();
+  return !value || !["0", "false", "off", "no"].includes(value);
 }
 
 // ─── Loose Spaces row shapes (flat scalar rows from /api/query/claw) ───────
@@ -212,6 +213,56 @@ function channelTypeOf(scopeType?: string | null, visibility?: string | null): U
   if (s === "DM") return "dm";
   if (s === "GROUP_DM") return "group_dm";
   return (visibility ?? "").toUpperCase() === "PRIVATE" ? "private" : "public";
+}
+
+/**
+ * A DM / group-DM has no human-authored channel name, so Spaces stores the
+ * participant id list as the name — e.g. "cmsr…,cmsr…". Detect that shape so
+ * the curator prompt can show people instead of opaque ids.
+ *
+ * Gated on channel TYPE as well as the pattern: a public channel legitimately
+ * named like an id must keep its real name.
+ */
+const ID_LIST_RE = /^[A-Za-z0-9_-]{16,40}(?:,[A-Za-z0-9_-]{16,40})*$/;
+
+function dmParticipantIds(
+  channelName: string | undefined,
+  channelType: UserMemoryChannelType,
+): string[] {
+  if (!channelName) return [];
+  if (channelType !== "dm" && channelType !== "group_dm") return [];
+  if (!ID_LIST_RE.test(channelName)) return [];
+  return channelName.split(",");
+}
+
+/** Names listed in a DM label before it collapses to "+N more". */
+const DM_NAME_CAP = 4;
+
+/**
+ * The channel label the curator sees. For DMs this turns the stored id list
+ * into the other participants' display names ("#Mei Tanaka"); every other
+ * channel keeps its real name untouched.
+ *
+ * Ids that didn't resolve are COUNTED but not named — rendering them via
+ * `nameOf` would print "someone, someone", which reads as real people to the
+ * LLM. If nothing resolves we return the raw name rather than inventing one.
+ * Resolution is pure map lookup against the names already fetched for message
+ * authors, so this costs no additional query.
+ */
+function channelLabel(
+  rawName: string | undefined,
+  channelType: UserMemoryChannelType,
+  userId: string,
+  nameById: Map<string, string>,
+): string | undefined {
+  const ids = dmParticipantIds(rawName, channelType);
+  if (ids.length === 0) return rawName;
+  const others = ids.filter((id) => id !== userId);
+  const names = others.map((id) => nameById.get(id)).filter((n): n is string => !!n);
+  if (names.length === 0) return rawName;
+  const shown = names.slice(0, DM_NAME_CAP);
+  const hidden = others.length - shown.length;
+  return shown.join(", ") + (hidden > 0 ? ` +${hidden} more` : "");
 }
 
 /** Strip mention tokens / HTML to a plain readable line. */
@@ -492,48 +543,107 @@ async function fetchMessagesByIds(auth: SpacesAuthContext, ids: string[]): Promi
  *  (they render lightweight), never throws. Returns cid → messages (asc, capped).
  *  Vespa is eventually-consistent — fine here since backfill/daily read past
  *  windows, not the live edge. */
+/**
+ * Pack conversations into chunks that each fit one Vespa query.
+ *
+ * The limit is a HIT budget and the query sorts by recency across the whole
+ * chunk, so an overflowing chunk starves its oldest conversation. `replyCount`
+ * (already fetched) tells us each thread's size, so small threads can share a
+ * query while a big one gets its own. Unknown size → charged the full cap, which
+ * is the old one-per-query behaviour.
+ */
+export function packThreadChunks(convIds: string[], sizeOf: (cid: string) => number): string[][] {
+  const chunks: string[][] = [];
+  let cur: string[] = [];
+  let curHits = 0;
+  for (const cid of convIds) {
+    const size = Math.min(THREAD_FETCH_CAP, Math.max(1, sizeOf(cid)));
+    if (cur.length > 0 && curHits + size > VESPA_MAX_HITS) {
+      chunks.push(cur);
+      cur = [];
+      curHits = 0;
+    }
+    cur.push(cid);
+    curHits += size;
+  }
+  if (cur.length > 0) chunks.push(cur);
+  return chunks;
+}
+
 async function fetchThreadsBatch(
   userId: string,
   workspaceId: string,
   convIds: string[],
+  /** Expected message count per conversation. */
+  sizeOf: (cid: string) => number,
 ): Promise<Map<string, MsgRow[]>> {
   const byConv = new Map<string, MsgRow[]>();
-  const chunks: string[][] = [];
-  for (let i = 0; i < convIds.length; i += VESPA_THREAD_CHUNK) {
-    chunks.push(convIds.slice(i, i + VESPA_THREAD_CHUNK));
-  }
+
+  /** One Vespa read. False = the result filled the budget, so it may be trimmed. */
+  const fetchChunk = async (chunk: string[], hits: number): Promise<boolean> => {
+    const built = buildYqlFromParams(
+      {
+        searchArea: "message",
+        filters: { conversationId: { in: chunk } },
+        sort: { by: "createdDate", dir: "desc" },
+        hits,
+      },
+      userId,
+      workspaceId,
+    );
+    const resp = (await queryDirect(
+      built.yql,
+      built.query,
+      userId,
+      hits,
+      0,
+      CONFIG.vespaQueryEndpoint,
+      built.rankProfile,
+      undefined,
+      workspaceId,
+      true, // includeRawFields — we read the raw chat_message doc
+    )) as unknown as { data?: { results?: Array<Record<string, unknown>> } };
+    const results = resp?.data?.results ?? [];
+    for (const r of results) {
+      const row = vespaHitToMsgRow(r);
+      if (!row || row.isDeleted) continue;
+      const list = byConv.get(row.conversationId);
+      if (list) list.push(row);
+      else byConv.set(row.conversationId, [row]);
+    }
+    return results.length < hits;
+  };
+
+  const chunks = packThreadChunks(convIds, sizeOf);
+  logger.info("[assembler] thread-fetch packed", {
+    userId,
+    conversations: convIds.length,
+    queries: chunks.length,
+  });
 
   await mapPool(chunks, THREAD_FETCH_CONCURRENCY, async (chunk) => {
+    const hits = Math.min(
+      VESPA_MAX_HITS,
+      chunk.reduce((n, cid) => n + Math.min(THREAD_FETCH_CAP, Math.max(1, sizeOf(cid))), 0),
+    );
     try {
-      const hits = chunk.length * THREAD_FETCH_CAP;
-      const built = buildYqlFromParams(
-        {
-          searchArea: "message",
-          filters: { conversationId: { in: chunk } },
-          sort: { by: "createdDate", dir: "desc" },
-          hits,
-        },
-        userId,
-        workspaceId,
-      );
-      const resp = (await queryDirect(
-        built.yql,
-        built.query,
-        userId,
-        hits,
-        0,
-        CONFIG.vespaQueryEndpoint,
-        built.rankProfile,
-        undefined,
-        workspaceId,
-        true, // includeRawFields — we read the raw chat_message doc
-      )) as unknown as { data?: { results?: Array<Record<string, unknown>> } };
-      for (const r of resp?.data?.results ?? []) {
-        const row = vespaHitToMsgRow(r);
-        if (!row || row.isDeleted) continue;
-        const list = byConv.get(row.conversationId);
-        if (list) list.push(row);
-        else byConv.set(row.conversationId, [row]);
+      const complete = await fetchChunk(chunk, hits);
+      // `replyCount` can lag reality. If the read came back full we can't tell
+      // what was trimmed, so redo those conversations one at a time — where a
+      // full cap each makes trimming impossible.
+      if (!complete && chunk.length > 1) {
+        logger.info("[assembler] thread-fetch chunk hit the hit budget — refetching singly", {
+          userId,
+          size: chunk.length,
+        });
+        for (const cid of chunk) byConv.delete(cid);
+        await mapPool(chunk, THREAD_FETCH_CONCURRENCY, async (cid) => {
+          try {
+            await fetchChunk([cid], THREAD_FETCH_CAP);
+          } catch (e) {
+            logger.info("[assembler] vespa thread-refetch failed", { cid, err: String(e) });
+          }
+        });
       }
     } catch (e) {
       logger.info("[assembler] vespa thread-fetch chunk failed", { size: chunk.length, err: String(e) });
@@ -673,8 +783,17 @@ export async function assembleConversationUnits(
   // source-of-truth psql — see fetchThreadsBatch. workspaceId (resolved above)
   // gates the tenant scope; without it we skip thread-fetch (convs render
   // lightweight) rather than run unscoped.
+  //    Expected size per conversation so the fetch can batch small threads.
+  //    replyCount counts replies, so +1 for the root; unknown → full cap.
+  const expectedThreadSize = (cid: string): number => {
+    const replies = convById.get(cid)?.replyCount;
+    return typeof replies === "number" && replies >= 0
+      ? replies + 1 + THREAD_SIZE_SLACK
+      : THREAD_FETCH_CAP;
+  };
+
   const threadByConv = workspaceId
-    ? await fetchThreadsBatch(userId, workspaceId, interestingIds)
+    ? await fetchThreadsBatch(userId, workspaceId, interestingIds, expectedThreadSize)
     : new Map<string, MsgRow[]>();
   if (!workspaceId) {
     logger.warn("[assembler] no workspaceId — skipping Vespa thread-fetch (lightweight units)", { userId });
@@ -692,6 +811,16 @@ export async function assembleConversationUnits(
   for (const list of threadByConv.values()) for (const m of list) senderIds.add(m.senderId);
   for (const a of mentions) if (a.actorId) senderIds.add(a.actorId);
   for (const m of parentMsgs) senderIds.add(m.senderId);
+  // DM participants who never spoke in the window aren't message authors, so
+  // fold them in here — this WIDENS the single fetchUsers call below rather
+  // than adding a second one, and it's what lets channelLabel() name everyone
+  // in the conversation instead of only the people with a line in it.
+  for (const cid of convIds) {
+    const c = convById.get(cid);
+    const ch = c?.channelId ? chanById.get(c.channelId) : undefined;
+    const ids = dmParticipantIds(ch?.name ?? undefined, channelTypeOf(ch?.scopeType, ch?.visibility));
+    for (const id of ids) senderIds.add(id);
+  }
   const userRows = await fetchUsers(auth, Array.from(senderIds)).catch(() => [] as UserRow[]);
   const nameById = new Map(userRows.map((u) => [u.id, u.name || u.email || u.id]));
   const nameOf = (id: string): string => (id === userId ? "you" : nameById.get(id) ?? "someone");
@@ -704,8 +833,8 @@ export async function assembleConversationUnits(
   for (const cid of convIds) {
     const conv = convById.get(cid);
     const chan = conv?.channelId ? chanById.get(conv.channelId) : undefined;
-    const channelName = chan?.name ?? undefined;
     const channelType = channelTypeOf(chan?.scopeType, chan?.visibility);
+    const channelName = channelLabel(chan?.name ?? undefined, channelType, userId, nameById);
 
     // Thread messages: fetched for interesting convs; else the user's own
     // messages in this conv (lightweight).
@@ -916,7 +1045,7 @@ async function persistBehaviorSignals(rows: BehaviorSignalRow[]): Promise<void> 
       logger.warn("[assembler] persist behavior signal failed", {
         userId: r.userId,
         sourceMessageId: r.sourceMessageId,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMsg(err),
       });
     }
   }

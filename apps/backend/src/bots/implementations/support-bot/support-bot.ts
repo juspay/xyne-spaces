@@ -284,7 +284,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
    */
   public async validateChannel(channelId: string): Promise<boolean> {
     try {
-      console.log(`[SupportBot] Validating channel ID: ${channelId}`)
+      logger.info(`[SupportBot] Validating channel ID: ${channelId}`)
       const response = await axios.post(
         `${this.BACKEND_URL}/api/apps/channel/info`,
         { 

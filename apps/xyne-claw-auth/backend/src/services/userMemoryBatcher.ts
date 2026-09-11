@@ -12,7 +12,7 @@
  *   1. Token budget — accumulate records until the next one would push the batch
  *      past BATCH_TOKEN_BUDGET.
  *   2. Record backstop — never exceed MAX_RECORDS_PER_BATCH (matches the claw
- *      curator's own 50-record cap, so it never silently truncates a batch).
+ *      curator's own 200-record cap, so it never silently truncates a batch).
  *
  * Oversized single units (a rare 80-message thread all at the char cap, or a
  * huge canvas) are SUB-CHUNKED into `id#pN` pieces that each fit the budget, so
@@ -33,9 +33,10 @@ const CHARS_PER_TOKEN = 4;
  *  existing memories are added. */
 export const BATCH_TOKEN_BUDGET = 80_000;
 const BATCH_CHAR_BUDGET = BATCH_TOKEN_BUDGET * CHARS_PER_TOKEN; // 320_000
-/** Matches MAX_RECORDS_PER_BATCH in claw's user-memory-curator (never let a
- *  batch exceed what the curator will actually process). */
-const MAX_RECORDS_PER_BATCH = 50;
+/** Matches MAX_RECORDS_PER_BATCH in claw's user-memory-curator. Small records
+ * can now fill the 80k-token budget instead of being cut off at 50; large
+ * records still split earlier on BATCH_CHAR_BUDGET. */
+const MAX_RECORDS_PER_BATCH = 200;
 
 /** Marker prefixing every sub-chunk id: `<baseId>#p<n>`. Base record ids
  *  (message/conversation ids, `twin-reply:*`) never contain "#", so this is a
@@ -85,7 +86,7 @@ function subChunk(r: UserMemoryRecord): UserMemoryRecord[] {
   }));
 }
 
-/** Pack records into curator batches by token budget (+ 50-record backstop),
+/** Pack records into curator batches by token budget (+ 200-record backstop),
  *  sub-chunking any single oversized unit first. Every batch is non-empty and
  *  fits the budget (a lone sub-chunk that equals the budget is its own batch). */
 export function packRecordsIntoBatches(records: UserMemoryRecord[]): UserMemoryRecord[][] {

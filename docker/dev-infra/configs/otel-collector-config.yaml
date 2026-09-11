@@ -21,7 +21,7 @@ processors:
 
 exporters:
   prometheusremotewrite:
-    endpoint: "http://localhost:8428/api/v1/write"
+    endpoint: "http://victoriametrics:8428/api/v1/write"
     tls:
       insecure: true
   debug:

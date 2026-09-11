@@ -9,6 +9,7 @@ export interface ConnectionConfig {
   password: string;
   database: string;
   ssl?: boolean;
+  ca?: string;
 }
 
 export interface DiscoveredTable {

@@ -1,6 +1,7 @@
 import { prisma } from "../db.js";
 
 export interface CreateChatAttachmentInput {
+  chatMessageId?: string | null;
   uploaderUserId: string;
   url: string;
   thumbnailUrl?: string | null;
@@ -16,6 +17,7 @@ export const chatAttachmentRepository = {
   create: (data: CreateChatAttachmentInput) =>
     prisma.chatAttachment.create({
       data: {
+        chatMessageId: data.chatMessageId ?? null,
         uploaderUserId: data.uploaderUserId,
         url: data.url,
         thumbnailUrl: data.thumbnailUrl ?? null,

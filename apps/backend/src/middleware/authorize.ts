@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AccessType } from '@xyne/shared';
+import { AccessType, OrgRole, WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
@@ -77,5 +77,55 @@ export const authorize = (resourceName: string, requiredAccess: AccessType, allo
         message: 'An error occurred during authorization',
       });
     }
+  };
+};
+
+/**
+ * Workspace/org ADMIN and OWNER pass by role; everyone else must hold the named
+ * resource at the required access. Used for release-manager edit actions, which
+ * are open to admins/owners and to individually-granted users.
+ */
+export const authorizePrivilegedOrResource = (resourceName: string, requiredAccess: AccessType) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({
+        error: 'Authentication required',
+        message: 'Please authenticate to access this resource',
+      });
+      return;
+    }
+
+    const isPrivileged =
+      req.user.orgRole === OrgRole.OWNER ||
+      req.user.orgRole === OrgRole.ADMIN ||
+      req.user.role === WorkspaceRole.OWNER ||
+      req.user.role === WorkspaceRole.ADMIN;
+    if (isPrivileged) {
+      next();
+      return;
+    }
+
+    try {
+      const resource = await prisma.resource.findUnique({ where: { name: resourceName } });
+      if (
+        resource &&
+        (await repositories.resourceAccess.hasAccess(req.user.id, resource.id, requiredAccess))
+      ) {
+        next();
+        return;
+      }
+    } catch (error) {
+      logger.error('Authorization error:', error);
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'An error occurred during authorization',
+      });
+      return;
+    }
+
+    res.status(403).json({
+      error: 'Admin or owner access required',
+      message: 'This endpoint requires administrator or owner privileges',
+    });
   };
 };

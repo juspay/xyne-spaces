@@ -1,4 +1,5 @@
 export { searchUsers, searchChannels } from './search.js';
+export { matchesAllTokens } from './tokenMatch.js';
 export {
   canonicalArgsJson,
   shadowKeyFor,
@@ -17,6 +18,7 @@ export {
   extractUserMentions,
   extractGroupMentions,
   extractAllMentions,
+  stripCodeRegions,
 } from './mentionParser.js';
 export {
   matchKind,

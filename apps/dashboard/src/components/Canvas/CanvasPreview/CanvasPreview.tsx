@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
 import { FileText, X } from 'lucide-react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -16,15 +16,18 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface CanvasPreviewProps {
   canvasId?: string;
   onClose?: () => void;
+  expanded?: boolean;
 }
 
 export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   canvasId: propCanvasId,
   onClose,
+  expanded = false,
 }) => {
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -184,6 +187,22 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
           <h4 className='text-[13px] font-semibold text-foreground truncate'>{canvas.title}</h4>
           <div className='text-xs text-muted-foreground mt-0.5'>Click to open canvas</div>
         </div>
+      </div>
+    );
+  }
+
+  if (expanded) {
+    return (
+      <div className='w-full canvas-surface'>
+        <BlockNoteView
+          editor={
+            editor as unknown as BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>
+          }
+          editable={false}
+          theme={blockNoteTheme}
+          sideMenu={false}
+          formattingToolbar={false}
+        />
       </div>
     );
   }

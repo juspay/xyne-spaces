@@ -136,6 +136,8 @@ export const RCASidebar = ({
               variant='outline'
               size='sm'
               onClick={onPreviousPage}
+              data-track-category='RCA'
+              data-track-name='RCA_PREV_PAGE'
               disabled={!hasPreviousPage || isSubmitting}
               className='gap-1'
             >
@@ -146,6 +148,8 @@ export const RCASidebar = ({
               variant='outline'
               size='sm'
               onClick={onNextPage}
+              data-track-category='RCA'
+              data-track-name='RCA_NEXT_PAGE'
               disabled={!hasNextPage || isSubmitting}
               className='gap-1'
             >

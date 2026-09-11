@@ -219,7 +219,10 @@ async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const result = await githubWebhookService.handleWebhookEvent(eventType, payload);
+    // Extract workspaceId from URL path (optional for backward compatibility)
+    const workspaceId = req.params.workspaceId;
+
+    const result = await githubWebhookService.handleWebhookEvent(eventType, payload, workspaceId);
     res.status(200).json(result);
   } catch (error) {
     logger.error('[GitHub-Webhook] Error:', error);
@@ -227,6 +230,8 @@ async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Support both legacy route (without workspaceId) and new route (with workspaceId)
+router.post('/github/:workspaceId', githubWebhookMiddleware.verify, handleGitHubWebhook);
 router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
 
 // Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification

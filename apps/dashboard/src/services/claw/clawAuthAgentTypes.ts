@@ -128,6 +128,9 @@ export interface Agent {
   readonly spacesAppId: string | null;
   readonly spacesAppUserId: string | null;
   readonly spacesAppToken: string | null;
+  readonly spacesAppTokenConfigured?: boolean;
+  readonly orgId?: string | null;
+  readonly orgName?: string | null;
   readonly tools: AgentTool[];
   readonly skills?: AgentSkill[];
   readonly collections?: AgentCollection[];

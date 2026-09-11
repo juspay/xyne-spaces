@@ -82,6 +82,12 @@ export type ResolvedBoardAdditionalField = FormEntityValueRow & {
   isPlaceholder: boolean;
 };
 
+export type LeftoverFieldValue = FormEntityValueRow & {
+  resolvedFieldId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+};
+
 export const resolveBoardAdditionalFields = ({
   formMapping,
   formEntityValues,
@@ -154,4 +160,55 @@ export const resolveBoardAdditionalFields = ({
       isPlaceholder: true,
     };
   });
+};
+
+/**
+ * A ticket's own saved values for fields that are no longer part of the board's current
+ * form — e.g. a field the board had before a "Copy Board Configuration" run replaced its
+ * form with another board's. The value rows are never touched by a copy, only unreachable
+ * through the normal current-form-driven lookup above; this recovers them directly (via
+ * their own `formField`/`globalField` relation, exactly like `resolveFormFieldId` does) so
+ * they can still be shown — read-only, since they're no longer part of the form's schema.
+ */
+export const resolveLeftoverFieldValues = ({
+  formMapping,
+  formEntityValues,
+  boardId,
+}: {
+  formMapping: FormMappingLike | null | undefined;
+  formEntityValues: readonly FormEntityValueRow[] | undefined;
+  boardId: string | null | undefined;
+}): LeftoverFieldValue[] => {
+  const membershipRows = formMapping?.formFields;
+  const currentFieldIds = new Set(
+    formMapping?.formId && membershipRows
+      ? resolveDisplayFormFields(formMapping.formId, [...membershipRows]).map(field => field.id)
+      : [],
+  );
+  const values = formEntityValues ?? [];
+
+  // No entityType filter, matching resolveBoardAdditionalFields's sibling helpers above —
+  // formEntityValues is already scoped to this ticket by the caller's entityId query, so
+  // entityType filtering here would be redundant.
+  const latestByField = new Map<string, FormEntityValueRow>();
+  values
+    .filter(value => isBoardContextValue(value, boardId) && !currentFieldIds.has(value.fieldId))
+    .forEach(value => {
+      const current = latestByField.get(value.fieldId);
+      if (!current || (value.updatedAt ?? 0) > (current.updatedAt ?? 0)) {
+        latestByField.set(value.fieldId, value);
+      }
+    });
+
+  const resolved: LeftoverFieldValue[] = [];
+  for (const [resolvedFieldId, value] of latestByField) {
+    const fieldName = value.globalField?.fieldName ?? value.formField?.fieldName;
+    const fieldType = value.globalField?.fieldType ?? value.formField?.fieldType;
+    // Definition is gone too (e.g. a legacy field's row was hard-deleted) — nothing left
+    // to label this value with, so there's nothing safe to show.
+    if (!fieldName || !fieldType) continue;
+    resolved.push({ ...value, resolvedFieldId, fieldName, fieldType });
+  }
+
+  return resolved.sort((a, b) => a.fieldName.localeCompare(b.fieldName));
 };

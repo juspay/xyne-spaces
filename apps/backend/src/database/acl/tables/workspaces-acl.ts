@@ -28,15 +28,32 @@ export class WorkspacesACL extends BaseQueryACL<
     }
     return {
       status: 'ACTIVE',
-      organization: {
-        members: {
-          some: {
-            memberId: this.ctx.memberId,
-            // Only active memberships (leftAt null) grant access to the org's workspaces.
-            leftAt: null,
+
+      OR: [
+        { id: this.ctx.workspaceId },
+        {
+          organization: {
+            members: {
+              some: {
+                memberId: this.ctx.memberId,
+                // Only active memberships (leftAt null) grant access to the org's workspaces.
+                leftAt: null,
+              },
+            },
           },
         },
-      },
+        // Cross-org access recorded in workspace_organizations, where the join used it.
+        {
+          workspaceOrgs: {
+            some: {
+              leftAt: null,
+              organization: {
+                members: { some: { memberId: this.ctx.memberId, leftAt: null } },
+              },
+            },
+          },
+        },
+      ],
     }
   }
 

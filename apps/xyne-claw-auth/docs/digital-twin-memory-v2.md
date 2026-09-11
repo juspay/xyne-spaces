@@ -269,7 +269,7 @@ viewer). 4xx / `no-api-key` are permanent and not retried.
 
 ### Phase 3 — File-memory store + always-loaded persona  *(LANDED)*
 - Migration `20260716140000_agent_memory_files` + generic `AgentMemoryFile` model +
-  `agentMemoryFiles.ts` service (10k-char cap, max-3 loaded, `ensureDefaultFiles`).
+  `agentMemoryFiles.ts` service (20k-char cap, max-3 loaded, `ensureDefaultFiles`).
   **Default file set** (same structure for every user, seeded on enable): `soul.md`,
   `people.md`, `projects.md` (loaded by default) + `playbook.md`, `expertise.md` (opt-in).
 - Twin routes: `GET/PUT/DELETE /memory-files`, `POST /memory-files/:name/load`
@@ -278,7 +278,7 @@ viewer). 4xx / `no-api-key` are permanent and not retried.
   (`memory.ts fetchAgentPromptFiles`) and injects them as a **promptInjection** (`run.ts`,
   `id="__twin-persona"`) — which reaches BOTH the @mention and interactive paths, so no
   `agent.ts`/`webhook.ts` surgery was needed. → twin works with **zero tool calls**.
-- Frontend: `DigitalTwinFilesTab` (Persona overlay) — edit files, char counter vs 10k, toggle
+- Frontend: `DigitalTwinFilesTab` (Persona overlay) — edit files, char counter vs 20k, toggle
   which ≤3 load into the prompt, delete, "Rebuild from memories".
 
 ### Phase 4 — Soul synthesizer  *(LANDED)*

@@ -7,10 +7,11 @@ import {
   getCredentialFields,
   listSubagents,
   forkSubagentForInstance,
+  checkAgentMcpConnectionHealth,
   type AgentMcpConnectionMeta,
   type SubagentDef,
 } from "../../../../lib/api";
-import type { McpServer, CredentialField } from "../../../../lib/types";
+import type { McpServer, CredentialField, HealthResult } from "../../../../lib/types";
 
 interface Props {
   agentSlug: string;
@@ -44,6 +45,13 @@ function canPinWithoutCreds(server: McpServer, fieldCount: number): boolean {
 interface EditingKey {
   serverType: string;
   slug: string | null;
+}
+
+/** On-demand health status for one agent-pinned MCP instance. */
+interface InstanceHealth {
+  status: "checking" | "healthy" | "unhealthy";
+  message?: string;
+  latencyMs?: number;
 }
 
 /**
@@ -85,6 +93,34 @@ export function AgentMcpTabV3({ agentSlug, userId, canEdit }: Props) {
   /** Fork modal state. Null when closed; otherwise carries which instance
    *  we're forking for + the user's source/name picks. */
   const [forkModal, setForkModal] = useState<ForkModalState | null>(null);
+  /** On-demand health per instance id. Never auto-run on mount — the operator
+   *  clicks "Check" so opening the tab does not spawn N MCP child processes. */
+  const [healthByInstance, setHealthByInstance] = useState<Record<string, InstanceHealth>>({});
+
+  const runHealthCheck = useCallback(async (inst: AgentMcpConnectionMeta) => {
+    setHealthByInstance((prev) => ({ ...prev, [inst.id]: { status: "checking" } }));
+    try {
+      const result: HealthResult = await checkAgentMcpConnectionHealth(
+        agentSlug,
+        userId,
+        inst.mcpServerType,
+        inst.slug,
+      );
+      setHealthByInstance((prev) => ({
+        ...prev,
+        [inst.id]: {
+          status: result.healthy ? "healthy" : "unhealthy",
+          message: result.message,
+          latencyMs: result.latencyMs,
+        },
+      }));
+    } catch (err) {
+      setHealthByInstance((prev) => ({
+        ...prev,
+        [inst.id]: { status: "unhealthy", message: err instanceof Error ? err.message : String(err) },
+      }));
+    }
+  }, [agentSlug, userId]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -348,13 +384,34 @@ export function AgentMcpTabV3({ agentSlug, userId, canEdit }: Props) {
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium text-xyne-fg-primary">{inst.displayName}</span>
                               <span className="rounded bg-xyne-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-xyne-fg-tertiary">{inst.slug}</span>
-                              <span className="rounded bg-xyne-success-bg px-1.5 py-0.5 text-[10px] uppercase text-xyne-success">connected</span>
+                              {(() => {
+                                const h = healthByInstance[inst.id];
+                                if (!h) {
+                                  return <span title="Health not checked yet - click Check" className="rounded bg-xyne-surface-sunken px-1.5 py-0.5 text-[10px] uppercase text-xyne-fg-tertiary">unknown</span>;
+                                }
+                                if (h.status === "checking") {
+                                  return <span className="rounded bg-xyne-surface-sunken px-1.5 py-0.5 text-[10px] uppercase text-xyne-fg-tertiary">checking</span>;
+                                }
+                                if (h.status === "healthy") {
+                                  return <span title={h.message} className="rounded bg-xyne-success-bg px-1.5 py-0.5 text-[10px] uppercase text-xyne-success">healthy</span>;
+                                }
+                                return <span title={h.message} className="rounded bg-xyne-error-bg px-1.5 py-0.5 text-[10px] uppercase text-xyne-error">unhealthy</span>;
+                              })()}
                             </div>
                             <p className="mt-1 text-[11px] text-xyne-fg-muted">
                               Tool prefix: <span className="font-mono text-xyne-fg-tertiary">{`${server.type}-${inst.slug}__`}</span>
                               {" · "}Pinned by user {inst.createdByUserId ?? "unknown"}
                               {" · "}last updated {new Date(inst.updatedAt).toLocaleString()}
                             </p>
+                            {(() => {
+                              const h = healthByInstance[inst.id];
+                              if (!h || !h.message || h.status === "checking") return null;
+                              return (
+                                <p className={`mt-1 text-[11px] ${h.status === "healthy" ? "text-xyne-success" : "text-xyne-error"}`}>
+                                  {h.message}{typeof h.latencyMs === "number" ? ` (${h.latencyMs}ms)` : ""}
+                                </p>
+                              );
+                            })()}
                             {/* Reverse-lookup: which subagents have THIS
                                 instance pinned via mcpInstanceMap. Lets the
                                 operator see at a glance the blast radius of
@@ -379,6 +436,14 @@ export function AgentMcpTabV3({ agentSlug, userId, canEdit }: Props) {
                           </div>
                           {canEdit && !isEditingThis && (
                             <div className="flex shrink-0 gap-2">
+                              <button
+                                onClick={() => void runHealthCheck(inst)}
+                                disabled={healthByInstance[inst.id]?.status === "checking"}
+                                title="Check whether this instance's pinned credentials are actually reachable"
+                                className="rounded border border-xyne-border-subtle px-2 py-1 text-xs text-xyne-fg-secondary hover:bg-xyne-surface-sunken disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                {healthByInstance[inst.id]?.status === "checking" ? "Checking" : "Check"}
+                              </button>
                               <button
                                 onClick={() => openForkModal(inst)}
                                 disabled={forkableSubagents.length === 0}

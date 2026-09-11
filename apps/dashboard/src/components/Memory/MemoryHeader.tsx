@@ -254,7 +254,8 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             <button
               onClick={handleUploadSubmit}
               disabled={uploadMutation.isPending || !repoUrl.trim()}
-              className='px-4 py-2 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              className='h-auto px-4 py-2 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-ph-capture-attribute-track-id='memory_upload_documents'
               data-track-category='Memory'
               data-track-name='ConfirmUploadDocuments'
             >
@@ -285,7 +286,8 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             <button
               onClick={handleCleanupConfirm}
               disabled={cleanupMutation.isPending}
-              className='px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              className='h-auto px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-ph-capture-attribute-track-id='memory_cleanup_all_vespa'
               data-track-category='Memory'
               data-track-name='ConfirmCleanupVespaMemory'
             >

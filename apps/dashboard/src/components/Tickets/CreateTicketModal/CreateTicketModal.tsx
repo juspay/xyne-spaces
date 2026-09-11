@@ -1,13 +1,14 @@
-import { useCallback } from 'react';
+import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useZero } from '../../../hooks/useZero';
-import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { isTestEnv } from '../../../config';
 import {
   AttachmentEntityType,
   BaseTicketType,
+  BoardType,
   ChannelScopeType,
   FormContextType,
   FormEntityType,
@@ -20,42 +21,35 @@ import {
   toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
+import { KanbanBoard as SquareKanban, TicketToken as Ticket, PauseCircle } from '@xyne/icons';
 import {
-  CircleCheck,
+  CheckTickCircle as CircleCheck,
   CircleDashed,
   CircleDot,
-  CircleX,
-  Copy,
-  Ellipsis,
-  Hash,
-  Link as LinkIcon,
-  Loader2,
-  Paperclip,
-  Signature,
-  SquareArrowOutUpRight,
-  SquareKanban,
+  MultipleCrossCancelCircle as CircleX,
+  ThreeDotsMenuHorizontal as Ellipsis,
+  Hashtag as Hash,
+  LinkChainHorizontal as LinkIcon,
+  PaperclipSlant as Paperclip,
+  ExternalLink as SquareArrowOutUpRight,
   Tag,
-  Ticket,
-  Trash2,
-  User,
-  Users,
-  WorkflowIcon,
-  X,
-} from 'lucide-react';
+  DeleteDustbin01 as Trash2,
+  UserDefault as User,
+  UserTwo as Users,
+  MultipleCrossCancelDefault as X,
+} from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../../hooks/useAuth';
+import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
-import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
@@ -67,6 +61,7 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
+import { RepoDot, repoColor } from '../../Release/repoVisual';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import type { UploadedFile } from '../../ui/files/Files.types';
 import Input from '../../ui/Input';
@@ -94,14 +89,13 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
-import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
-import { isReleaseBoard } from '../../../utils/boardUtils';
+import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { openCreateTicketWindow, subscribeCreateTicketResult } from '../../../utils/electronApp';
-import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
+import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -117,7 +111,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
-  projectId: string;
+  projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
   selectedBoardName?: string | undefined;
@@ -130,15 +124,24 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
+  initialTicketKind?: 'task' | 'release';
+  releaseOnly?: boolean;
+  releaseChannelIds?: string[];
   sourceConversation?: ConversationWithTicket | undefined;
+  sourceMessageId?: string | undefined;
+  entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  allowChannelSelection?: boolean;
+  useLocalAttachments?: boolean;
+  focusDescriptionOnOpen?: boolean;
   ticketSequence?: { current: number; total: number };
   parentTicketId?: string;
   onBeforeCreate?: (description: string, files: File[]) => Promise<void>;
   onTicketCreated?: (ticket: {
     id: string;
     conversationId?: string;
+    channelId?: string;
     xyneId?: string;
     workflowType?: string;
   }) => void;
@@ -178,6 +181,14 @@ type SubTicketDraft = {
 
 const EMPTY_TAGS: string[] = [];
 
+const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
+
+const PRIMARY_DF_KEY = {
+  branch: 'branch',
+  deployedCommit: 'deployedCommitId',
+  newCommit: 'newCommitId',
+} as const;
+
 const normalizeSubTicketDrafts = (
   value?: Array<{ title: string; description?: string }>,
 ): SubTicketDraft[] => {
@@ -213,11 +224,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
+  initialTicketKind = 'task',
+  releaseOnly = false,
+  releaseChannelIds,
   isFromSubTicket = false,
   isFromAI = false,
+  allowChannelSelection = false,
+  useLocalAttachments = false,
+  focusDescriptionOnOpen = false,
   ticketSequence,
   parentTicketId,
   sourceConversation,
+  sourceMessageId,
+  entityLinkContext: entityLinkContextProp,
   onBeforeCreate,
   onTicketCreated,
   standalone = false,
@@ -225,8 +244,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   enableUrlSync = false,
 }) => {
   const zero = useZero();
-  const shareableOrigin = useShareableOrigin();
   const { user } = useAuth();
+  const inheritedEntityLinkScope = useContext(EntityLinkContext);
+  const entityLinkScope = entityLinkContextProp ?? inheritedEntityLinkScope;
   const {
     addDroppedFiles: providerAddDroppedFiles,
     removeDroppedFile: providerRemoveDroppedFile,
@@ -249,6 +269,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Determine if we're creating from conversation or tickets tab
   const isFromTicketsTab = tab === 'tickets' && !sourceConversation;
+  const canSelectChannel = isFromSubTicket || isFromAI || releaseOnly || allowChannelSelection;
+  const usesLocalAttachments = isFromTicketsTab || useLocalAttachments;
   // Fetch existing CHAT attachments from INITIAL MESSAGE ONLY using Zero
 
   const messageIdForQuery =
@@ -279,6 +301,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
 
   const hasPopulatedDeployedCommitId = useRef(false);
+  const [selectedRepoBoardIds, setSelectedRepoBoardIds] = useState<string[]>([]);
+  const [repoRanges, setRepoRanges] = useState<
+    Record<string, { branch: string; deployedCommit: string; newCommit: string }>
+  >({});
+  const hasPopulatedRepoDeployed = useRef<Set<string>>(new Set());
+  const [ticketKind, setTicketKind] = useState<'task' | 'release'>(initialTicketKind);
   const seedSnapshotRef = useRef<TicketFormSnapshot | null>(null);
   const baselineAttachmentCountRef = useRef<number | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -319,7 +347,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         return;
       }
 
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Load from DraftProvider (DB-backed)
         try {
           const map = getDroppedFilesForEntity(
@@ -331,7 +359,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             baselineAttachmentCountRef.current = map.size;
           }
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
         }
       } else {
         // For tickets tab, local state only
@@ -343,12 +375,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     };
 
     void loadAttachments();
-  }, [isOpen, isFromTicketsTab, sourceConversation, channelId, getDroppedFilesForEntity]);
+  }, [isOpen, usesLocalAttachments, sourceConversation, channelId, getDroppedFilesForEntity]);
 
   // Unified add file handler
   const addFile = useCallback(
     async (file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider (DB-backed)
         await providerAddDroppedFiles(file, channelId, sourceConversation?.conversationId);
       } else {
@@ -356,13 +388,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => [...prev, { id: newLocalFileId(), file }]);
       }
     },
-    [isFromTicketsTab, providerAddDroppedFiles, channelId, sourceConversation],
+    [usesLocalAttachments, providerAddDroppedFiles, channelId, sourceConversation],
   );
 
   // Unified remove file handler
   const removeFile = useCallback(
     async (attachmentId: string, _file: File): Promise<void> => {
-      if (!isFromTicketsTab) {
+      if (!usesLocalAttachments) {
         // Use DraftProvider
         await providerRemoveDroppedFile(attachmentId);
       } else {
@@ -370,27 +402,28 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         setTicketLocalFiles(prev => prev.filter(entry => entry.id !== attachmentId));
       }
     },
-    [isFromTicketsTab, providerRemoveDroppedFile],
+    [usesLocalAttachments, providerRemoveDroppedFile],
   );
 
   // Clear all files handler
   const clearFiles = useCallback(async () => {
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       await providerClearDroppedFiles(channelId, sourceConversation?.conversationId ?? null);
     } else {
       setTicketLocalFiles([]);
     }
-  }, [isFromTicketsTab, providerClearDroppedFiles, channelId, sourceConversation]);
+  }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
-  const channels = useAllVisibleChannels().filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const channels = useAllVisibleChannels().filter(
+    channel =>
+      channel.scopeType === ChannelScopeType.DEFAULT &&
+      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+  );
 
   // Track if title has been auto-generated for this modal session
   const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
 
   const [newTags, setNewTags] = useState<string[]>([]);
-
-  // Fetch workflow types using optimized hook
-  const { workflowTypes } = useWorkflowTypes();
 
   // Title generator hook
   const {
@@ -402,7 +435,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useTitleGenerator({
     maxLength: 100,
     onError: error => {
-      console.error('Title generation error:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Title generation error:'),
+        error: error,
+      });
     },
   });
 
@@ -461,16 +498,88 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Fetch boards for the selected channel's project (or default projectId)
   const selectedChannelProjectId =
-    (isFromSubTicket || isFromAI) && selectedChannel?.projectId
-      ? selectedChannel.projectId
-      : projectId;
-  const [boards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId }),
+    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
+  const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: effectiveChannelId }),
+    { enabled: !!effectiveChannelId },
   );
+  // main's board resolution (channel-board-mapping with a project-boards fallback)
+  // must define `boards` before the release additions below read it.
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
+    { enabled: !!selectedChannelProjectId },
+  );
+  const boards = useMemo(() => {
+    // Release repos are project-scoped (its release boards), not channel-mapped.
+    if (ticketKind === 'release') return projectBoards ?? [];
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'CreateTicketModal',
+        resolution: 'channel-board-mapping',
+        channelId: effectiveChannelId,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    // Only fall back to project boards once the mapping query has fully synced —
+    // an empty result before that is just the zero cache warming up, not a truly
+    // unmapped channel.
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'CreateTicketModal',
+      resolution: 'project-boards-fallback',
+      channelId: effectiveChannelId,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId, ticketKind]);
+
+  // Read by the open-reset effect without adding `boards` to its deps.
+  const boardsRef = useRef(boards);
+  boardsRef.current = boards;
+
+  // Services grouped by main release board → read-only chips under each repo.
+  const [releaseApplications] = useCachedQuery(
+    queries.applicationsByProjectId({ projectId: selectedChannelProjectId ?? '' }),
+    { enabled: !!selectedChannelProjectId },
+  );
+  const servicesByMainBoard = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const list =
+      !releaseApplications || releaseApplications instanceof Error ? [] : releaseApplications;
+    for (const app of list) {
+      if (!app.mainReleaseBoardId) continue;
+      const names = map.get(app.mainReleaseBoardId) ?? [];
+      names.push(app.name);
+      map.set(app.mainReleaseBoardId, names);
+    }
+    return map;
+  }, [releaseApplications]);
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
     () => boards?.find(b => b.id === formValues.boardId),
+    [boards, formValues.boardId],
+  );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
+  const isReleaseLine = ticketKind === 'release';
+  // Only main release boards are selectable (repos); services show as chips below.
+  // Keep the currently-primary board even if it lacks a provider.
+  const releaseBoardOptions = useMemo(
+    () =>
+      (boards ?? [])
+        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
+        .filter(b => isReleaseBoard(b.boardType))
+        .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
     [boards, formValues.boardId],
   );
 
@@ -483,7 +592,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showAssignee = ticketFormConfig?.assignedTo?.enabled ?? true;
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
-  const showWorkflows = ticketFormConfig?.workflows?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
   const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
   const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
@@ -493,7 +601,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryAssignee = ticketFormConfig?.assignedTo?.mandatory ?? false;
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
-  const mandatoryWorkflows = ticketFormConfig?.workflows?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
   const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
@@ -516,26 +623,42 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [formMapping?.formFields, formMapping?.formId],
   );
 
-  const titleValue = formValues?.title ?? '';
-  const descriptionValue = formValues?.description ?? '';
-
   // Reset dynamic fields when board changes
   useEffect(() => {
-    if (formValues?.boardId) {
+    if (ticketKind === 'release') return;
+    if (formValues.boardId) {
       form.setFieldValue('dynamicFields', {});
       markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
     }
-  }, [formValues?.boardId, form, markAutoApplied]);
+    setSelectedRepoBoardIds([]);
+    setRepoRanges({});
+    hasPopulatedRepoDeployed.current = new Set();
+  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
 
   useEffect(() => {
+    if (!isOpen) {
+      setSelectedRepoBoardIds([]);
+      setRepoRanges({});
+      hasPopulatedRepoDeployed.current = new Set();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (ticketKind === 'release') {
+      form.setFieldValue('ticketType', BaseTicketType.Release);
+      markAutoApplied({ ticketType: BaseTicketType.Release });
+      return;
+    }
     if (!selectedBoard) return;
 
-    const ticketType = isReleaseBoard(selectedBoard.boardType)
-      ? BaseTicketType.Release
-      : BaseTicketType.Fix;
+    const ticketType = isFlowRootTicket
+      ? BaseTicketType.Epic
+      : isReleaseBoard(selectedBoard.boardType)
+        ? BaseTicketType.Release
+        : BaseTicketType.Fix;
     form.setFieldValue('ticketType', ticketType);
     markAutoApplied({ ticketType });
-  }, [selectedBoard, form, markAutoApplied]);
+  }, [ticketKind, selectedBoard, isFlowRootTicket, form, markAutoApplied]);
 
   useEffect(() => {
     if (!isOpen || resolvedFormFields.length === 0) return;
@@ -569,54 +692,61 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           hasPopulatedDeployedCommitId.current = true;
         }
       } catch (error) {
-        console.error('Failed to fetch latest deployed commit ID:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to fetch latest deployed commit ID:'),
+          error: error,
+        });
       }
     };
 
     void fetchLatestDeployedCommitId();
   }, [isOpen, resolvedFormFields, selectedBoard, form, formValues?.dynamicFields, markAutoApplied]);
-  const {
-    duplicateCheck,
-    // duplicateCandidate,
-    candidateLinks,
-    // duplicateCheckError,
-    isCheckingDuplicate,
-    resetDuplicateState,
-  } = useDuplicateTicketCheck({
-    title: titleValue,
-    description: descriptionValue,
-    projectId: selectedChannelProjectId,
-    boardId: formValues?.boardId,
-    isOpen,
-    debounceMs: 2000,
-  });
 
-  // Once the user acts on the board (manual select, accept, or reject), suppress all further AI suggestions
-  const [boardAISuggestionSuppressed, setBoardAISuggestionSuppressed] = useState(false);
+  useEffect(() => {
+    if (!isOpen || !isReleaseLine) return;
+    for (const boardId of selectedRepoBoardIds) {
+      if (hasPopulatedRepoDeployed.current.has(boardId)) continue;
+      if (repoRanges[boardId]?.deployedCommit) continue;
+      hasPopulatedRepoDeployed.current.add(boardId);
+      void apiInstance
+        .get<{ latestCommitId: string }>('/commits/analyze/latest-deployed-commit', {
+          params: { mainReleaseBoardId: boardId },
+        })
+        .then(response => {
+          const latest = response.data?.latestCommitId;
+          if (!latest) return;
+          setRepoRanges(prev =>
+            prev[boardId]?.deployedCommit
+              ? prev
+              : {
+                  ...prev,
+                  [boardId]: {
+                    branch: prev[boardId]?.branch ?? '',
+                    deployedCommit: latest,
+                    newCommit: prev[boardId]?.newCommit ?? '',
+                  },
+                },
+          );
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, isReleaseLine, selectedRepoBoardIds, repoRanges]);
+
   const [boardSelectorOpen, setBoardSelectorOpen] = useState(false);
 
-  // Reset suppression when modal opens/closes
+  // Reset board selector when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setBoardAISuggestionSuppressed(false);
       setBoardSelectorOpen(false);
     }
   }, [isOpen]);
 
-  const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
-    title: titleValue,
-    description: descriptionValue,
-    projectId: selectedChannelProjectId,
-    currentBoardId: formValues?.boardId || '',
-    isOpen: isOpen && !boardAISuggestionSuppressed && !selectedBoardId,
-    debounceMs: 2000,
-  });
-
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedChannelProjectId }),
-    { enabled: tagsQueried },
+    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
   const userGroupOptions = useUserGroups();
@@ -707,7 +837,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
 
     // Add newly uploaded files (from DraftProvider or local state)
-    if (!isFromTicketsTab) {
+    if (!usesLocalAttachments) {
       // From DraftProvider (DB)
       const draftFiles = Array.from(attachmentsMap.entries()).map(([attachmentId, file]) => ({
         attachmentId,
@@ -739,7 +869,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     attachmentsMap,
     sourceConversation,
     excludedChatAttachmentIds,
-    isFromTicketsTab,
+    usesLocalAttachments,
     ticketLocalFiles,
   ]);
 
@@ -747,6 +877,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       form.reset();
+      setTicketKind(initialTicketKind);
       setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
       seedSnapshotRef.current = null;
@@ -769,7 +900,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         form.setFieldValue('status', initialStatus);
       }
       form.setFieldValue('tags', initialTags);
-      if (selectedBoardId) {
+      // Release boards are created only via the Release Manager; don't preselect one here.
+      const preselectedBoard = selectedBoardId
+        ? boardsRef.current?.find(b => b.id === selectedBoardId)
+        : undefined;
+      if (selectedBoardId && !(preselectedBoard && isReleaseBoard(preselectedBoard.boardType))) {
         form.setFieldValue('boardId', selectedBoardId);
       }
       if (enableUrlSync && hasCreateTicketFlag(searchParamsRef.current)) {
@@ -784,7 +919,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           form.setFieldValue('workflowType', prefill.workflowType);
         }
       }
-      resetDuplicateState();
       seedSnapshotRef.current = snapshotTicketForm(form.state.values);
     }
   }, [
@@ -797,7 +931,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     initialStatus,
     initialSubTickets,
     initialTags,
-    resetDuplicateState,
+    initialTicketKind,
     selectedBoardId,
   ]);
 
@@ -832,18 +966,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [boards, form, markAutoApplied]);
 
-  // Auto-select first board when board suggestion returns null (test env only — in prod
-  // the user picks a board explicitly if no suggestion is available).
+  // Auto-select first board in test env when no board is selected
   useEffect(() => {
     if (!isTestEnv) return;
-    if (isCheckingBoard || boardSuggestion?.analysis.suggestedBoardId) return;
     if (form.getFieldValue('boardId')) return;
     const firstBoard = boards?.[0];
     if (firstBoard) {
       form.setFieldValue('boardId', firstBoard.id);
       markAutoApplied({ boardId: firstBoard.id });
     }
-  }, [isCheckingBoard, boardSuggestion, boards, form, markAutoApplied]);
+  }, [boards, form, markAutoApplied]);
 
   // Auto-generate title when modal opens with a description but no title
   useEffect(() => {
@@ -872,12 +1004,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       form.setFieldValue('title', generatedTitle);
       markAutoApplied({ title: generatedTitle.trim() });
     }
-    // Only set generated ticket type for non-release boards
-    if (generatedTicketType && !isReleaseBoard(selectedBoard?.boardType)) {
+    // FLOW root tickets are always Epic and release lines are always Release;
+    // AI classification only applies elsewhere.
+    if (
+      generatedTicketType &&
+      !isFlowRootTicket &&
+      ticketKind !== 'release' &&
+      !isReleaseBoard(selectedBoard?.boardType)
+    ) {
       form.setFieldValue('ticketType', generatedTicketType);
       markAutoApplied({ ticketType: generatedTicketType });
     }
-  }, [form, generatedTitle, generatedTicketType, selectedBoard?.boardType, markAutoApplied]);
+  }, [
+    form,
+    generatedTitle,
+    generatedTicketType,
+    isFlowRootTicket,
+    ticketKind,
+    selectedBoard?.boardType,
+    markAutoApplied,
+  ]);
 
   // File handling functions
   const handleModalDragOver = (e: DragEvent<HTMLDivElement>): void => {
@@ -978,16 +1124,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const processTicketCreationResponse = (
     response: { data?: TicketResponse },
     workflowType: string,
+    channelId?: string,
   ): void => {
     if (onTicketCreated && response.data?.id) {
       const ticketData: {
         id: string;
         conversationId: string;
+        channelId?: string;
         xyneId?: string;
         workflowType?: string;
       } = {
         id: response.data.id,
         conversationId: response.data.conversationId || '',
+        ...(channelId && { channelId }),
         ...(response.data.xyneId && { xyneId: response.data.xyneId }),
       };
 
@@ -1009,7 +1158,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showAssignee,
         showTodo,
         showDueDate,
-        showWorkflows,
         showLabels,
         showMerchantId,
         showTicketType,
@@ -1017,20 +1165,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         mandatoryAssignee,
         mandatoryTodo,
         mandatoryDueDate,
-        mandatoryWorkflows,
         mandatoryLabels,
         mandatoryMerchantId,
         mandatoryTicketType,
+        isRelease: ticketKind === 'release',
+        releaseOnly,
       }),
     [
       formValues,
       boards,
       resolvedFormFields,
+      ticketKind,
       showUserGroupsOnly,
       showAssignee,
       showTodo,
       showDueDate,
-      showWorkflows,
       showLabels,
       showMerchantId,
       showTicketType,
@@ -1038,19 +1187,58 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryAssignee,
       mandatoryTodo,
       mandatoryDueDate,
-      mandatoryWorkflows,
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
+      releaseOnly,
     ],
   );
 
+  const releaseGateMessage = useMemo(() => {
+    if (ticketKind !== 'release') return null;
+    if (!formValues?.boardId) return 'Select at least one repository';
+    const df = formValues?.dynamicFields ?? {};
+    const one = (v: string | string[] | undefined): string =>
+      (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).trim();
+    const isSha = (v: string): boolean => /^[0-9a-f]{7,40}$/i.test(v);
+    const ranges = [
+      {
+        branch: one(df['branch']),
+        deployed: one(df['deployedCommitId']),
+        next: one(df['newCommitId']),
+      },
+      ...selectedRepoBoardIds.map(id => ({
+        branch: (repoRanges[id]?.branch ?? '').trim(),
+        deployed: (repoRanges[id]?.deployedCommit ?? '').trim(),
+        next: (repoRanges[id]?.newCommit ?? '').trim(),
+      })),
+    ];
+    if (ranges.some(r => !r.branch || !r.deployed || !r.next)) {
+      return 'Enter the branch and deployed → new commit range for every selected repository';
+    }
+    if (ranges.some(r => !isSha(r.deployed) || !isSha(r.next))) {
+      return 'Commit values must be valid hashes (7–40 hex characters)';
+    }
+    if (ranges.some(r => r.deployed === r.next)) {
+      return 'Deployed and new commit must be different';
+    }
+    return null;
+  }, [
+    ticketKind,
+    formValues?.boardId,
+    formValues?.dynamicFields,
+    selectedRepoBoardIds,
+    repoRanges,
+  ]);
+
+  const submitGateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
+
   const isFormReadyForSubmit = useMemo(() => {
     if (!form.state.isValid || !form.state.isDirty) return false;
-    if (missingMandatoryFieldMessage) return false;
+    if (submitGateMessage) return false;
     if (Object.keys(dynamicFieldErrors).length > 0) return false;
     return true;
-  }, [form.state.isValid, form.state.isDirty, missingMandatoryFieldMessage, dynamicFieldErrors]);
+  }, [form.state.isValid, form.state.isDirty, submitGateMessage, dynamicFieldErrors]);
 
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
@@ -1058,22 +1246,40 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       // Validate mandatory board-configured fields
       const mandatoryFieldErrors: string[] = [];
 
-      if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formData.assignee?.value) {
+      if (canSelectChannel && !formData.channelId.trim()) {
+        mandatoryFieldErrors.push(
+          releaseOnly ? 'Release channel is required' : 'Channel is required',
+        );
+      }
+      if (
+        !releaseOnly &&
+        showUserGroupsOnly &&
+        mandatoryUserGroupsOnly &&
+        !formData.assignee?.value
+      ) {
         mandatoryFieldErrors.push('User Group is required');
       }
-      if (!showUserGroupsOnly && showAssignee && mandatoryAssignee && !formData.assignee?.value) {
+      if (
+        !releaseOnly &&
+        !showUserGroupsOnly &&
+        showAssignee &&
+        mandatoryAssignee &&
+        !formData.assignee?.value
+      ) {
         mandatoryFieldErrors.push('Assignee is required');
       }
-      if (showDueDate && mandatoryDueDate && !formData.eta) {
+      if (!releaseOnly && showDueDate && mandatoryDueDate && !formData.eta) {
         mandatoryFieldErrors.push('Due Date is required');
       }
       if (showTodo && mandatoryTodo && !formData.status) {
         mandatoryFieldErrors.push('Todo/Status is required');
       }
-      if (showWorkflows && mandatoryWorkflows && !formData.workflowType) {
-        mandatoryFieldErrors.push('Workflow is required');
-      }
-      if (showLabels && mandatoryLabels && (!formData.tags || formData.tags.length === 0)) {
+      if (
+        !releaseOnly &&
+        showLabels &&
+        mandatoryLabels &&
+        (!formData.tags || formData.tags.length === 0)
+      ) {
         mandatoryFieldErrors.push('Labels are required');
       }
       if (showMerchantId && mandatoryMerchantId && !formData.merchantId?.trim()) {
@@ -1128,10 +1334,33 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
       // Drop any stale value left over for a field switched out of its active branch — the
       // backend rejects the whole ticket if a value is present for an inactive field.
-      const activeDynamicFields =
+      const filteredDynamicFields =
         resolvedFormFields.length > 0
           ? filterActiveDynamicFieldValues(resolvedFormFields, formData.dynamicFields)
           : formData.dynamicFields;
+
+      const submitDynamicFields: Record<string, string | string[]> =
+        isReleaseLine && !!formData.boardId
+          ? {
+              ...filteredDynamicFields,
+              releaseRepos: JSON.stringify([
+                {
+                  mainReleaseBoardId: formData.boardId,
+                  branch: getSingleStringValue(formData.dynamicFields?.['branch'] || ''),
+                  deployedCommit: getSingleStringValue(
+                    formData.dynamicFields?.['deployedCommitId'] || '',
+                  ),
+                  newCommit: getSingleStringValue(formData.dynamicFields?.['newCommitId'] || ''),
+                },
+                ...selectedRepoBoardIds.map(id => ({
+                  mainReleaseBoardId: id,
+                  branch: repoRanges[id]?.branch ?? '',
+                  deployedCommit: repoRanges[id]?.deployedCommit ?? '',
+                  newCommit: repoRanges[id]?.newCommit ?? '',
+                })),
+              ]),
+            }
+          : filteredDynamicFields;
 
       // Split assignee into assignedTo and userGroupId
       const assignedTo = formData.assignee?.type === 'assigneeTo' ? formData.assignee.value : null;
@@ -1147,10 +1376,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
 
       // Collect draft attachment IDs from DraftProvider (for conversation case)
-      const draftAttachmentIds = !isFromTicketsTab ? Array.from(attachmentsMap.keys()) : [];
+      const draftAttachmentIds = !usesLocalAttachments ? Array.from(attachmentsMap.keys()) : [];
 
       // Get files to send - combine both sources
-      const draftFiles = !isFromTicketsTab
+      const draftFiles = !usesLocalAttachments
         ? Array.from(attachmentsMap.values()).filter((f): f is File => f instanceof File)
         : ticketLocalFiles.map(entry => entry.file);
 
@@ -1163,13 +1392,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('title', formData.title.trim());
         formDataPayload.append('description', formData.description.trim());
         formDataPayload.append('boardId', formData.boardId);
-        // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
-        formDataPayload.append(
-          'channelId',
-          isFromSubTicket || isFromAI ? formData.channelId : channelId,
-        );
-        if (selectedChannelProjectId) {
-          formDataPayload.append('projectId', selectedChannelProjectId);
+        // Channel-selecting flows use the value picked in the form; regular flows
+        // remain tied to the channel supplied by their caller.
+        formDataPayload.append('channelId', canSelectChannel ? formData.channelId : channelId);
+        if (selectedBoard?.projectId) {
+          formDataPayload.append('projectId', selectedBoard.projectId);
         }
 
         if (assignedTo) {
@@ -1208,11 +1435,23 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           formDataPayload.append('ticketType', formData.ticketType);
         }
 
+        // Send dynamicFields on the multipart path too, else releaseRepos/commit
+        // range are dropped when a release ticket has an attachment.
+        formDataPayload.append('dynamicFields', JSON.stringify(submitDynamicFields));
+
         // Add draft attachment IDs if creating from conversation
         if (draftAttachmentIds.length > 0) {
           draftAttachmentIds.forEach(id => {
             formDataPayload.append('draftAttachmentIds[]', id);
           });
+        }
+
+        if (sourceMessageId) {
+          formDataPayload.append('sourceMessageId', sourceMessageId);
+        }
+
+        if (entityLinkScope) {
+          formDataPayload.append('entityLinkContext', JSON.stringify(entityLinkScope));
         }
 
         if (sourceConversation) {
@@ -1256,7 +1495,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       } else {
         // No files, use JSON
         response = await apiInstance.post<TicketResponse>('/tickets', {
@@ -1268,15 +1507,17 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           assignedTo: assignedTo || undefined,
           userGroupId: userGroupId || undefined,
           boardId: formData.boardId,
-          // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
-          channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
+          // Keep JSON and multipart channel resolution identical.
+          channelId: canSelectChannel ? formData.channelId : channelId,
           fromTicketsTab: isFromTicketsTab,
-          ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
+          ...(selectedBoard?.projectId && { projectId: selectedBoard.projectId }),
           ticketType: formData.ticketType,
           ...(draftAttachmentIds.length > 0 && { draftAttachmentIds }),
           ...(sourceConversation && { eta: formData.eta?.toISOString() }),
           ...(formData.tags && formData.tags.length > 0 && { tags: formData.tags }),
           ...(sourceConversation && { sourceConversationId: sourceConversation.conversationId }),
+          ...(sourceMessageId && { sourceMessageId }),
+          ...(entityLinkScope && { entityLinkContext: entityLinkScope }),
           ...(formData.workflowType && { workflowType: formData.workflowType }),
           ...(sourceConversation &&
             excludedChatAttachmentIds.size > 0 && {
@@ -1285,11 +1526,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(formData.merchantId && { merchantId: formData.merchantId }),
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
-          dynamicFields: activeDynamicFields,
+          dynamicFields: submitDynamicFields,
         });
 
         createdTicketResponse = response.data;
-        processTicketCreationResponse(response, formData.workflowType);
+        processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -1320,7 +1561,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     } catch (error) {
       // Handle file upload failures and other API errors
-      console.error('Failed to create ticket:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to create ticket:'),
+        error: error,
+      });
 
       toast.error('Ticket Creation Failed', {
         description:
@@ -1330,14 +1575,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   };
 
   const handleClose = (): void => {
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       void clearFiles();
     }
     setExcludedChatAttachmentIds(new Set());
     setEditingSubTicketIndex(null);
     setEditingSubTicketTitle('');
     setEditingSubTicketDescription('');
-    resetDuplicateState();
     onClose();
   };
 
@@ -1362,7 +1606,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
     }
 
-    if (isFromTicketsTab) {
+    if (usesLocalAttachments) {
       if (ticketLocalFiles.length > 0) return true;
     } else if (attachmentsMap.size > (baselineAttachmentCountRef.current ?? 0)) {
       return true;
@@ -1386,7 +1630,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     handleClose();
   };
 
-  const canPopOut = !standalone && !ticketSequence;
+  const canPopOut = !standalone && !ticketSequence && !allowChannelSelection;
 
   const handlePopOut = (): void => {
     const popoutId = uuidv4();
@@ -1400,9 +1644,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       popoutId,
       workspaceId: user?.workspaceId,
       channelId,
-      projectId,
+      ...(projectId ? { projectId } : {}),
       tab: tab || undefined,
       sourceConversationId: sourceConversation?.conversationId,
+      sourceMessageId,
+      entityLinkContext: entityLinkScope ?? undefined,
       initialMessageId: sourceConversation?.initialMessageId,
       parentTicketId,
       isFromSubTicket,
@@ -1470,26 +1716,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       });
   };
 
-  // Handle duplicate ticket copy link
-  const handleDuplicateTicketCopyLink = (link: string): void => {
-    const ticketUrl = `${shareableOrigin}${link}`;
-
-    navigator.clipboard
-      .writeText(ticketUrl)
-      .then(() => {
-        toast.success('Link Copied', {
-          description: 'The link has been copied to your clipboard.',
-          duration: 2000,
-        });
-      })
-      .catch(() => {
-        toast.error('Link Copy Failed', {
-          description: 'Failed to copy the link to your clipboard.',
-          duration: 2000,
-        });
-      });
-  };
-
   // get unique tags from project_tags
   const availableTags = useMemo(() => {
     if (!projectTags) return [];
@@ -1523,18 +1749,92 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return []; // Return empty array for empty/undefined values
   };
 
-  // Get board options and memomize them
+  const getRepoRange = (
+    id: string,
+  ): { branch: string; deployedCommit: string; newCommit: string } => {
+    if (id === formValues?.boardId) {
+      return {
+        branch: getSingleStringValue(formValues?.dynamicFields?.['branch'] ?? ''),
+        deployedCommit: getSingleStringValue(formValues?.dynamicFields?.['deployedCommitId'] ?? ''),
+        newCommit: getSingleStringValue(formValues?.dynamicFields?.['newCommitId'] ?? ''),
+      };
+    }
+    return repoRanges[id] ?? { branch: '', deployedCommit: '', newCommit: '' };
+  };
+
+  const setRepoRangeField = (
+    id: string,
+    key: 'branch' | 'deployedCommit' | 'newCommit',
+    value: string,
+  ): void => {
+    if (id === formValues?.boardId) {
+      form.setFieldValue('dynamicFields', {
+        ...formValues?.dynamicFields,
+        [PRIMARY_DF_KEY[key]]: value,
+      });
+      return;
+    }
+    setRepoRanges(prev => ({
+      ...prev,
+      [id]: { branch: '', deployedCommit: '', newCommit: '', ...prev[id], [key]: value },
+    }));
+  };
+
+  const toggleRepoBoard = (id: string): void => {
+    if (id === formValues?.boardId) {
+      const [next, ...rest] = selectedRepoBoardIds;
+      if (next) {
+        const range = repoRanges[next] ?? { branch: '', deployedCommit: '', newCommit: '' };
+        form.setFieldValue('boardId', next);
+        form.setFieldValue('dynamicFields', {
+          ...formValues?.dynamicFields,
+          branch: range.branch,
+          deployedCommitId: range.deployedCommit,
+          newCommitId: range.newCommit,
+        });
+        setSelectedRepoBoardIds(rest);
+      } else {
+        const nextFields = { ...formValues?.dynamicFields };
+        delete nextFields['branch'];
+        delete nextFields['deployedCommitId'];
+        delete nextFields['newCommitId'];
+        form.setFieldValue('boardId', '');
+        form.setFieldValue('dynamicFields', nextFields);
+      }
+      return;
+    }
+    if (selectedRepoBoardIds.includes(id)) {
+      setSelectedRepoBoardIds(prev => prev.filter(x => x !== id));
+      return;
+    }
+    if (!formValues?.boardId) {
+      form.setFieldValue('boardId', id);
+      const df = formValues?.dynamicFields ?? {};
+      if (!getSingleStringValue(df['branch'] ?? '').trim()) {
+        form.setFieldValue('dynamicFields', { ...df, branch: 'main' });
+      }
+    } else {
+      setSelectedRepoBoardIds(prev => [...prev, id]);
+      setRepoRanges(prev => ({
+        ...prev,
+        [id]: prev[id] ?? { branch: 'main', deployedCommit: '', newCommit: '' },
+      }));
+    }
+  };
+
   const boardOptions = useMemo(
     () =>
-      boards?.map(board => ({
-        label: board.name,
-        value: board.id,
-        icon: (
-          <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
-            {board.name.charAt(0)}
-          </span>
-        ),
-      })) ?? [],
+      boards
+        ?.filter(board => !isReleaseBoard(board.boardType))
+        .map(board => ({
+          label: board.name,
+          value: board.id,
+          icon: (
+            <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
+              {board.name.charAt(0)}
+            </span>
+          ),
+        })) ?? [],
     [boards],
   );
 
@@ -1553,7 +1853,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     {
       label: 'Paused',
       value: 'PAUSED',
-      icon: <Signature strokeWidth={2.5} className='size-3.5 text-teal-500' />,
+      icon: <PauseCircle strokeWidth={2.5} className='size-3.5 text-teal-500' />,
     },
     {
       label: 'Cancelled',
@@ -1579,15 +1879,25 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [channels],
   );
 
+  const [allChannels] = useCachedQuery(queries.userAllChannels({}), { enabled: releaseOnly });
+  const releaseChannelOptions = useMemo(() => {
+    const ids = new Set(releaseChannelIds ?? []);
+    if (ids.size === 0) return channelOptions;
+    return (allChannels ?? [])
+      .filter(ch => ids.has(ch.id))
+      .map(ch => ({
+        ...ch,
+        label: ch.name,
+        value: ch.id,
+        icon: <Hash className='size-3.5' strokeWidth={2.33} />,
+      }));
+  }, [channelOptions, releaseChannelIds, allChannels]);
+
   const assigneeOptions = useMemo(() => {
     const query = assigneeSearchValue.trim().toLowerCase();
     const matchedUsers = !query
       ? activeUsers
-      : activeUsers.filter(
-          user =>
-            getUserDisplayName(user).toLowerCase().includes(query) ||
-            (user.email ?? '').toLowerCase().includes(query),
-        );
+      : activeUsers.filter(user => matchesUserQuery(user, assigneeSearchValue));
     // You first, then channel members, then cap the rows (this list isn't
     // virtualized). Deactivated users aren't shown here — the source is active-only.
     const membersFirst = channelMembersFirst(matchedUsers, user => user.id, assigneeMemberIds);
@@ -1647,7 +1957,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Get tag options
   const tagOptions = useMemo(() => {
-    const selectedTags = formValues?.tags ?? [];
+    const selectedTags = formValues.tags ?? [];
     const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
 
     return allTags
@@ -1657,7 +1967,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
       }));
-  }, [availableTags, newTags, initialTags, formValues?.tags]);
+  }, [availableTags, newTags, initialTags, formValues.tags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;
@@ -1684,6 +1994,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       isFieldActive(field, allFields, getFieldEffectiveValue),
     );
   }, [requiredDynamicFields, resolvedFormFields, formValues?.dynamicFields]);
+
+  const visibleDynamicFields = useMemo(
+    () =>
+      isReleaseLine
+        ? activeDynamicFields.filter(f => !PRIMARY_RANGE_FIELD_NAMES.includes(f.fieldName))
+        : activeDynamicFields,
+    [activeDynamicFields, isReleaseLine],
+  );
 
   // Field error
   const FieldError: React.FC<FieldErrorProps> = ({ error }) => {
@@ -1729,8 +2047,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
         <h2 className='text-xs leading-5 font-medium text-foreground/80 select-none'>
           {ticketSequence
-            ? `New Ticket (${ticketSequence.current}/${ticketSequence.total})`
-            : 'New Ticket'}
+            ? `${ticketKind === 'release' ? 'New Release' : 'New Ticket'} (${ticketSequence.current}/${ticketSequence.total})`
+            : ticketKind === 'release'
+              ? 'New Release'
+              : 'New Ticket'}
         </h2>
         <div className='flex items-center gap-1'>
           {enableUrlSync && (
@@ -1825,9 +2145,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     field.handleChange(e.target.value);
                   }}
                   aria-label='Ticket Title'
-                  placeholder='Enter Ticket Title...'
+                  placeholder={
+                    ticketKind === 'release' ? 'Enter Release Title...' : 'Enter Ticket Title...'
+                  }
                   data-testid='ticket-title-input'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='EDIT_TICKET_TITLE'
                   data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                   className={cn(
@@ -1867,7 +2189,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 placeholder='Enter Ticket Description...'
                 aria-label='Ticket Description'
                 data-testid='ticket-description-input'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='EDIT_TICKET_DESCRIPTION'
                 data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                 onChange={e => {
@@ -1923,7 +2245,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={saveEditedSubTicket}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='SaveEditedSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -1960,7 +2282,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             type='button'
                             onClick={() => beginEditSubTicket(index)}
                             className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='EditSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -1971,7 +2293,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             onClick={() => deleteSubTicket(index)}
                             aria-label={`Delete subticket ${index + 1}`}
                             className='text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='TICKETS'
+                            data-track-category='Tickets'
                             data-track-name='DeleteSubTicket'
                             data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
                           >
@@ -1989,13 +2311,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         {/* Channel and Board Selection */}
         <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
-          {/* Channel Selection - Only for SubTicket creation */}
-          {(isFromSubTicket || isFromAI) && (
+          {/* Optional channel selection for subtickets, AI, and context-free entry points. */}
+          {canSelectChannel && (
             <form.Field
               name='channelId'
               validators={{
                 onChange: ({ value }) => {
-                  if (!value?.trim()) return 'Channel is required';
+                  if (!value?.trim())
+                    return releaseOnly ? 'Release channel is required' : 'Channel is required';
                   return undefined;
                 },
               }}
@@ -2003,13 +2326,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               {field => (
                 <EntitySelector
                   variant='inline'
-                  options={channelOptions}
+                  options={releaseOnly ? releaseChannelOptions : channelOptions}
                   selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['channelId'])
-                  }
-                  searchPlaceholder='channel'
-                  placeholder='channel'
+                  onSelect={(value: string | null) => {
+                    field.handleChange(value as CreateTicketFormData['channelId']);
+                    if (allowChannelSelection) form.setFieldValue('boardId', '');
+                  }}
+                  searchPlaceholder={releaseOnly ? 'release channel' : 'channel'}
+                  placeholder={releaseOnly ? 'Select release channel' : 'channel'}
                   inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
                 />
               )}
@@ -2021,97 +2345,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             name='boardId'
             validators={{
               onChange: ({ value }) => {
+                if (ticketKind === 'release') return undefined;
                 if (!value?.trim()) return 'Board is required';
                 return undefined;
               },
             }}
           >
             {field => {
-              // AI is checking — compact shimmer chip with an inline X to stop and pick manually
-              if (isCheckingBoard && !boardAISuggestionSuppressed) {
-                return (
-                  <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-0.5 h-8 w-fit overflow-hidden text-sm'>
-                    <SquareKanban
-                      className='size-3.5 text-muted-foreground shrink-0'
-                      strokeWidth={2.33}
-                    />
-                    <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
-                      Suggesting board...
-                    </span>
-                    <button
-                      type='button'
-                      className='flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:text-foreground focus-visible:bg-accent transition-colors shrink-0'
-                      title='Stop and select manually'
-                      aria-label='Stop and select manually'
-                      onClick={() => {
-                        setBoardAISuggestionSuppressed(true);
-                        resetBoardSuggestionState();
-                        setTimeout(() => setBoardSelectorOpen(true), 0);
-                      }}
-                      data-track-category='TICKETS'
-                      data-track-name='CancelAISuggestedBoard'
-                    >
-                      <X className='size-3.5 shrink-0' strokeWidth={2.33} />
-                    </button>
-                  </div>
-                );
-              }
-
-              // AI suggestion ready — grey outer wrapper, chip left, Accept/Reject right
-              if (
-                boardSuggestion?.analysis.suggestedBoardId &&
-                !boardAISuggestionSuppressed &&
-                !field.state.value
-              ) {
-                return (
-                  <div className='flex items-center justify-between w-full rounded-lg bg-muted px-3 py-1.5'>
-                    {/* Board name pill — clean bg inside the grey wrapper */}
-                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 text-sm'>
-                      <SquareKanban
-                        className='size-3.5 text-muted-foreground shrink-0'
-                        strokeWidth={2.33}
-                      />
-                      <span className='text-foreground whitespace-nowrap'>
-                        {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
-                      </span>
-                    </div>
-                    {/* Accept / Reject — separate bordered buttons on the right */}
-                    <div className='flex items-center gap-1.5'>
-                      <button
-                        type='button'
-                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                        onClick={() => {
-                          if (boardSuggestion.analysis.suggestedBoardId) {
-                            field.handleChange(boardSuggestion.analysis.suggestedBoardId);
-                            setBoardAISuggestionSuppressed(true);
-                            resetBoardSuggestionState();
-                          }
-                        }}
-                        data-track-category='TICKETS'
-                        data-track-name='AcceptAISuggestedBoard'
-                      >
-                        Accept
-                      </button>
-                      <button
-                        type='button'
-                        className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
-                        onClick={() => {
-                          setBoardAISuggestionSuppressed(true);
-                          resetBoardSuggestionState();
-                          // Defer open until EntitySelector has mounted in DOM
-                          setTimeout(() => setBoardSelectorOpen(true), 0);
-                        }}
-                        data-track-category='TICKETS'
-                        data-track-name='RejectAISuggestedBoard'
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              // Normal selector (default / after reject / after accept — shows chevron to change)
+              if (ticketKind === 'release') return null;
               return (
                 <EntitySelector
                   showSearch={false}
@@ -2119,7 +2360,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   selectedValue={field.state.value || ''}
                   onSelect={(value: string | null) => {
                     field.handleChange(value as CreateTicketFormData['boardId']);
-                    setBoardAISuggestionSuppressed(true);
                     setBoardSelectorOpen(false);
                   }}
                   searchPlaceholder='board'
@@ -2136,12 +2376,146 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </form.Field>
         </div>
 
+        {isReleaseLine && (
+          <div className='space-y-2'>
+            <div className='flex items-baseline justify-between'>
+              <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
+                Repositories
+              </span>
+              <span className='font-mono text-[11px] text-muted-foreground'>
+                {(formValues?.boardId ? 1 : 0) + selectedRepoBoardIds.length} selected
+              </span>
+            </div>
+
+            {releaseBoardOptions.map(o => {
+              const id = o.value;
+              const isPrimary = id === formValues?.boardId;
+              const selected = isPrimary || selectedRepoBoardIds.includes(id);
+              const range = getRepoRange(id);
+              const setField = (key: 'branch' | 'deployedCommit' | 'newCommit', value: string) =>
+                setRepoRangeField(id, key, value);
+              const toggle = () => toggleRepoBoard(id);
+              return (
+                <div
+                  key={id}
+                  className={cn(
+                    'rounded-xl border px-3 py-2.5 transition-colors',
+                    selected ? 'border-primary/40 bg-primary/5' : 'border-border bg-muted/20',
+                  )}
+                >
+                  <div className='flex items-center gap-3'>
+                    <button
+                      type='button'
+                      onClick={toggle}
+                      aria-pressed={selected}
+                      aria-label={selected ? `Remove ${o.label}` : `Add ${o.label}`}
+                      data-track-category='CreateTicket'
+                      data-track-name='ToggleReleaseRepo'
+                      className={cn(
+                        'grid size-[18px] shrink-0 place-items-center rounded-[5px] border text-[11px] font-semibold transition-colors',
+                        selected
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border text-transparent hover:border-primary/60',
+                      )}
+                    >
+                      ✓
+                    </button>
+                    <RepoDot color={repoColor(id)} className={selected ? '' : 'opacity-50'} />
+                    <button
+                      type='button'
+                      onClick={toggle}
+                      data-track-category='CreateTicket'
+                      data-track-name='ToggleReleaseRepoLabel'
+                      className={cn(
+                        'min-w-0 flex-1 truncate text-left text-sm font-semibold',
+                        selected ? 'text-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                    {isPrimary && (
+                      <span className='shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary'>
+                        Primary
+                      </span>
+                    )}
+                    {selected ? (
+                      <div className='flex shrink-0 items-center gap-1.5'>
+                        <input
+                          value={range.deployedCommit}
+                          onChange={e => setField('deployedCommit', e.target.value)}
+                          placeholder='deployed'
+                          className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                          data-track-category='CreateTicket'
+                          data-track-name='RepoDeployedCommit'
+                        />
+                        <span className='text-muted-foreground'>→</span>
+                        <input
+                          value={range.newCommit}
+                          onChange={e => setField('newCommit', e.target.value)}
+                          placeholder='new'
+                          className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                          data-track-category='CreateTicket'
+                          data-track-name='RepoNewCommit'
+                        />
+                      </div>
+                    ) : (
+                      <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
+                        <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                          —
+                        </span>
+                        <span className='text-muted-foreground'>→</span>
+                        <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                          —
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {selected && (
+                    <div className='mt-2 flex items-center gap-2 pl-[30px]'>
+                      <label
+                        htmlFor={`repo-branch-${id}`}
+                        className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'
+                      >
+                        Branch
+                      </label>
+                      <input
+                        id={`repo-branch-${id}`}
+                        value={range.branch}
+                        onChange={e => setField('branch', e.target.value)}
+                        placeholder='main'
+                        className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                        data-track-category='CreateTicket'
+                        data-track-name='RepoBranch'
+                      />
+                    </div>
+                  )}
+                  {(servicesByMainBoard.get(id)?.length ?? 0) > 0 && (
+                    <div className='mt-2 flex flex-wrap items-center gap-1.5 pl-[30px]'>
+                      <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
+                        Services
+                      </span>
+                      {servicesByMainBoard.get(id)!.map(name => (
+                        <span
+                          key={name}
+                          className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Dynamic Form Fields */}
-        {activeDynamicFields.length > 0 && (
+        {visibleDynamicFields.length > 0 && (
           <div className='space-y-2'>
             <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
             <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
-              {activeDynamicFields.map(field => {
+              {visibleDynamicFields.map(field => {
                 const fieldName = field.fieldName;
                 const fieldType = field.fieldType;
                 const rawValue = formValues?.dynamicFields?.[fieldName] || '';
@@ -2356,94 +2730,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </div>
         )}
 
-        <div className='py-2'>
-          {isCheckingDuplicate && (
-            <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' />
-              <span>Checking for duplicates...</span>
-            </div>
-          )}
-          {(duplicateCheck?.candidates?.length ?? 0) > 0 && (
-            <div className='rounded-lg border border-border bg-muted p-4 mb-2 transition-all duration-200 ease-out'>
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between pb-0.5'>
-                  <span className='flex items-center gap-2'>
-                    <Copy className='size-3' strokeWidth={2.5} />
-                    <p className='text-sm font-medium text-foreground leading-5'>
-                      {duplicateCheck?.analysis?.isDuplicate
-                        ? 'Duplicate ticket found'
-                        : 'Similar tickets found'}
-                    </p>
-                  </span>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    onClick={resetDuplicateState}
-                    className='size-6 '
-                  >
-                    <X strokeWidth={2.33} className='size-3.5' />
-                  </Button>
-                </div>
-                {(duplicateCheck?.analysis?.isDuplicate
-                  ? duplicateCheck?.candidates?.slice(0, 1)
-                  : duplicateCheck?.candidates?.slice(0, 5)
-                )?.map(candidate => {
-                  const candidateLink = candidateLinks.get(candidate.id);
-
-                  return (
-                    <div
-                      key={candidate.id}
-                      className='border border-border rounded-lg p-2.5 flex items-center justify-between gap-2 group bg-background'
-                    >
-                      <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                        <p className='text-foreground text-sm font-medium truncate'>
-                          <RenderMessageWithHTML message={candidate.title} />
-                        </p>
-                      </span>
-                      <span className='opacity-0 flex items-center gap-1 group-hover:opacity-100 transition-opacity duration-300 '>
-                        {candidateLink && (
-                          <Tooltip
-                            content='Copy Ticket'
-                            side='top'
-                            className='text-[10px] font-semibold leading-3  p-1.5'
-                          >
-                            <Button
-                              type='button'
-                              variant='ghost'
-                              size='icon'
-                              className='size-6'
-                              onClick={() => {
-                                handleDuplicateTicketCopyLink(candidateLink);
-                              }}
-                              data-track-category='Tickets'
-                              data-track-name='CopyDuplicateTicketLink'
-                            >
-                              <LinkIcon className='size-3.5' />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {candidateLink && (
-                          <Tooltip
-                            content='Open in new page'
-                            side='top'
-                            className='text-[10px] font-semibold leading-3 p-1.5 '
-                          >
-                            <Link to={candidateLink}>
-                              <Button type='button' variant='ghost' size='icon' className='size-6'>
-                                <SquareArrowOutUpRight className='size-3.5' />
-                              </Button>
-                            </Link>
-                          </Tooltip>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
         {allAttachments.length > 0 && (
           <div
             className={cn(
@@ -2475,7 +2761,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       // Exclude this chat attachment from the ticket
                       setExcludedChatAttachmentIds(prev => new Set([...prev, attachmentId]));
                     }}
-                    onPreview={() => {}}
+                    onPreview={() => undefined}
                     isUploading={form.state.isSubmitting}
                     variant='detailed'
                   />
@@ -2524,69 +2810,72 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         <div className='flex flex-wrap items-center gap-2.5 mt-2'>
           {/* Assignee Selection */}
-          <form.Field name='assignee'>
-            {field => (
-              <EntitySelector
-                options={assigneeOptions}
-                selectedValue={
-                  field.state.value
-                    ? field.state.value.type === 'assigneeTo'
-                      ? `user:${field.state.value.value}`
-                      : `${field.state.value.type}:${field.state.value.value}`
-                    : null
-                }
-                onSelect={(value: string | null) => {
-                  const applyAssignee = (val: string | null): void => {
-                    field.handleChange(parseAssignee(val));
-                    if (val) {
-                      const picked = assigneeOptions.find(o => o.value === val);
-                      setSelectedAssigneeOption(
-                        picked
-                          ? { value: picked.value, label: picked.label, icon: picked.icon }
-                          : null,
-                      );
-                    } else {
-                      setSelectedAssigneeOption(null);
-                    }
-                  };
-                  // Gate individual users by channel membership; groups pass through.
-                  if (value && value.startsWith('user:')) {
-                    const uid = value.slice('user:'.length);
-                    const name = assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
-                    gatedAssignUser({
-                      userId: uid,
-                      userName: name,
-                      assign: () => applyAssignee(value),
-                    });
-                  } else {
-                    applyAssignee(value);
+          {!releaseOnly && (
+            <form.Field name='assignee'>
+              {field => (
+                <EntitySelector
+                  options={assigneeOptions}
+                  selectedValue={
+                    field.state.value
+                      ? field.state.value.type === 'assigneeTo'
+                        ? `user:${field.state.value.value}`
+                        : `${field.state.value.type}:${field.state.value.value}`
+                      : null
                   }
-                }}
-                onSearchChange={setAssigneeSearchValue}
-                searchPlaceholder={
-                  showUserGroupsOnly
-                    ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                    : `Select assignee${mandatoryAssignee ? ' *' : ''}`
-                }
-                placeholder={
-                  showUserGroupsOnly
-                    ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                    : `Assignee${mandatoryAssignee ? ' *' : ''}`
-                }
-                inputIcon={
-                  showUserGroupsOnly ? (
-                    <Users className='size-3.5' strokeWidth={2.33} />
-                  ) : (
-                    <User className='size-3.5' strokeWidth={2.33} />
-                  )
-                }
-                inputClassName='rounded-md h-7'
-                disableClientFiltering={true}
-                showIndicator={false}
-                testId='ticket-assignee-selector'
-              />
-            )}
-          </form.Field>
+                  onSelect={(value: string | null) => {
+                    const applyAssignee = (val: string | null): void => {
+                      field.handleChange(parseAssignee(val));
+                      if (val) {
+                        const picked = assigneeOptions.find(o => o.value === val);
+                        setSelectedAssigneeOption(
+                          picked
+                            ? { value: picked.value, label: picked.label, icon: picked.icon }
+                            : null,
+                        );
+                      } else {
+                        setSelectedAssigneeOption(null);
+                      }
+                    };
+                    // Gate individual users by channel membership; groups pass through.
+                    if (value && value.startsWith('user:')) {
+                      const uid = value.slice('user:'.length);
+                      const name =
+                        assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
+                      gatedAssignUser({
+                        userId: uid,
+                        userName: name,
+                        assign: () => applyAssignee(value),
+                      });
+                    } else {
+                      applyAssignee(value);
+                    }
+                  }}
+                  onSearchChange={setAssigneeSearchValue}
+                  searchPlaceholder={
+                    showUserGroupsOnly
+                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                      : `Select assignee${mandatoryAssignee ? ' *' : ''}`
+                  }
+                  placeholder={
+                    showUserGroupsOnly
+                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
+                  }
+                  inputIcon={
+                    showUserGroupsOnly ? (
+                      <Users className='size-3.5' strokeWidth={2.33} />
+                    ) : (
+                      <User className='size-3.5' strokeWidth={2.33} />
+                    )
+                  }
+                  inputClassName='rounded-md h-7'
+                  disableClientFiltering={true}
+                  showIndicator={false}
+                  testId='ticket-assignee-selector'
+                />
+              )}
+            </form.Field>
+          )}
 
           {/* Status Selection (Todo) - conditionally rendered */}
           {showTodo && (
@@ -2612,7 +2901,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           )}
 
           {/* Due Date - conditionally rendered */}
-          {showDueDate && (
+          {showDueDate && !releaseOnly && (
             <form.Field name='eta'>
               {field => {
                 const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
@@ -2630,50 +2919,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           )}
 
           {/* Priority Selection */}
-          <form.Field name='priority'>
-            {field => {
-              return (
-                <EntitySelector
-                  showSearch={false}
-                  options={getPriorityOptions()}
-                  selectedValue={field.state.value}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['priority'])
-                  }
-                  searchPlaceholder='priority'
-                  placeholder='priority'
-                  inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                  inputClassName='rounded-md h-7'
-                  showClearButton={true}
-                  showIndicator={false}
-                  testId='ticket-priority-selector'
-                />
-              );
-            }}
-          </form.Field>
-
-          {/* Workflow Type Selection - conditionally rendered */}
-          {showWorkflows && (
-            <form.Field name='workflowType'>
+          {!releaseOnly && (
+            <form.Field name='priority'>
               {field => {
                 return (
                   <EntitySelector
-                    variant='inline'
-                    options={workflowTypes.map(workflowType => ({
-                      ...workflowType,
-                      value: workflowType.id,
-                      icon: null,
-                    }))}
+                    showSearch={false}
+                    options={getPriorityOptions()}
                     selectedValue={field.state.value}
-                    onSelect={value => {
-                      field.handleChange(value as CreateTicketFormData['workflowType']);
-                    }}
-                    searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                    inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
-                    inputClassName='bg-background'
+                    onSelect={(value: string | null) =>
+                      field.handleChange(value as CreateTicketFormData['priority'])
+                    }
+                    searchPlaceholder='priority'
+                    placeholder='priority'
+                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7'
+                    showClearButton={true}
                     showIndicator={false}
-                    testId='ticket-workflow-selector'
+                    testId='ticket-priority-selector'
                   />
                 );
               }}
@@ -2681,7 +2944,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           )}
 
           {/* Tags Selection - conditionally rendered */}
-          {showLabels && (
+          {showLabels && !releaseOnly && (
             <form.Field name='tags'>
               {field => (
                 <EntityMultiSelector
@@ -2708,15 +2971,22 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           )}
 
           {/* Ticket Type Selection - conditionally rendered */}
-          {showTicketType && (
+          {showTicketType && !releaseOnly && (
             <form.Field name='ticketType'>
               {field => {
-                const typeOptions =
-                  ticketTypeOptions?.map(type => ({
-                    label: type.value,
-                    value: type.value,
-                    icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                  })) ?? [];
+                const typeOptions = isFlowRootTicket
+                  ? [
+                      {
+                        label: BaseTicketType.Epic,
+                        value: BaseTicketType.Epic,
+                        icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                      },
+                    ]
+                  : (ticketTypeOptions?.map(type => ({
+                      label: type.value,
+                      value: type.value,
+                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                    })) ?? []);
 
                 return (
                   <EntitySelector
@@ -2730,7 +3000,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'
-                    showClearButton={true}
+                    showClearButton={!isFlowRootTicket}
                     showIndicator={false}
                   />
                 );
@@ -2763,7 +3033,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             disabled={form.state.isSubmitting}
             className='size-6'
             data-testid='ticket-attachment-button'
-            data-track-category='TICKETS'
+            data-track-category='Tickets'
             data-track-name='ATTACH_FILE'
             data-track-metadata={JSON.stringify({
               boardId: selectedBoardId,
@@ -2774,8 +3044,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
           </Button>
           <div className='flex items-center gap-3'>
-            {missingMandatoryFieldMessage ? (
-              <Tooltip content={missingMandatoryFieldMessage} side='top'>
+            {submitGateMessage ? (
+              <Tooltip content={submitGateMessage} side='top'>
                 <span className='cursor-not-allowed'>
                   <Button
                     type='submit'
@@ -2783,7 +3053,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                     className='pointer-events-none'
                     data-testid='ticket-submit-button'
-                    data-track-category='TICKETS'
+                    data-track-category='Tickets'
                     data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                     data-track-metadata={JSON.stringify({
                       boardId: selectedBoardId,
@@ -2792,7 +3062,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       isFromAI,
                     })}
                   >
-                    {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+                    {form.state.isSubmitting
+                      ? 'Creating...'
+                      : ticketKind === 'release'
+                        ? 'Create Release'
+                        : 'Create Ticket'}
                   </Button>
                 </span>
               </Tooltip>
@@ -2802,7 +3076,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 loading={form.state.isSubmitting}
                 disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                 data-testid='ticket-submit-button'
-                data-track-category='TICKETS'
+                data-track-category='Tickets'
                 data-track-name='SUBMIT_CREATE_TICKET_MODAL'
                 data-track-metadata={JSON.stringify({
                   boardId: selectedBoardId,
@@ -2811,7 +3085,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   isFromAI,
                 })}
               >
-                {form.state.isSubmitting ? 'Creating...' : 'Create Ticket'}
+                {form.state.isSubmitting
+                  ? 'Creating...'
+                  : ticketKind === 'release'
+                    ? 'Create Release'
+                    : 'Create Ticket'}
               </Button>
             )}
             {/* Hidden file input */}
@@ -2897,7 +3175,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
-      {...(!isMobile ? { focusRef: titleInputRef } : {})}
+      {...(!isMobile
+        ? { focusRef: focusDescriptionOnOpen ? descriptionTextareaRef : titleInputRef }
+        : {})}
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',

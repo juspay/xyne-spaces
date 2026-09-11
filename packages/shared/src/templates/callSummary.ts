@@ -16,7 +16,7 @@ export const DEFAULT_SUMMARY_FIELDS = `### 💡 Key Takeaways
 
 ### Call Overview
 **Estimated Duration**: [Short/Medium/Long based on transcript length]
-**Participants**: [List all participants mentioned]
+**Participants**: [List all participants mentioned; keep the "{HOST}" marker immediately after the name of the person who created the call]
 **Primary Focus**: [1-2 sentence summary of main purpose]
 
 ---

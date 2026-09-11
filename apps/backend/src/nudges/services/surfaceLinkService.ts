@@ -9,23 +9,14 @@ interface CreateLinkInput {
   targetId: string;
   linkKind: SurfaceLinkKind;
   createdBy: string;
-  projectId: string;
+  workspaceId: string;
 }
 
 class SurfaceLinkService {
   async createLink(input: CreateLinkInput): Promise<void> {
-    const { sourceType, sourceId, targetType, targetId, linkKind, createdBy, projectId } = input;
+    const { sourceType, sourceId, targetType, targetId, linkKind, createdBy, workspaceId } = input;
 
     try {
-      // Stamp the denormalized tenant key from the owning project.
-      const project = await db.project.findUnique({
-        where: { id: projectId },
-        select: { workspaceId: true },
-      });
-      if (!project) {
-        throw new Error(`Project not found for surface link: ${projectId}`);
-      }
-
       await db.surfaceLink.upsert({
         where: {
           sourceType_sourceId_targetType_targetId_linkKind: {
@@ -43,8 +34,7 @@ class SurfaceLinkService {
           targetId,
           linkKind,
           createdBy,
-          projectId,
-          workspaceId: project.workspaceId,
+          workspaceId,
         },
         update: {},
       });

@@ -28,6 +28,9 @@ class AdapterRegistry {
    * @throws Error if no adapter found
    */
   getAdapter(sourceName: string): ExternalSourceAdapter {
+    const registeredAdapter = this.findRegisteredAdapter(sourceName);
+    if (registeredAdapter) return registeredAdapter;
+
     const platform = this.extractPlatform(sourceName);
 
     const adapter = this.adapters.get(platform);
@@ -45,8 +48,22 @@ class AdapterRegistry {
    * @returns true if adapter exists
    */
   hasAdapter(sourceName: string): boolean {
+    if (this.findRegisteredAdapter(sourceName)) return true;
     const platform = this.extractPlatform(sourceName);
     return this.adapters.has(platform);
+  }
+
+  getPollingPlatforms(): ExternalSourcePlatform[] {
+    return [...this.adapters.entries()]
+      .filter(([, adapter]) => adapter.supportsPolling)
+      .map(([platform]) => platform);
+  }
+
+  private findRegisteredAdapter(sourceName: string): ExternalSourceAdapter | undefined {
+    return [...this.adapters.entries()]
+      .sort(([left], [right]) => right.length - left.length)
+      .find(([platform]) => sourceName === platform || sourceName.startsWith(`${platform}-`))
+      ?.[1];
   }
 
   /**

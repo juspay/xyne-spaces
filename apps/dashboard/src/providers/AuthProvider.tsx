@@ -11,8 +11,6 @@ import {
 import { setupElectronAuthListeners } from '../utils/electronAuth';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import {
   registerNativePushToken,
   unregisterNativePushToken,
@@ -69,7 +67,11 @@ const fetchUserFromSession = async (): Promise<User | null> => {
       return data.user;
     }
   } catch (error) {
-    console.error('[AUTH] Failed to fetch user via /auth/me after session bootstrap', error);
+    logger.error(LoggerEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[AUTH] Failed to fetch user via /auth/me after session bootstrap'),
+      error: error,
+    });
   }
 
   return null;
@@ -84,9 +86,14 @@ const hydrateNativeSession = async (sessionId: string | null | undefined): Promi
     return null;
   }
 
-  // eslint-disable-next-line no-console
-  console.info('[AUTH] Native session injected via cookie, attempting /auth/me fetch', {
-    sessionId,
+  logger.info(LoggerEvent.FRONTEND_ERROR, {
+    type: 'migrated_console_info',
+    message: String('[AUTH] Native session injected via cookie, attempting /auth/me fetch'),
+    context: [
+      {
+        sessionId,
+      },
+    ],
   });
   return fetchUserFromSession();
 };
@@ -110,17 +117,35 @@ const handleNativeSignInResult = (
     return;
   }
 
-  if (payload.workspaces && payload.workspaces.length > 0 && payload.email) {
+  // Zero workspaces still goes to the machine when the backend reported a domain conflict, so
+  // the enterprise request-to-join UI renders instead of falling through to the session bootstrap.
+  const nativeHasDomainConflict = !!(payload.domainConflictError || payload.publicEmailDomainError);
+  if (
+    payload.email &&
+    ((payload.workspaces && payload.workspaces.length > 0) || nativeHasDomainConflict)
+  ) {
     authActor.send({
       type: 'OAUTH_CALLBACK_COMPLETE',
       output: {
-        workspaces: payload.workspaces as Workspace[],
+        workspaces: (payload.workspaces ?? []) as Workspace[],
         pendingUserData: {
           email: payload.email,
           name: payload.name ?? '',
           ...(payload.picture ? { picture: payload.picture } : {}),
         },
         userExistsButRemoved: payload.userExistsButRemoved || false,
+        ...(payload.domainConflictError
+          ? { domainConflictError: payload.domainConflictError }
+          : {}),
+        ...(payload.publicEmailDomainError
+          ? { publicEmailDomainError: payload.publicEmailDomainError }
+          : {}),
+        ...(payload.enterpriseJoinOrgName
+          ? { enterpriseJoinOrgName: payload.enterpriseJoinOrgName }
+          : {}),
+        ...(payload.enterpriseJoinWorkspaces
+          ? { enterpriseJoinWorkspaces: payload.enterpriseJoinWorkspaces }
+          : {}),
       },
     });
     return;
@@ -217,8 +242,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         registeredNativePushTokenRef.current = payload.token;
         pendingNativePushTokenRef.current = null;
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('[AUTH] Failed to register native push token', error);
+        logger.error(LoggerEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[AUTH] Failed to register native push token'),
+          error: error,
+        });
       }
     },
     [isMobile, requestNativePushToken, user],
@@ -226,7 +254,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     if (!isElectron) {
-      return (): void => {};
+      return (): void => undefined;
     }
 
     const bootstrapElectronSession = async (): Promise<void> => {
@@ -236,11 +264,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const user = await fetchUserFromSession();
         if (user?.id) {
           authActor.send({ type: 'SESSION_VALIDATED', user });
-
-          mixpanelService.track(EVENTS.APP_REFRESH, {
-            trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.AUTH_SUCCESS_REDIRECT,
-            url: window.location.href,
-          });
 
           logger.info(LoggerEvent.APP_REFRESH, {
             url: window.location.href,
@@ -273,6 +296,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 ...(data.picture ? { picture: data.picture } : {}),
               },
               userExistsButRemoved: data.userExistsButRemoved || false,
+              ...(data.domainConflictError
+                ? { domainConflictError: data.domainConflictError }
+                : {}),
+              ...(data.publicEmailDomainError
+                ? { publicEmailDomainError: data.publicEmailDomainError }
+                : {}),
+              ...(data.enterpriseJoinOrgName
+                ? { enterpriseJoinOrgName: data.enterpriseJoinOrgName }
+                : {}),
+              ...(data.enterpriseJoinWorkspaces
+                ? { enterpriseJoinWorkspaces: data.enterpriseJoinWorkspaces }
+                : {}),
             },
           });
         } else {
@@ -294,14 +329,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     reactNativeBridge.initialize();
-    // eslint-disable-next-line no-console
-    console.info('[AUTH] React Native WebView detected, wiring native auth bridge');
+    logger.info(LoggerEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_info',
+      message: String('[AUTH] React Native WebView detected, wiring native auth bridge'),
+    });
 
     const unsubscribeNativeReady = reactNativeBridge.on(
       NativeInboundMessageType.NATIVE_READY,
       () => {
-        // eslint-disable-next-line no-console
-        console.info('[AUTH] Native host reported ready');
+        logger.info(LoggerEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_info',
+          message: String('[AUTH] Native host reported ready'),
+        });
       },
     );
 
@@ -353,8 +392,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const lastToken = registeredNativePushTokenRef.current;
       if (lastToken) {
         void unregisterNativePushToken().catch(error => {
-          // eslint-disable-next-line no-console
-          console.error('[AUTH] Failed to unregister native push token', error);
+          logger.error(LoggerEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[AUTH] Failed to unregister native push token'),
+            error: error,
+          });
         });
         registeredNativePushTokenRef.current = null;
       }

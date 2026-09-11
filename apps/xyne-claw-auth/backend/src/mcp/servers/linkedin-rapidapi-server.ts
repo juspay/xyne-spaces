@@ -24,6 +24,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -140,7 +141,7 @@ function ok(data: unknown): CallToolResult {
 }
 
 function fail(err: unknown): CallToolResult {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errMsg(err);
   logErr(`tool error: ${msg}`);
   return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
 }

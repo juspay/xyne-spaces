@@ -1,4 +1,4 @@
-import React, { JSX, useEffect, useMemo, useState } from 'react';
+import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -10,8 +10,8 @@ import {
   Ticket as TicketIcon,
   Users,
   Clock,
+  Phone,
 } from 'lucide-react';
-import { highlightCodeBlocks } from './utils';
 import {
   getAnchorTargetProps,
   getInternalLinkLabel,
@@ -26,10 +26,12 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
+import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
+import { LinkHoverCard } from '../LinkHoverCard/LinkHoverCard';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
@@ -55,19 +57,23 @@ interface RenderMessageWithHTMLProps {
   showEdited?: boolean;
   isSystemMessage?: boolean;
   breakLongLinks?: boolean;
+  /** Render URLs/links as inert plain text (activity sidebar: a click opens the activity, not the link). */
+  disableLinks?: boolean;
   /** Needed to render embedded FlowScreenManager widgets */
   messageId?: string;
   conversationId?: string;
   preserveThreadRoute?: boolean;
+  slashCommandArtifactContext?: {
+    channelId?: string;
+    senderId?: string;
+    createdAt?: number;
+    surface?: 'channel' | 'thread';
+  };
 }
 
 const MAX_HTML_LENGTH = 100000;
 
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
-
-const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
-const CODE_BLOCK_PREVIEW_LINES = 10;
-const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 24 + 32;
 
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
@@ -75,6 +81,8 @@ const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
       return <TicketIcon className='h-3.5 w-3.5' />;
     case 'canvas':
       return <FileText className='h-3.5 w-3.5' />;
+    case 'call':
+      return <Phone className='h-3.5 w-3.5' />;
     default:
       return <MessageSquare className='h-3.5 w-3.5' />;
   }
@@ -95,7 +103,7 @@ const getOptionalChannelScopeType = (value: unknown): ChannelScopeType | undefin
   return isChannelScopeType(scopeType) ? scopeType : undefined;
 };
 
-const InternalXyneLink = ({
+export const InternalXyneLink = ({
   href,
   children,
   className,
@@ -105,7 +113,8 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const copyHref = withWorkspacePrefix(resolvedHref, workspaceId);
+  const copyHref =
+    parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
   const { userID } = useAuthContextValues();
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
@@ -117,6 +126,10 @@ const InternalXyneLink = ({
     enabled: !!parsedLink?.canvasId,
   });
   const [copied, setCopied] = useState(false);
+
+  // Call links are left to bubble: the document-level handler in App.tsx routes
+  // every anchor in the app, and it turns an invite URL into the dashboard's own
+  // call route. Claiming them here as well would do the same work twice.
 
   if (!resolvedHref || !parsedLink) {
     return (
@@ -535,7 +548,11 @@ function CollapsibleConversationHistory({
   );
 }
 
-function CopyableCodeBlock({
+const CODE_BLOCK_COLLAPSE_THRESHOLD = 50;
+const CODE_BLOCK_PREVIEW_LINES = 20;
+const CODE_BLOCK_PREVIEW_MAX_HEIGHT = CODE_BLOCK_PREVIEW_LINES * 20 + 16;
+
+function MessageCodeBlock({
   children,
   codeText,
 }: {
@@ -543,15 +560,15 @@ function CopyableCodeBlock({
   codeText: string;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
-  const resetTimerRef = React.useRef<number | undefined>(undefined);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const resetTimerRef = useRef<number | undefined>(undefined);
 
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current !== undefined) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
+  useEffect(
+    () => (): void => {
+      if (resetTimerRef.current !== undefined) window.clearTimeout(resetTimerRef.current);
+    },
+    [],
+  );
 
   const handleCopy = (): void => {
     void copyTextToClipboard(codeText)
@@ -560,76 +577,78 @@ function CopyableCodeBlock({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to copy code snippet to clipboard'),
+          error: error,
+        });
       });
   };
 
+  const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
+  const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+
   return (
-    <div className='group/code-block relative'>
+    <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
+      <div
+        className='relative overflow-hidden'
+        style={
+          collapsible && !isExpanded
+            ? { maxHeight: `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px` }
+            : undefined
+        }
+      >
+        {children}
+        {collapsible && (
+          <div
+            className={
+              isExpanded
+                ? 'flex justify-center pb-2'
+                : 'pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pt-8 pb-3'
+            }
+            style={
+              isExpanded
+                ? undefined
+                : {
+                    backgroundImage: 'linear-gradient(to bottom, transparent, hsl(var(--muted)))',
+                  }
+            }
+          >
+            <button
+              type='button'
+              onClick={() => setIsExpanded(prev => !prev)}
+              className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
+              data-track-category='MESSAGE'
+              data-track-name='TOGGLE_CODE_BLOCK'
+              data-track-metadata={JSON.stringify({ isExpanded, lineCount: lines })}
+            >
+              <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
+              <span>{isExpanded ? 'Show less' : `Show more (${lines} lines)`}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       <button
         type='button'
         onClick={handleCopy}
-        className='absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border border-muted-foreground/30 bg-background/90 px-2 text-xs font-medium text-muted-foreground opacity-100 shadow-sm transition-opacity hover:bg-muted hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-sm transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
         aria-label='Copy code snippet'
         title='Copy code snippet'
         data-track-category='MESSAGE'
         data-track-name='COPY_CODE_SNIPPET'
       >
-        {copied ? (
-          <>
-            <Check className='h-3 w-3 text-green-600' />
-            <span>Copied</span>
-          </>
-        ) : (
-          <>
-            <Copy className='h-3 w-3' />
-            <span>Copy</span>
-          </>
-        )}
+        <span className='flex items-center justify-center p-1'>
+          {copied ? (
+            <CopyCopied size={16} className='text-status-success' />
+          ) : (
+            <CopyDefault size={16} />
+          )}
+        </span>
       </button>
       <span aria-live='polite' className='sr-only'>
         {copied ? 'Code snippet copied to clipboard' : ''}
       </span>
-      {children}
-    </div>
-  );
-}
-
-function CollapsibleCodeBlock({
-  children,
-  keyPrefix,
-  lineCount,
-}: {
-  children: React.ReactNode;
-  keyPrefix: string;
-  lineCount: number;
-}): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const toggleExpanded = (): void => {
-    setIsExpanded(prev => !prev);
-  };
-
-  return (
-    <div className='collapsible-code-block relative' key={`${keyPrefix}-collapsible-code`}>
-      <div
-        className='relative overflow-hidden'
-        style={{
-          maxHeight: isExpanded ? 'none' : `${CODE_BLOCK_PREVIEW_MAX_HEIGHT}px`,
-        }}
-      >
-        {children}
-        <button
-          type='button'
-          onClick={toggleExpanded}
-          className='absolute bottom-4 right-3 z-10 rounded-md border border-muted-foreground/30 bg-background px-2 py-1 text-xs font-medium text-primary shadow-sm hover:bg-muted hover:text-primary/80 cursor-pointer'
-          data-track-category='MESSAGE'
-          data-track-name='TOGGLE_CODE_BLOCK'
-          data-track-metadata={JSON.stringify({ isExpanded, lineCount })}
-        >
-          {isExpanded ? 'Collapse' : `Expand (${lineCount} lines)`}
-        </button>
-      </div>
     </div>
   );
 }
@@ -790,32 +809,19 @@ const handleTableElement = (
   const tableHandlers: Record<string, TableElementHandler> = {
     table: (_el, props, children, idx, keyPrefix) => {
       const { key: _key, ...restProps } = props;
-      const existingClass = (restProps['className'] as string) || '';
-      const tableProps = {
-        ...restProps,
-        className: cn('border border-border border-collapse w-full my-2', existingClass),
-      };
       return {
-        props: tableProps,
+        props: restProps,
         wrapper: (
-          <div key={`${keyPrefix}-table-wrapper-${idx}`} className='overflow-x-auto'>
-            <table {...(tableProps as React.TableHTMLAttributes<HTMLTableElement>)}>
+          <div key={`${keyPrefix}-table-wrapper-${idx}`} className='overflow-x-auto max-w-full'>
+            <table {...(restProps as React.TableHTMLAttributes<HTMLTableElement>)}>
               {children}
             </table>
           </div>
         ),
       };
     },
-    thead: (_el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      return { props: { ...props, className: cn('bg-muted/50', existingClass) } };
-    },
     td: (el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      const newProps: Record<string, unknown> = {
-        ...props,
-        className: cn('border border-border px-3 py-2 text-left', existingClass),
-      };
+      const newProps: Record<string, unknown> = { ...props };
       const colspan = el.getAttribute('colspan');
       const rowspan = el.getAttribute('rowspan');
       if (colspan) {
@@ -829,14 +835,7 @@ const handleTableElement = (
       return { props: newProps };
     },
     th: (el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      const newProps: Record<string, unknown> = {
-        ...props,
-        className: cn(
-          'border border-border px-3 py-2 text-left font-semibold bg-muted/50',
-          existingClass,
-        ),
-      };
+      const newProps: Record<string, unknown> = { ...props };
       const colspan = el.getAttribute('colspan');
       const rowspan = el.getAttribute('rowspan');
       if (colspan) {
@@ -848,15 +847,6 @@ const handleTableElement = (
         if (!isNaN(row)) newProps['rowSpan'] = row;
       }
       return { props: newProps };
-    },
-    tr: (_el, props) => {
-      const existingClass = (props['className'] as string) || '';
-      return {
-        props: {
-          ...props,
-          className: cn('border-b border-border last:border-b-0', existingClass),
-        },
-      };
     },
   };
 
@@ -876,6 +866,12 @@ const parseNode = (
   messageId?: string,
   conversationId?: string,
   preserveThreadRoute = false,
+  slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
+  disableLinks = false,
+  // True when this node is inside a <code>/<pre> region. Unlike `insideCodeBlock`
+  // (which is also set for anchors to suppress URL auto-linking), this is strictly
+  // code context, so mentions can be flattened to inert text without affecting links.
+  insideCode = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -899,7 +895,16 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      if (parseInternalXyneLink(url)) {
+      if (disableLinks) {
+        parts.push(
+          <span
+            key={`${keyPrefix}-url-${offset}`}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
+          >
+            {url}
+          </span>,
+        );
+      } else if (parseInternalXyneLink(url)) {
         const external = isExternalUrl(url);
         const linkProps = getAnchorTargetProps(url);
 
@@ -951,6 +956,17 @@ const parseNode = (
 
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();
+
+  // Inside code blocks / inline code, a mention span is almost always a false
+  // positive — e.g. `@Juspay` inside the email `guruprasad.bhosale@Juspay.in`
+  // in a SQL snippet. Render it as inert text instead of an interactive chip.
+  if (insideCode && el.hasAttribute('data-mention')) {
+    return (
+      <React.Fragment key={`${keyPrefix}-code-mention-${idx}`}>
+        {el.textContent ?? ''}
+      </React.Fragment>
+    );
+  }
 
   if (el.hasAttribute('data-mention') && el.getAttribute('data-mention-type') === 'user') {
     const userId = el.getAttribute('data-user-id') || '';
@@ -1061,28 +1077,37 @@ const parseNode = (
   // Handle embedded flow JSON — render FlowScreenManager in place of the div
   if (el.hasAttribute('data-flow-json')) {
     const raw = el.getAttribute('data-flow-json');
-    console.log(
-      '[RenderMsg] data-flow-json found, raw length:',
-      raw?.length,
-      'messageId:',
-      messageId,
-      'conversationId:',
-      conversationId,
-    );
+    logger.info(Event.FRONTEND_ERROR, {
+      type: 'migrated_console_log',
+      message: String('[RenderMsg] data-flow-json found, raw length:'),
+      context: [raw?.length, 'messageId:', messageId, 'conversationId:', conversationId],
+    });
     if (raw) {
       try {
         const flowJSON = JSON.parse(raw) as FlowDefinition;
-        console.log('[RenderMsg] parsed flowJSON ok, screenId:', flowJSON.screenId);
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('[RenderMsg] parsed flowJSON ok, screenId:'),
+          context: [flowJSON.screenId],
+        });
         return (
-          <FlowScreenManager
-            key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
-            flow={flowJSON}
-            messageId={messageId ?? ''}
-            conversationId={conversationId ?? ''}
-          />
+          <div key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flowJSON}
+              messageId={messageId ?? ''}
+              conversationId={conversationId ?? ''}
+              {...(slashCommandArtifactContext && {
+                messageContext: slashCommandArtifactContext,
+              })}
+            />
+          </div>
         );
       } catch (e) {
-        console.error('[RenderMsg] failed to parse data-flow-json:', e);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[RenderMsg] failed to parse data-flow-json:'),
+          error: e,
+        });
         return null;
       }
     }
@@ -1119,6 +1144,9 @@ const parseNode = (
       messageId,
       conversationId,
       preserveThreadRoute,
+      slashCommandArtifactContext,
+      disableLinks,
+      insideCode || isCodeElement,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1253,6 +1281,14 @@ const parseNode = (
     }
   }
 
+  if (tag === 'a' && disableLinks) {
+    return (
+      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary hover:underline'>
+        {children}
+      </span>
+    );
+  }
+
   if (tag === 'a') {
     let href = el.getAttribute('href');
     if (href && isValidURL(href)) {
@@ -1286,9 +1322,6 @@ const parseNode = (
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
         const externalHref = href;
         props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
-          if (e.metaKey || e.ctrlKey) {
-            logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: externalHref });
-          }
           e.preventDefault();
           openLink(externalHref, e);
         };
@@ -1315,6 +1348,16 @@ const parseNode = (
       props['data-track-category'] = 'MESSAGE';
       props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
       props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
+
+      const label = (el.textContent ?? '').trim().replace(/\/+$/, '');
+      if (isExternal && label !== href.replace(/\/+$/, '')) {
+        const { key, ...anchorProps } = props;
+        return (
+          <LinkHoverCard key={key as string} href={href}>
+            {React.createElement(tag, anchorProps, ...children)}
+          </LinkHoverCard>
+        );
+      }
     }
   }
 
@@ -1335,27 +1378,11 @@ const parseNode = (
 
   if (tag === 'pre') {
     const codeText = el.textContent ?? '';
-    const lineCount = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
-    const preElement = React.createElement(tag, props, ...children);
-    const copyablePre = (
-      <CopyableCodeBlock key={`${keyPrefix}-copyable-pre-${idx}`} codeText={codeText}>
-        {preElement}
-      </CopyableCodeBlock>
+    return (
+      <MessageCodeBlock key={`${keyPrefix}-code-block-${idx}`} codeText={codeText}>
+        {React.createElement(tag, props, ...children)}
+      </MessageCodeBlock>
     );
-
-    if (lineCount > CODE_BLOCK_COLLAPSE_THRESHOLD) {
-      return (
-        <CollapsibleCodeBlock
-          key={`${keyPrefix}-collapsible-pre-${idx}`}
-          keyPrefix={`${keyPrefix}-${idx}`}
-          lineCount={lineCount}
-        >
-          {copyablePre}
-        </CollapsibleCodeBlock>
-      );
-    }
-
-    return copyablePre;
   }
 
   return React.createElement(tag, props, ...children);
@@ -1366,9 +1393,11 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   showEdited = false,
   isSystemMessage = false,
   breakLongLinks = false,
+  disableLinks = false,
   messageId,
   conversationId,
   preserveThreadRoute = false,
+  slashCommandArtifactContext,
 }): JSX.Element => {
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
@@ -1378,12 +1407,11 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       if (!message || typeof message !== 'string') return [];
 
       if (message.includes('data-flow-json')) {
-        console.log(
-          '[RenderMsg] content contains data-flow-json, messageId:',
-          messageId,
-          'len:',
-          message.length,
-        );
+        logger.info(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_log',
+          message: String('[RenderMsg] content contains data-flow-json, messageId:'),
+          context: [messageId, 'len:', message.length],
+        });
       }
 
       const safe = message.slice(0, MAX_HTML_LENGTH).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -1393,20 +1421,6 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
       sanitizeDomTree(doc.body);
 
       trimBoundaryWhitespace(doc.body);
-
-      try {
-        const highlightedHTML = highlightCodeBlocks(doc.body.innerHTML);
-        const tempDoc = new DOMParser().parseFromString(highlightedHTML, 'text/html');
-        while (doc.body.firstChild) {
-          doc.body.removeChild(doc.body.firstChild);
-        }
-        // This moves nodes from tempDoc.body to doc.body without string parsing
-        while (tempDoc.body.firstChild) {
-          doc.body.appendChild(tempDoc.body.firstChild);
-        }
-      } catch {
-        // If highlighting fails, leave content as-is (already sanitized)
-      }
 
       const nodes: React.ReactNode[] = [];
       let idx = 0;
@@ -1428,6 +1442,8 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           messageId,
           conversationId,
           preserveThreadRoute,
+          slashCommandArtifactContext,
+          disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1441,9 +1457,11 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     keyPrefix,
     navigate,
     breakLongLinks,
+    disableLinks,
     messageId,
     conversationId,
     preserveThreadRoute,
+    slashCommandArtifactContext,
   ]);
 
   // Inject (edited) into the last element if it's safe to do so

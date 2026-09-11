@@ -487,11 +487,18 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                 <Button
                   variant='outline'
                   onClick={() => void handlePreview()}
+                  data-track-category='whatsapp-migration'
+                  data-track-name='PREVIEW_MIGRATION'
                   disabled={isPreviewLoading}
                 >
                   {isPreviewLoading ? 'Previewing…' : 'Preview Import'}
                 </Button>
-                <Button onClick={() => void handleExecute()} disabled={isExecuteLoading}>
+                <Button
+                  onClick={() => void handleExecute()}
+                  data-track-category='whatsapp-migration'
+                  data-track-name='EXECUTE_MIGRATION'
+                  disabled={isExecuteLoading}
+                >
                   {isExecuteLoading ? 'Starting…' : 'Start Import'}
                 </Button>
               </div>
@@ -610,6 +617,8 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   <Button
                     variant='outline'
                     onClick={() => void handlePurgePreview()}
+                    data-track-category='whatsapp-migration'
+                    data-track-name='PREVIEW_PURGE'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Checking…' : 'Preview Delete'}
@@ -617,6 +626,8 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   <Button
                     variant='destructive'
                     onClick={() => void handlePurgeExecute()}
+                    data-track-category='whatsapp-migration'
+                    data-track-name='EXECUTE_PURGE'
                     disabled={isPurgeLoading || !selectedPurgeSourceId}
                   >
                     {isPurgeLoading ? 'Deleting…' : 'Delete Imported Messages'}

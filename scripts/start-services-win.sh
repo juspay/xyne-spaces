@@ -5,6 +5,9 @@
 
 set -e
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -83,7 +86,7 @@ echo -e "${GREEN}✓ Buckets created.${NC}"
 
 # --- STEP 6: Database Setup ---
 echo -e "${BLUE}🔄 Checking Database Schema...${NC}"
-cd apps/backend
+cd "$REPO_ROOT/apps/backend"
 
 if [ ! -d "node_modules" ]; then
     echo -e "${YELLOW}⚠️  Installing backend dependencies...${NC}"
@@ -105,11 +108,16 @@ pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/seed-acl.ts
 #    pnpm exec dotenv -e .env.local -- pnpm exec tsx scripts/assign-user-group.ts "$USER_EMAIL"
 # fi
 
-cd ..
+cd "$REPO_ROOT"
 
 # --- STEP 7: Start Zero Cache ---
 echo -e "${BLUE}🚀 Starting Zero Cache...${NC}"
 $COMPOSE_CMD -f docker-compose.dev.yml up -d zero-cache
+
+until curl -s http://localhost:4848/ > /dev/null 2>&1; do
+    printf "."
+    sleep 2
+done
 
 # --- STEP 8: Deploy Vespa schemas ---
 # Non-fatal: needs bun + the vespa CLI. Retry with `pnpm run services:vespa`.

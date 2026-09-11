@@ -1,13 +1,15 @@
 import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import { ZeroProvider as ZeroReactProvider } from '@rocicorp/zero/react';
-import { dropAllDatabases, UpdateNeededReason, Zero } from '@rocicorp/zero';
+import { UpdateNeededReason, Zero } from '@rocicorp/zero';
 import { useAuth } from './AuthProvider';
 import { mutators } from '../zero/mutators';
 import { schema } from '@xyne/shared';
-import { VITE_ZERO_SERVER } from '../config';
+import { VITE_ZERO_SERVER, ZERO_STORAGE_KEY } from '../config';
+import { dropZeroDatabases, rememberZeroLane } from '../zero/dropZeroDatabases';
 import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
+import { useEncryptionBootstrap } from '@xyne/shared/hooks';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -15,6 +17,7 @@ interface ZeroProviderProps {
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
+  const { isReady: encryptionReady } = useEncryptionBootstrap();
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
@@ -23,19 +26,17 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const [zero, setZero] = useState<Zero | null>(null);
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !encryptionReady) {
       return;
     }
 
-    // Auth function - returns undefined to let Zero use cookies
-    // Cookies are sent automatically by the browser
     const authFunction = undefined;
 
     const handleUpdateNeeded = async (reason: UpdateNeededReason): Promise<void> => {
       if (reason.type === 'SchemaVersionNotSupported' || reason.type === 'VersionNotSupported') {
         isRefreshing.current = true;
         try {
-          await dropAllDatabases();
+          await dropZeroDatabases();
         } catch {
           // Ignore errors during drop
         }
@@ -57,10 +58,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     prevWorkspaceIdRef.current = currentWorkspaceId;
 
     const initZero = async (): Promise<void> => {
-      // If workspaceId changed, drop all local databases to prevent stale cross-workspace cache
+      // If workspaceId changed, drop this lane's local databases to prevent stale
+      // cross-workspace cache. Scoped so a sibling bundle on the same origin keeps its own.
       if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
         try {
-          await dropAllDatabases();
+          await dropZeroDatabases();
         } catch {
           // Ignore errors during drop
         }
@@ -70,10 +72,12 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         userID: user.id,
         auth: authFunction,
         server: VITE_ZERO_SERVER,
+        // Empty in single-lane builds, which keeps the storage name unchanged.
+        ...(ZERO_STORAGE_KEY ? { storageKey: ZERO_STORAGE_KEY } : {}),
+        pingTimeoutMs: 10000,
         schema,
         mutators: mutators,
         hiddenTabDisconnectDelay: 60000,
-        pingTimeoutMs: 10000,
         context: {
           userID: user.id,
           workspaceId: currentWorkspaceId,
@@ -89,6 +93,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         onClientStateNotFound: handleClientStateNotFound,
       });
 
+      // Cache which lane this document's Zero storage belongs to, so a later
+      // logout can scope its drop after the client has been torn down.
+      rememberZeroLane(zeroObj.idbName);
+
       setZero(prev => {
         void prev?.close();
         return zeroObj;
@@ -98,7 +106,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     };
 
     void initZero();
-  }, [user, refreshCount]);
+  }, [user, refreshCount, encryptionReady]);
 
   if (!zero) {
     return null;

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useEffect, useCallback, useRef } from 'react';
 import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
 
@@ -93,7 +94,10 @@ export const SelectionAskAI = ({
     // CRITICAL: canvasId is required for proper hierarchy in canvasContexts
     // Without it, selections cannot be properly associated with a canvas
     if (!canvasId) {
-      console.warn('[SelectionAskAI] Cannot create selection without canvasId');
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('[SelectionAskAI] Cannot create selection without canvasId'),
+      });
       return;
     }
 

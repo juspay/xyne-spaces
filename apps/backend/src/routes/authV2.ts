@@ -35,6 +35,12 @@ router.get('/refresh-session', authV2Controller.refreshSession);
 
 router.post('/email/login', emailAuthController.login);
 
+router.post('/email/register', emailAuthController.register);
+
+router.post('/email/verify', emailAuthController.verifyEmail);
+
+router.post('/email/resend-code', emailAuthController.resendVerificationCode);
+
 router.post('/email/forgot-password', emailAuthController.requestResetCode);
 
 router.post('/email/reset-password', emailAuthController.resetPassword);

@@ -58,6 +58,8 @@ export const GeneratePRDButton: React.FC<{
       <button
         type='button'
         onClick={() => setIsModalOpen(true)}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_CALL_DETAILS'
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
@@ -107,6 +109,8 @@ const GenerateSummaryButton: React.FC<{
       <button
         type='button'
         onClick={() => setIsModalOpen(true)}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_CALL_DETAILS'
         disabled={isLoading}
         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
         title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
@@ -172,6 +176,8 @@ const ChatWithAskAIButton: React.FC<{
     <button
       type='button'
       onClick={handleClick}
+      data-track-category='MESSAGE'
+      data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
       className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
       title='Chat with Transcript'
     >

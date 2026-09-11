@@ -111,7 +111,7 @@ export interface PromptMemoryFile {
  * Fetch the deterministic, always-loaded memory files for (agentSlug, userId)
  * from claw-auth — the persona (soul.md, …) injected into the system prompt at
  * run start. S2S. Degrades to [] on any error so a slow/absent file store never
- * breaks a run. Content is already ≤10k chars/file and ≤3 files (enforced
+ * breaks a run. Content is already ≤20k chars/file and ≤3 files (enforced
  * server-side).
  */
 export async function fetchAgentPromptFiles(agentSlug: string, userId: string): Promise<PromptMemoryFile[]> {

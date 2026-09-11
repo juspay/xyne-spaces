@@ -5,7 +5,8 @@ import {
   getDMParticipantIdsToFetch,
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
-import { useUsers } from './useUsers';
+import { useUsersById } from './useUsers';
+import type { User } from '../machines/stateMachine';
 import { getUserDisplayName } from '../utils/userDisplayName';
 import { useAuthContextValues } from './useAuth';
 
@@ -50,19 +51,20 @@ export const useChannelDisplayName = (
     [safeChannel, currentUserId],
   );
 
-  const allUsers = useUsers();
-  // Memoized: unmemoized `.filter()` produced a fresh `users` array every
-  // render, which busted the displayInfo memo below — so the full
-  // display-name computation re-ran on every render of every caller
-  // (profiled in the activity list trace).
+  // O(1) id -> User Map for the whole workspace (shared reference-keyed cache).
+  // Replaces the previous `allUsers.filter(...)` full-workspace scan that ran
+  // once per participant lookup per rendered item — with thousands of items
+  // mounting per Cmd+K keystroke that scan dominated render time.
+  const usersById = useUsersById();
+  // Look up the handful of participants by id. Order follows the channel's
+  // stored participant order (getDMParticipantIdsToFetch) rather than the
+  // workspace-array order the old scan produced; for 1:1 DMs (one participant)
+  // this is identical, and for group DMs it is a deterministic, stable order.
   const users = useMemo(
-    () => allUsers.filter(v => userIdsToFetch.some(u => u === v.id)),
-    [allUsers, userIdsToFetch],
+    () => userIdsToFetch.map(id => usersById.get(id)).filter((u): u is User => Boolean(u)),
+    [usersById, userIdsToFetch],
   );
-  const currentUser = useMemo(
-    () => allUsers.find(u => u.id === currentUserId),
-    [allUsers, currentUserId],
-  );
+  const currentUser = useMemo(() => usersById.get(currentUserId), [usersById, currentUserId]);
 
   const totalOtherParticipants = useMemo(() => {
     if (!isDMChannel(safeChannel.scopeType)) return 0;

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useDocumentOperations } from '../contexts/DocumentOperationsContext';
 import {
@@ -188,10 +189,11 @@ export function useScopedFind(
                 range.surroundContents(mark);
                 marks.push(mark);
               } catch (rangeError) {
-                console.warn(
-                  'Failed to wrap range with mark, trying alternative approach:',
-                  rangeError,
-                );
+                logger.warn(LogEvent.FRONTEND_ERROR, {
+                  type: 'migrated_console_warn',
+                  message: String('Failed to wrap range with mark, trying alternative approach:'),
+                  context: [rangeError],
+                });
 
                 // Alternative: split text node and insert mark
                 const originalText = textNode.nodeValue!;
@@ -221,16 +223,28 @@ export function useScopedFind(
                 } catch (fallbackError) {
                   // Restore original text on error
                   textNode.nodeValue = originalText;
-                  console.error('Fallback highlighting approach failed:', fallbackError);
+                  logger.error(LogEvent.FRONTEND_ERROR, {
+                    type: 'migrated_console_error',
+                    message: String('Fallback highlighting approach failed:'),
+                    error: fallbackError,
+                  });
                 }
               }
             } catch (error) {
-              console.warn('Error processing text node for highlighting:', error);
+              logger.warn(LogEvent.FRONTEND_ERROR, {
+                type: 'migrated_console_warn',
+                message: String('Error processing text node for highlighting:'),
+                context: [error],
+              });
             }
           }
         }
       } catch (error) {
-        console.error('Error creating highlight marks:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error creating highlight marks:'),
+          error: error,
+        });
       }
 
       return marks;
@@ -374,12 +388,20 @@ export function useScopedFind(
                 marks.push(overlay);
               }
             } catch (error) {
-              console.warn('Error creating overlay highlight:', error);
+              logger.warn(LogEvent.FRONTEND_ERROR, {
+                type: 'migrated_console_warn',
+                message: String('Error creating overlay highlight:'),
+                context: [error],
+              });
             }
           }
         }
       } catch (error) {
-        console.error('Error creating overlay highlights:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error creating overlay highlights:'),
+          error: error,
+        });
       }
 
       return marks;
@@ -393,7 +415,10 @@ export function useScopedFind(
       const isPDF = isPDFContext(container);
 
       if (debug) {
-        console.log(`Using ${isPDF ? 'overlay' : 'mark'} highlighting strategy`);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`Using ${isPDF ? 'overlay' : 'mark'} highlighting strategy`),
+        });
       }
 
       return isPDF
@@ -462,7 +487,10 @@ export function useScopedFind(
           const currentTime = Date.now();
           if (currentTime - startTime > timeoutMs) {
             if (debug) {
-              console.log('Text layer wait timeout reached');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Text layer wait timeout reached'),
+              });
             }
             resolve(text);
             return;
@@ -472,7 +500,12 @@ export function useScopedFind(
           const currentTextLength = text.length;
 
           if (debug && currentTextLength !== lastTextLength) {
-            console.log(`Text layer length changed: ${lastTextLength} -> ${currentTextLength}`);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String(
+                `Text layer length changed: ${lastTextLength} -> ${currentTextLength}`,
+              ),
+            });
           }
 
           const lengthStable = currentTextLength === lastTextLength && currentTextLength > 0;
@@ -493,15 +526,21 @@ export function useScopedFind(
             });
             matchOk = !!(result.success && result.matches && result.matches.length > 0);
             if (debug && !matchOk) {
-              console.log('Text layer stable but chunk text not matchable yet; keep waiting');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Text layer stable but chunk text not matchable yet; keep waiting'),
+              });
             }
           }
 
           if (stableEnough && (!searchPhrase || matchOk)) {
             if (debug) {
-              console.log(
-                `Text layer ready (length ${currentTextLength}${searchPhrase ? ', match verified' : ''})`,
-              );
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String(
+                  `Text layer ready (length ${currentTextLength}${searchPhrase ? ', match verified' : ''})`,
+                ),
+              });
             }
             resolve(text);
             return;
@@ -533,17 +572,29 @@ export function useScopedFind(
       const currentToken = callTokenRef.current;
 
       if (debug) {
-        console.log('highlightText called with:', text, 'token:', currentToken);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('highlightText called with:'),
+          context: [text, 'token:', currentToken],
+        });
       }
 
       const root = containerRef.current;
       if (!root) {
-        if (debug) console.log('No container ref found');
+        if (debug)
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String('No container ref found'),
+          });
         return false;
       }
 
       if (debug) {
-        console.log('Container found:', root);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String('Container found:'),
+          context: [root],
+        });
       }
 
       clearHighlightsFromDOM(root);
@@ -559,31 +610,48 @@ export function useScopedFind(
         // For PDFs / spreadsheets: goToPage → waitForPageReady (PDF) → extract on page scope.
         if (documentOperationsRef?.current?.goToPage) {
           if (debug) {
-            console.log('PDF or Spreadsheet detected', pageIndex);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('PDF or Spreadsheet detected'),
+              context: [pageIndex],
+            });
           }
           if (pageIndex !== undefined && pageIndex >= 0) {
             const waitForPageReadyFn = documentOperationsRef.current.waitForPageReady;
 
             if (debug) {
-              console.log('Going to page or subsheet:', pageIndex);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Going to page or subsheet:'),
+                context: [pageIndex],
+              });
             }
             await documentOperationsRef.current.goToPage(pageIndex);
             if (currentToken !== callTokenRef.current) {
               if (debug) {
-                console.log('Stale call after goToPage, aborting');
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Stale call after goToPage, aborting'),
+                });
               }
               return false;
             }
 
             if (waitForPageReadyFn) {
               if (debug) {
-                console.log('Waiting for page ready (canvas + text + annotations)...');
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Waiting for page ready (canvas + text + annotations)...'),
+                });
               }
               await waitForPageReadyFn(pageIndex);
             }
             if (currentToken !== callTokenRef.current) {
               if (debug) {
-                console.log('Stale call after waitForPageReady, aborting');
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Stale call after waitForPageReady, aborting'),
+                });
               }
               return false;
             }
@@ -592,7 +660,10 @@ export function useScopedFind(
               const pageRoot = findPdfPageRoot(root, pageIndex);
               if (!pageRoot) {
                 if (debug) {
-                  console.log(`PDF page ${pageIndex} not found, skipping highlight`);
+                  logger.info(LogEvent.INFO, {
+                    type: 'migrated_console_log',
+                    message: String(`PDF page ${pageIndex} not found, skipping highlight`),
+                  });
                 }
                 return false;
               }
@@ -602,23 +673,36 @@ export function useScopedFind(
             if (waitForPageReadyFn) {
               containerText = extractContainerText(highlightScope);
               if (debug) {
-                console.log('Page ready; extracted text length:', containerText.length);
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Page ready; extracted text length:'),
+                  context: [containerText.length],
+                });
               }
             } else {
               if (debug) {
-                console.log('Waiting for text layer (non-PDF readiness)...');
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Waiting for text layer (non-PDF readiness)...'),
+                });
               }
               containerText = await waitForTextLayerReady(highlightScope, 5000, {
                 searchPhrase: text,
                 caseSensitive,
               });
               if (debug) {
-                console.log('Text layer ready, proceeding with highlighting');
+                logger.info(LogEvent.INFO, {
+                  type: 'migrated_console_log',
+                  message: String('Text layer ready, proceeding with highlighting'),
+                });
               }
             }
           } else {
             if (debug) {
-              console.log('No page or subsheet index provided, skipping highlight');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('No page or subsheet index provided, skipping highlight'),
+              });
             }
             return false;
           }
@@ -635,7 +719,10 @@ export function useScopedFind(
 
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            console.log('Stale call after text extraction, aborting');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Stale call after text extraction, aborting'),
+            });
           }
           return false;
         }
@@ -664,13 +751,20 @@ export function useScopedFind(
 
         if (containerText.length === 0) {
           if (debug) {
-            console.log('No extractable text; skipping highlight and cache');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('No extractable text; skipping highlight and cache'),
+            });
           }
           return false;
         }
 
         if (debug) {
-          console.log('Container text extracted, length:', containerText.length);
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String('Container text extracted, length:'),
+            context: [containerText.length],
+          });
         }
 
         // Clean expired cache entries
@@ -686,13 +780,20 @@ export function useScopedFind(
 
         if (cachedEntry && Date.now() - cachedEntry.timestamp < CACHE_DURATION) {
           if (debug) {
-            console.log('Using cached result for key:', cacheKey);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Using cached result for key:'),
+              context: [cacheKey],
+            });
           }
 
           // Check if this call is still the latest before using cached results
           if (currentToken !== callTokenRef.current) {
             if (debug) {
-              console.log('Stale call detected after cache lookup, aborting');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Stale call detected after cache lookup, aborting'),
+              });
             }
             return false;
           }
@@ -700,7 +801,11 @@ export function useScopedFind(
           matches = cachedEntry.matches;
         } else {
           if (debug) {
-            console.log('Cache miss, computing highlights client-side for key:', cacheKey);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Cache miss, computing highlights client-side for key:'),
+              context: [cacheKey],
+            });
           }
 
           if (currentToken !== callTokenRef.current) {
@@ -713,12 +818,20 @@ export function useScopedFind(
           });
 
           if (debug) {
-            console.log('Client-side highlighting result:', result);
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Client-side highlighting result:'),
+              context: [result],
+            });
           }
 
           if (!result.success || !result.matches || result.matches.length === 0) {
             if (debug) {
-              console.log('No matches found:', result.message);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('No matches found:'),
+                context: [result.message],
+              });
             }
             return false;
           }
@@ -726,7 +839,10 @@ export function useScopedFind(
           // Check if this call is still the latest before processing results
           if (currentToken !== callTokenRef.current) {
             if (debug) {
-              console.log('Stale call detected after computing matches, aborting');
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Stale call detected after computing matches, aborting'),
+              });
             }
             return false;
           }
@@ -741,17 +857,27 @@ export function useScopedFind(
             };
 
             if (debug) {
-              console.log('Cached successful result for key:', cacheKey);
+              logger.info(LogEvent.INFO, {
+                type: 'migrated_console_log',
+                message: String('Cached successful result for key:'),
+                context: [cacheKey],
+              });
             }
           } else if (!canUseCache && debug) {
-            console.log('Skipping cache write (no documentId or empty text)');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Skipping cache write (no documentId or empty text)'),
+            });
           }
         }
 
         // Check if this call is still the latest before creating DOM highlights
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            console.log('Stale call detected before creating highlights, aborting');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String('Stale call detected before creating highlights, aborting'),
+            });
           }
           return false;
         }
@@ -780,16 +906,29 @@ export function useScopedFind(
         });
 
         if (debug) {
-          console.log(`Created ${allMarks.length} highlight marks from ${matches.length} matches`);
-          console.log(
-            `Longest match index: ${longestMatchIndex} with length: ${longestMatchLength}`,
-          );
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `Created ${allMarks.length} highlight marks from ${matches.length} matches`,
+            ),
+          });
+          logger.info(LogEvent.INFO, {
+            type: 'migrated_console_log',
+            message: String(
+              `Longest match index: ${longestMatchIndex} with length: ${longestMatchLength}`,
+            ),
+          });
         }
 
         // Final check before updating state
         if (currentToken !== callTokenRef.current) {
           if (debug) {
-            console.log('Stale call detected before state update, aborting and cleaning up DOM');
+            logger.info(LogEvent.INFO, {
+              type: 'migrated_console_log',
+              message: String(
+                'Stale call detected before state update, aborting and cleaning up DOM',
+              ),
+            });
           }
           allMarks.forEach(mark => {
             if (mark.parentNode) {
@@ -811,7 +950,11 @@ export function useScopedFind(
 
         return allMarks.length > 0;
       } catch (error) {
-        console.error('Error during client-side highlighting:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error during client-side highlighting:'),
+          error: error,
+        });
         if (currentToken === callTokenRef.current) {
           clearHighlightsFromDOM(root);
         }

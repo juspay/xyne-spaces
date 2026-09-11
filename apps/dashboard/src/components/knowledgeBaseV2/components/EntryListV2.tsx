@@ -1,11 +1,13 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { cn } from '../../../utils/classNames';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { StatusBadgeV2 } from './StatusBadgeV2';
 import { IngestStatusV2 } from './IngestStatusV2';
 import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
+import { XyneAIStar } from '../../icons/xyne-ai';
+import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
+import { FileFailedBadgeV2 } from './FileFailedBadgeV2';
 
 export interface ColumnDef {
   key: string;
@@ -22,9 +24,16 @@ interface EntryListV2Props {
   onOpen: (entry: CollectionChild) => void;
   onDelete?: (entry: CollectionChild) => void;
   onRename?: (entry: CollectionChild) => void;
-  /** When provided, FOLDER rows render a share button next to rename/delete.
-   *  The screen only passes this at root (collections view). */
+  /** When provided, every row renders a Share button. At root this opens
+   *  the full collection access-management dialog; inside a collection it
+   *  opens a copy-link-only dialog for the folder/file. */
   onShare?: (entry: CollectionChild) => void;
+  /** When provided, every row renders an Ask AI button next to share.
+   *  Files scope precisely (kbDocId); folders fall back to their owning
+   *  collection — see KnowledgeBaseV2Screen's onAskAIAboutEntry. */
+  onAskAI?: (entry: CollectionChild) => void;
+  /** Opens the per-collection ingestion status drawer (root collections view). */
+  onOpenStatus?: (entry: CollectionChild) => void;
   /** Inline-rename state: id of the row whose name should render as an
    *  editable input, plus the commit / cancel callbacks. */
   editingId?: string | null;
@@ -74,6 +83,8 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   onDelete,
   onRename,
   onShare,
+  onAskAI,
+  onOpenStatus,
   editingId,
   onRenameCommit,
   onRenameCancel,
@@ -83,7 +94,8 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   // Reserve a tail gutter for whichever action affordances are wired up so
   // grid columns don't shift between rows with/without actions. Each button
   // is 36 px wide.
-  const actionCount = (onShare ? 1 : 0) + (onRename ? 1 : 0) + (onDelete ? 1 : 0);
+  const actionCount =
+    (onAskAI ? 1 : 0) + (onShare ? 1 : 0) + (onRename ? 1 : 0) + (onDelete ? 1 : 0);
   const actionsWidth = actionCount > 0 ? `${String(actionCount * 36)}px` : null;
   const template = [
     '1fr',
@@ -143,12 +155,13 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   };
 
   return (
-    // Same surface tokens as the toolbar (bg-secondary) so the list view
-    // reads as part of the same surface family — matches xyne-search /kb.
-    <div className='overflow-hidden rounded-2xl border border-border bg-secondary'>
+    // Flat, borderless table — mirrors Drive's list view (no card
+    // background/rounded frame around the whole thing; each row is just
+    // separated by a thin hairline).
+    <div className='w-full'>
       {/* Header */}
       <div
-        className='grid items-center gap-3 border-b border-border bg-muted/60 px-4 py-2 text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground'
+        className='grid items-center gap-3 border-b border-border px-4 py-2 text-[13px] font-medium text-muted-foreground'
         style={{ gridTemplateColumns: template }}
       >
         <span>Name</span>
@@ -176,10 +189,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
               key={virtualRow.key}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
-              className={cn(
-                'group absolute left-0 right-0',
-                virtualRow.index > 0 && 'border-t border-border',
-              )}
+              className='group absolute left-0 right-0 border-b border-border/60'
               style={{
                 transform: `translateY(${String(virtualRow.start)}px)`,
               }}
@@ -195,11 +205,19 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                   <div className='flex min-w-0 items-center gap-3'>
                     <span className='flex-shrink-0 pr-1'>
                       {e.type === 'FOLDER' ? (
-                        <div className='flex h-7 w-7 items-center justify-center'>
+                        <div className='relative flex h-7 w-7 items-center justify-center'>
                           <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
+                          <span className='absolute -bottom-1 -right-1'>
+                            <CollectionStatusBadgeV2 entry={e} onOpenStatus={onOpenStatus} />
+                          </span>
                         </div>
                       ) : (
-                        <StatusBadgeV2 name={e.name} />
+                        <span className='relative inline-flex'>
+                          <StatusBadgeV2 name={e.name} />
+                          <span className='absolute -bottom-1 -right-1'>
+                            <FileFailedBadgeV2 status={e.ingestionStatus} />
+                          </span>
+                        </span>
                       )}
                     </span>
                     <InlineNameCell
@@ -210,27 +228,47 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                     <IngestStatusV2 status={e.ingestionStatus} />
                   </div>
                 ) : (
-                  <button
-                    type='button'
-                    onClick={() => onOpen(e)}
-                    className='flex min-w-0 items-center gap-3 text-left'
-                    data-track-category='knowledge-base'
-                    data-track-name='open-entry'
-                  >
-                    <span className='flex-shrink-0 pr-1'>
-                      {e.type === 'FOLDER' ? (
-                        <div className='flex h-7 w-7 items-center justify-center'>
-                          <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
-                        </div>
-                      ) : (
-                        <StatusBadgeV2 name={e.name} />
-                      )}
-                    </span>
-                    <span className='truncate text-[13.5px] font-medium text-foreground'>
-                      {e.name}
-                    </span>
-                    <IngestStatusV2 status={e.ingestionStatus} />
-                  </button>
+                  <div className='flex min-w-0 items-center gap-2'>
+                    {/* Rendered as a role=button div (not a <button>) so the
+                        status badge below can be a real nested button —
+                        matches FolderCardV2's grid structure. */}
+                    <div
+                      role='button'
+                      tabIndex={0}
+                      onClick={() => onOpen(e)}
+                      onKeyDown={(ev): void => {
+                        if (ev.key === 'Enter' || ev.key === ' ') {
+                          ev.preventDefault();
+                          onOpen(e);
+                        }
+                      }}
+                      className='flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left'
+                      data-track-category='knowledge-base'
+                      data-track-name='open-entry'
+                    >
+                      <span className='flex-shrink-0 pr-1'>
+                        {e.type === 'FOLDER' ? (
+                          <div className='relative flex h-7 w-7 items-center justify-center'>
+                            <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
+                            <span className='absolute -bottom-1 -right-1'>
+                              <CollectionStatusBadgeV2 entry={e} onOpenStatus={onOpenStatus} />
+                            </span>
+                          </div>
+                        ) : (
+                          <span className='relative inline-flex'>
+                            <StatusBadgeV2 name={e.name} />
+                            <span className='absolute -bottom-1 -right-1'>
+                              <FileFailedBadgeV2 status={e.ingestionStatus} />
+                            </span>
+                          </span>
+                        )}
+                      </span>
+                      <span className='min-w-0 flex-1 truncate text-[13.5px] font-medium text-foreground'>
+                        {e.name}
+                      </span>
+                      {e.type === 'FILE' ? <IngestStatusV2 status={e.ingestionStatus} /> : null}
+                    </div>
+                  </div>
                 )}
 
                 {/* Other columns */}
@@ -247,12 +285,29 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                   </button>
                 ))}
 
-                {/* Row actions (share / rename / delete). Share is folder-only
-                    and only wired by the root view — matches V1's behaviour.
-                    Visibility (public/private) lives inside the share dialog. */}
+                {/* Row actions (share / rename / delete). Share opens the full
+                    collection access-management dialog at root, or a
+                    copy-link-only dialog for a folder/file — see
+                    KnowledgeBaseV2Screen's onShare. */}
                 {actionsWidth ? (
                   <div className='flex items-center justify-end gap-1'>
-                    {onShare && e.type === 'FOLDER' ? (
+                    {onAskAI ? (
+                      <button
+                        type='button'
+                        aria-label={`Ask AI about ${e.name}`}
+                        title='Ask AI'
+                        onClick={ev => {
+                          ev.stopPropagation();
+                          onAskAI(e);
+                        }}
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
+                        data-track-category='knowledge-base'
+                        data-track-name='ask-ai-entry'
+                      >
+                        <XyneAIStar size={14} />
+                      </button>
+                    ) : null}
+                    {onShare ? (
                       <button
                         type='button'
                         aria-label={`Share ${e.name}`}
@@ -261,7 +316,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onShare(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='share-entry'
                       >
@@ -277,7 +332,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onRename(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus:opacity-100'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
                         data-track-category='knowledge-base'
                         data-track-name='rename-entry'
                       >
@@ -293,7 +348,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           ev.stopPropagation();
                           onDelete(e);
                         }}
-                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus:opacity-100 dark:hover:bg-red-950/40'
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 dark:hover:bg-red-950/40'
                         data-track-category='knowledge-base'
                         data-track-name='delete-entry'
                       >

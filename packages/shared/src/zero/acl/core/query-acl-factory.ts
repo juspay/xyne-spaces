@@ -1,5 +1,5 @@
 import type { TableName } from './types';
-import type {Context} from './../../schema'
+import type { Context } from './../../schema';
 import { BaseQueryACL } from './base-acl';
 
 import {
@@ -24,6 +24,7 @@ import {
   ChannelRecapsACL,
   RecapsACL,
   ChannelParticipantsACL,
+  ChannelBoardMappingsACL,
   ChannelsACL,
   ChannelSectionsACL,
   ChannelStatsACL,
@@ -31,6 +32,7 @@ import {
   ConversationsACL,
   MessageAttachmentsACL,
   MessagesACL,
+  MessageArtifactsACL,
   NotificationPreferencesACL,
   OrgMembersACL,
   OrganizationsACL,
@@ -48,6 +50,7 @@ import {
   TicketReferenceMappingsACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
+  TicketExportsACL,
   ProjectTagsACL,
   TicketTagMappingsACL,
   TicketsACL,
@@ -63,6 +66,9 @@ import {
   WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
+  SdlcEntityLinksACL,
+  SdlcArtifactsACL,
+  SdlcTracksACL,
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
@@ -116,8 +122,10 @@ import {
   ReleaseChangesACL,
   ReleaseEventsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   SurfaceLinksACL,
+  SdlcFoldersACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -126,10 +134,7 @@ import {
   SummaryTemplatesACL,
 } from '../tables';
 export class QueryACLFactory {
-  static getACL<TTable extends TableName>(
-    table: TTable,
-    ctx: Context
-  ): BaseQueryACL<TTable> {
+  static getACL<TTable extends TableName>(table: TTable, ctx: Context): BaseQueryACL<TTable> {
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx) as BaseQueryACL<TTable>;
@@ -179,6 +184,8 @@ export class QueryACLFactory {
         return new ChannelRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channels':
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_board_mappings':
+        return new ChannelBoardMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'channel_stats':
         return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':
@@ -191,6 +198,8 @@ export class QueryACLFactory {
         return new ModelsACL(ctx) as BaseQueryACL<TTable>;
       case 'messages':
         return new MessagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'message_artifacts':
+        return new MessageArtifactsACL(ctx) as BaseQueryACL<TTable>;
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx) as BaseQueryACL<TTable>;
       case 'org_members':
@@ -227,6 +236,8 @@ export class QueryACLFactory {
         return new TicketSubTicketMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_tags':
         return new TicketTagsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_exports':
+        return new TicketExportsACL(ctx) as BaseQueryACL<TTable>;
       case 'project_tags':
         return new ProjectTagsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_tag_mappings':
@@ -269,10 +280,20 @@ export class QueryACLFactory {
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
         return new ReposACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_entity_links':
+        return new SdlcEntityLinksACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_artifacts':
+        return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_tracks':
+        return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
         return new SavedUserConfigurationValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'view_access':
+        return new ViewAccessACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':

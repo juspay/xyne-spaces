@@ -4,6 +4,7 @@ import { bitbucketAdapter } from "./adapters/bitbucket.js";
 import { kibanaAdapter } from "./adapters/kibana.js";
 import { xyneSpacesAdapter } from "./adapters/xyne-spaces.js";
 import { xyneDashboardAdapter } from "./adapters/xyne-dashboard.js";
+import { xyneWorkflowsAdapter } from "./adapters/xyne-workflows.js";
 import { figmaAdapter } from "./adapters/figma.js";
 import { ardraFinopsAdapter } from "./adapters/ardra-finops.js";
 import { sequencethinkingAdapter } from "./adapters/sequentialthinking.js";
@@ -47,13 +48,17 @@ import { twitterAdapter } from "./adapters/twitter.js";
 import { redditAdapter } from "./adapters/reddit.js";
 import { xNewsAdapter } from "./adapters/x-news.js";
 import { jusbizMcpAdapter } from "./adapters/jusbiz-mcp.js";
+import { heisenbergAdapter } from "./adapters/heisenberg.js";
+import { jenkinsAdapter } from "./adapters/jenkins.js";
 
 export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   grafana: grafanaAdapter,
+  jenkins: jenkinsAdapter,
   bitbucket: bitbucketAdapter,
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,
   "xyne-dashboard": xyneDashboardAdapter,
+  "xyne-workflows": xyneWorkflowsAdapter,
   google: googleAdapter,
   microsoft: microsoftAdapter,
   figma: figmaAdapter,
@@ -113,4 +118,5 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   reddit: redditAdapter,
   "x-news": xNewsAdapter,
   "jusbiz-mcp": jusbizMcpAdapter,
+  heisenberg: heisenbergAdapter,
 };

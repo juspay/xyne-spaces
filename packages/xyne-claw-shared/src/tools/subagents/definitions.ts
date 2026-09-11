@@ -28,6 +28,13 @@ export interface SubagentDefinition {
   paramDescription: string;
   /** MCP server type this subagent wraps — matches serverType from /mcp/tools */
   serverType: string;
+  /** Additional serverTypes this definition also wraps. Prod can register the
+   *  same logical connector under a second type (e.g. the DB-provisioned
+   *  "github-mcp-npx" next to the code adapter's "github"); without an alias
+   *  the extra type has no definition and its tools become invisible to the
+   *  fast-mode catalog while passing through fine in normal mode. Alias types
+   *  share this definition's wrapper name, prompt, and allowlist identity. */
+  serverTypeAliases?: string[];
   /** Optional per-subagent reasoning level. When set, overrides the global
    *  AGENT.thinkingLevel for THIS subagent's child session. Retrieval-heavy
    *  subagents (spaces) benefit from "high"; cheap structured-fetch ones
@@ -38,12 +45,22 @@ export interface SubagentDefinition {
    *  tool sweep. Used for hard retrieval where the first sweep often misses.
    *  Omit/false to keep the default single-sweep guidance. */
   allowRequery?: boolean;
+  /** When true, the PARENT agent may send a FOLLOW-UP question to the SAME
+   *  child session (via the `session_id` this tool returns) instead of spawning
+   *  a fresh subagent that has lost all prior context. The child session is then
+   *  PERSISTED under sessions/{conversationId}/subagents/{name}/{handle}/ so it
+   *  can be resumed, and it rides the existing recursive GCS session archive for
+   *  free. Only enable for read/research subagents where a scoped drill-down on
+   *  the same evidence is the natural next step. Omit/false → always fresh, and
+   *  no session_id parameter is exposed to the parent. */
+  supportsFollowUp?: boolean;
 }
 
 export const SUBAGENT_DEFINITIONS: SubagentDefinition[] = [
   // ── Spaces ──────────────────────────────────────────────────────
   {
     name: "spaces",
+    supportsFollowUp: true,
     progressLabels: [
       "🔍 Searching Spaces...",
       "📬 Scanning messages and channels...",
@@ -119,6 +136,7 @@ HARD RULES:
   // ── Bitbucket ───────────────────────────────────────────────────
   {
     name: "bitbucket",
+    supportsFollowUp: true,
     progressLabels: [
       "🔀 Checking Bitbucket...",
       "🌿 Looking up branches and PRs...",
@@ -146,6 +164,7 @@ Return structured findings with relevant identifiers (PR IDs, branch names, comm
   // ── GitHub ──────────────────────────────────────────────────────
   {
     name: "github",
+    supportsFollowUp: true,
     progressLabels: [
       "🐙 Checking GitHub...",
       "🌿 Looking up branches and PRs...",
@@ -190,11 +209,16 @@ Return structured findings (lists of {repo, number, title, state, url} when surf
     paramName: "question",
     paramDescription: "What to look up on GitHub. Include the owner/repo (e.g. 'anthropics/anthropic-sdk-python'), PR / issue numbers, branch names, file paths, or a code search expression.",
     serverType: "github",
+    // Prod's active GitHub connector is DB-registered under this second type
+    // (the code adapter's "github" is vestigial there). Without the alias its
+    // tools are invisible to the fast-mode catalog (2026-07-30 incident).
+    serverTypeAliases: ["github-mcp-npx"],
   },
 
   // ── Grafana ─────────────────────────────────────────────────────
   {
     name: "grafana",
+    supportsFollowUp: true,
     progressLabels: [
       "📊 Querying Grafana...",
       "📈 Pulling metrics and time ranges...",
@@ -222,6 +246,7 @@ Return structured findings with error counts, metric values, patterns, and time 
   // ── DeepWiki ────────────────────────────────────────────────────
   {
     name: "deepwiki",
+    supportsFollowUp: true,
     progressLabels: [
       "📚 Researching docs...",
       "🧠 Reading the wiki index...",
@@ -254,6 +279,7 @@ Return a concise answer grounded in the actual docs. Cite specific pages when re
   // ── Context7 ────────────────────────────────────────────────────
   {
     name: "context7",
+    supportsFollowUp: true,
     progressLabels: [
       "📖 Fetching library docs...",
       "📦 Resolving the library id...",
@@ -1564,6 +1590,19 @@ If a query fails, include the error text and suggest a corrected index or query 
 /** Helper to get a definition by name */
 export function getSubagentDefinition(name: string): SubagentDefinition | undefined {
   return SUBAGENT_DEFINITIONS.find((d) => d.name === name);
+}
+
+/**
+ * Resolve the definition wrapping a given MCP serverType, honouring aliases.
+ * THE lookup for "which subagent owns this server's tools" — every call site
+ * (normal-mode wrapper build, fast-mode catalog + direct split) must use this
+ * instead of matching `d.serverType` inline, or alias-registered servers
+ * (github-mcp-npx) silently fall out of one mode but not the other.
+ */
+export function findSubagentDefinitionForServer(serverType: string): SubagentDefinition | undefined {
+  return SUBAGENT_DEFINITIONS.find(
+    (d) => d.serverType === serverType || (d.serverTypeAliases?.includes(serverType) ?? false),
+  );
 }
 
 

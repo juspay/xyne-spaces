@@ -185,6 +185,10 @@ NUM_FEATURES=${#FEATURE_LABELS[@]}
 if [ -n "${XYNE_FEATURES:-}" ]; then
     SELECTED_FEATURES="$XYNE_FEATURES"
     echo "$SELECTED_FEATURES" | grep -qw 1 || SELECTED_FEATURES="1,${SELECTED_FEATURES}"
+elif [ ! -t 0 ]; then
+
+    SELECTED_FEATURES="1"
+    echo -e "${YELLOW}  Not a terminal — starting Chat & Tickets only (set XYNE_FEATURES to pick more).${NC}"
 else
 
 CURSOR=1                          # start on Xyne-Claw (first toggleable item)

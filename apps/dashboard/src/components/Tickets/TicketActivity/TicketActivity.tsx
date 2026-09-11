@@ -1,15 +1,15 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
+import { Archive } from 'lucide-react';
+import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Activity,
-  ArrowUpDown,
-  Calendar,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheck,
   FileText,
-  SquareKanban,
   Tag,
-  Archive,
-  GitMerge,
-  Mail,
-} from 'lucide-react';
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+} from '@xyne/icons';
 import {
   ActivityType,
   TicketReferenceRelation,
@@ -20,6 +20,12 @@ import {
   type ReferenceTicketActivityValue,
   type SubticketActivityValue,
   type BaseActivityValue,
+  type EtaAutoRecomputedActivityValue,
+  type EtaManuallyUpdatedActivityValue,
+  type EtaRiskDetectedActivityValue,
+  type EtaRiskAcknowledgedActivityValue,
+  type EtaRiskReopenedActivityValue,
+  type EtaRiskResolvedActivityValue,
 } from '@xyne/shared';
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -40,6 +46,8 @@ interface TicketActivityProps {
   boards?: { id: string; name: string }[];
   userGroups: UserGroup[] | undefined;
   stageVisitFormValues?: StageVisitFormValues[];
+  /** FLOW form values are scoped by planNodeId rather than a persisted stage id. */
+  flowFormContextId?: string;
 }
 
 /**
@@ -53,14 +61,19 @@ type ActivityValue = Partial<
     ReferenceTicketActivityValue &
     SubticketActivityValue & {
       fieldName?: string;
+      contextName?: string;
       reason?: string;
       stageName?: string;
+      prompt?: string;
+      confirmationText?: string;
+      stepTitle?: string;
       oldFilename?: string;
       newFilename?: string;
       emailType?: string;
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      isAiClassification?: boolean;
     }
 >;
 
@@ -89,7 +102,7 @@ const formatExactTimestamp = (timestamp: number | Date): string => {
   }
 };
 
-const getActivityDescription = (
+export const getActivityDescription = (
   activity: TicketActivityType,
   users: User[] | undefined,
   boards?: { id: string; name: string }[],
@@ -247,6 +260,23 @@ const getActivityDescription = (
       };
     }
 
+    case ActivityType.ETA:
+      return {
+        description: 'changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {value?.oldValue ? new Date(value.oldValue).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {value?.newValue ? new Date(value.newValue).toLocaleDateString() : 'none'}
+            </span>
+          </>
+        ),
+      };
+
     case ActivityType.STAGE_ETA:
       return {
         description: `updated stage deadline`,
@@ -263,6 +293,94 @@ const getActivityDescription = (
           </>
         ),
       };
+
+    case ActivityType.ETA_AUTO_RECOMPUTED: {
+      const v = activity.value as EtaAutoRecomputedActivityValue | null;
+      return {
+        description: 'automatically extended due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.finalEta ? new Date(v.finalEta).toLocaleDateString() : ''}
+            </span>
+            {v?.standardPathUsed ? ' via the Standard Path' : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_MANUALLY_UPDATED: {
+      const v = activity.value as EtaManuallyUpdatedActivityValue | null;
+      return {
+        description: 'manually changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.newEta ? new Date(v.newEta).toLocaleDateString() : ''}
+            </span>
+            {v?.reason ? <>: {v.reason}</> : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_DETECTED: {
+      const v = activity.value as EtaRiskDetectedActivityValue | null;
+      return {
+        description: 'detected planning risk',
+        details: (
+          <>
+            stage deadline{' '}
+            <span className='font-semibold'>
+              {v?.stageEta ? new Date(v.stageEta).toLocaleDateString() : ''}
+            </span>{' '}
+            is later than due date{' '}
+            <span className='font-semibold'>
+              {v?.ticketEta ? new Date(v.ticketEta).toLocaleDateString() : ''}
+            </span>
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_ACKNOWLEDGED: {
+      const v = activity.value as EtaRiskAcknowledgedActivityValue | null;
+      return {
+        description: 'acknowledged planning risk',
+        details: v?.reason || '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_REOPENED: {
+      const v = activity.value as EtaRiskReopenedActivityValue | null;
+      return {
+        description: 'planning risk reopened',
+        details: v?.changedInputs?.length ? `${v.changedInputs.join(', ')} changed` : '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_RESOLVED: {
+      const v = activity.value as EtaRiskResolvedActivityValue | null;
+      const causeText: Record<string, string> = {
+        CONDITION_NO_LONGER_TRUE: 'the condition no longer applies',
+        TERMINAL_STATUS: 'the ticket reached a terminal status',
+        MANUAL_DATE_CHANGE: 'the due date was changed manually',
+      };
+      return {
+        description: 'planning risk resolved',
+        details: v?.cause ? causeText[v.cause] || '' : '',
+      };
+    }
 
     case ActivityType.USER_GROUP_ID: {
       const oldGroup = userGroups?.find(g => g.id === value?.oldValue);
@@ -295,6 +413,16 @@ const getActivityDescription = (
     }
 
     case ActivityType.METADATA:
+      if (value?.field === 'flowConfirmation') {
+        const confirmationText = value.confirmationText || value.prompt;
+        return {
+          description: confirmationText
+            ? `confirmed “${confirmationText}”`
+            : 'completed the confirmation',
+          details: '',
+        };
+      }
+
       if (value?.field === 'emailReply') {
         return {
           description: 'replied to the email',
@@ -305,7 +433,8 @@ const getActivityDescription = (
       if (value?.field === 'stageFormFile') {
         const fieldLabel = value.fieldName || 'file';
         const filename = value.newFilename || value.oldFilename || 'file';
-        const stageSuffix = value.stageName ? ` in ${value.stageName} form` : '';
+        const contextName = value.contextName ?? value.stageName;
+        const stageSuffix = contextName ? ` in ${contextName} form` : '';
         const action = value.action;
 
         if (action === 'removed') {
@@ -330,6 +459,7 @@ const getActivityDescription = (
 
       if (value?.field === 'customField') {
         const fieldLabel = value?.fieldName || 'custom field';
+        const contextSuffix = value?.contextName ? ` in ${value.contextName} form` : '';
         const oldValue =
           typeof value?.oldValue === 'string'
             ? (customFieldAttachmentFilenameById?.get(value.oldValue) ?? value.oldValue)
@@ -341,7 +471,7 @@ const getActivityDescription = (
 
         if (oldValue && newValue) {
           return {
-            description: `updated ${fieldLabel}`,
+            description: `updated ${fieldLabel}${contextSuffix}`,
             details: (
               <>
                 from <span className='font-semibold'>{oldValue}</span> to{' '}
@@ -353,13 +483,13 @@ const getActivityDescription = (
 
         if (newValue) {
           return {
-            description: `set ${fieldLabel}`,
+            description: `set ${fieldLabel}${contextSuffix}`,
             details: <span className='font-semibold'>{newValue}</span>,
           };
         }
 
         return {
-          description: `cleared ${fieldLabel}`,
+          description: `cleared ${fieldLabel}${contextSuffix}`,
           details: oldValue ? <span className='font-semibold'>{oldValue}</span> : '',
         };
       }
@@ -428,11 +558,26 @@ const getActivityDescription = (
       };
     }
 
-    case ActivityType.SUBTICKET_CREATED: {
+    case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED: {
       const subTicketXyneId =
         value?.subTicketXyneId || value?.subTicketId?.substring(0, 8).toUpperCase();
+      // Newer rows carry the action in the activity type; older ones only in the value.
+      const subTicketAction =
+        activity.activityType === ActivityType.SUBTICKET_LINKED
+          ? 'linked'
+          : activity.activityType === ActivityType.SUBTICKET_UNLINKED
+            ? 'unlinked'
+            : value?.subTicketAction;
+      const description =
+        subTicketAction === 'linked'
+          ? 'linked subticket'
+          : subTicketAction === 'unlinked'
+            ? 'unlinked subticket'
+            : 'created subticket';
       return {
-        description: 'created subticket',
+        description,
         details: <span className='font-semibold'>{subTicketXyneId}</span>,
       };
     }
@@ -594,6 +739,9 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
   if (activity.activityType === ActivityType.METADATA && value?.field === 'stageFormFile') {
     return <FileText size={12} className='text-blue-600' />;
   }
+  if (activity.activityType === ActivityType.METADATA && value?.field === 'flowConfirmation') {
+    return <CircleCheck size={12} className='text-emerald-600' />;
+  }
 
   switch (activity.activityType) {
     case ActivityType.PRIORITY:
@@ -606,8 +754,16 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <Tag size={12} className='text-gray-400' />;
     case ActivityType.ETA:
     case ActivityType.STAGE_ETA:
+    case ActivityType.ETA_AUTO_RECOMPUTED:
+    case ActivityType.ETA_MANUALLY_UPDATED:
+    case ActivityType.ETA_RISK_DETECTED:
+    case ActivityType.ETA_RISK_ACKNOWLEDGED:
+    case ActivityType.ETA_RISK_REOPENED:
+    case ActivityType.ETA_RISK_RESOLVED:
       return <Calendar size={12} />;
     case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED:
       return <FileText size={12} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={12} className='text-purple-600' />;
@@ -632,6 +788,7 @@ export const TicketActivity = ({
   userGroups,
   boards,
   stageVisitFormValues = [],
+  flowFormContextId,
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [showExactTime, setShowExactTime] = useState(false);
@@ -720,6 +877,7 @@ export const TicketActivity = ({
               activities={sortedActivities}
               showExactTime={showExactTime}
               stageVisitFormValues={stageVisitFormValues}
+              {...(flowFormContextId ? { flowFormContextId } : {})}
               customFieldAttachmentFilenameById={customFieldAttachmentFilenameById}
             />
           ))}
@@ -743,6 +901,7 @@ export const ActivityComponent = ({
   activities,
   showExactTime,
   stageVisitFormValues = [],
+  flowFormContextId,
   customFieldAttachmentFilenameById,
 }: {
   activity: TicketActivityType;
@@ -753,10 +912,12 @@ export const ActivityComponent = ({
   activities: TicketActivityType[];
   showExactTime: boolean;
   stageVisitFormValues?: StageVisitFormValues[];
+  flowFormContextId?: string;
   customFieldAttachmentFilenameById?: ReadonlyMap<string, string>;
 }) => {
   const activityUser = users?.find(u => u.id === activity.updatedBy);
   const isAutomationActivity = (activity.value as ActivityValue | null)?.isAutomation === true;
+  const isAiActivity = (activity.value as ActivityValue | null)?.isAiClassification === true;
   const { description, details, hideActorName } = getActivityDescription(
     activity,
     users,
@@ -772,10 +933,20 @@ export const ActivityComponent = ({
     (activity.activityType === ActivityType.STAGE_NAME ||
       activity.activityType === ActivityType.STATUS) &&
     activityValue?.field === 'stageName';
+  const isFlowFormCompletion =
+    !!flowFormContextId &&
+    activity.activityType === ActivityType.STATUS &&
+    activityValue?.field === 'statusV2' &&
+    activityValue.newValue === 'COMPLETED';
 
-  const matchedFormVisit = isStageMove
-    ? matchFormVisit(stageVisitFormValues, activityValue?.newValue, activity.timestamp)
-    : undefined;
+  const matchedFormVisit = isFlowFormCompletion
+    ? stageVisitFormValues
+        .filter(sv => sv.stageId === flowFormContextId)
+        .filter(sv => sv.enteredAt <= new Date(activity.timestamp).getTime() + 60_000)
+        .sort((a, b) => b.enteredAt - a.enteredAt)[0]
+    : isStageMove
+      ? matchFormVisit(stageVisitFormValues, activityValue?.newValue, activity.timestamp)
+      : undefined;
 
   return (
     <div
@@ -795,9 +966,11 @@ export const ActivityComponent = ({
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
-              (isAutomationActivity
-                ? 'Automation'
-                : getUserDisplayName(activityUser) || 'Someone')}{' '}
+              (isAiActivity
+                ? 'AI classification'
+                : isAutomationActivity
+                  ? 'Automation'
+                  : getUserDisplayName(activityUser) || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>

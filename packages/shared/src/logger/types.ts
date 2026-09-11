@@ -3,7 +3,7 @@ import type { EventType, LogLevel } from './events.js';
 /**
  * Platform-agnostic Logger interface.
  * Dashboard implements with Web Workers + OTel.
- * Lotus implements with console.log or native logging.
+ * Lotus implements with console or native logging.
  */
 export interface Logger {
   debug(event: EventType, extraFields?: Record<string, unknown>): void;
@@ -31,13 +31,16 @@ export const noopLogger: Logger = {
 
 /**
  * Console-based logger for simple environments (e.g. React Native dev).
+ * This is the intentional fallback for consumers that have no native logger.
  */
+/* eslint-disable no-console */
 export const consoleLogger: Logger = {
   debug: (event, extra) => console.debug(`[${event}]`, extra ?? ''),
   info: (event, extra) => console.log(`[${event}]`, extra ?? ''),
   warn: (event, extra) => console.warn(`[${event}]`, extra ?? ''),
   error: (event, extra) => console.error(`[${event}]`, extra ?? ''),
 };
+/* eslint-enable no-console */
 
 /**
  * Metrics recorder interface for OTel-like instrumentation.

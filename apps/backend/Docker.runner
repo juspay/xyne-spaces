@@ -34,6 +34,7 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
@@ -44,11 +45,12 @@ COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
 
 COPY packages/shared    packages/shared
+COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
 COPY apps/backend       apps/backend
 
-# backend consumes both from their built dist/
-RUN pnpm --filter @xyne/shared --filter agentic-framework run build
+# backend consumes these from their built dist/
+RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
 
 WORKDIR /repo/apps/backend
 RUN pnpm run db:generate

@@ -9,10 +9,18 @@ import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplay
 
 type MembershipRow = FormFields & { globalField?: GlobalField | null };
 
+export type FormFieldConditionMatch = 'changed' | 'contains';
+
+export interface FormFieldCondition {
+  fieldId: string;
+  match: FormFieldConditionMatch;
+  value?: string;
+}
+
 interface TicketUpdatedFormFieldsSectionProps {
   boardIds: string[];
-  formFieldIds: string[];
-  onChange: (ids: string[]) => void;
+  formFieldConditions: FormFieldCondition[];
+  onChange: (conditions: FormFieldCondition[]) => void;
   onFieldNamesResolved?: (map: Map<string, string>) => void;
 }
 
@@ -22,9 +30,16 @@ interface BoardGroup {
   fields: { id: string; fieldName: string }[];
 }
 
+function conditionFor(
+  conditions: FormFieldCondition[],
+  fieldId: string,
+): FormFieldCondition | undefined {
+  return conditions.find(c => c.fieldId === fieldId);
+}
+
 export function TicketUpdatedFormFieldsSection({
   boardIds,
-  formFieldIds,
+  formFieldConditions,
   onChange,
   onFieldNamesResolved,
 }: TicketUpdatedFormFieldsSectionProps): React.ReactElement {
@@ -82,8 +97,8 @@ export function TicketUpdatedFormFieldsSection({
       .filter(g => g.fields.length > 0);
   }, [boardMappings, stageTransitionsByBoardId, boardIds, boardNameMap]);
 
-  const formFieldIdsRef = useRef(formFieldIds);
-  formFieldIdsRef.current = formFieldIds;
+  const conditionsRef = useRef(formFieldConditions);
+  conditionsRef.current = formFieldConditions;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onFieldNamesResolvedRef = useRef(onFieldNamesResolved);
@@ -92,8 +107,8 @@ export function TicketUpdatedFormFieldsSection({
   useEffect(() => {
     if (!boardMappings || !stageTransitions) return;
     const validIds = new Set(boardGroups.flatMap(g => g.fields.map(f => f.id)));
-    const pruned = formFieldIdsRef.current.filter(id => validIds.has(id));
-    if (pruned.length !== formFieldIdsRef.current.length) {
+    const pruned = conditionsRef.current.filter(c => validIds.has(c.fieldId));
+    if (pruned.length !== conditionsRef.current.length) {
       onChangeRef.current(pruned);
     }
   }, [boardGroups, boardMappings, stageTransitions, boardIds]);
@@ -121,20 +136,41 @@ export function TicketUpdatedFormFieldsSection({
 
   const handleToggle = (fieldId: string, checked: boolean) => {
     if (checked) {
-      onChange([...formFieldIds, fieldId]);
+      onChange([
+        ...formFieldConditions,
+        {
+          fieldId,
+          match: 'changed',
+          value: '',
+        },
+      ]);
     } else {
-      onChange(formFieldIds.filter(id => id !== fieldId));
+      onChange(formFieldConditions.filter(c => c.fieldId !== fieldId));
     }
   };
 
   const handleSelectAll = (group: BoardGroup, checked: boolean) => {
     const fieldIds = group.fields.map(f => f.id);
     if (checked) {
-      const next = [...formFieldIds, ...fieldIds.filter(id => !formFieldIds.includes(id))];
-      onChange(next);
+      const existing = new Set(formFieldConditions.map(c => c.fieldId));
+      const additions = fieldIds
+        .filter(id => !existing.has(id))
+        .map(fieldId => ({
+          fieldId,
+          match: 'changed' as FormFieldConditionMatch,
+          value: '',
+        }));
+      onChange([...formFieldConditions, ...additions]);
     } else {
-      onChange(formFieldIds.filter(id => !fieldIds.includes(id)));
+      onChange(formFieldConditions.filter(c => !fieldIds.includes(c.fieldId)));
     }
+  };
+
+  const updateCondition = (
+    fieldId: string,
+    patch: Partial<Pick<FormFieldCondition, 'match' | 'value'>>,
+  ) => {
+    onChange(formFieldConditions.map(c => (c.fieldId === fieldId ? { ...c, ...patch } : c)));
   };
 
   const toggleBoard = (boardId: string) => {
@@ -148,6 +184,11 @@ export function TicketUpdatedFormFieldsSection({
       return next;
     });
   };
+
+  const selectedIds = useMemo(
+    () => new Set(formFieldConditions.map(c => c.fieldId)),
+    [formFieldConditions],
+  );
 
   return (
     <div className='flex flex-col gap-2 rounded-lg border border-border bg-background/40 px-3 py-3'>
@@ -167,7 +208,7 @@ export function TicketUpdatedFormFieldsSection({
           {boardGroups.map(group => {
             const { boardId, boardName, fields } = group;
             const isExpanded = expandedBoards.has(boardId);
-            const selectedInBoard = fields.filter(f => formFieldIds.includes(f.id));
+            const selectedInBoard = fields.filter(f => selectedIds.has(f.id));
             const allSelected = selectedInBoard.length === fields.length;
             const someSelected = selectedInBoard.length > 0 && !allSelected;
 
@@ -218,16 +259,55 @@ export function TicketUpdatedFormFieldsSection({
 
                 {/* Field checkboxes — shown when expanded */}
                 {isExpanded && (
-                  <div className='flex flex-col gap-0.5 px-2 pb-2'>
-                    {fields.map(field => (
-                      <div key={field.id} className='rounded-md px-1 py-0.5 hover:bg-accent/40'>
-                        <Checkbox
-                          checked={formFieldIds.includes(field.id)}
-                          onChange={checked => handleToggle(field.id, checked)}
-                          label={field.fieldName}
-                        />
-                      </div>
-                    ))}
+                  <div className='flex flex-col gap-1 px-2 pb-2'>
+                    {fields.map(field => {
+                      const cond = conditionFor(formFieldConditions, field.id);
+                      const checked = !!cond;
+                      const match = cond?.match ?? 'changed';
+                      return (
+                        <div
+                          key={field.id}
+                          className='flex flex-col gap-1 rounded-md px-1 py-1 hover:bg-accent/40'
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onChange={next => handleToggle(field.id, next)}
+                            label={field.fieldName}
+                          />
+                          {checked && (
+                            <div className='ml-6 flex flex-wrap items-center gap-2'>
+                              <select
+                                value={match}
+                                onChange={e =>
+                                  updateCondition(field.id, {
+                                    match: e.target.value as FormFieldConditionMatch,
+                                  })
+                                }
+                                className='h-7 rounded-md border border-border bg-background px-2 text-[11px] text-foreground'
+                                data-track-category='automation-builder'
+                                data-track-name='form-field-match-operator'
+                              >
+                                <option value='changed'>Changed</option>
+                                <option value='contains'>Contains</option>
+                              </select>
+                              {match === 'contains' && (
+                                <input
+                                  type='text'
+                                  value={cond?.value ?? ''}
+                                  onChange={e =>
+                                    updateCondition(field.id, { value: e.target.value })
+                                  }
+                                  placeholder='Value contains…'
+                                  className='h-7 min-w-[140px] flex-1 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground'
+                                  data-track-category='automation-builder'
+                                  data-track-name='form-field-contains-value'
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -237,4 +317,27 @@ export function TicketUpdatedFormFieldsSection({
       )}
     </div>
   );
+}
+
+/** Convert legacy formFieldIds / formFieldConditions from trigger config. */
+export function conditionsFromTriggerConfig(
+  config: Record<string, unknown> | undefined,
+): FormFieldCondition[] {
+  if (!config) return [];
+  const conditions = config['formFieldConditions'] as FormFieldCondition[] | undefined;
+  if (conditions && conditions.length > 0) {
+    return conditions.map(c => {
+      const next: FormFieldCondition = {
+        fieldId: c.fieldId,
+        match: c.match ?? 'changed',
+      };
+      if (c.value !== undefined) next.value = c.value;
+      return next;
+    });
+  }
+  const ids = config['formFieldIds'] as string[] | undefined;
+  if (ids && ids.length > 0) {
+    return ids.map(fieldId => ({ fieldId, match: 'changed' as const }));
+  }
+  return [];
 }

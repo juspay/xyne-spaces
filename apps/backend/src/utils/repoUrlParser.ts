@@ -1,3 +1,5 @@
+import { VCSProviderType } from '@xyne/shared';
+
 // Parses a Bitbucket Server / Data Center repo URL into projectKey + repoSlug.
 // Handles the three forms Bitbucket emits:
 //   - HTTPS browse:  https://bitbucket.example.net/projects/KEY/repos/slug/browse
@@ -61,13 +63,63 @@ export function parseBitbucketRepoUrl(url: string): { projectKey: string; repoSl
     return { projectKey: browse[1].toUpperCase(), repoSlug: browse[2] };
   }
 
-  // Clone URLs (SSH or HTTPS): the project/repo are the last two path segments,
-  // with an optional /scm prefix (HTTPS clone) and an optional .git suffix.
-  // SSH carries a lowercased project key, so normalise to Bitbucket's uppercase convention.
-  const clone = /(?:\/scm)?\/([^/]+)\/([^/?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(url);
-  if (clone?.[1] && clone[2]) {
-    return { projectKey: clone[1].toUpperCase(), repoSlug: clone[2] };
+  let clonePath = url;
+  for (const sep of ['?', '#']) {
+    const idx = clonePath.indexOf(sep);
+    if (idx !== -1) clonePath = clonePath.slice(0, idx);
+  }
+  if (clonePath.toLowerCase().endsWith('.git')) clonePath = clonePath.slice(0, -4);
+  const segs = clonePath.split('/').filter(Boolean);
+  if (segs.length >= 2) {
+    return {
+      projectKey: segs[segs.length - 2]!.toUpperCase(),
+      repoSlug: segs[segs.length - 1]!,
+    };
   }
 
+  return null;
+}
+
+// Parses a GitHub repo URL (github.com or GHE) into owner + repo, accepting
+// https, scheme-less, ssh:// and scp-like forms. Host-anchored via URL parsing
+// so lookalikes (notgithub.com, github.com.evil.io) never match.
+export function parseGitHubRepoUrl(url: string): { owner: string; repo: string } | null {
+  if (!url) return null;
+  let candidate = url.trim();
+
+  // scp-like SSH (git@host:owner/repo.git) isn't URL-parseable — normalise it.
+  const scpLike = /^git@([^:/\s]+):(.+)$/.exec(candidate);
+  if (scpLike) candidate = `ssh://git@${scpLike[1]}/${scpLike[2]}`;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) candidate = `https://${candidate}`;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return null;
+  }
+
+  // github.com / www / GHE (github.<domain>), but not github.com.<lookalike>
+  const host = parsed.hostname.toLowerCase();
+  const isGheHost = host.startsWith('github.') && !host.startsWith('github.com.');
+  if (host !== 'github.com' && host !== 'www.github.com' && !isGheHost) {
+    return null;
+  }
+
+  const [owner, repoSegment] = parsed.pathname.split('/').filter(Boolean);
+  const repo = repoSegment?.replace(/\.git$/i, '');
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}
+
+export function inferVcsProvider(repoUrl: string): VCSProviderType {
+  return parseGitHubRepoUrl(repoUrl) ? VCSProviderType.GITHUB : VCSProviderType.BITBUCKET_SERVER;
+}
+
+// Like inferVcsProvider but returns null for an unrecognized URL, so callers can
+// reject it instead of defaulting to a misleading Bitbucket-flavored error.
+export function detectVcsProvider(repoUrl: string): VCSProviderType | null {
+  if (parseGitHubRepoUrl(repoUrl)) return VCSProviderType.GITHUB;
+  if (parseBitbucketRepoUrl(repoUrl)) return VCSProviderType.BITBUCKET_SERVER;
   return null;
 }

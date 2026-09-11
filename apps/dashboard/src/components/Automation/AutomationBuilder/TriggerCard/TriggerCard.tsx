@@ -15,19 +15,29 @@ import { Popover } from '../../../ui/Popover/Popover';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { EmailReceivedFilterForm } from './EmailReceivedFilterForm';
 import { WebhookTriggerForm } from './WebhookTriggerForm';
-import { TicketUpdatedFormFieldsSection } from './TicketUpdatedFormFieldsSection';
+import {
+  TicketUpdatedFormFieldsSection,
+  conditionsFromTriggerConfig,
+} from './TicketUpdatedFormFieldsSection';
 import type { TriggerCardProps } from './TriggerCard.types';
 import type { TriggerCatalogItem, JsonSchema } from '../../Automation.types';
 
-function omitProperty(schema: JsonSchema, key: string): JsonSchema {
-  if (schema.properties && key in schema.properties) {
-    const { [key]: _omit, ...rest } = schema.properties;
-    return { ...schema, properties: rest };
+function omitProperties(schema: JsonSchema, keys: string[]): JsonSchema {
+  if (schema.properties) {
+    const rest = { ...schema.properties };
+    let removedAny = false;
+    for (const key of keys) {
+      if (key in rest) {
+        delete rest[key];
+        removedAny = true;
+      }
+    }
+    if (removedAny) return { ...schema, properties: rest };
   }
   if (schema.definitions) {
     const newDefs: Record<string, JsonSchema> = {};
     for (const [defKey, def] of Object.entries(schema.definitions)) {
-      newDefs[defKey] = omitProperty(def, key);
+      newDefs[defKey] = omitProperties(def, keys);
     }
     return { ...schema, definitions: newDefs };
   }
@@ -144,10 +154,10 @@ export function TriggerCard({
             issues={issues ?? null}
             pathPrefix='trigger.config.'
           />
-        ) : trigger.type === 'TICKET_UPDATED' ? (
+        ) : trigger.type === 'TICKET_UPDATED' || trigger.type === 'TICKET_CREATED' ? (
           <>
             <SchemaForm
-              schema={omitProperty(schema.configSchema, 'formFieldIds')}
+              schema={omitProperties(schema.configSchema, ['formFieldIds', 'formFieldConditions'])}
               value={trigger.config}
               onChange={onConfigChange}
               issues={issues ?? null}
@@ -155,8 +165,14 @@ export function TriggerCard({
             />
             <TicketUpdatedFormFieldsSection
               boardIds={(trigger.config?.['boardIds'] as string[] | undefined) ?? []}
-              formFieldIds={(trigger.config?.['formFieldIds'] as string[] | undefined) ?? []}
-              onChange={ids => onConfigChange({ ...trigger.config, formFieldIds: ids })}
+              formFieldConditions={conditionsFromTriggerConfig(trigger.config)}
+              onChange={conditions =>
+                onConfigChange({
+                  ...trigger.config,
+                  formFieldConditions: conditions,
+                  formFieldIds: conditions.map(c => c.fieldId),
+                })
+              }
               {...(onFormFieldNamesResolved
                 ? { onFieldNamesResolved: onFormFieldNamesResolved }
                 : {})}

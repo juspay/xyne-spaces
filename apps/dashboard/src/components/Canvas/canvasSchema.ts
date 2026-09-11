@@ -1,4 +1,5 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
+import { createReactInlineMathSpec } from '@blocknote/math-block';
 import { Extension, type EditorOptions } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
@@ -9,6 +10,22 @@ import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
+import { canvasTicketStyleSpec } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
+import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
+import { canvasDiagramBlockSpec } from './CanvasDiagramSpec';
+import { canvasMathBlockSpec } from './CanvasMathBlockSpec';
+import { CANVAS_EMBED_TYPE, canvasEmbedSpec } from './CanvasEmbedSpec';
+import {
+  canvasAudioBlockSpec,
+  canvasFileBlockSpec,
+  canvasImageBlockSpec,
+  canvasVideoBlockSpec,
+} from './CanvasFileBlockSpec';
+import { canvasLinkShortcutsExtension } from './canvasLinkShortcuts';
+import { canvasPastedLinkExtension } from './canvasPastedLink';
+import { canvasSourceBlockShortcutsExtension } from './canvasSourceBlockShortcuts';
+import { canvasTableShortcutsExtension } from './canvasTableShortcuts';
+import { canvasTicketUnlinkExtension } from './canvasTicketUnlink';
 
 // Default blocks + whiteboard, then extended with mention and citation inline content.
 // Shared by the canvas editors and the read-only previews: a preview built on a
@@ -17,15 +34,26 @@ import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCom
 // Helper isolates the type assertion so ESLint no-unsafe-assignment does not trigger at call site.
 function createCanvasSchema() {
   return BlockNoteSchema.create({
-    blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs),
+    blockSpecs: Object.assign({}, defaultBlockSpecs, whiteboardBlockSpecs, {
+      diagram: canvasDiagramBlockSpec,
+      mathBlock: canvasMathBlockSpec,
+      codeBlock: canvasCodeBlockSpec,
+      [CANVAS_EMBED_TYPE]: canvasEmbedSpec,
+      file: canvasFileBlockSpec,
+      image: canvasImageBlockSpec,
+      video: canvasVideoBlockSpec,
+      audio: canvasAudioBlockSpec,
+    }),
   } as Parameters<typeof BlockNoteSchema.create>[0]).extend({
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
+      math: createReactInlineMathSpec(),
       mention: mentionInlineContentSpec,
       citation: citationInlineContentSpec,
     },
     styleSpecs: {
       canvasCommentThread: canvasCommentThreadStyleSpec,
+      canvasTicket: canvasTicketStyleSpec,
     },
   });
 }
@@ -260,7 +288,14 @@ const handleCanvasTableKeyDown = (view: EditorView, event: KeyboardEvent): boole
 };
 
 export const canvasTiptapOptions = {
-  extensions: [canvasTablePendingExitRowExtension],
+  extensions: [
+    canvasTicketUnlinkExtension,
+    canvasTablePendingExitRowExtension,
+    canvasPastedLinkExtension,
+    canvasLinkShortcutsExtension,
+    canvasTableShortcutsExtension,
+    canvasSourceBlockShortcutsExtension,
+  ],
   editorProps: {
     handleKeyDown: handleCanvasTableKeyDown,
   },

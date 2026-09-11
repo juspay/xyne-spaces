@@ -64,7 +64,7 @@ export const SectionEmojiPicker = ({
             height={400}
             lazyLoadEmojis
             searchPlaceHolder='Search emoji...'
-            previewConfig={{ showPreview: false }}
+            previewConfig={{ showPreview: true }}
           />
         </div>
       )}

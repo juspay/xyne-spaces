@@ -14,11 +14,13 @@ const normalizeNativeEmoji = (emoji: string): string =>
     })
     .join('');
 
-const unifiedToEmoji = (unified: string): string =>
+export const unifiedToEmoji = (unified: string): string =>
   unified
     .split('-')
     .map(code => String.fromCodePoint(parseInt(code, 16)))
     .join('');
+
+const UNIFIED_PATTERN = /^[0-9a-f]{4,6}(-[0-9a-f]{4,6})*$/i;
 
 const ensureEmojiData = (): Promise<void> => {
   if (emojiDataCache) return Promise.resolve();
@@ -47,6 +49,10 @@ export const loadEmojiData = (): Promise<void> => ensureEmojiData();
 /** Convert a native Unicode emoji to its canonical shortcode name. */
 export const findUnicodeEmojiName = (emoji: string): string | undefined =>
   nativeEmojiNames?.get(normalizeNativeEmoji(emoji));
+
+/** Same as findUnicodeEmojiName, keyed by a unified id (e.g. "1f917") instead of the character. */
+export const findUnicodeEmojiNameByUnified = (unified: string): string | undefined =>
+  UNIFIED_PATTERN.test(unified) ? findUnicodeEmojiName(unifiedToEmoji(unified)) : undefined;
 
 export const findCustomEmoji = (
   name: string,

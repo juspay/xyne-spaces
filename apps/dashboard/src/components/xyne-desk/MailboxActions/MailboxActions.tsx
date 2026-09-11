@@ -3,10 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { Star, Ban, Inbox as InboxIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MailboxState } from '@xyne/shared';
-import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 
@@ -16,6 +14,12 @@ interface MailboxActionsProps {
   ticketId: string;
   channelId: string;
   slot: MailboxSlot;
+  mailboxOverlay:
+    | {
+        state?: MailboxState | null;
+        starred?: boolean | null;
+      }
+    | undefined;
 }
 
 // The mailbox location rendered as a removable chip (Gmail-style), like a label.
@@ -36,12 +40,11 @@ export const MailboxActions = ({
   ticketId,
   channelId,
   slot,
+  mailboxOverlay,
 }: MailboxActionsProps): ReactElement | null => {
   const zero = useZero();
-  const [rows] = useCachedQuery(queries.myTicketMailbox({ ticketId }), { enabled: !!ticketId });
-  const overlay = (rows ?? [])[0];
-  const state = overlay?.state ?? MailboxState.INBOX;
-  const starred = overlay?.starred ?? false;
+  const state = mailboxOverlay?.state ?? MailboxState.INBOX;
+  const starred = mailboxOverlay?.starred ?? false;
 
   const setState = async (next: MailboxState): Promise<void> => {
     try {

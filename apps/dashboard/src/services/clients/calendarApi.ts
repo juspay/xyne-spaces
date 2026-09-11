@@ -24,6 +24,14 @@ export async function syncCalendar(provider: CalendarProvider): Promise<void> {
   await apiInstance.post(`/calendar/sync/${providerPath}`);
 }
 
+/** Disconnects the calendar: stops the watch and clears stored OAuth credentials
+ * so a subsequent connect goes through Google's/Microsoft's consent screen again
+ * (needed to pick up newly-added scopes like calendar.events). */
+export async function disconnectCalendar(provider: CalendarProvider): Promise<void> {
+  const providerPath = provider === 'GOOGLE' ? 'google' : 'microsoft';
+  await apiInstance.delete(`/calendar/watch/${providerPath}`);
+}
+
 export async function initCalendarOAuth(
   platform: CalendarOAuthPlatform = 'web',
 ): Promise<CalendarOAuthInitResponse> {

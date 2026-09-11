@@ -84,7 +84,10 @@ function getSheets(): sheets_v4.Sheets {
 }
 
 function getSpreadsheetId(): string {
-  const id = process.env.MIGRATION_SHEET_ID || '1_lljpA7-FKUrrU6x9j7E3-HeTeRDXB_BxHToKSh6WLo';
+  const id = process.env.MIGRATION_SHEET_ID;
+  if (!id) {
+    throw new Error('[GoogleSheets] Missing MIGRATION_SHEET_ID');
+  }
   return id;
 }
 

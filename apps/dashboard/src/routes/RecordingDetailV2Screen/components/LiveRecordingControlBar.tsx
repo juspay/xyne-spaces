@@ -17,10 +17,11 @@
  * `onMarkerSelect`, clicking any of the three opens the transcript at that point.
  */
 
-import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, Flag } from '@xyne/icons';
+import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
+import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
@@ -31,13 +32,23 @@ import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './marked
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
+const PLAYBACK_SPEEDS = [
+  { value: 1, label: '1x' },
+  { value: 1.2, label: '1.2x' },
+  { value: 1.5, label: '1.5x' },
+  { value: 2, label: '2x' },
+] as const;
+
 interface LiveRecordingControlBarProps {
   recording: RecordingDetail;
   isLive: boolean;
   onStopped?: () => void;
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   onMarkerSelect?: (item: MarkedItem) => void;
+  onOpenTranscript?: () => void;
   isAudioPreparing?: boolean;
+  /** True once playback is known to be unavailable for this recording. */
+  isAudioUnavailable?: boolean;
 }
 
 /** Stands in when there is no audio to load, so the playback hook can stay unconditional. */
@@ -49,7 +60,9 @@ export const LiveRecordingControlBar = ({
   onStopped,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
+  isAudioUnavailable = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
   // Recording session state — only meaningful when this tab owns the live session.
   const activeExternalId = useRecordingStore(context => context.externalId);
@@ -114,8 +127,10 @@ export const LiveRecordingControlBar = ({
       <RecordedTimelineBar
         recording={recording}
         isAudioPreparing={isAudioPreparing}
+        isAudioUnavailable={isAudioUnavailable}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
+        {...(onOpenTranscript ? { onOpenTranscript } : {})}
       />
     );
   }
@@ -186,7 +201,11 @@ export const LiveRecordingControlBar = ({
         {isPaused ? 'Paused' : 'Live'}
       </span>
 
-      <RecordingVisualizer isPaused={isPaused} />
+      <RecordingVisualizer
+        isAnimated={!isPaused}
+        className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+        {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+      />
     </div>
   );
 };
@@ -344,15 +363,21 @@ interface RecordedTimelineBarProps {
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   /** Supplied once there is a transcript to open at the marker's timestamp. */
   onMarkerSelect?: (item: MarkedItem) => void;
+  /** Supplied once there is a transcript to open — the waveform pill opens it directly. */
+  onOpenTranscript?: () => void;
   /** True while the stitched audio is still on its way. */
   isAudioPreparing?: boolean;
+  /** True once playback is known to be unavailable (e.g. older recordings). */
+  isAudioUnavailable?: boolean;
 }
 
 const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
+  isAudioUnavailable = false,
 }: RecordedTimelineBarProps): ReactElement => {
   const fallbackDurationMs =
     recording.durationMs ??
@@ -379,16 +404,28 @@ const RecordedTimelineBar = ({
   const isPlaying = playback.state === 'playing';
   const isStitching = !onLoadAudio && isAudioPreparing;
   const isAudioBusy = isStitching || playback.state === 'loading';
+  // Once stitching has given up (or never applied) and there is still no audio to
+  // load, the recording simply has no playable audio (e.g. older recordings) — show
+  // an alert-triangle instead of a spinner that would otherwise never resolve.
+  const showAudioUnavailable = !onLoadAudio && !isStitching && isAudioUnavailable;
   const audioControlLabel = isStitching
     ? 'Preparing audio'
-    : !onLoadAudio
-      ? 'Audio is unavailable for this recording'
-      : playback.state === 'loading'
-        ? 'Loading audio'
-        : isPlaying
-          ? 'Pause recording'
-          : 'Play recording';
-  const audioIconKey = isAudioBusy ? 'loading' : isPlaying ? 'pause' : 'play';
+    : showAudioUnavailable
+      ? 'Recording is not available for playback.'
+      : !onLoadAudio
+        ? 'Audio is unavailable for this recording'
+        : playback.state === 'loading'
+          ? 'Loading audio'
+          : isPlaying
+            ? 'Pause recording'
+            : 'Play recording';
+  const audioIconKey = isAudioBusy
+    ? 'loading'
+    : showAudioUnavailable
+      ? 'unavailable'
+      : isPlaying
+        ? 'pause'
+        : 'play';
 
   const selectMarker =
     playback.canSeek || onMarkerSelect
@@ -398,52 +435,60 @@ const RecordedTimelineBar = ({
         }
       : null;
 
+  const playButton = (
+    <motion.div
+      className='shrink-0'
+      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={
+        shouldReduceMotion ? { duration: 0.15 } : { type: 'spring', stiffness: 480, damping: 30 }
+      }
+    >
+      <Button
+        type='button'
+        variant='outline'
+        size='icon'
+        onClick={() => void playback.toggle()}
+        disabled={!onLoadAudio || playback.state === 'loading'}
+        aria-busy={isAudioBusy}
+        className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
+        aria-label={audioControlLabel}
+        title={audioControlLabel}
+        data-track-category='RecordingDetailV2'
+        data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
+      >
+        <AnimatePresence mode='wait' initial={false}>
+          <motion.span
+            key={audioIconKey}
+            className='flex items-center justify-center'
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.6 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+          >
+            {isAudioBusy ? (
+              <Spinner size={14} className='animate-spin' />
+            ) : showAudioUnavailable ? (
+              <AlertTriangle size={14} className='text-muted-foreground' />
+            ) : isPlaying ? (
+              <PauseBig size={14} strokeWidth={4} variant='Solid' />
+            ) : (
+              <PlayBig size={14} variant='Solid' />
+            )}
+          </motion.span>
+        </AnimatePresence>
+      </Button>
+    </motion.div>
+  );
+
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
       <div className='flex min-h-11 items-center gap-4'>
-        <motion.div
-          className='shrink-0'
-          initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={
-            shouldReduceMotion
-              ? { duration: 0.15 }
-              : { type: 'spring', stiffness: 480, damping: 30 }
-          }
-        >
-          <Button
-            type='button'
-            variant='outline'
-            size='icon'
-            onClick={() => void playback.toggle()}
-            disabled={!onLoadAudio || playback.state === 'loading'}
-            aria-busy={isAudioBusy}
-            className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
-            aria-label={audioControlLabel}
-            title={audioControlLabel}
-            data-track-category='RecordingDetailV2'
-            data-track-name={isPlaying ? 'pause_recording' : 'play_recording'}
-          >
-            <AnimatePresence mode='wait' initial={false}>
-              <motion.span
-                key={audioIconKey}
-                className='flex items-center justify-center'
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.6 }}
-                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
-              >
-                {isAudioBusy ? (
-                  <Spinner size={14} className='animate-spin' />
-                ) : isPlaying ? (
-                  <PauseBig size={14} strokeWidth={4} variant='Solid' />
-                ) : (
-                  <PlayBig size={14} variant='Solid' />
-                )}
-              </motion.span>
-            </AnimatePresence>
-          </Button>
-        </motion.div>
+        {showAudioUnavailable ? (
+          <Tooltip content='Recording is not available for playback.'>{playButton}</Tooltip>
+        ) : (
+          playButton
+        )}
 
         <span className='w-12 shrink-0 text-right font-mono text-xs text-foreground'>
           {formatElapsedTime(elapsedMs)}
@@ -509,18 +554,34 @@ const RecordedTimelineBar = ({
           {formatElapsedTime(durationMs)}
         </span>
 
-        <RecordingVisualizer isPaused={!isPlaying} />
+        <RecordingVisualizer
+          isAnimated={false}
+          className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+          {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+        />
       </div>
 
-      {/* Only worth explaining the markers once there are some to explain. */}
-      {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+      {/* Legend only when there's something to explain; speed only once audio can load. */}
+      {(markedTypes.size > 0 || onLoadAudio) && (
+        <div className='mt-3 flex items-center gap-4 pl-1'>
+          {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+          {onLoadAudio && (
+            <div className='ml-auto'>
+              <PlaybackSpeedControl
+                rate={playback.playbackRate}
+                onChange={playback.setPlaybackRate}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
 /** Reads the marker vocabulary of the track above it — only the kinds actually on it. */
 const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactElement => (
-  <div className='mt-3 flex items-center gap-5 pl-1 text-xs text-muted-foreground'>
+  <div className='flex items-center gap-5 text-xs text-muted-foreground'>
     {types.has('decision') && (
       <span className='flex items-center gap-1.5'>
         <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
@@ -542,28 +603,107 @@ const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactE
   </div>
 );
 
+interface PlaybackSpeedControlProps {
+  rate: number;
+  onChange: (rate: number) => void;
+}
+
+/** Playback speed control after the audio has loaded. */
+const PlaybackSpeedControl = ({ rate, onChange }: PlaybackSpeedControlProps): ReactElement => (
+  <div className='flex shrink-0 items-center gap-2 text-xs text-muted-foreground'>
+    <span>Speed</span>
+    <div className='flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5'>
+      {PLAYBACK_SPEEDS.map(speed => (
+        <button
+          key={speed.value}
+          type='button'
+          onClick={() => onChange(speed.value)}
+          className={cn(
+            'rounded-full px-2.5 py-1 font-mono text-xs transition-colors',
+            rate === speed.value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          data-track-category='RecordingDetailV2'
+          data-track-name='set_playback_speed'
+        >
+          {speed.label}
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
 /* -------------------------------------------------------------------------- */
 /* Audio visualizer                                                           */
 /* -------------------------------------------------------------------------- */
 
-const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement => (
-  <div className='inline-flex h-7 w-14 items-center justify-center gap-0.5 rounded-lg border border-border px-2'>
-    {Array.from({ length: 4 }, (_, i) => {
-      if (isPaused) {
-        return <div key={i} className='size-1 rounded-full bg-muted-foreground' />;
-      }
+export interface RecordingVisualizerProps {
+  isAnimated: boolean;
+  onClick?: () => void;
+  size?: 'sm' | 'md';
+  colorClassName?: string;
+  className?: string;
+}
 
-      const style: CSSProperties = {
-        animation: `recWaveBar 0.55s ease-in-out ${i * 0.08}s infinite alternate`,
-      };
-      return (
-        <div key={i} className='flex h-4 items-center'>
-          <div
-            className='rec-overlay-waveform-bar w-1 rounded-full bg-primary !opacity-100'
-            style={style}
-          />
-        </div>
-      );
-    })}
-  </div>
-);
+const RECORDING_VISUALIZER_REST_HEIGHT = '40%';
+
+const RECORDING_VISUALIZER_SIZE_CLASSES = {
+  md: { wrapperHeight: 'h-4', barWidth: 'w-1.5' },
+  sm: { wrapperHeight: 'h-3', barWidth: 'w-0.5' },
+} as const;
+
+export const RecordingVisualizer = ({
+  isAnimated,
+  onClick,
+  size = 'md',
+  colorClassName = 'bg-primary',
+  className,
+}: RecordingVisualizerProps): ReactElement => {
+  const shouldReduceMotion = useReducedMotion();
+  const isWaving = isAnimated && !shouldReduceMotion;
+  const { wrapperHeight, barWidth } = RECORDING_VISUALIZER_SIZE_CLASSES[size];
+
+  const bars = Array.from({ length: 4 }, (_, i) => (
+    <div key={i} className={cn('flex items-center', wrapperHeight)}>
+      <motion.div
+        className={cn('rounded-full', barWidth, colorClassName)}
+        initial={{ height: isWaving ? '25%' : RECORDING_VISUALIZER_REST_HEIGHT }}
+        animate={
+          isWaving ? { height: ['25%', '100%'] } : { height: RECORDING_VISUALIZER_REST_HEIGHT }
+        }
+        transition={
+          isWaving
+            ? {
+                duration: 0.55,
+                delay: i * 0.08,
+                repeat: Infinity,
+                repeatType: 'mirror',
+                ease: 'easeInOut',
+              }
+            : { duration: 0.3, ease: 'easeOut' }
+        }
+      />
+    </div>
+  ));
+
+  const wrapperClassName = cn('inline-flex items-center gap-0.5', className);
+
+  if (!onClick) {
+    return <div className={wrapperClassName}>{bars}</div>;
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className={cn(wrapperClassName, 'transition-colors hover:border-primary/50')}
+      aria-label='Open transcript'
+      title='Open transcript'
+      data-track-category='RecordingDetailV2'
+      data-track-name='waveform_open_transcript'
+    >
+      {bars}
+    </button>
+  );
+};

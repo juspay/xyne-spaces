@@ -8,6 +8,7 @@ import * as google from "./google/index.js";
 import * as microsoft from "./microsoft/index.js";
 import * as schedule from "./schedule/index.js";
 import * as askQuestion from "./ask-question/index.js";
+import * as codeArtifacts from "./code-artifacts/index.js";
 import * as addCitations from "./add-citations/index.js";
 import * as attachment from "./attachment/index.js";
 import * as researchAgent from "./research-agent/index.js";
@@ -15,13 +16,14 @@ import * as sandbox from "./sandbox/index.js";
 import * as sandboxPw from "./sandbox-pw/index.js";
 import * as createPpt from "./create-ppt/index.js";
 import * as createReport from "./create-report/index.js";
+import * as deskReport from "./desk-report/index.js";
 import * as genius from "./genius/index.js";
+import * as visualize from "./visualize/index.js";
 import * as webSearch from "./web-search/index.js";
 import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
 import * as createPdf from "./create-pdf/index.js";
 import * as fillPdfForm from "./fill-pdf-form/index.js";
-import * as jenkins from "./jenkins/index.js";
 import * as getAgentRuns from "./get-agent-runs/index.js";
 import * as postmanSbx from "./postman-sbx/index.js";
 import * as todo from "./todo/index.js";
@@ -29,6 +31,9 @@ import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
+import * as reactArtifact from "./react-artifact/index.js";
+import * as recordSkill from "./record-skill/index.js";
+import * as agentTools from "./agent-tools/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -41,6 +46,9 @@ function register(tool: ToolDefinition): void {
 register(schedule.scheduleTask);
 register(schedule.scheduledJobControl);
 register(askQuestion.askUserQuestion);
+register(codeArtifacts.postCodeBlock);
+register(codeArtifacts.postDiff);
+register(codeArtifacts.postChart);
 register(addCitations.addCitationsTool);
 
 // Register google tools
@@ -126,11 +134,14 @@ register(researchAgent.reviewPullRequest);
 // Register create-ppt tools
 register(createPpt.createPptTool);
 register(createPpt.editPptTool);
+register(reactArtifact.createReactArtifactTool);
+register(reactArtifact.readArtifactAppFileTool);
 
 // Register create-html-report tool — renders a markdown report into a
 // standalone HTML file and attaches it, leaving a short summary inline in
 // chat. See xyne-claw-shared/src/tools/create-report/tools.ts.
 register(createReport.createHtmlReportTool);
+register(deskReport.createDeskReportTool);
 
 // Register create-pdf tools
 // register(createPdf.createPdfTool);
@@ -139,6 +150,10 @@ register(createReport.createHtmlReportTool);
 // Register genius tools
 register(genius.geniusAnalyticsTool);
 register(genius.geniusInvestigationTool);
+
+// Register visualize tool — renders a chart from data the agent already has,
+// reusing the Analytics module's chart contracts + renderer registry.
+register(visualize.visualizeTool);
 
 // Register web-search and deep-research tools
 register(webSearch.webSearchTool);
@@ -160,11 +175,6 @@ register(createPdf.editPdfTool);
 register(fillPdfForm.inspectPdfForm);
 register(fillPdfForm.fillPdfForm);
 
-// Register jenkins tools
-register(jenkins.jenkinsTriggerBuild);
-register(jenkins.jenkinsGetBuildStatus);
-register(jenkins.jenkinsListBuilds);
-register(jenkins.jenkinsGetBuildLogs);
 // get-agent-runs (custom:system) DEREGISTERED 2026-07-15: it returned
 // cross-user run history — task text + user emails — to ANY agent without
 // admin privileges (privacy leak). Superseded by the privacy-bounded
@@ -177,14 +187,21 @@ register(postmanSbx.postmanSbxRunCollection);
 
 // Register skill-management tools — create-skill (write tool: draft + approve →
 // personal skill) and update-skill (proposes a diff to the skill owner via DM).
+// Both carry source "custom:agent-tools" so they group with the agent/subagent/
+// MCP authoring tools below: to a user picking tools, "what this agent can
+// AUTHOR" is one idea, and it was previously split across three one-tool groups.
 register(skillManagement.createSkillTool);
 register(skillManagement.updateSkillTool);
 
+// Register agent-authoring tools — create/update agent, create/update subagent,
+// create MCP server. All approval-gated writes applied in claw-auth's
+// flow-action `serverType==="agent-tools"` branch; see agent-tools/tools.ts.
+for (const t of agentTools.AGENT_TOOL_DEFS) register(t);
+
 // Register plan-tracking tools (todo-write / todo-read). The agent maintains an
 // explicit todo list that renders as a live, in-place-updating card in the
-// Spaces thread (via claw-auth's kind:"plan" progress handler). todo-write
-// fires the render using ctx.progressUrl/sessionId/s2sKey — threaded by
-// loadCustomTools — so no extra wiring is needed here.
+// Spaces thread. todo-write publishes the shared ui-widget envelope, so the
+// same tool works over legacy progress POSTs and the unified SSE transport.
 register(todo.todoWriteTool);
 register(todo.todoReadTool);
 
@@ -202,12 +219,16 @@ register(sandbox.sandboxRun);
 register(sandbox.sandboxRunDetached);
 register(sandbox.sandboxPollJob);
 register(sandbox.sandboxWriteFile);
+register(sandbox.sandboxEditFile);
+register(sandbox.sandboxCopyIn);
 register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
 register(sandbox.gitRead);
+register(sandbox.sdlcGitContext);
 register(videoExplainer.createVideoExplainer);
+register(recordSkill.analyzeSkillRecording);
 
 // Register sandbox-pw tools (browser via @playwright/mcp through sandbox-router-test)
 for (const t of sandboxPw.SANDBOX_PW_TOOLS) register(t);

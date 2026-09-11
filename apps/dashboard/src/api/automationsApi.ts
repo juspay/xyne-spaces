@@ -1,3 +1,4 @@
+import { WorkflowEventType } from '@xyne/shared';
 import { apiInstance } from '../services/clients/apiClient';
 
 interface SuccessEnvelope<T> {
@@ -44,6 +45,7 @@ export function isTerminalProposalStatus(status: string): boolean {
 }
 
 export const AutomationRunStatusValues = {
+  PENDING: 'PENDING',
   SCHEDULED: 'SCHEDULED',
   RUNNING: 'RUNNING',
   EXTERNAL_WAIT: 'EXTERNAL_WAIT',
@@ -226,17 +228,151 @@ export interface Automation {
   createdAt: string;
   updatedAt: string;
   automationSeriesId: string | null;
+  eventType: WorkflowEventType;
 }
 
-export interface AutomationRun {
+export interface DeskLabelRulesPayload {
+  channelId: string;
+  labelName: string;
+  color?: string;
+  labelId?: string;
+  name?: string;
+  emailFilters?: Record<string, unknown>;
+  keepInInbox?: boolean;
+  /** Also apply the new rule to emails already in the desk. */
+  applyToExisting?: boolean;
+}
+
+export type DeskLabelBackfillEnqueue = 'enqueued' | 'already-running' | 'cooldown';
+
+/**
+ * Create can also decline before reaching the queue: 'inactive' means it deduped
+ * onto a disabled rule, which a backfill has nothing to run against.
+ */
+export type DeskLabelBackfillOutcome = DeskLabelBackfillEnqueue | 'inactive';
+
+export interface DeskLabelBackfillProgress {
+  total: number;
+  scanned: number;
+  matched: number;
+  labeled: number;
+  alreadyLabeled: number;
+  archived: number;
+  skipped: number;
+  /** The rule was disabled or archived mid-run, so the scan stopped short. */
+  stoppedEarly: boolean;
+}
+
+export interface DeskLabelBackfillRun {
+  state: 'queued' | 'running' | 'completed' | 'failed';
+  progress: DeskLabelBackfillProgress | null;
+  failedReason: string | null;
+}
+
+export interface DeskLabelRulesCreateResult {
+  automations: Automation[];
+  created: boolean;
+  backfill: DeskLabelBackfillOutcome | null;
+}
+
+export interface DeskLabelRulesPage {
+  automations: Automation[];
+  counts: {
+    total: number;
+    active: number;
+  };
+  pagination: {
+    limit: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+}
+
+export function createDeskLabelRules(
+  payload: DeskLabelRulesPayload,
+): Promise<DeskLabelRulesCreateResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<DeskLabelRulesCreateResult>>(
+      '/automations/desk-label-rules',
+      payload,
+    ),
+  );
+}
+
+/** Replay an existing rule over the mail already in its desk. */
+export function startDeskLabelRuleBackfill(
+  id: string,
+): Promise<{ backfill: DeskLabelBackfillEnqueue }> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ backfill: DeskLabelBackfillEnqueue }>>(
+      `/automations/desk-label-rules/${id}/backfill`,
+    ),
+  );
+}
+
+export function fetchDeskLabelRuleBackfill(
+  id: string,
+): Promise<{ backfill: DeskLabelBackfillRun | null }> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ backfill: DeskLabelBackfillRun | null }>>(
+      `/automations/desk-label-rules/${id}/backfill`,
+    ),
+  );
+}
+
+export function fetchDeskLabelRules(opts: {
+  channelId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<DeskLabelRulesPage> {
+  const params = new URLSearchParams();
+  params.set('channelId', opts.channelId);
+  if (opts.cursor) params.set('cursor', opts.cursor);
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<DeskLabelRulesPage>>(
+      `/automations/desk-label-rules${qs ? `?${qs}` : ''}`,
+    ),
+  );
+}
+
+export function setDeskLabelRuleStatus(
+  id: string,
+  status: 'ACTIVE' | 'DISABLED',
+): Promise<{ automation: Automation }> {
+  return unwrap(
+    apiInstance.patch<SuccessEnvelope<{ automation: Automation }>>(
+      `/automations/desk-label-rules/${encodeURIComponent(id)}`,
+      { status },
+    ),
+  );
+}
+
+export function archiveAutomation(
+  id: string,
+): Promise<{ automation?: Automation; message?: string }> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ automation?: Automation; message?: string }>>(
+      `/automations/${encodeURIComponent(id)}`,
+    ),
+  );
+}
+
+/** Row shape returned by the runs list — no context blobs. */
+export interface AutomationRunSummary {
   id: string;
   automationId: string;
   status: AutomationRunStatus;
-  triggerData: Record<string, unknown>;
-  context: Record<string, unknown>;
   error: string | null;
   startedAt: string;
   completedAt: string | null;
+}
+
+/** Returned by the run-detail endpoint only. */
+export interface AutomationRun extends AutomationRunSummary {
+  triggerData: Record<string, unknown>;
+  context: Record<string, unknown>;
 }
 
 export interface SaveResult {
@@ -360,7 +496,7 @@ export function releaseAutomationTemplate(attachmentId: string): Promise<{ remov
 
 // ─── Runs API (REST — replaces Zero queries for runs) ────────────────────
 export interface RunsListPage {
-  runs: AutomationRun[];
+  runs: AutomationRunSummary[];
   nextCursor: string | null;
 }
 
@@ -402,6 +538,15 @@ export interface RunDetail {
     createdAt: string;
     updatedAt: string;
   }>;
+}
+
+/** Every row in this automation's lineage (all past + current versions), newest first. */
+export function fetchAutomationVersions(automationId: string): Promise<Automation[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<Automation[]>>(
+      `/automations/${encodeURIComponent(automationId)}/versions`,
+    ),
+  );
 }
 
 export function fetchAutomationRun(executionId: string): Promise<RunDetail> {

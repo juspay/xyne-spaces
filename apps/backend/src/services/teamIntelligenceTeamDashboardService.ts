@@ -6,36 +6,20 @@ import {
 } from '@/database/repositories/teamIntelligenceTeamRepository';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { createTeamIntelligenceLlmClient } from '@/team-intelligence/services/team-intelligence-llm-client';
 
 export interface TeamBulletsDateRangeInput {
   from: Date;
   to: Date;
   teamId: string;
+  orgId?: string | null;
   page: number;
   limit: number;
 }
 
 class TeamIntelligenceTeamDashboardService {
   private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      appConfig.defaultWorkspaceId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) return null;
-
-    return new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: appConfig.llm.requestTimeoutMs,
-        },
-      },
-      defaultModel: appConfig.workflow.defaultModelName,
-    });
+    return createTeamIntelligenceLlmClient();
   }
 
   async getTeamBullets(input: TeamBulletsDateRangeInput) {
@@ -44,6 +28,7 @@ class TeamIntelligenceTeamDashboardService {
         from: input.from,
         to: input.to,
         teamId: input.teamId,
+        orgId: input.orgId,
         page: input.page,
         limit: input.limit,
       });
@@ -53,12 +38,22 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getPrByDate(input: { from: Date; to: Date; prId: number }) {
+  async getTeamLeadershipSnapshots(input: { from: Date; to: Date; teamId: string; orgId?: string | null }) {
+    try {
+      return await teamIntelligenceTeamRepository.getTeamLeadershipSnapshotsByDate(input);
+    } catch (error) {
+      logger.error('[TeamIntelligenceTeam] getTeamLeadershipSnapshots failed', { error, input });
+      throw error;
+    }
+  }
+
+  async getPrByDate(input: { from: Date; to: Date; prId: number; orgId?: string | null }) {
     try {
       return await teamIntelligenceTeamRepository.getPrByDate({
         from: input.from,
         to: input.to,
         prId: input.prId,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceTeam] getPrByDate failed', { error, input });
@@ -66,12 +61,13 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamUsageSummary(input: { from: Date; to: Date; teamId: string }) {
+  async getTeamUsageSummary(input: { from: Date; to: Date; teamId: string; orgId?: string | null }) {
     try {
       return await teamIntelligenceTeamRepository.getTeamUsageSummary({
         from: input.from,
         to: input.to,
         teamId: input.teamId,
+        orgId: input.orgId,
       });
     } catch (error) {
       logger.error('[TeamIntelligenceTeam] getTeamUsageSummary failed', { error, input });
@@ -177,9 +173,9 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamChannelRecaps(input: { from: Date; to: Date; teamId: string; page: number; limit: number }) {
+  async getTeamChannelRecaps(input: { from: Date; to: Date; teamId: string; page: number; limit: number; workspaceId: string }) {
     try {
-      const { from, to, teamId, page, limit } = input;
+      const { from, to, teamId, page, limit, workspaceId } = input;
       const display = await teamIntelligenceTeamRepository.findLatestTeamDisplayByTeamId(teamId, { from, to });
       const teamName = display?.teamName ?? 'No Team';
       const allTeamNames = await teamIntelligenceTeamRepository.findAllTeamNamesByTeamId(teamId);
@@ -187,7 +183,7 @@ class TeamIntelligenceTeamDashboardService {
       const cacheKey = this.buildTeamChannelMatchCacheKey(teamId, from, to);
       const cacheTtlSeconds = 5 * 24 * 60 * 60;
 
-      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to });
+      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to, workspaceId });
     if (candidates.length === 0) {
       return {
         from: from.toISOString().slice(0, 10),
@@ -280,6 +276,7 @@ class TeamIntelligenceTeamDashboardService {
       channelIds: matchedChannelIds,
       page,
       limit,
+      workspaceId,
     });
 
     const matchedChannelSet = new Set(matchedChannelIds);
@@ -311,9 +308,9 @@ class TeamIntelligenceTeamDashboardService {
     }
   }
 
-  async getTeamChannelTickets(input: { from: Date; to: Date; teamId: string; page: number; limit: number }) {
+  async getTeamChannelTickets(input: { from: Date; to: Date; teamId: string; page: number; limit: number; workspaceId: string }) {
     try {
-      const { from, to, teamId, page, limit } = input;
+      const { from, to, teamId, page, limit, workspaceId } = input;
       const display = await teamIntelligenceTeamRepository.findLatestTeamDisplayByTeamId(teamId, { from, to });
       const teamName = display?.teamName ?? 'No Team';
       const allTeamNames = await teamIntelligenceTeamRepository.findAllTeamNamesByTeamId(teamId);
@@ -321,7 +318,7 @@ class TeamIntelligenceTeamDashboardService {
       const cacheKey = this.buildTeamChannelMatchCacheKey(teamId, from, to);
       const cacheTtlSeconds = 5 * 24 * 60 * 60;
 
-      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to });
+      const candidates = await teamIntelligenceTeamRepository.getChannelRecapChannelsByDate({ from, to, workspaceId });
       if (candidates.length === 0) {
         return {
           from: from.toISOString().slice(0, 10),

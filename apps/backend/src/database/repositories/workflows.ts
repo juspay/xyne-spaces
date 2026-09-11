@@ -23,6 +23,7 @@ import {
   WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -33,6 +34,8 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
     ? `AND "workflowType" = '${workflowType.replace(/'/g, "''")}'`
     : ''
 
+  const dedicatedExecutionFilter = `AND ("workflowType" IS NULL OR "workflowType" NOT IN (${GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES.map(type => `'${type}'`).join(', ')}))`
+
   return `
     WITH claimed AS (
       SELECT "id"
@@ -40,6 +43,7 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
       WHERE "status" = 'PENDING'
       ${tagFilter}
       ${typeFilter}
+      ${dedicatedExecutionFilter}
       ORDER BY "createdAt" ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -204,9 +208,18 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
     });
   }
 
+  /**
+   * All workflow rows in a lineage, keyed by the series' root id. The root
+   * row itself has `automationSeriesId: null` (every other row in the
+   * lineage points `automationSeriesId` at the root's `id`), so it has to be
+   * matched by `id` explicitly or it silently drops out of its own history.
+   */
   async findByautomationSeriesId(automationSeriesId: string): Promise<Workflow[]> {
     return await this.db.workflow.findMany({
-      where: { automationSeriesId, workflowType: 'Automations' },
+      where: {
+        workflowType: 'Automations',
+        OR: [{ automationSeriesId }, { id: automationSeriesId }],
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -479,7 +492,10 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
 
   async findRunningExecutionIds(): Promise<string[]> {
     const executions = await this.db.workflowExecution.findMany({
-      where: { status: 'RUNNING', NOT: { workflowType: 'Automations' } },
+      where: {
+        status: 'RUNNING',
+        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
+      },
       select: { id: true },
     })
     return executions.map(e => e.id)
@@ -488,7 +504,11 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
   async resetExecutionsToPending(ids: string[]): Promise<void> {
     if (ids.length === 0) return
     await this.db.workflowExecution.updateMany({
-      where: { id: { in: ids }, status: 'RUNNING', NOT: { workflowType: 'Automations' } },
+      where: {
+        id: { in: ids },
+        status: 'RUNNING',
+        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
+      },
       data: { status: 'PENDING' },
     })
   }

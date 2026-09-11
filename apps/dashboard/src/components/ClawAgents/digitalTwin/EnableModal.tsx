@@ -51,10 +51,23 @@ export const EnableModal = ({
       title={mode === 'enable' ? 'Enable Digital Twin' : 'Backfill history'}
       footer={
         <>
-          <Button variant='ghost' size='sm' onClick={onClose} disabled={enabling}>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={onClose}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_ENABLE_DIGITAL_TWIN'
+            disabled={enabling}
+          >
             Cancel
           </Button>
-          <Button size='sm' onClick={submit} loading={enabling}>
+          <Button
+            size='sm'
+            onClick={submit}
+            data-track-category='Claw Agents'
+            data-track-name='ENABLE_DIGITAL_TWIN'
+            loading={enabling}
+          >
             {ctaLabel}
             {!enabling && <ArrowRight className='size-3.5' />}
           </Button>

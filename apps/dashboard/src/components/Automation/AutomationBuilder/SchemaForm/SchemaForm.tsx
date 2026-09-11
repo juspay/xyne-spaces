@@ -210,7 +210,7 @@ function Field({
       try {
         el.setSelectionRange(cursor, cursor);
       } catch {
-        void 0;
+        /* Intentionally ignored. */
       }
     });
   };
@@ -441,6 +441,7 @@ function Field({
           <ChipArrayField
             value={arrayValue}
             onChange={next => onChange(next)}
+            mode={isTokenChipField(fieldKey) ? 'token' : 'phrase'}
             placeholder={
               fieldKey === 'fromDomains'
                 ? 'e.g. acme.com — Enter to add'
@@ -526,6 +527,14 @@ function Field({
       />
       {hasError && <FieldError message={errorMessage} />}
     </div>
+  );
+}
+
+function isTokenChipField(fieldKey: string): boolean {
+  return (
+    /email|domain|address|recipient|url/i.test(fieldKey) ||
+    /ids?$/i.test(fieldKey) ||
+    /^(to|cc|bcc)$/i.test(fieldKey)
   );
 }
 
@@ -743,7 +752,14 @@ function ArrayField({
           ))}
         </div>
       )}
-      <Button variant='outline' size='sm' onClick={handleAdd} className='self-start'>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={handleAdd}
+        data-track-category='automation-builder'
+        data-track-name='ADD_SCHEMA_FIELD'
+        className='self-start'
+      >
         <Plus className='size-4' />
         Add entry
       </Button>
@@ -822,7 +838,15 @@ function RecordField({
           variableSources={variableSources}
         />
       ))}
-      <Button type='button' variant='outline' size='sm' onClick={handleAdd} className='self-start'>
+      <Button
+        type='button'
+        variant='outline'
+        size='sm'
+        onClick={handleAdd}
+        data-track-category='automation-builder'
+        data-track-name='ADD_SCHEMA_FIELD'
+        className='self-start'
+      >
         <Plus className='mr-1 size-3.5' />
         Add row
       </Button>

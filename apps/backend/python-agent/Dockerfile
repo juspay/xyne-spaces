@@ -45,6 +45,11 @@ RUN case "$DIARIZATION_ENABLED" in \
 # Copy application code
 COPY . .
 
+# Run as an unprivileged user. Created before the model download so the caches under /app
+# are owned by the account that reads and updates them at runtime.
+RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Pre-download model files (ONNX model, tokenizer, languages.json)
 # Using dedicated script to avoid heavy main.py imports that need env vars
 RUN python download_models.py

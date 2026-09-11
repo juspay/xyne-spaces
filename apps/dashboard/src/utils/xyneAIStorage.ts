@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 /**
  * IndexedDB storage for Genius AI conversation history
  */
@@ -167,7 +168,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to save conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to save conversation:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -206,7 +211,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to load conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to load conversation:'),
+        error: error,
+      });
       return null;
     }
   }
@@ -241,7 +250,11 @@ class XyneAIStorage {
         (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
       )[0]!;
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to load latest conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to load latest conversation:'),
+        error: error,
+      });
       return null;
     }
   }
@@ -265,7 +278,11 @@ class XyneAIStorage {
         (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
       )[0]!;
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to load latest global conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to load latest global conversation:'),
+        error: error,
+      });
       return null;
     }
   }
@@ -299,7 +316,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to load conversations for channel:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to load conversations for channel:'),
+        error: error,
+      });
       return [];
     }
   }
@@ -325,7 +346,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to delete conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to delete conversation:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -355,7 +380,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to toggle star:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to toggle star:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -387,7 +416,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to rename conversation:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to rename conversation:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -416,7 +449,11 @@ class XyneAIStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to load all conversations:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to load all conversations:'),
+        error: error,
+      });
       return [];
     }
   }
@@ -433,7 +470,11 @@ class XyneAIStorage {
 
       await Promise.all(deletePromises);
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to clear old conversations:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to clear old conversations:'),
+        error: error,
+      });
     }
   }
 
@@ -445,7 +486,11 @@ class XyneAIStorage {
       );
       await Promise.all(deletePromises);
     } catch (error) {
-      console.error('[XyneAIStorage] Failed to delete all conversations for channel:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStorage] Failed to delete all conversations for channel:'),
+        error: error,
+      });
       throw error;
     }
   }

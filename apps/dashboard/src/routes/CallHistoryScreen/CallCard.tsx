@@ -15,6 +15,8 @@ import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import Button from '../../components/ui/Button';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
+import { normalizeRecordingTags } from '../../utils/recordingUtils';
+import { LabelChip } from '../../components/Labels/LabelPicker';
 import {
   Call,
   getParticipantDisplayData,
@@ -25,7 +27,7 @@ import {
   getStatusText,
   hasAnyoneJoined,
   hasPreviewParticipantJoined,
-  isScheduledCallJoinable,
+  canJoinCall,
 } from './callHistoryItem.utils';
 import { cn } from '../../utils/classNames';
 import { ReactElement } from 'react';
@@ -53,6 +55,10 @@ interface CallHistoryItemProps {
   onViewExternalChat?: (() => void) | undefined;
   isRecentCall?: boolean;
   onDetailClick?: (() => void) | undefined;
+  /** Confirmed labels on this call, shown as chips under the meta line. */
+  labels?: string[];
+  /** Resolves a label value (Tag id) to its display text. Defaults to identity. */
+  resolveLabel?: (label: string) => string;
 }
 
 const MAX_AVATARS_TO_SHOW = 3;
@@ -67,10 +73,13 @@ export const CallCard = ({
   onViewExternalChat,
   isRecentCall = false,
   onDetailClick,
+  labels = [],
+  resolveLabel = (label: string): string => label,
 }: CallHistoryItemProps) => {
   const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
   const { isMobile } = usePlatform();
+  const visibleLabels = normalizeRecordingTags(labels);
   const channel = allChannels.find(c => c.id === call.channelId);
   const isChannelCall = channel?.scopeType === ChannelScopeType.DEFAULT;
 
@@ -107,7 +116,7 @@ export const CallCard = ({
       ? participantUsers.map(user => user.name || user.email || 'Unknown')
       : fallbackParticipantData.displayNames;
 
-  const isCallJoinable = isScheduledCallJoinable(call);
+  const isCallJoinable = canJoinCall(call);
   const isActiveState = call.status === CallStatus.ACTIVE;
 
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
@@ -209,7 +218,7 @@ export const CallCard = ({
           onDetailClick();
         }
       }}
-      data-track-category='calls'
+      data-track-category='CALLS'
       data-track-name='view-call-detail'
       className={cn(
         'relative flex items-center justify-between p-1.5',
@@ -305,6 +314,13 @@ export const CallCard = ({
                 <span className={cn('text-xs', iconColorClass)}>{statusText}</span>
               </div>
             )}
+            {visibleLabels.length > 0 && (
+              <div className='flex flex-wrap items-center gap-1.5 pt-1'>
+                {visibleLabels.map(label => (
+                  <LabelChip key={label} label={resolveLabel(label)} />
+                ))}
+              </div>
+            )}
           </div>
           <div className={cn('flex items-center shrink-0', isMobile ? 'gap-1.5' : 'gap-2.5')}>
             <div
@@ -321,7 +337,7 @@ export const CallCard = ({
                 }
               }}
               className='flex items-center gap-1'
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='view-past-participants'
             >
               <div className='flex items-center -space-x-1.5'>
@@ -353,7 +369,7 @@ export const CallCard = ({
                       <button
                         className='size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         onClick={e => e.stopPropagation()}
-                        data-track-category='calls'
+                        data-track-category='CALLS'
                         data-track-name='call-more-options'
                       >
                         <MoreVertical className='size-4' />
@@ -365,6 +381,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           handleGotoTranscript?.();
                         }}
+                        data-track-category='CALLS'
+                        data-track-name='GOTO_TRANSCRIPT'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -376,6 +394,8 @@ export const CallCard = ({
                             e.stopPropagation();
                             onViewExternalChat();
                           }}
+                          data-track-category='CALLS'
+                          data-track-name='VIEW_EXTERNAL_CHAT'
                           className='text-sm font-medium rounded-lg'
                         >
                           View External Chat
@@ -386,6 +406,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           handleDownloadTranscript?.();
                         }}
+                        data-track-category='CALLS'
+                        data-track-name='DOWNLOAD_TRANSCRIPT'
                         disabled={!hasTranscript}
                         className='text-sm font-medium rounded-lg'
                       >
@@ -396,6 +418,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           onCallClick();
                         }}
+                        data-track-category='CALLS'
+                        data-track-name='OPEN_CALL'
                         className='text-sm font-medium rounded-lg'
                       >
                         Start Call
@@ -416,7 +440,7 @@ export const CallCard = ({
                             handleGotoTranscript?.();
                           }}
                           disabled={!isUserChannelMember || !handleGotoTranscript}
-                          data-track-category='calls'
+                          data-track-category='CALLS'
                           data-track-name='goto-call-message'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
@@ -435,7 +459,7 @@ export const CallCard = ({
                             handleDownloadTranscript?.();
                           }}
                           disabled={!hasTranscript}
-                          data-track-category='calls'
+                          data-track-category='CALLS'
                           data-track-name='download-transcript'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none'
                         >
@@ -450,7 +474,7 @@ export const CallCard = ({
                             e.stopPropagation();
                             onViewExternalChat();
                           }}
-                          data-track-category='calls'
+                          data-track-category='CALLS'
                           data-track-name='view-external-chat'
                           className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         >
@@ -464,7 +488,7 @@ export const CallCard = ({
                           e.stopPropagation();
                           onCallClick();
                         }}
-                        data-track-category='calls'
+                        data-track-category='CALLS'
                         data-track-name='join-call'
                         className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                       >
@@ -481,7 +505,7 @@ export const CallCard = ({
                       size='icon'
                       className='size-7 text-muted-foreground hover:text-foreground'
                       onClick={e => e.stopPropagation()}
-                      data-track-category='calls'
+                      data-track-category='CALLS'
                       data-track-name='call-more-options'
                     >
                       <MoreVertical className='size-4' />
@@ -493,6 +517,8 @@ export const CallCard = ({
                         e.stopPropagation();
                         handleGotoTranscript?.();
                       }}
+                      data-track-category='CALLS'
+                      data-track-name='GOTO_TRANSCRIPT'
                       disabled={!isUserChannelMember || !handleGotoTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -504,6 +530,8 @@ export const CallCard = ({
                           e.stopPropagation();
                           onViewExternalChat();
                         }}
+                        data-track-category='CALLS'
+                        data-track-name='VIEW_EXTERNAL_CHAT'
                         className='text-sm font-medium rounded-lg'
                       >
                         External Huddle
@@ -514,6 +542,8 @@ export const CallCard = ({
                         e.stopPropagation();
                         handleDownloadTranscript?.();
                       }}
+                      data-track-category='CALLS'
+                      data-track-name='DOWNLOAD_TRANSCRIPT'
                       disabled={!hasTranscript}
                       className='text-sm font-medium rounded-lg'
                     >
@@ -531,6 +561,8 @@ export const CallCard = ({
                     >
                       <Button
                         onClick={handleGotoTranscript}
+                        data-track-category='CALLS'
+                        data-track-name='GOTO_TRANSCRIPT'
                         variant='outline'
                         size='icon'
                         disabled={!isUserChannelMember || !handleGotoTranscript}
@@ -547,6 +579,8 @@ export const CallCard = ({
                     <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
                       <Button
                         onClick={handleDownloadTranscript}
+                        data-track-category='CALLS'
+                        data-track-name='DOWNLOAD_TRANSCRIPT'
                         variant='outline'
                         size='icon'
                         disabled={!hasTranscript}
@@ -563,7 +597,7 @@ export const CallCard = ({
                         variant='outline'
                         size='icon'
                         className='size-7'
-                        data-track-category='calls'
+                        data-track-category='CALLS'
                         data-track-name='view-external-chat'
                       >
                         <ScrollText className='size-3.5 text-muted-foreground' />
@@ -580,6 +614,8 @@ export const CallCard = ({
                     e.stopPropagation();
                     onCallClick();
                   }}
+                  data-track-category='CALLS'
+                  data-track-name='OPEN_CALL'
                   variant='outline'
                   data-testid='call-join-button'
                   className={cn(

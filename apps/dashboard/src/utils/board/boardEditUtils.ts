@@ -97,8 +97,6 @@ export const getFieldConfigKey = (fieldName: string): string => {
       return 'assignedTo';
     case 'status':
       return 'todo';
-    case 'workflowType':
-      return 'workflows';
     case 'tags':
       return 'labels';
     case 'ticketType':

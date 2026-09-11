@@ -18,6 +18,7 @@ import Avatar from '../ui/Avatar/Avatar';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { Button } from '../ui/Button/Button';
 import { cn } from '../../utils/classNames';
+import { ShortcutHint } from '../ui/ShortcutHint';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useSelf } from '../../hooks/useUsers';
@@ -26,17 +27,26 @@ import { v4 as uuidv4 } from 'uuid';
 import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
+import { usePath } from '../../hooks/usePath';
 
 interface SettingsProps {
   onClose: () => void;
   onOpenPreferences: () => void;
   onOpenStatusModal: () => void;
+  /**
+   * Open the profile in a modal instead of navigating to the routed
+   * `/chat/dir/.../profile/...` sidebar. Provided on surfaces where the routed
+   * profile sidebar is not mounted (non-chat pages). When absent, or when the
+   * user is already on a chat page, the routed navigation is used.
+   */
+  onOpenProfileModal?: (userId: string) => void;
 }
 
 const Settings = ({
   onClose,
   onOpenPreferences,
   onOpenStatusModal,
+  onOpenProfileModal,
 }: SettingsProps): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
@@ -47,6 +57,7 @@ const Settings = ({
   const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
+  const path = usePath();
 
   const { status: livePresenceStatus, setStatus: setLivePresenceStatus } = useUserPresence(
     user?.id ?? '',
@@ -134,6 +145,15 @@ const Settings = ({
 
   const handleProfileClick = (): void => {
     onClose();
+    // On non-chat pages the routed profile sidebar is not mounted, so navigating
+    // to `/chat/dir/.../profile/...` would bounce the user out of their current
+    // page into chat. When a modal handler is available and we are not on a chat
+    // page, open the profile in a modal and stay on the current page instead.
+    const isChatPage = path.startsWith('/chat/');
+    if (onOpenProfileModal && !isChatPage && user?.id) {
+      onOpenProfileModal(user.id);
+      return;
+    }
     if (channelId) {
       void navigate(`/chat/dir/${channelId}/profile/${user?.id}`);
     } else {
@@ -180,8 +200,9 @@ const Settings = ({
                   setLivePresenceStatus('ONLINE');
                   setPresencePopoverOpen(false);
                 }}
+                data-ph-capture-attribute-track-id='set_presence_online'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
               >
                 <div className='w-2 h-2 rounded-full bg-green-500' />
@@ -195,8 +216,9 @@ const Settings = ({
                   setLivePresenceStatus('AWAY');
                   setPresencePopoverOpen(false);
                 }}
+                data-ph-capture-attribute-track-id='set_presence_away'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='SETTINGS'
+                data-track-category='Settings'
                 data-track-name='SetPresenceAway'
               >
                 <div className='w-2 h-2 rounded-full border border-muted-foreground' />
@@ -253,6 +275,7 @@ const Settings = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                trackId='clear_user_status'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 data-track-category='Settings'
@@ -265,6 +288,7 @@ const Settings = ({
             <div className='flex items-center p-1 gap-2 text-muted-foreground'>
               <SmilePlus className='size-4 flex-shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
+              <ShortcutHint shortcut='global.setStatus' className='ml-auto text-xs' />
             </div>
           )}
         </div>
@@ -287,6 +311,7 @@ const Settings = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
+                trackId='resume_notifications'
                 data-track-category='Settings'
                 data-track-name='ResumeNotifications'
               >
@@ -332,6 +357,8 @@ const Settings = ({
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
+                    data-ph-capture-attribute-track-id='pause_notifications'
+                    data-ph-capture-attribute-duration={option.minutes}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
@@ -391,6 +418,7 @@ const Settings = ({
         >
           <Settings2 className='size-4' />
           Preferences
+          <ShortcutHint shortcut='global.openPreferences' className='ml-auto' />
         </Button>
       </div>
 
@@ -402,6 +430,7 @@ const Settings = ({
           variant='ghost'
           className='text-destructive w-full text-left hover:bg-transparent hover:text-destructive rounded-md'
           onClick={handleLogout}
+          trackId='logout'
           data-track-category='Settings'
           data-track-name='Logout'
         >

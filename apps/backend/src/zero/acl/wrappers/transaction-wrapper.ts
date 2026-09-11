@@ -16,6 +16,7 @@ import {
 import { mutationSyncProcessor } from '../../mutation-sync/processor';
 import { collectMutationSyncPreviousValue } from '../../mutation-sync/config';
 import type { MutationSyncOperation } from '../../mutation-sync/types';
+import { wrapTransactionWithEncryption } from '../../encryption-interceptor';
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
@@ -36,24 +37,29 @@ export function wrapTransactionWithACL(
   ctx: QueryContext | undefined,
   vespaJobs: VespaJobsAccumulator,
   sideEffectJobs: SideEffectJobsAccumulator,
+  mutatorName?: string,
 ): Transaction<Schema> {
   if (!ctx) {
     throw new Error('QueryContext is required for ACL wrapping');
   }
 
-  return new Proxy(tx, {
+  const storageTx = wrapTransactionWithEncryption(tx, {
+    workspaceId: ctx.workspaceId,
+    mutatorName,
+  });
+
+  return new Proxy(storageTx, {
     get(target, prop: string | symbol, receiver) {
       if (prop === 'mutate') {
-        return wrapMutateWithACL(target.mutate, ctx, tx, vespaJobs, sideEffectJobs);
+        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs);
       }
-      
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === 'function') {
         return value.bind(target);
       }
-      
+
       return value;
-    }
+    },
   }) as Transaction<Schema>;
 }
 
@@ -116,7 +122,7 @@ function wrapMutateWithACL(
               tx
             );
 
-            // 4. Execute original mutation (if ACL passes)
+            // 5. Execute original mutation (if ACL passes)
             const result = await (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
 
             // 5. Collect jobs only after the mutation succeeds.

@@ -208,7 +208,7 @@ function sanitizeCitationUrl(url: string): string {
  * markdown lists (`- Item [clf-...#1]\n- Next item`), and consuming the `\n`
  * collapses every list item into one paragraph (bug seen 2026-06-15).
  */
-const CLAW_CITATION_TOKEN_RE = /([【[⟦])(clf-[A-Za-z0-9_.:-]+#\d+)([】\]⟧])/g;
+export const CLAW_CITATION_TOKEN_RE = /([【[⟦])(clf-[A-Za-z0-9_.:-]+#\d+)([】\]⟧])/g;
 
 /**
  * Lenient catch-all for malformed clf tokens the LLM sometimes hallucinates.
@@ -218,7 +218,7 @@ const CLAW_CITATION_TOKEN_RE = /([【[⟦])(clf-[A-Za-z0-9_.:-]+#\d+)([】\]⟧]
  * Without this pass they'd render as raw bracket text in the prose. We strip
  * them outright since they're never valid citations.
  */
-const CLAW_CITATION_MALFORMED_RE = /[【[⟦]\s*clf-[^】\]⟧]*[】\]⟧]/g;
+export const CLAW_CITATION_MALFORMED_RE = /[【[⟦]\s*clf-[^】\]⟧]*[】\]⟧]/g;
 
 export function stripCitationMarks(html: string): string {
   return html

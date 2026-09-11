@@ -1,4 +1,5 @@
 import { invitationEmailHtml, invitationEmailText } from './templates/invitation';
+import { config } from '../../config/env';
 
 export interface EmailResult {
   success: boolean;
@@ -28,6 +29,7 @@ export interface SendInvitationEmailParams {
   invitationLink: string;
   invitationId: string;
   tempPassword?: string;
+  frontendUrl?: string;
 }
 
 /**
@@ -61,8 +63,9 @@ export abstract class BaseEmailService {
     const { to, inviterName, workspaceName, invitationLink, tempPassword } = params;
 
     const subject = `You've been invited to join ${workspaceName} on Xyne Spaces`;
-    const html = invitationEmailHtml({ inviterName, workspaceName, invitationLink, tempPassword });
-    const text = invitationEmailText({ inviterName, workspaceName, invitationLink, tempPassword });
+    const frontendUrl = params.frontendUrl ?? config.frontendUrl;
+    const html = invitationEmailHtml({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl });
+    const text = invitationEmailText({ inviterName, workspaceName, invitationLink, tempPassword, frontendUrl });
 
     return this.sendEmail({ to, subject, html, text });
   }

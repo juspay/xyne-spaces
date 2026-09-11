@@ -1,5 +1,4 @@
 import { io, Socket } from 'socket.io-client';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../Analytics/mixpanelService';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import {
@@ -17,29 +16,11 @@ export interface TypingEvent {
   timestamp: Date;
 }
 
-function formatDurationFromMs(durationMs: number): string {
-  if (durationMs < 0) return '0 seconds';
-
-  const hours = Math.floor(durationMs / 3600000);
-  const minutes = Math.floor((durationMs % 3600000) / 60000);
-  const seconds = Math.floor((durationMs % 60000) / 1000);
-
-  const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
-  if (minutes > 0) parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds} second${seconds !== 1 ? 's' : ''}`);
-  }
-
-  return parts.join(' ');
-}
-
 class WebSocketService {
   private socket: Socket | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
   private connectionStartTime: number | null = null;
-  private reconnectionStartTime: number | null = null;
   private connectionPromise: Promise<void> | null = null;
   private connectionAttemptStartTime: number | null = null;
   private sessionStartTime: number | null = null;
@@ -113,14 +94,6 @@ class WebSocketService {
           reconnectAttempts: this.reconnectAttempts,
         });
 
-        if (this.reconnectAttempts > 0 && this.reconnectionStartTime) {
-          mixpanelService.track(EVENTS.PERFORMANCE_METRIC, {
-            type: EVENT_PROPERTIES.PERFORMANCE_METRIC_TYPES.WS_CONNECTION_RECONNECT_ATTEMPT,
-            timeTakenMs: Date.now() - this.reconnectionStartTime,
-            reconnectAttempts: this.reconnectAttempts,
-          });
-        }
-
         safeRecordMetric(() => {
           socketConnectionAttemptDuration.record(attemptLatency);
           socketConnectionTotalDuration.record(totalLatency);
@@ -135,7 +108,6 @@ class WebSocketService {
         this.reconnectAttempts = 0;
         this.connectionStartTime = Date.now();
         this.sessionStartTime = Date.now();
-        this.reconnectionStartTime = null;
         this.firstConnectionAttemptTime = null;
         this.connectionPromise = null; // Clear the promise after successful connection
         resolve();
@@ -143,7 +115,6 @@ class WebSocketService {
 
       this.socket.on('disconnect', reason => {
         this.isConnected = false;
-        this.reconnectionStartTime = Date.now();
         this.connectionPromise = null; // Clear the promise on disconnect
 
         logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
@@ -151,17 +122,10 @@ class WebSocketService {
         // Track WebSocket disconnection
         const durationMs = this.connectionStartTime ? Date.now() - this.connectionStartTime : 0;
         this.connectionStartTime = null; // Reset to prevent incorrect calculations on subsequent disconnects
-        const durationFormatted = formatDurationFromMs(durationMs);
 
         logger.info(Logger.Event.WEBSOCKET_CONNECTION_CLOSED, {
           sessionDurationMs: durationMs,
           reason: reason,
-        });
-
-        mixpanelService.track(EVENTS.WS_CONNECTION_CLOSED, {
-          reason: reason,
-          durationMs, // Exact time in milliseconds
-          durationFormatted, // Human-readable format (e.g., "1 minute 30 seconds")
         });
 
         safeRecordMetric(() => {

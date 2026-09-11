@@ -1,30 +1,27 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { redisService } from '@/services/redisService';
 
 /**
- * Producer for the nightly entity-extraction queue.
+ * Producer for the entity-extraction queue.
  *
- * Enqueued at message ingest, drained at midnight. A job is just a threadId
- * (== conversationId), keyed so a busy thread dedupes to ONE job, delayed until
- * the next IST midnight so it is processed once when the thread has settled, and
- * priority-ordered by time. Everything else — resolving the channel/workspace,
- * reading the channel's approved types (chat_container.entityTypes), gating —
- * happens in the worker, keeping the ingest path free of lookups.
+ * Enqueued at message ingest. A job is just a threadId (== conversationId),
+ * keyed so a busy thread dedupes to ONE job and held for a short debounce window
+ * so that dedupe has something to collapse: a job re-extracts the WHOLE thread,
+ * so firing one per message would cost O(n²) LLM calls over the thread's life.
+ * Everything else — resolving the channel/workspace, reading the channel's
+ * approved types (chat_container.entityTypes), gating — happens in the worker,
+ * keeping the ingest path free of lookups.
+ *
+ * A message landing while the thread's job is already active is dropped (Bull
+ * ignores the repeat add, and the job is gone once it completes). Accepted:
+ * any later message on the thread re-extracts it whole.
  *
  * Consumption lives in workers/entityExtractionWorker.ts.
  */
 export interface EntityExtractionJobData {
   threadId: string;
-}
-
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** ms from now until the next 00:00 IST — the delay that batches jobs to night. */
-function msUntilNextMidnightIST(): number {
-  const istNow = Date.now() + IST_OFFSET_MS;
-  return Math.ceil(istNow / DAY_MS) * DAY_MS - istNow;
 }
 
 class EntityExtractionQueue {
@@ -65,7 +62,8 @@ class EntityExtractionQueue {
   /**
    * Feed-time entry — call when a message is ingested (threadId == conversationId).
    * Fully guarded so it can never throw into the ingest path. Bull ignores a
-   * repeat add while the job is still queued, so a busy thread stays one job.
+   * repeat add while the job is still delayed or queued, so every message inside
+   * the debounce window folds into the one job the first message created.
    */
   async enqueueForMessage(conversationId: string | undefined): Promise<void> {
     if (!this.queue || !conversationId) return;
@@ -75,7 +73,7 @@ class EntityExtractionQueue {
         {
           jobId: conversationId, // dedupe the thread
           priority: Math.max(1, Math.floor(Date.now() / 1000)), // lower = older = first
-          delay: msUntilNextMidnightIST(),
+          delay: config.entityExtraction.debounceMs,
         },
       );
     } catch (err) {
@@ -87,16 +85,23 @@ class EntityExtractionQueue {
   }
 
   /**
-   * Enqueue a thread for IMMEDIATE processing (backfill), bypassing the nightly
-   * delay. Same jobId dedup, so a thread already queued for tonight isn't
-   * duplicated. Returns true if a job was added.
+   * Enqueue a thread for IMMEDIATE processing (backfill), bypassing the debounce
+   * window. Same jobId dedup, so a thread already waiting out its window isn't
+   * duplicated — it just stays on its original schedule.
    */
   async enqueueThreadNow(threadId: string): Promise<void> {
     if (!this.queue || !threadId) return;
-    await this.queue.add(
-      { threadId },
-      { jobId: threadId, priority: Math.max(1, Math.floor(Date.now() / 1000)) },
-    );
+    try {
+      await this.queue.add(
+        { threadId },
+        { jobId: threadId, priority: Math.max(1, Math.floor(Date.now() / 1000)) },
+      );
+    } catch (err) {
+      logger.warn('[ENTITY-EXTRACTION-QUEUE] backfill enqueue failed', {
+        threadId,
+        error: String(err),
+      });
+    }
   }
 
   async close(): Promise<void> {

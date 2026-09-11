@@ -191,6 +191,8 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                 <button
                   type='button'
                   onClick={() => handleTagRemove(user)}
+                  data-track-category='ENTITY_PICKER'
+                  data-track-name='REMOVE_USER_CHIP'
                   className='rounded-full p-0.5 transition-colors'
                   aria-label={`Remove ${getUserDisplayName(user)}`}
                 >
@@ -285,6 +287,8 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                         : 'hover:bg-accent hover:text-accent-foreground',
                     )}
                     onClick={() => handleUserSelect(user)}
+                    data-track-category='ENTITY_PICKER'
+                    data-track-name='SELECT_USER'
                     onMouseEnter={() => setSelectedIndex(index)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {

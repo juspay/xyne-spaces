@@ -25,4 +25,4 @@ export const DEFAULT_TELEPRESENCE_CAC_CONFIG: TelepresenceCacConfig = {
 };
 
 // Hardcoded flag for the "Enable Xyne Telepresence" toggle button shown in presentation mode.
-export const isTelepresenceToggleEnable = true;
+export const isTelepresenceToggleEnable = false;

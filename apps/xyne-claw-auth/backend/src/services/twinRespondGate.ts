@@ -13,6 +13,7 @@
  */
 
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { interact } from "../mcp/servers/xyne-spaces-client.js";
@@ -181,7 +182,7 @@ export async function recordTwinSilence(
   } catch (err) {
     logger.warn("[twin-respond-gate] recordTwinSilence failed", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -370,7 +371,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     });
     return decision;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     logger.warn("[twin-respond-gate] client failed — fail-closed (stay silent)", { userId, err: msg });
     recordFailure(`gate client error: ${msg}`);
     return FAIL_CLOSED;

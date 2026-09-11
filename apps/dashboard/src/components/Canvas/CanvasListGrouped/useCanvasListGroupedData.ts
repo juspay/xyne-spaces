@@ -15,7 +15,9 @@ import {
   type CanvasHierarchySections,
 } from './CanvasListGrouped.utils';
 import {
+  filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
 } from '../canvasFilters';
@@ -24,7 +26,10 @@ interface UseCanvasListGroupedDataParams {
   currentUserId?: string | undefined;
   collapsedProjects: ReadonlySet<string>;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
+  includeArchived: boolean;
+  onlyArchived: boolean;
   forceExpandProjects?: boolean;
 }
 
@@ -50,7 +55,10 @@ export function useCanvasListGroupedData({
   currentUserId,
   collapsedProjects,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
+  includeArchived,
+  onlyArchived,
   forceExpandProjects = false,
 }: UseCanvasListGroupedDataParams): UseCanvasListGroupedDataResult {
   const allUsers = useUsers();
@@ -90,6 +98,8 @@ export function useCanvasListGroupedData({
   const [personalCanvasesResult, personalCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
       scope: 'personal_root',
+      includeArchived,
+      onlyArchived,
     }),
     {
       enabled: true,
@@ -103,13 +113,28 @@ export function useCanvasListGroupedData({
   const lazyPersonalCanvases = useMemo(
     () =>
       filterStarredCanvases(
-        filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(toArray<Canvas>(personalCanvasesResult)),
-          excludeCallGeneratedCanvases,
+        filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(
+            withStarredCanvasState(
+              filterArchivedCanvases(toArray<Canvas>(personalCanvasesResult), {
+                includeArchived,
+                onlyArchived,
+              }),
+            ),
+            excludeCallGeneratedCanvases,
+          ),
+          excludeRecordingGeneratedCanvases,
         ),
         showStarredOnly,
       ),
-    [excludeCallGeneratedCanvases, personalCanvasesResult, showStarredOnly],
+    [
+      excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
+      includeArchived,
+      onlyArchived,
+      personalCanvasesResult,
+      showStarredOnly,
+    ],
   );
   const expandedProjectIds = useMemo(
     () =>

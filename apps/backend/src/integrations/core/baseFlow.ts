@@ -3,7 +3,7 @@
  * Optional preprocessing (API calls, data enrichment)
  */
 import { ExternalSource } from '@prisma/client';
-import { TestPayloadResult } from './types';
+import { type IngestionOptions, TestPayloadResult } from './types';
 
 export abstract class BaseFlow {
   /**
@@ -12,9 +12,14 @@ export abstract class BaseFlow {
    *
    * @param rawPayload - Raw payload from external source
    * @param _source - External source object from database (optional)
+   * @param _options - Internal ingestion behavior (optional)
    * @returns Enriched payload (can be same as input if no preprocessing needed)
    */
-  async preprocess?(rawPayload: any, _source?: ExternalSource): Promise<any> {
+  async preprocess?(
+    rawPayload: any,
+    _source?: ExternalSource,
+    _options?: IngestionOptions,
+  ): Promise<any> {
     return rawPayload; // Default: no preprocessing
   }
 

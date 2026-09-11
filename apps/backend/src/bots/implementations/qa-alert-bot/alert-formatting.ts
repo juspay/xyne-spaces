@@ -1,3 +1,5 @@
+import { escapeHtml } from '@/utils/htmlEscape';
+
 export type JenkinsAlertCategory =
   | 'automation_failed'
   | 'automation_skipped'
@@ -29,15 +31,6 @@ export interface JenkinsWebhookPayload {
   alertCategory?: JenkinsAlertCategory | string;
   failureReason?: string;
   mentionHtmlList?: string[];
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function normalizeWhitespace(value: string): string {

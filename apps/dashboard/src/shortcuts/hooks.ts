@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { shortcutsActor } from '../machines/shortcutsMachine';
 import { registerShortcut } from './shortcutsRegistry';
 import type { ShortcutScope, ShortcutRegistration } from './shortcutsRegistry';
-import { shortcuts } from './catalog';
+import { getShortcut } from './catalog';
+import { isElectronApp } from '../utils/electronApp';
 import type { ShortcutDefinition, ShortcutId } from './catalog';
 
 export const useShortcut = (
@@ -80,12 +81,20 @@ export const useShortcutById = (
   handler: (event: KeyboardEvent) => void,
   overrides: ShortcutOverrides = {},
 ): void => {
-  const definition = shortcuts[id];
-  const { keys, ...baseConfig } = definition || { keys: '' };
+  const definition = getShortcut(id);
+  const { keys, ...baseConfig } = definition ?? { keys: '' };
+
+  // An `electronOnly` combo is claimed by the browser itself (new window,
+  // incognito, tab switching) and never reaches the page, so registering a
+  // handler for it in a tab only adds a listener that can never fire. Gating
+  // here means the catalog flag governs both the binding and the hint, instead
+  // of every call site repeating the check the sidebar rail does by hand.
+  const available =
+    definition !== undefined && (definition.electronOnly !== true || isElectronApp());
 
   useShortcut(keys, handler, {
     ...baseConfig,
     ...overrides,
-    enabled: definition ? (overrides.enabled ?? true) : false,
+    enabled: available ? (overrides.enabled ?? true) : false,
   });
 };

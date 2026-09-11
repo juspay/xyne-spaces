@@ -21,8 +21,8 @@ import { BoardRepository } from '@/database/repositories/boardRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
 import { Prisma } from '@prisma/client';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
@@ -47,11 +47,10 @@ import {
   NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
-import { superpositionClient } from './superpositionClient';
-import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
@@ -71,6 +70,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -78,6 +78,10 @@ import { runClawAgent } from '@/services/clawAgentService';
 import { convert as htmlToText } from 'html-to-text';
 import type { UserInfo as AgentUserInfo } from '@/agents/xyne-ai/tools/types';
 import { computeSlaDueDates } from '@/utils/slaCalculator';
+import {
+  hasExternalInteractionEmailChanged,
+  hasExternalInteractionTicketChanged,
+} from '@/services/externalInteractionUpdate';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 export function stripCitationBlock(text: string): string {
@@ -95,6 +99,18 @@ interface UserInfo {
   picture?: string;
 }
 
+/**
+ * App-desk source binding for an ingested message. When set, the ExternalMessage
+ * link row binding (externalSourceId, externalId) → Email is written inside the
+ * same DB transaction as the Email write, so a crash cannot leave an Email
+ * without the link that per-source thread continuation and reply routing rely on.
+ */
+export interface ExternalSourceLink {
+  externalSourceId: string;
+  externalId: string;
+  externalThreadId: string;
+}
+
 export interface CreateConversationWithEmailParams {
   channelId: string;
   boardId?: string; // @deprecated - Target board for ticket creation. Now fetched from EmailChannelPreference table. Kept for backward compatibility.
@@ -108,16 +124,19 @@ export interface CreateConversationWithEmailParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
-  sourceName?: string; // External source name for Superposition context
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
   emailType?: EmailType;
   // User who sent this email, for outbound-new flows. Null/undefined for inbound.
   sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
 }
 
 export interface AddEmailToConversationParams {
@@ -131,10 +150,31 @@ export interface AddEmailToConversationParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   emailType?: EmailType;
+  sentByUserId?: string;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+}
+
+export interface UpdateExternalInteractionParams {
+  emailId: string;
+  subject: string;
+  body: string;
+  from: string;
+  externalThreadId: string;
+  externalMessageId: string;
+  type: EmailType;
+  sentByUserId?: string | null;
+  rating?: number | null;
+  clientVersionName?: string | null;
+  clientVersionCode?: string | null;
+  syncTicket?: boolean;
+  updatedBy?: string | null;
 }
 
 export interface CreateConversationFromEmailParams {
@@ -176,7 +216,6 @@ export interface IngestEmailThreadParams {
     uploadedFiles?: UploadedFileResult[];
   }>;
   ticketMetadata?: Record<string, unknown>;
-  sourceName?: string;
   referencedMessageIds?: string[];
 }
 
@@ -220,6 +259,52 @@ function derivePriorityFromSubject(subject: string): TicketPriority {
   }
 
   return TicketPriority.LOW;
+}
+
+/**
+ * Write the ExternalMessage link row inside an existing transaction.
+ *
+ * The (externalSourceId, externalId) pair being already linked means the same
+ * app re-posted an id it already linked — that is a no-op, not an error.
+ * `createMany` + `skipDuplicates` covers the concurrent-repost race without
+ * raising P2002, which would poison the surrounding interactive transaction.
+ */
+async function linkExternalMessageInTx(
+  tx: Prisma.TransactionClient,
+  link: ExternalSourceLink,
+  emailId: string,
+  workspaceId: string,
+): Promise<void> {
+  const existing = await tx.externalMessage.findUnique({
+    where: {
+      externalSourceId_externalId: {
+        externalSourceId: link.externalSourceId,
+        externalId: link.externalId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    logger.warn('[EmailService] ExternalMessage link already exists, skipping', {
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      emailId,
+    });
+    return;
+  }
+  await tx.externalMessage.createMany({
+    data: [{
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      externalThreadId: link.externalThreadId,
+      messageId: emailId,
+      entityId: emailId,
+      direction: MessageDirection.INCOMING,
+      entityType: ExternalEntityType.EMAIL,
+      workspaceId,
+    }],
+    skipDuplicates: true,
+  });
 }
 
 export class EmailService {
@@ -401,6 +486,127 @@ export class EmailService {
         logger.error('[EmailService] Failed to log Vespa insertion error to database:', dbError);
       }
     });
+  }
+
+  async updateExternalInteraction(
+    params: UpdateExternalInteractionParams,
+  ) {
+    const currentEmail = await this.prisma.email.findUnique({
+      where: { id: params.emailId },
+    });
+    if (!currentEmail) throw new Error(`Email ${params.emailId} not found`);
+
+    const currentTicket = params.syncTicket
+      ? await this.prisma.ticket.findFirst({
+          where: { conversationId: currentEmail.conversationId },
+        })
+      : null;
+
+    const emailChanged = hasExternalInteractionEmailChanged(currentEmail, {
+      subject: params.subject,
+      body: params.body,
+      from: params.from,
+      externalThreadId: params.externalThreadId,
+      externalMessageId: params.externalMessageId,
+      type: params.type,
+      sentByUserId: params.sentByUserId ?? null,
+      rating: params.rating ?? null,
+      clientVersionName: params.clientVersionName ?? null,
+      clientVersionCode: params.clientVersionCode ?? null,
+    });
+    const ticketChanged = hasExternalInteractionTicketChanged(currentTicket, {
+      title: params.subject,
+      description: params.body,
+    });
+
+    if (!emailChanged && !ticketChanged) return currentEmail;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const email = emailChanged
+        ? await tx.email.update({
+            where: { id: params.emailId },
+            data: {
+              subject: params.subject,
+              body: params.body,
+              from: params.from,
+              externalThreadId: params.externalThreadId,
+              externalMessageId: params.externalMessageId,
+              type: params.type,
+              sentByUserId: params.sentByUserId,
+              rating: params.rating,
+              clientVersionName: params.clientVersionName,
+              clientVersionCode: params.clientVersionCode,
+            },
+          })
+        : currentEmail;
+
+      if (!currentTicket || !ticketChanged) return { email, ticket: null };
+
+      const ticket = await tx.ticket.update({
+        where: { id: currentTicket.id },
+        data: {
+          title: params.subject,
+          description: params.body,
+          ...(params.updatedBy && { updatedBy: params.updatedBy }),
+        },
+      });
+      await syncConversationTicketMdFromPrismaTicket(tx, ticket);
+      return { email, ticket };
+    });
+
+    if (emailChanged) {
+      this.pushVespaJobForMail(
+        result.email.id,
+        params.updatedBy ?? currentTicket?.updatedBy ?? currentEmail.from,
+        currentEmail.workspaceId ?? undefined,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external interaction', {
+          emailId: result.email.id,
+          error,
+        });
+      });
+    }
+
+    if (result.ticket && currentTicket) {
+      this.pushVespaJobForTicket(
+        result.ticket.id,
+        params.updatedBy ?? currentTicket.updatedBy,
+        result.ticket.workspaceId,
+      ).catch((error) => {
+        logger.error('[EmailService] Failed to reindex updated external ticket', {
+          ticketId: result.ticket!.id,
+          error,
+        });
+      });
+      void messageMetadataService
+        .syncInitialMessageMd(result.ticket.conversationId)
+        .catch((error) => {
+          logger.warn('[EmailService] Failed to sync edited external ticket metadata', {
+            ticketId: result.ticket!.id,
+            error,
+          });
+        });
+      void emitTicketUpdated({
+        ticket: result.ticket as TicketLike,
+        changes: {
+          ...(currentTicket.title !== result.ticket.title && {
+            title: {
+              previousValue: currentTicket.title,
+              newValue: result.ticket.title,
+            },
+          }),
+          ...(currentTicket.description !== result.ticket.description && {
+            description: {
+              previousValue: currentTicket.description,
+              newValue: result.ticket.description,
+            },
+          }),
+        },
+        performedById: params.updatedBy ?? null,
+      });
+    }
+
+    return result.email;
   }
 
   /**
@@ -912,13 +1118,16 @@ export class EmailService {
       emailReplyTo = [],
       externalThreadId,
       externalMessageId,
+      externalSourceId,
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
-      sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
+      rating,
+      clientVersionName,
+      clientVersionCode,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -935,65 +1144,20 @@ export class EmailService {
       });
     }
 
-    // Step 0: Superposition guard — bail out before creating anything
-    if (sourceName) {
-      try {
-        const context = createBlockingContext({
-          sourceName: sourceName,
-          email: emailFrom,
-          emailSubject: emailSubject,
-        });
-
-        if (!superpositionClient.isReady()) {
-          logger.warn('[EmailService] SuperpositionClient not ready, proceeding without blocking check', {
-            sourceName,
-            email: emailFrom,
-            domain: context.domain,
-          });
-        } else {
-          const isBlocked = await superpositionClient.getBooleanValue('blocked', false, context);
-          
-          logger.info('[EmailService] Superposition check result', {
-            sourceName,
-            domain: context.domain,
-            email: emailFrom,
-            isBlocked,
-          });
-
-          if (isBlocked) {
-            logger.warn('[EmailService] Blocking Zoho ingestion (no conversation/ticket/email)', {
-              sourceName,
-              domain: context.domain,
-              email: emailFrom,
-            });
-            return { blocked: true };
-          }
-        }
-      } catch (error) {
-        logger.error('[EmailService] Error checking Superposition flag, proceeding with ticket creation', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          sourceName,
-        });
-        // If Superposition check fails, proceed with ticket creation (fail-open)
-      }
-    }
-
-    const projectId = channel.projectId;
-
     // Fetch boardId from EmailChannelPreference table
     const emailChannelPreference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
 
-    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > first board in project
+    // Priority: passedBoardId (explicit, from request) > emailChannelPreference.boardId (admin default) > ChannelBoardMapping (isDefault or oldest)
     let configuredBoardId = passedBoardId || emailChannelPreference?.boardId;
 
     if (!configuredBoardId) {
-      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to first board in project ${projectId}`);
-      const firstBoard = await this.prisma.board.findFirst({ where: { projectId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
-      configuredBoardId = firstBoard?.id;
+      logger.warn(`[EmailService] EmailChannelPreference missing boardId for channel ${channelId}, falling back to ChannelBoardMapping`);
+      const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+      configuredBoardId = resolved?.boardId;
     }
 
     if (!configuredBoardId) {
-      logger.error(`[EmailService] No board found for channel ${channelId} in project ${projectId}`);
+      logger.error(`[EmailService] No board found for channel ${channelId}`);
       throw new Error(`EmailChannelPreference must have a boardId configured. Channel: ${channelId}. Please configure boardId in email_channel_preferences table.`);
     }
 
@@ -1004,11 +1168,7 @@ export class EmailService {
       throw new Error(`Configured boardId ${configuredBoardId} not found in database. Please verify email_channel_preferences.boardId points to a valid board.`);
     }
 
-    // Validate that the board belongs to the same project as the channel
-    if (configuredBoard.projectId !== projectId) {
-      logger.error(`[EmailService] Board project mismatch: boardId ${configuredBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
-      throw new Error(`Configured boardId ${configuredBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). Email channel and board must be in the same project.`);
-    }
+    const projectId = configuredBoard.projectId;
 
     const boardId = configuredBoardId;
     logger.info(`[EmailService] Using configured boardId ${boardId} from EmailChannelPreference table`);
@@ -1084,9 +1244,17 @@ export class EmailService {
           externalMessageId,
           ...(sentByUserId && { sentByUserId }),
           ...(normalizedRfcMessageId && { rfcMessageId: normalizedRfcMessageId }),
+          ...(rating != null && { rating }),
+          ...(clientVersionName && { clientVersionName }),
+          ...(clientVersionCode && { clientVersionCode }),
           ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
+
+      // App-desk source link shares this transaction so it can't be lost to a crash.
+      if (externalSourceId) {
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, createdEmail.id, channel.workspaceId);
+      }
 
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
@@ -1160,6 +1328,24 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
+    // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -1311,8 +1497,13 @@ export class EmailService {
         emailReplyTo = [],
         externalThreadId,
         externalMessageId,
+        externalSourceId,
         rfcMessageId,
         emailType = EmailType.DEFAULT,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         uploadedFiles = [],
         receivedAt,
       } = params;
@@ -1346,10 +1537,20 @@ export class EmailService {
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
         rfcMessageId,
+        sentByUserId,
+        rating,
+        clientVersionName,
+        clientVersionCode,
         ...(receivedAt && { createdAt: receivedAt }),
       };
 
-      const email = await this.emailRepository.create(emailData);
+      // When an app-desk source link is requested, the Email upsert and the
+      // link write share one transaction so neither can be lost on its own.
+      const email = externalSourceId ? await this.prisma.$transaction(async (tx) => {
+        const created = await this.emailRepository.create(emailData, tx);
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, created.id, created.workspaceId);
+        return created;
+      }) : await this.emailRepository.create(emailData);
       void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
@@ -1613,6 +1814,13 @@ export class EmailService {
               data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+
+            try {
+              await syncUserWorkload(primaryUserId, userGroupId, boardId, userId);
+              logger.info(`[EmailService] Synced workload for user ${primaryUserId}`);
+            } catch (workloadError) {
+              logger.error('[EmailService] Error syncing workload:', workloadError);
+            }
           }
         } else {
         const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, ticket.projectId, channelId);
@@ -1777,7 +1985,9 @@ export class EmailService {
       logger.warn(`[emailService.sendReplyOnConversation] Email sending blocked for ticket ${ticket.id} - emailReplyEnabled is false`);
       throw new Error(`Email sending is temporarily disabled for this ticket. An automated process is in progress.`);
     }
-    const externalSource = await new ExternalSourceRepository().findByChannelId(conversation.channelId);
+    const externalSource = await new ChannelExternalSourceResolver().resolveForChannel(
+      conversation.channelId,
+    );
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
     const emails = await this.emailRepository.findByConversationId(params.conversationId);
     if (emails.length === 0) throw new Error(`No emails in conversation ${params.conversationId}`);
@@ -1880,7 +2090,6 @@ export class EmailService {
       externalSourceId,
       userId,
       ticketMetadata,
-      sourceName,
     } = params;
 
     if (params.emails.length === 0) {
@@ -1900,27 +2109,6 @@ export class EmailService {
       throw new Error(
         `[EmailService] refusing to ingest into non-EMAIL channel ${channelId} (type=${channel.type})`,
       );
-    }
-
-    const projectId = channel.projectId;
-    if (sourceName) {
-      try {
-        const ctx = createBlockingContext({
-          sourceName,
-          email: firstEmail.from,
-          emailSubject: firstEmail.subject,
-        });
-        if (
-          superpositionClient.isReady() &&
-          (await superpositionClient.getBooleanValue('blocked', false, ctx))
-        ) {
-          return { conversationId: '', inserted: 0, duplicates: 0, isNew: false, blocked: true };
-        }
-      } catch (error) {
-        logger.error('[EmailService] Superposition check failed, proceeding', {
-          error: error,
-        });
-      }
     }
 
     const existingFirstEmail = await this.emailRepository.findFirstByThreadAndChannel(
@@ -1971,6 +2159,7 @@ export class EmailService {
 
     let boardId: string | undefined;
     let groupId: string | null = null;
+    let projectId: string | undefined;
     if (!existingFirstEmail) {
       const externalSource = await this.prisma.externalSource.findUnique({
         where: { id: externalSourceId },
@@ -1979,17 +2168,18 @@ export class EmailService {
       boardId =
         preference?.boardId ?? externalSource?.boardId ?? undefined;
       if (!boardId) {
-        const firstBoard = await this.prisma.board.findFirst({
-          where: { projectId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        });
-        boardId = firstBoard?.id;
+        const resolved = await resolveChannelDefaultBoard(this.prisma, channelId);
+        boardId = resolved?.boardId;
+        projectId = resolved?.projectId ?? undefined;
       }
       if (!boardId) {
         throw new Error(
-          `[EmailService] No board configured for channel ${channelId} (project ${projectId})`,
+          `[EmailService] No board configured for channel ${channelId}`,
         );
+      }
+      if (!projectId) {
+        const board = await this.boardRepository.findById(boardId);
+        projectId = board?.projectId ?? undefined;
       }
       groupId = preference?.assigneeUserGroupId ?? null;
     }
@@ -2056,7 +2246,7 @@ export class EmailService {
             },
           });
 
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId!);
           const createdTicket = await tx.ticket.create({
             data: {
               title: firstEmail.subject,
@@ -2067,7 +2257,7 @@ export class EmailService {
               channelId,
               workspaceId: channel.workspaceId,
               xyneId,
-              projectId,
+              projectId: projectId!,
               boardId: boardId!,
               lastEmailAt: firstEmail.receivedAt ?? new Date(),
               stageName: firstStage.name,
@@ -2348,7 +2538,7 @@ export class EmailService {
       ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
 
       if (groupId) {
-        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId, createdBy: userId };
+        const ticketForEmit = { id: txResult.ticketId, workspaceId: channel.workspaceId, channelId, boardId: boardId!, projectId: projectId!, createdBy: userId };
         void emitTicketUpdated({
           ticket: ticketForEmit as Parameters<typeof emitTicketUpdated>[0]['ticket'],
           changes: { userGroupId: { previousValue: null, newValue: groupId } },
@@ -2391,6 +2581,24 @@ export class EmailService {
           error,
         );
       });
+
+      // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
+      // truthy here; the guard is what narrows string | undefined for TS.
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

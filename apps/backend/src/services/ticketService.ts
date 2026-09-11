@@ -74,6 +74,32 @@ export class TicketService {
 
       const { boardId } = ticket;
 
+      if (ticket.board?.boardType === BoardType.FLOW) {
+        const [currentStage, targetStage] = await Promise.all([
+          prisma.stage.findFirst({ where: { boardId, name: ticket.stageName } }),
+          prisma.stage.findFirst({ where: { boardId, name: stage } }),
+        ]);
+        if (!currentStage || !targetStage) {
+          logger.warn(`[TicketService] FLOW stage not found for ${ticketId} → "${stage}"`);
+          return;
+        }
+        const transition = await prisma.stageTransition.findUnique({
+          where: {
+            boardId_fromStageId_toStageId: {
+              boardId,
+              fromStageId: currentStage.id,
+              toStageId: targetStage.id,
+            },
+          },
+        });
+        if (!transition) {
+          logger.warn(`[TicketService] FLOW transition rejected for ${ticketId} → "${stage}"`);
+          return;
+        }
+        await this.ticketRepository.updateTicketStage(ticketId, stage, userId, source, prActivityData);
+        return;
+      }
+
       // NON_LINEAR boards require the dedicated transition service (handles forms, approvals, SLA).
       if (ticket.board?.boardType === BoardType.NON_LINEAR) {
         const result = await ticketStageTransitionService.transitionTicket(ticketId, userId, stage, {
@@ -108,12 +134,12 @@ export class TicketService {
         // For WEBHOOK source with PR data, we still need to call repository to create PR activity
         // even if the stage hasn't changed
         if (source === ActivitySource.WEBHOOK && prActivityData) {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Creating PR activity only.`
           );
           // Proceed to create PR activity without stage change
         } else {
-          console.info(
+          logger.info(
             `[TicketService] Ticket ${ticketId} is already in "${stage}" stage. Skipping update.`
           );
           return;
@@ -184,15 +210,50 @@ export class TicketService {
     const updates: string[] = [];
     const data: Record<string, unknown> = { updatedBy: userId, updatedAt: new Date() };
 
+    const existingTicket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { board: true },
+    });
+    if (!existingTicket) throw new Error('Ticket not found');
+    const flowStageChange =
+      existingTicket.board.boardType === BoardType.FLOW && (params.stage || params.status);
+    if (flowStageChange) {
+      const targetStageName = params.stage ?? params.status;
+      if (!targetStageName || (params.status && params.status !== targetStageName)) {
+        throw new Error('Flow status must match its target stage');
+      }
+      const [currentStage, targetStage] = await Promise.all([
+        prisma.stage.findFirst({
+          where: { boardId: existingTicket.boardId, name: existingTicket.stageName },
+        }),
+        prisma.stage.findFirst({
+          where: { boardId: existingTicket.boardId, name: targetStageName },
+        }),
+      ]);
+      if (!currentStage || !targetStage) throw new Error('Flow stage not found');
+      const allowed = await prisma.stageTransition.findUnique({
+        where: {
+          boardId_fromStageId_toStageId: {
+            boardId: existingTicket.boardId,
+            fromStageId: currentStage.id,
+            toStageId: targetStage.id,
+          },
+        },
+      });
+      if (!allowed) throw new Error('This Flow stage transition is not allowed');
+      await this.ticketRepository.updateTicketStage(ticketId, targetStageName, userId);
+      updates.push('stage', 'status');
+    }
+
     if (params.assigneeId) { data['assignedTo'] = params.assigneeId; updates.push('assignee'); }
-    if (params.stage) {
+    if (params.stage && !flowStageChange) {
       data['stageName'] = params.stage; updates.push('stage');
     }
     if (params.groupId) { data['userGroupId'] = params.groupId; updates.push('group'); }
     if (params.title) { data['title'] = params.title; updates.push('title'); }
     if (params.description) { data['description'] = params.description; updates.push('description'); }
     if (params.priority) { data['priority'] = params.priority; updates.push('priority'); }
-    if (params.status) { data['statusV2'] = params.status; updates.push('status'); }
+    if (params.status && !flowStageChange) { data['statusV2'] = params.status; updates.push('status'); }
     if (params.eta) { data['eta'] = new Date(params.eta); updates.push('eta'); }
 
     // Snapshot the fields that can change so we can emit TicketActivity
@@ -213,10 +274,10 @@ export class TicketService {
     });
 
     const previousCountsSnapshot = await buildKanbanCountsSnapshot(ticketId);
-    const updatedTicket = await prisma.ticket.update({
-      where: { id: ticketId },
-      data,
-    });
+    const hasDirectUpdates = Object.keys(data).some(key => key !== 'updatedBy' && key !== 'updatedAt');
+    const updatedTicket = hasDirectUpdates
+      ? await prisma.ticket.update({ where: { id: ticketId }, data })
+      : await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
@@ -413,6 +474,158 @@ export class TicketService {
     );
 
     return { added: toAdd, removed: toRemove };
+  }
+
+  /**
+   * Bulk add/remove tags across many tickets using ADDITIVE semantics
+   * (NOT replace): only the names in `addTags` / `removeTags` are touched and
+   * every other label on each ticket is preserved. Built for operations like
+   * relabelling a whole sprint (e.g. remove "Sprint June W2", add
+   * "Sprint Aug W2") without having to read and rewrite each ticket's full
+   * label set.
+   *
+   * Each ticket is applied in its OWN transaction so one bad ticket cannot
+   * roll back the rest (partial success is expected and reported).
+   *
+   * SECURITY: the caller passes a trusted `workspaceId` derived from the
+   * authenticated session — NEVER from the request body. Any ticketId that
+   * does not exist or does not belong to that workspace is skipped and
+   * returned in `skipped`, so this can never become a cross-workspace write.
+   */
+  async bulkUpdateTicketTags(
+    ticketIds: string[],
+    ops: { addTags?: string[]; removeTags?: string[] },
+    workspaceId: string,
+    updatedBy: string,
+  ): Promise<{
+    updated: Array<{ ticketId: string; added: string[]; removed: string[] }>;
+    unchanged: string[];
+    skipped: string[];
+    totalAdded: number;
+    totalRemoved: number;
+  }> {
+    const norm = (xs?: string[]) =>
+      Array.from(new Set((xs ?? []).map(t => t.trim()).filter(Boolean)));
+    const addNames = norm(ops.addTags);
+    // A tag requested in BOTH add and remove is kept (add wins) so we never
+    // delete-then-reinsert the same label in a single operation.
+    const removeNames = norm(ops.removeTags).filter(n => !addNames.includes(n));
+
+    if (addNames.length === 0 && removeNames.length === 0) {
+      throw new Error('bulkUpdateTicketTags: at least one of addTags or removeTags must be non-empty');
+    }
+
+    const uniqueIds = Array.from(
+      new Set(ticketIds.map(id => id.trim()).filter(Boolean)),
+    );
+
+    // Workspace-scoped authorization. Only tickets that BOTH exist AND belong
+    // to the caller's workspace are eligible; everything else is skipped.
+    const allowed = await prisma.ticket.findMany({
+      where: { id: { in: uniqueIds }, workspaceId },
+      select: { id: true },
+    });
+    const allowedIds = new Set(allowed.map(t => t.id));
+    const skipped = uniqueIds.filter(id => !allowedIds.has(id));
+
+    const updated: Array<{ ticketId: string; added: string[]; removed: string[] }> = [];
+    const unchanged: string[] = [];
+    let totalAdded = 0;
+    let totalRemoved = 0;
+
+    for (const ticketId of allowedIds) {
+      const existing = await prisma.ticketTag.findMany({
+        where: { ticketId },
+        select: { name: true },
+      });
+      const existingNames = new Set(existing.map(t => t.name));
+
+      const toAdd = addNames.filter(n => !existingNames.has(n));
+      const toRemove = removeNames.filter(n => existingNames.has(n));
+
+      if (toAdd.length === 0 && toRemove.length === 0) {
+        unchanged.push(ticketId);
+        continue;
+      }
+
+      try {
+        await prisma.$transaction(async tx => {
+          if (toRemove.length > 0) {
+            await tx.ticketTag.deleteMany({
+              where: { ticketId, name: { in: toRemove } },
+            });
+            for (const name of toRemove) {
+              await dualDeleteTicketTag(ticketId, name, tx);
+            }
+          }
+          if (toAdd.length > 0) {
+            await tx.ticketTag.createMany({
+              data: toAdd.map(name => ({ name, ticketId, workspaceId })),
+            });
+            await dualWriteTicketTags(ticketId, toAdd, tx);
+          }
+        });
+      } catch (error) {
+        logger.error(
+          `[TicketService] bulkUpdateTicketTags failed for ticket ${ticketId}:`,
+          error,
+        );
+        skipped.push(ticketId);
+        continue;
+      }
+
+      // Best-effort audit rows — the tag write above is already committed, so
+      // an audit failure must not fail the operation.
+      try {
+        const activityValues: Prisma.InputJsonValue[] = [
+          ...toAdd.map(name => ({ action: 'added', newValue: name })),
+          ...toRemove.map(name => ({ action: 'removed', oldValue: name })),
+        ];
+        if (activityValues.length > 0) {
+          await prisma.ticketActivity.createMany({
+            data: activityValues.map(value => ({
+              ticketId,
+              updatedBy,
+              workspaceId,
+              activityType: ActivityType.TAGS,
+              value,
+            })),
+          });
+        }
+      } catch (error) {
+        logger.error(
+          `[TicketService] bulkUpdateTicketTags audit write failed for ticket ${ticketId}:`,
+          error,
+        );
+      }
+
+      // Reindex the ticket in Vespa so search reflects the new labels.
+      await vespaQueue
+        .addJob({
+          schema: ticketSchema,
+          jobType: 'feed',
+          docId: ticketId,
+          userId: updatedBy,
+          workspaceId,
+        })
+        .catch(error => {
+          logger.error('[TicketService] bulkUpdateTicketTags Vespa feed enqueue failed:', {
+            ticketId,
+            error,
+          });
+        });
+
+      updated.push({ ticketId, added: toAdd, removed: toRemove });
+      totalAdded += toAdd.length;
+      totalRemoved += toRemove.length;
+    }
+
+    const safeWorkspaceId = workspaceId.replace(/[\r\n]/g, '');
+    logger.info(
+      `[TicketService] bulkUpdateTicketTags workspace=${safeWorkspaceId} requested=${uniqueIds.length} updated=${updated.length} unchanged=${unchanged.length} skipped=${skipped.length} +${totalAdded} -${totalRemoved}`,
+    );
+
+    return { updated, unchanged, skipped, totalAdded, totalRemoved };
   }
 
   /**

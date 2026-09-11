@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { bankIdForAgent } from "xyne-claw-shared";
 import { createLogger, createTraceId } from "../logger.js";
 
@@ -233,7 +234,7 @@ export async function collapseDuplicates(
             bank,
             duplicateId,
             canonical: cluster.canonical,
-            err: err instanceof Error ? err.message : String(err),
+            err: errMsg(err),
           });
         }
         if (consecutiveFailures >= MAX_CONSECUTIVE_INVALIDATION_FAILURES) {
@@ -336,7 +337,7 @@ export async function runNightlyMemoryHygiene(): Promise<void> {
       } catch (err) {
         logger.error("[memory-hygiene] Duplicate collapse failed", {
           bank,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
 
@@ -345,7 +346,7 @@ export async function runNightlyMemoryHygiene(): Promise<void> {
       } catch (err) {
         logger.error("[memory-hygiene] Retention step failed", {
           bank,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
 
@@ -368,7 +369,7 @@ export async function runNightlyMemoryHygiene(): Promise<void> {
       } catch (err) {
         logger.error("[memory-hygiene] Novelty report failed", {
           bank,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg(err),
         });
       }
     }

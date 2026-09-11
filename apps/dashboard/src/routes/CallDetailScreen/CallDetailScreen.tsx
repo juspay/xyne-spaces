@@ -1,33 +1,15 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { format } from 'date-fns';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Calendar,
-  Users,
-  Music,
-  ClipboardList,
-  Loader2,
-  LayoutList,
-  MessageCircle,
-  MessageSquare,
-  FileText,
-  ScrollText,
-} from 'lucide-react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
+import { Hashtag, EnvelopeDefault, File02Text } from '@xyne/icons';
+import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
-import { CreateDocumentModal } from '../../components/ui/MessageBubble/CreateDocumentModal';
-import Avatar from '../../components/ui/Avatar/Avatar';
-import { useUsers } from '../../hooks/useUsers';
 import { useCallPRD } from '../../hooks/useCallPRD';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
-import { getUserDisplayName } from '../../utils/userDisplayName';
 import { cn } from '../../utils/classNames';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import { type Call } from '../CallHistoryScreen/callHistoryItem.utils';
@@ -35,14 +17,31 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
 import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
-import { TranscriptTab } from './TranscriptTab';
-import { ParticipantsModal } from '../CallHistoryScreen/ParticipantsModal';
+import { CallParticipantsPopover } from './CallParticipantsPopover';
+import { CallSummaryTemplatePicker } from './CallSummaryTemplatePicker';
+import { useCallSummaryGeneration } from './useCallSummaryGeneration';
 import { useAuth } from '../../hooks/useAuth';
-import { useAllVisibleChannels } from '../../hooks/useChannels';
+import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
+import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
+import { callSummaryFormat, formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
+import { CallLabelPicker } from './CallLabelPicker';
+import { callService } from '../../services/Call/callService';
+import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { CallShareModal } from './CallShareModal';
+import { Button } from '../../components/ui/Button/Button';
 import {
-  getCallParticipantCount,
-  getPreviewParticipantUsers,
-} from '../CallHistoryScreen/callHistoryItem.utils';
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../components/ui/dropdown-menu';
+import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components/PostRecordingToEmailModal';
+import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
+import { useCallGoogleDocExport } from './useCallGoogleDocExport';
+
+/** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
+const POST_BUTTON_CLASS =
+  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -51,29 +50,63 @@ const getCanvasIdFromUrl = (url: unknown): string | null => {
   return url.split('/').filter(Boolean).pop() ?? null;
 };
 
+const EMPTY_LABEL_SUGGESTIONS: string[] = [];
+
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
-  const call = (location.state as { call: Call } | null)?.call;
+  const { callId: callIdParam } = useParams<{ callId: string }>();
+  const navState = location.state as { call: Call; labelSuggestions?: string[] } | null;
+  // The labels the history screen had loaded when this call was opened. Only the
+  // picker's suggestion list — a deep link arrives without them and just offers
+  // whatever is already on the call.
+  const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const { isMobile } = usePlatform();
+
+  // Calls Home hands the row over in navigation state. A call reached by link —
+  // from a share posted to a channel, or a pasted URL — has none, so fall back to
+  // resolving it by the id in the route.
+  const navigationCall = navState?.call;
+  const [fetchedCall, fetchedCallDetails] = useCachedQuery(
+    queries.callById({ callId: callIdParam ?? '' }),
+    { enabled: Boolean(callIdParam) },
+  );
+  const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
+  const isResolvingCall =
+    !navigationCall && Boolean(callIdParam) && fetchedCallDetails.type !== 'complete';
 
   // Hoist derived values so they're available to all hooks below
   const callConversationId =
     (call?.metadata as { conversationId?: string } | null)?.conversationId ?? null;
 
-  const [activeTab, setActiveTab] = useState<string>('summary');
-  const [isPRDModalOpen, setIsPRDModalOpen] = useState(false);
+  // `null` until the user picks a tab. The active tab is derived below, because
+  // Zero has not resolved on first paint and the tab list is not known yet.
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
   const { user } = useAuth();
-  const allUsers = useUsers();
-  const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
 
   const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
+  const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
-  const isChannelMember = visibleChannels.some(c => c.id === call?.channelId);
+  // Both lists run to hundreds of channels, and this screen re-renders on every
+  // Zero update, so keep the scans off the render path.
+  // The call's conversation is created in `callUpdatesChannel` when that override
+  // is set, falling back to the call's own channel (callRepository.ts:1209). Label,
+  // membership check and navigation all key off this one id so they cannot diverge.
+  const callMessageChannelId = call?.callUpdatesChannel ?? call?.channelId ?? null;
+  const isChannelMember = useMemo(
+    () => visibleChannels.some(c => c.id === callMessageChannelId),
+    [visibleChannels, callMessageChannelId],
+  );
+  const channel = useMemo(
+    () => allChannels.find(c => c.id === callMessageChannelId),
+    [allChannels, callMessageChannelId],
+  );
+  const { displayName: channelDisplayName, isLoading: isChannelNameLoading } =
+    useChannelDisplayName(channel, user?.id ?? '');
 
   // Set call context on the AI sidebar so it's scoped to this call when opened
   useAskAiTicketContext({
@@ -82,7 +115,7 @@ export default function CallDetailScreen(): ReactElement {
     previewText: call?.title ?? 'Call',
   });
 
-  const [conversationMessages] = useCachedQuery(
+  const [conversationMessages, conversationMessagesDetails] = useCachedQuery(
     queries.conversationMessages({ conversationId: callConversationId ?? '' }),
     { enabled: !!callConversationId },
   );
@@ -109,19 +142,18 @@ export default function CallDetailScreen(): ReactElement {
   }, [conversationMessages, call?.externalId]);
 
   const callMessageId = callMessage?.messageId ?? null;
-
   const detailedSummaryCanvasId = useMemo<string | null>(() => {
     const meta = callMessage?.metadata as Record<string, unknown> | null | undefined;
-    return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
-  }, [callMessage]);
+    const fromMessage = getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
+    if (fromMessage) return fromMessage;
+    const callMeta = call?.metadata as Record<string, unknown> | null | undefined;
+    const stamped = callMeta?.['detailedSummaryCanvasId'];
+    return typeof stamped === 'string' && stamped.length > 0 ? stamped : null;
+  }, [callMessage, call?.metadata]);
 
   const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
-
-  useEffect(() => {
-    if (activeTab === 'detailed-summary' && !hasDetailedSummaryTab) {
-      setActiveTab('summary');
-    }
-  }, [activeTab, hasDetailedSummaryTab]);
+  const summaryFormat = callSummaryFormat(call?.aiSummary);
+  const isOwner = Boolean(user?.id && call?.createdByUserId === user.id);
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -133,30 +165,40 @@ export default function CallDetailScreen(): ReactElement {
     );
   }, [conversationMessages, call?.externalId]);
 
-  // Find the transcript attachment from Zero (matches the chat thread pattern in CallBubble).
-  // Prefer the speaker-attributed "identified" transcript when present.
-  const transcriptAttachmentId = useMemo<string | null>(() => {
-    if (!conversationMessages || !call?.externalId) return null;
-    const all = conversationMessages.flatMap(m => m.attachments ?? []);
-    const matches = (type: string) =>
-      all.find(a => {
-        const meta = a.metadata as Record<string, unknown> | null;
-        return meta?.['type'] === type && meta?.['callId'] === call.externalId;
-      });
-    return (matches('identified_transcript') ?? matches('transcript'))?.id ?? null;
-  }, [conversationMessages, call?.externalId]);
-
   const durationMs =
     call?.startedAt && call?.endedAt
       ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
       : null;
 
-  const { prdEntries, handleGeneratePRD, isGeneratingPRD } = useCallPRD({
+  const { prdEntries } = useCallPRD({
     externalId: call?.externalId ?? '',
     messageId: callMessageId,
     persistedPrdCanvasIds,
-    onTabCreate: setActiveTab,
+    onTabCreate: setSelectedTab,
   });
+
+  const availableTabIds = useMemo<string[]>(
+    () => [
+      ...(hasDetailedSummaryTab ? ['detailed-summary'] : []),
+      ...prdEntries.map(prd => prd.id),
+    ],
+    [hasDetailedSummaryTab, prdEntries],
+  );
+
+  // Honour the user's pick while that tab still exists, otherwise fall back to the
+  // first tab there is. On first paint that list is empty, so nothing is active
+  // until Zero resolves and the real tabs appear.
+  const activeTab =
+    selectedTab && availableTabIds.includes(selectedTab)
+      ? selectedTab
+      : (availableTabIds[0] ?? null);
+
+  // Tabs come out of the call's conversation messages, so an unresolved query means
+  // "not known yet" rather than "this call has nothing".
+  const isTabContentLoading =
+    availableTabIds.length === 0 &&
+    Boolean(callConversationId) &&
+    conversationMessagesDetails.type !== 'complete';
 
   const updateScrollButtons = (): void => {
     const el = tabScrollRef.current;
@@ -210,224 +252,250 @@ export default function CallDetailScreen(): ReactElement {
     };
   }, [call, isMobile, openAI]);
 
-  const title = call?.title ?? 'Untitled Call';
-  const heldOn = call?.startedAt ? format(new Date(call.startedAt), 'MM/dd/yyyy, h:mm a') : null;
-  const participantCount = call ? getCallParticipantCount(call) : 0;
-  const extraParticipantCount = Math.max(participantCount - 3, 0);
-  const previewParticipants = getPreviewParticipantUsers(
-    call?.participantPreviewUserIds,
-    allUsers,
-    user?.id,
+  // The call's host, anyone who took part, or a member of the channel it happened
+  // in. Mirrors isCallAudience on the backend, which gates the same two actions.
+  const isCallAudience = Boolean(
+    user?.id &&
+    call &&
+    (call.createdByUserId === user.id ||
+      call.participants?.some(p => p.userId === user.id) ||
+      (call.channelId && visibleChannels.some(c => c.id === call.channelId))),
   );
-  const participantRows = useMemo(() => {
-    if (!call) return [];
+  // Labels are editable by that same audience.
+  const canEditLabels = isCallAudience;
 
-    return [
-      ...(call.participants ?? []).map(participant => {
-        const participantUser = participant.isExternal
-          ? null
-          : allUsers.find(candidate => candidate.id === participant.userId);
+  // `call` usually comes off navigation state, which never re-resolves from Zero,
+  // so labels are held here and reseeded when a different call is opened.
+  const [labels, setLabels] = useState<string[]>(call?.labels ?? []);
+  const labelsUpdateSeqRef = useRef(0);
+  useEffect(() => {
+    setLabels(call?.labels ?? []);
+    // Keyed on the call alone: re-running on the labels array would undo an
+    // optimistic edit, since navigation state keeps the pre-edit value forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.id]);
 
-        return {
-          id: participant.id ?? participant.userId,
-          userId: participant.userId,
-          isExternal: Boolean(participant.isExternal),
-          name: participant.isExternal
-            ? (participant.displayName ?? 'Guest')
-            : getUserDisplayName(participantUser),
-        };
-      }),
-      ...previewParticipants
-        .filter(
-          participant =>
-            !(call.participants ?? []).some(existing => existing.userId === participant.id),
-        )
-        .map(participant => ({
-          id: participant.id,
-          userId: participant.id,
-          isExternal: false,
-          name: getUserDisplayName(participant),
-        })),
-    ];
-  }, [allUsers, call, previewParticipants]);
+  /** Labels apply optimistically and roll back if the call rejects the write. */
+  const handleLabelsChange = async (next: string[]): Promise<void> => {
+    if (!call) return;
+    const previousLabels = labels;
+    const seq = ++labelsUpdateSeqRef.current;
+    setLabels(next);
+
+    try {
+      // Raw text typed in the picker becomes a real Tag server-side, so swap in
+      // the ids the response returns rather than keeping the optimistic strings.
+      const resolved = await callService.updateCallLabels(call.externalId, next);
+      if (labelsUpdateSeqRef.current === seq) setLabels(resolved);
+    } catch {
+      toast.error('Failed to update labels');
+      if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
+    }
+  };
+
+  const summary = useCallSummaryGeneration(call, fetchedCall);
+
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showGoogleDocModal, setShowGoogleDocModal] = useState(false);
+  const [emailModalNonce, setEmailModalNonce] = useState(0);
+  const [googleDocModalNonce, setGoogleDocModalNonce] = useState(0);
+  const closeGoogleDocModal = useCallback(() => setShowGoogleDocModal(false), []);
+  const googleDocExport = useCallGoogleDocExport(
+    call?.externalId ?? '',
+    call?.metadata,
+    closeGoogleDocModal,
+  );
+
+  // Connecting Google sends the browser away and back with these params. Reopen
+  // the modal it came from, remounted so it refetches what it can now do.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const email = params.get('recordingEmailConnected') === 'true';
+    const emailError = params.get('recordingEmailError');
+    const doc = params.get('recordingGoogleDocConnected') === 'true';
+    const docError = params.get('recordingGoogleDocError');
+    if (!email && !emailError && !doc && !docError) return;
+
+    if (email || emailError) {
+      if (email) toast.success('Google email connected');
+      else toast.error(emailError as string);
+      setEmailModalNonce(nonce => nonce + 1);
+      setShowEmailModal(true);
+    }
+    if (doc || docError) {
+      if (doc) toast.success('Google Docs connected');
+      else toast.error('Google Docs connection failed. Please try again.');
+      setGoogleDocModalNonce(nonce => nonce + 1);
+      setShowGoogleDocModal(true);
+    }
+
+    for (const key of [
+      'recordingEmailConnected',
+      'recordingEmailError',
+      'recordingGoogleDocConnected',
+      'recordingGoogleDocError',
+    ]) {
+      params.delete(key);
+    }
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: (location.state as { call: Call } | null) ?? null },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  const title = call?.title ?? 'Untitled Call';
+  const heldOn = formatCallHeldOn(call?.startedAt);
+  const callLength = formatCallLength(durationMs);
+
   if (!call) {
     return (
       <div className='flex items-center justify-center h-full'>
-        <p className='text-sm text-muted-foreground'>
-          Call not found. Please go back and try again.
-        </p>
+        {isResolvingCall ? (
+          <Loader2 className='size-5 animate-spin text-muted-foreground' />
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            Call not found, or you do not have access to it.
+          </p>
+        )}
       </div>
     );
   }
-  const callUpdatesChannelId = call.callUpdatesChannel ?? call.channelId;
+  const hasCallMessageLink = Boolean(callMessageChannelId && callConversationId);
+  // While a DM's participants are still loading the hook reports "Unknown User",
+  // so fall back to the neutral label rather than flashing a wrong name.
+  const postedInLabel =
+    channel && channelDisplayName && !isChannelNameLoading
+      ? `Posted in #${channelDisplayName}`
+      : 'Go to message';
 
   const handleGotoCallMessage = (): void => {
-    if (!callUpdatesChannelId || !callConversationId) return;
+    if (!callMessageChannelId || !callConversationId) return;
     void navigate(
-      `/chat/dir/${callUpdatesChannelId}/${callConversationId}#origin=${callConversationId}`,
+      `/chat/dir/${callMessageChannelId}/${callConversationId}#origin=${callConversationId}`,
     );
   };
 
-  const renderSummaryTab = (): ReactElement => {
-    if (call.aiSummary) {
-      return (
-        <div className='bot-markdown-content-call-summary prose prose-sm max-w-none text-foreground !ml-0'>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{call.aiSummary}</ReactMarkdown>
-        </div>
-      );
-    }
-    return <p className='text-sm text-muted-foreground'>No summary available for this call.</p>;
-  };
+  const pillClassName = (isActive: boolean): string =>
+    cn(
+      'flex items-center gap-1.5 shrink-0 h-8 rounded-full border px-3 text-[12.5px] font-medium transition-colors',
+      isActive
+        ? 'border-border bg-accent text-foreground'
+        : cn(
+            'border-transparent text-muted-foreground',
+            !isMobile && 'hover:bg-accent/60 hover:text-foreground',
+          ),
+    );
 
   return (
-    <div className='flex h-full overflow-hidden bg-background rounded-2xl'>
+    // `relative` scopes the canvas table-of-contents rail, which positions itself
+    // `absolute left-0`, to this screen instead of letting it escape onto the app
+    // sidebar. Mirrors the recording detail screen's root.
+    <div className='relative flex h-full overflow-hidden bg-background rounded-2xl'>
       <div className='flex-1 flex flex-col overflow-hidden min-w-0'>
-        {/* Header: breadcrumb + Generate PRD */}
-        <div className='flex items-center justify-between px-6 py-3 border-b border-border shrink-0'>
-          <div className='flex items-center gap-1.5 text-sm min-w-0'>
-            <button
-              onClick={() => void navigate('..')}
-              data-track-category='CallDetail'
-              data-track-name='breadcrumb-calls'
-              className='text-muted-foreground hover:text-foreground transition-colors shrink-0'
-            >
-              Calls
-            </button>
-            <ChevronRight className='size-3.5 text-muted-foreground shrink-0' />
-            <Tooltip content={title} delayDuration={500}>
-              <span className='text-foreground font-medium truncate max-w-xs'>{title}</span>
-            </Tooltip>
-          </div>
-
-          <div className='flex items-center gap-2 ml-4 shrink-0'>
-            {!isAIOpen && !isMobile && (
+        <div className='flex-1 overflow-y-auto'>
+          <div className='mx-auto w-full max-w-[820px] px-6 pt-6 pb-24 sm:px-8'>
+            {/* Breadcrumb + Ask AI */}
+            <div className='flex items-center gap-[7px] mb-[18px]'>
               <button
-                onClick={openAI}
+                onClick={() => void navigate('..')}
                 data-track-category='CallDetail'
-                data-track-name='open-ask-ai'
-                className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors shrink-0'
+                data-track-name='breadcrumb-calls'
+                className='text-[13px] text-muted-foreground hover:text-foreground transition-colors shrink-0'
               >
-                <img
-                  alt='Ask AI'
-                  width='16'
-                  height='16'
-                  src='/svgs/icons/ai-bot-gradient-star.svg'
-                />
-                <span className='hidden sm:inline'>Ask AI</span>
+                Calls Home
               </button>
-            )}
-            {call.channelId && callConversationId && (
-              <button
-                onClick={handleGotoCallMessage}
-                disabled={!isChannelMember}
-                data-track-category='CallDetail'
-                data-track-name='goto-call-message'
-                className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors shrink-0 disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed'
-                title={!isChannelMember ? 'You are not a member of this channel' : undefined}
-              >
-                <MessageSquare className='size-4' />
-                <span className='hidden sm:inline'>Go to Message</span>
-              </button>
-            )}
-            <button
-              onClick={() => setIsPRDModalOpen(true)}
-              disabled={isGeneratingPRD}
-              data-track-category='CallDetail'
-              data-track-name='generate-prd'
-              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0'
-            >
-              {isGeneratingPRD ? (
-                <Loader2 className='size-4 animate-spin' />
-              ) : (
-                <ClipboardList className='size-4' />
-              )}
-              <span className='hidden sm:inline'>Generate PRD</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable body */}
-        <div className='flex-1 overflow-y-auto px-8 py-8'>
-          <div className='mx-auto w-full max-w-5xl'>
-            <h1 className='text-3xl font-bold text-foreground mb-8 leading-tight'>{title}</h1>
-
-            {/* Metadata rows */}
-            <div className='flex flex-col gap-4 mb-8'>
-              {heldOn && (
-                <div className='flex items-center gap-4'>
-                  <div className='flex items-center gap-2 w-32 shrink-0 text-muted-foreground'>
-                    <Calendar className='size-4' />
-                    <span className='text-sm'>Held On</span>
-                  </div>
-                  <span className='text-sm text-foreground'>{heldOn}</span>
-                </div>
-              )}
-
-              {participantRows.length > 0 && (
-                <div className='flex items-start gap-4'>
-                  <div className='flex items-center gap-2 w-32 shrink-0 text-muted-foreground pt-0.5'>
-                    <Users className='size-4' />
-                    <span className='text-sm'>Participants</span>
-                  </div>
-                  <div className='flex items-center gap-3 min-w-0 overflow-hidden'>
-                    {participantRows.slice(0, 3).map((participant, i) => {
-                      const isLast = i === Math.min(participantRows.length, 3) - 1;
-                      return (
-                        <div
-                          key={participant.id}
-                          className={`flex items-center gap-1.5 ${isLast ? 'min-w-0' : 'shrink-0'}`}
-                        >
-                          {!participant.isExternal && participant.userId && (
-                            <Avatar
-                              userId={participant.userId}
-                              size='sm'
-                              showActiveStatus={false}
-                            />
-                          )}
-                          <span
-                            className={`text-sm text-foreground ${isLast ? 'truncate' : 'whitespace-nowrap'}`}
-                          >
-                            {participant.name}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    {extraParticipantCount > 0 && (
-                      <button
-                        onClick={() => setIsParticipantsModalOpen(true)}
-                        data-track-category='CallDetail'
-                        data-track-name='open-participants-modal'
-                        className='text-sm text-primary shrink-0 whitespace-nowrap hover:underline cursor-pointer'
-                      >
-                        +{extraParticipantCount} more
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {hasRecording && (
-                <div className='flex items-center gap-4'>
-                  <div className='flex items-center gap-2 w-32 shrink-0 text-muted-foreground'>
-                    <Music className='size-4' />
-                    <span className='text-sm'>Audio</span>
-                  </div>
-                  <div className='flex-1 max-w-md'>
-                    <AudioPlayer
-                      onLoad={signal =>
-                        recordingService.downloadRecordingBlob(call.externalId, signal)
-                      }
-                      initialDurationSec={durationMs ? durationMs / 1000 : undefined}
-                      trackCategory='CallDetail'
-                      showToastOnError
+              <span className='text-[13px] text-muted-foreground/60 shrink-0'>/</span>
+              <Tooltip content={title} delayDuration={500}>
+                <span className='min-w-0 truncate text-[13px] font-medium text-foreground/85'>
+                  {title}
+                </span>
+              </Tooltip>
+              <div className='flex-1' />
+              {!isAIOpen && !isMobile && (
+                <Tooltip content='Ask AI' delayDuration={300}>
+                  <button
+                    onClick={openAI}
+                    data-track-category='CallDetail'
+                    data-track-name='open-ask-ai'
+                    className='size-8 shrink-0 flex items-center justify-center rounded-lg transition-colors hover:bg-accent'
+                  >
+                    <img
+                      alt='Ask AI'
+                      width='18'
+                      height='18'
+                      src='/svgs/icons/ai-bot-gradient-star.svg'
                     />
-                  </div>
-                </div>
+                  </button>
+                </Tooltip>
               )}
             </div>
 
-            {/* Tabs */}
-            <div className='border-b border-border mb-6 flex items-start gap-1'>
+            {/* Title */}
+            <h1 className='text-[31px] font-semibold leading-[1.15] tracking-[-0.5px] text-foreground'>
+              {title}
+            </h1>
+
+            {/* Meta line: date · time · length · posted in */}
+            <div className='mt-2 flex flex-wrap items-center gap-x-[9px] gap-y-1 text-[13.5px] text-muted-foreground'>
+              {heldOn && <span>{heldOn}</span>}
+              {heldOn && callLength && <span className='text-muted-foreground/60'>·</span>}
+              {callLength && <span>{callLength}</span>}
+              {hasCallMessageLink && (heldOn || callLength) && (
+                <span className='text-muted-foreground/60'>·</span>
+              )}
+              {hasCallMessageLink && (
+                <Tooltip
+                  content={
+                    isChannelMember
+                      ? 'Open the call message'
+                      : 'You are not a member of this channel'
+                  }
+                  delayDuration={300}
+                >
+                  <span className='inline-flex min-w-0 max-w-full'>
+                    <button
+                      onClick={handleGotoCallMessage}
+                      disabled={!isChannelMember}
+                      data-track-category='CallDetail'
+                      data-track-name='goto-call-message'
+                      className='truncate underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground hover:decoration-muted-foreground disabled:pointer-events-none disabled:no-underline disabled:opacity-60'
+                    >
+                      {postedInLabel}
+                    </button>
+                  </span>
+                </Tooltip>
+              )}
+            </div>
+
+            {/* Participants + labels — one row, as on the recording detail header */}
+            <div className='mt-3.5 flex flex-wrap items-center gap-2'>
+              <CallParticipantsPopover call={call} currentUserId={user?.id} />
+              {(canEditLabels || labels.length > 0) && (
+                <CallLabelPicker
+                  labels={labels}
+                  canEdit={canEditLabels}
+                  suggestions={labelSuggestions}
+                  onChange={next => void handleLabelsChange(next)}
+                />
+              )}
+            </div>
+
+            {/* Recording */}
+            {hasRecording && (
+              <div className='mt-3.5 max-w-md rounded-xl border border-border bg-muted/40 px-3 py-2'>
+                <AudioPlayer
+                  onLoad={signal => recordingService.downloadRecordingBlob(call.externalId, signal)}
+                  initialDurationSec={durationMs ? durationMs / 1000 : undefined}
+                  trackCategory='CallDetail'
+                  showToastOnError
+                />
+              </div>
+            )}
+
+            {/* Tabs + primary action */}
+            <div className='mt-3.5 flex items-center gap-2.5 border-b border-border pb-3'>
               {canScrollLeft && (
                 <button
                   onClick={() => {
@@ -436,7 +504,7 @@ export default function CallDetailScreen(): ReactElement {
                   }}
                   data-track-category='CallDetail'
                   data-track-name='tabs-scroll-left'
-                  className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors mb-3'
+                  className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >
                   <ChevronLeft className='size-3.5' />
                 </button>
@@ -444,59 +512,32 @@ export default function CallDetailScreen(): ReactElement {
               <div
                 ref={tabScrollRef}
                 onScroll={updateScrollButtons}
-                className='flex gap-6 overflow-x-auto no-scrollbar min-w-0'
+                className='flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar'
               >
-                {(
-                  [
-                    { id: 'summary', label: 'Summary', icon: LayoutList },
-                    { id: 'transcript', label: 'Transcript', icon: MessageCircle },
-                    ...(hasDetailedSummaryTab
-                      ? [
-                          {
-                            id: 'detailed-summary',
-                            label: 'Detailed Summary',
-                            icon: ScrollText,
-                          },
-                        ]
-                      : []),
-                  ] as const
-                ).map(({ id, label, icon }) => {
-                  const TabIcon = icon;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => setActiveTab(id)}
-                      data-track-category='CallDetail'
-                      data-track-name={`tab-${id}`}
-                      className={cn(
-                        'pb-3 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 shrink-0',
-                        activeTab === id
-                          ? 'border-primary text-foreground'
-                          : 'border-transparent text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <TabIcon className='size-4' />
-                      {label}
-                    </button>
-                  );
-                })}
+                {hasDetailedSummaryTab && (
+                  <CallSummaryTemplatePicker
+                    selectedTemplateId={summary.selectedTemplateId}
+                    isActive={activeTab === 'detailed-summary'}
+                    onSelect={() => setSelectedTab('detailed-summary')}
+                    {...(isCallAudience ? { onRegenerate: summary.regenerate } : {})}
+                    isRegenerating={summary.isGenerating}
+                    regeneratingTemplateId={summary.request?.templateId}
+                    regeneratingTemplateName={summary.request?.templateName}
+                    className={pillClassName(activeTab === 'detailed-summary')}
+                  />
+                )}
                 {prdEntries.map(prd => (
                   <button
                     key={prd.id}
-                    onClick={() => setActiveTab(prd.id)}
+                    onClick={() => setSelectedTab(prd.id)}
                     data-track-category='CallDetail'
                     data-track-name='tab-prd'
-                    className={cn(
-                      'pb-3 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 shrink-0 max-w-[140px]',
-                      activeTab === prd.id
-                        ? 'border-primary text-foreground'
-                        : 'border-transparent text-muted-foreground hover:text-foreground',
-                    )}
+                    className={cn(pillClassName(activeTab === prd.id), 'max-w-[160px]')}
                   >
                     {prd.canvasId === null ? (
-                      <Loader2 className='size-4 animate-spin shrink-0' />
+                      <Loader2 className='size-3.5 shrink-0 animate-spin' />
                     ) : (
-                      <FileText className='size-4 shrink-0' />
+                      <FileText className='size-3.5 shrink-0' />
                     )}
                     <span className='truncate'>{prd.title}</span>
                   </button>
@@ -510,25 +551,113 @@ export default function CallDetailScreen(): ReactElement {
                   }}
                   data-track-category='CallDetail'
                   data-track-name='tabs-scroll-right'
-                  className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors mb-3'
+                  className='shrink-0 size-5 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 >
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {isCallAudience && hasDetailedSummaryTab && (
+                <DropdownMenu>
+                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setShowShareModal(true)}
+                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_modal'
+                    >
+                      <Hashtag className='size-3.5' />
+                      Post to channel
+                    </Button>
+                    {isOwner && (
+                      <>
+                        <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='iconSm'
+                            aria-label='More actions'
+                            className={POST_BUTTON_CLASS}
+                            data-track-category='CallDetail'
+                            data-track-name='open_call_actions_menu'
+                          >
+                            <ChevronDown className='size-3.5' />
+                          </Button>
+                        </DropdownMenuTrigger>
+                      </>
+                    )}
+                  </div>
+                  <DropdownMenuContent
+                    align='end'
+                    sideOffset={6}
+                    className='w-60 rounded-xl p-1.5 shadow-xl'
+                  >
+                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                      Send this summary to
+                    </p>
+                    <DropdownMenuItem
+                      onSelect={() => setShowShareModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_from_menu'
+                    >
+                      <Hashtag className='size-4 text-muted-foreground' />
+                      Post to channel
+                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                        Default
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowEmailModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_email_modal'
+                    >
+                      <EnvelopeDefault className='size-4 text-muted-foreground' />
+                      Draft follow-up email
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowGoogleDocModal(true)}
+                      disabled={googleDocExport.isExporting}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='export_call_google_doc'
+                    >
+                      <File02Text className='size-4 text-muted-foreground' />
+                      {googleDocExport.isExporting
+                        ? 'Creating Google Doc…'
+                        : 'Export to Google Docs'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
 
             {/* Tab content */}
-            <div className='w-full'>
-              {activeTab === 'summary' ? (
-                renderSummaryTab()
-              ) : activeTab === 'transcript' ? (
-                <TranscriptTab attachmentId={transcriptAttachmentId} />
+            <div className='w-full pt-6'>
+              {isTabContentLoading ? (
+                <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+                  <Loader2 className='size-4 animate-spin' />
+                  Loading...
+                </div>
               ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
-                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+                <DetailedSummaryCanvasTab
+                  key={`${detailedSummaryCanvasId}:${summary.canvasNonce}`}
+                  canvasId={detailedSummaryCanvasId}
+                />
               ) : (
                 (() => {
                   const prd = prdEntries.find(e => e.id === activeTab);
-                  if (!prd) return null;
+                  if (!prd) {
+                    return (
+                      <p className='text-sm text-muted-foreground'>
+                        No detailed summary available for this call.
+                      </p>
+                    );
+                  }
                   if (prd.canvasId === null) {
                     return (
                       <div className='flex flex-col gap-1.5'>
@@ -547,29 +676,71 @@ export default function CallDetailScreen(): ReactElement {
         </div>
       </div>
 
-      <ParticipantsModal
-        isOpen={isParticipantsModalOpen}
-        onClose={() => setIsParticipantsModalOpen(false)}
-        call={call}
-        currentUserId={user?.id}
-      />
+      {showShareModal && (
+        <Dialog
+          open={showShareModal}
+          onOpenChange={open => !open && setShowShareModal(false)}
+          title='Post to channel'
+          data-testid='post-call-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
+        >
+          <CallShareModal
+            callId={call.id}
+            externalId={call.externalId}
+            createdByUserId={call.createdByUserId}
+            onClose={() => setShowShareModal(false)}
+          />
+        </Dialog>
+      )}
 
-      <CreateDocumentModal
-        isOpen={isPRDModalOpen}
-        onClose={() => setIsPRDModalOpen(false)}
-        onGenerate={async customPrompt => {
-          setIsPRDModalOpen(false);
-          await handleGeneratePRD(customPrompt);
-        }}
-        isLoading={isGeneratingPRD}
-        title='Generate PRD'
-        description='Choose how you want to generate the Product Requirements Document.'
-        standardOptionLabel='Standard PRD'
-        standardOptionSubtext='Generate a standard PRD based on the entire call transcript.'
-        customOptionLabel='Custom Instructions'
-        customOptionSubtext='Provide specific details or focus areas for the PRD.'
-        customInputPlaceholder='E.g., Focus on the API authentication flow and error handling...'
-      />
+      {isOwner && showEmailModal && hasDetailedSummaryTab && (
+        <Dialog
+          open={showEmailModal}
+          onOpenChange={open => !open && setShowEmailModal(false)}
+          title='Review draft email'
+          description='Review the call recap before sending it by email.'
+          className='max-w-[1120px] overflow-hidden rounded-xl p-0'
+          testId='post-call-to-email-dialog'
+        >
+          <PostRecordingToEmailModal
+            key={emailModalNonce}
+            recording={{
+              externalId: call.externalId,
+              title: call.title ?? '',
+              aiSummary: call.aiSummary,
+              aiSummaryFormat: summaryFormat,
+            }}
+            onClose={() => setShowEmailModal(false)}
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
+
+      {isOwner && showGoogleDocModal && hasDetailedSummaryTab && (
+        <Dialog
+          open={showGoogleDocModal}
+          onOpenChange={open => !open && setShowGoogleDocModal(false)}
+          title='Preview Google Doc'
+          description='Review the call summary before creating a Google Doc.'
+          className='max-w-[720px] overflow-hidden rounded-[18px] p-0'
+          testId='call-google-doc-preview-dialog'
+        >
+          <GoogleDocPreviewModal
+            key={googleDocModalNonce}
+            recording={{
+              externalId: call.externalId,
+              title: call.title ?? '',
+              googleDocs: googleDocExport.documents,
+            }}
+            onClose={() => setShowGoogleDocModal(false)}
+            onExport={googleDocExport.exportDoc}
+            isExporting={googleDocExport.isExporting}
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
     </div>
   );
 }

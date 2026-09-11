@@ -10,6 +10,90 @@ import { downloadFile } from '../../../services/clients/fileFetchService';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { JSX } from 'react/jsx-runtime';
 
+export interface AttachmentViewerRawAttachment {
+  id: string;
+  originalFilename: string;
+  mimetype: string;
+  size: number;
+  thumbnailUrl?: string | null;
+}
+
+export interface AttachmentViewerRefLike {
+  attachmentId: string;
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  fileSize: number;
+  thumbnailUrl?: string | null;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+  parentMessage?: unknown;
+}
+
+export const buildAttachmentViewerPayload = <T extends AttachmentViewerRefLike>(params: {
+  targetId: string;
+  fallback: T;
+  allThreadAttachments?: T[];
+  allAttachments?: readonly AttachmentViewerRawAttachment[];
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+  parentMessage?: unknown;
+  overlay?: Partial<T>;
+}): { attachments: T[]; startIndex: number } => {
+  const {
+    targetId,
+    fallback,
+    allThreadAttachments,
+    allAttachments,
+    conversationId,
+    channelId,
+    replyCount,
+    parentMessage,
+    overlay,
+  } = params;
+
+  const siblings: T[] =
+    allThreadAttachments && allThreadAttachments.length > 0
+      ? allThreadAttachments
+      : allAttachments && allAttachments.length > 0
+        ? allAttachments.map(att => {
+            const ref: AttachmentViewerRefLike = {
+              attachmentId: att.id,
+              fileName: att.originalFilename,
+              fileUrl: `/attachments/${att.id}/download`,
+              mimeType: att.mimetype,
+              fileSize: att.size,
+            };
+            if (att.thumbnailUrl !== undefined) ref.thumbnailUrl = att.thumbnailUrl;
+            if (conversationId) ref.conversationId = conversationId;
+            if (channelId) ref.channelId = channelId;
+            if (replyCount !== undefined) ref.replyCount = replyCount;
+            if (parentMessage) ref.parentMessage = parentMessage;
+            return ref as T;
+          })
+        : [fallback];
+
+  let startIndex = siblings.findIndex(a => a.attachmentId === targetId);
+  if (startIndex === -1) {
+    startIndex = siblings.findIndex(
+      a =>
+        a.fileName === fallback.fileName &&
+        a.fileSize === fallback.fileSize &&
+        a.mimeType === fallback.mimeType,
+    );
+  }
+
+  const base = startIndex === -1 ? [fallback] : siblings;
+  const safeStartIndex = startIndex === -1 ? 0 : startIndex;
+  const attachments = overlay
+    ? base.map((a, i) => (i === safeStartIndex ? { ...a, ...overlay } : a))
+    : base;
+
+  return { attachments, startIndex: safeStartIndex };
+};
+
 /**
  * MIME type to file extension mapping
  * Used for displaying file type badges and icons

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import Papa from 'papaparse';
@@ -106,7 +107,11 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
           processParsedData(parsedData);
         },
         error: (error: Error) => {
-          console.error('Papa.parse worker error:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Papa.parse worker error:'),
+            error: error,
+          });
           // Fallback to non-worker parsing if worker fails
           // This handles cases where workers are unavailable or restricted
           Papa.parse(text, {
@@ -116,7 +121,11 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
               processParsedData(parsedData);
             },
             error: (fallbackError: Error) => {
-              console.error('Papa.parse fallback error:', fallbackError);
+              logger.error(LogEvent.FRONTEND_ERROR, {
+                type: 'migrated_console_error',
+                message: String('Papa.parse fallback error:'),
+                error: fallbackError,
+              });
               setLoading(false);
             },
           });

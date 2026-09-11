@@ -13,8 +13,13 @@ import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  matchesUserQuery,
+} from '../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { RemoveMemberDialog } from './RemoveMemberDialog';
 
 interface UserListProps {
   users: User[];
@@ -43,22 +48,24 @@ export const UserList = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const isCreateMode = !userGroupId;
   const { isMobile } = usePlatform();
+  const [removeTarget, setRemoveTarget] = useState<User | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
   // Get users matching search query (for adding)
   const searchResults = useUserSearch(searchTerm, 10);
 
   // Fetch workspace roles for the role dropdown
   const [roles] = useCachedQuery(queries.roles({}));
 
+  // The group setting decides whether removing a member can hand their open tickets off
+  const [userGroup] = useCachedQuery(queries.getUserGroupById({ userGroupId: userGroupId ?? '' }), {
+    enabled: !isCreateMode,
+  });
+
   // Filter existing users by search term
   const filteredUsers = useMemo(() => {
     if (!searchTerm.trim()) return users;
 
-    const searchLower = searchTerm.toLowerCase();
-    return users.filter(
-      user =>
-        getUserDisplayName(user).toLowerCase().includes(searchLower) ||
-        user.email?.toLowerCase().includes(searchLower),
-    );
+    return users.filter(user => matchesUserQuery(user, searchTerm));
   }, [users, searchTerm]);
 
   // Get users that can be added (not already in the group)
@@ -97,21 +104,45 @@ export const UserList = ({
     }
   };
 
-  const handleRemoveUser = (userId: string): void => {
-    // Create mode: use callback
+  const handleRemoveUser = (user: User): void => {
+    // Create mode: nothing is persisted yet, so there are no tickets to hand off
     if (isCreateMode) {
-      onRemoveUser?.(userId);
+      onRemoveUser?.(user.id);
       return;
     }
 
-    // Edit mode: call API
+    // Edit mode: confirm first — their open tickets stay with them unless handed off
+    setRemoveTarget(user);
+  };
+
+  const confirmRemoveUser = async (reassignTickets: boolean): Promise<void> => {
+    if (!removeTarget || !userGroupId) return;
+
+    const userId = removeTarget.id;
+    setIsRemoving(true);
     try {
-      zero.mutate(
+      // The handoff rides along with the removal: the server queues it only after the
+      // mapping delete commits, so a failed removal can never strand reassigned tickets.
+      const result = await zero.mutate(
         mutators.userGroup.removeUsers({
           userGroupId: userGroupId,
           userIds: [userId],
+          reassignTickets,
         }),
+      ).server;
+      if (result.type === 'error') {
+        throw new Error(result.error.message || 'Failed to remove user from group.');
+      }
+
+      // "Queued", not "handed off": the enqueue happens post-commit and the job leaves
+      // tickets in place when no eligible replacement exists.
+      toast.success(
+        'Member removed',
+        reassignTickets
+          ? { description: 'Reassignment of their open tickets has been queued.' }
+          : undefined,
       );
+      setRemoveTarget(null);
       onUserRemove?.();
     } catch (error) {
       toast.error(
@@ -119,6 +150,8 @@ export const UserList = ({
           ? error.message
           : 'Failed to remove user from group. Please try again.',
       );
+    } finally {
+      setIsRemoving(false);
     }
   };
 
@@ -225,9 +258,10 @@ export const UserList = ({
                           {/* Remove Button */}
                           {!disabled && (
                             <Button
+                              type='button'
                               variant='ghost'
                               size='sm'
-                              onClick={() => void handleRemoveUser(user.id)}
+                              onClick={() => handleRemoveUser(user)}
                               className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
                               data-track-category='UserGroups'
                               data-track-name='RemoveUserFromGroup'
@@ -292,6 +326,7 @@ export const UserList = ({
                           </div>
                         </div>
                         <Button
+                          type='button'
                           variant='outline'
                           size='sm'
                           onClick={() => void handleAddUser(user)}
@@ -318,6 +353,15 @@ export const UserList = ({
           </div>
         )}
       </div>
+
+      <RemoveMemberDialog
+        user={removeTarget}
+        canReassignTickets={userGroup?.reassignOnUnavailable === true}
+        isRemoving={isRemoving}
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={reassignTickets => void confirmRemoveUser(reassignTickets)}
+        userGroupId={userGroupId}
+      />
     </div>
   );
 };

@@ -48,6 +48,8 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
           e.stopPropagation();
           handleViewGroup();
         }}
+        data-track-category='MENTION'
+        data-track-name='OPEN_GROUP_FROM_MENTION'
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -110,6 +112,8 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
         <div className='flex justify-end px-4 py-3 border-t border-muted-foreground/20'>
           <button
             onClick={handleViewGroup}
+            data-track-category='MENTION'
+            data-track-name='OPEN_GROUP_FROM_MENTION'
             className='inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-muted hover:bg-accent rounded-md transition-colors'
           >
             <ExternalLink className='size-4' />

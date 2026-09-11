@@ -72,7 +72,7 @@ const MeetWithPanel = ({
           role='button'
           tabIndex={0}
           className='flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-muted cursor-text overflow-hidden'
-          data-track-category='calendar'
+          data-track-category='CALENDAR'
           data-track-name='meet-with-input-focus'
           onClick={() => inputRef.current?.focus()}
           onKeyDown={e => {
@@ -121,7 +121,7 @@ const MeetWithPanel = ({
               style={{ minWidth: selectedUsers.length > 0 ? '80px' : '120px' }}
               placeholder={selectedUsers.length === 0 ? 'Meet with people' : ''}
               value={query}
-              data-track-category='calendar'
+              data-track-category='CALENDAR'
               data-track-name='meet-with-search'
               onChange={e => {
                 setQuery(e.target.value);

@@ -896,38 +896,6 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    case 'workflows':
-      return (
-        <MockFrame title={title}>
-          <Shell railActive='tickets'>
-            <ScreenHeader title='Ticket Workflow' pill='#1024' />
-            <div className='flex-1 p-2 space-y-1.5 overflow-hidden'>
-              {[
-                { step: 'Assign to on-call engineer', status: 'done' },
-                { step: 'Notify #incidents channel', status: 'done' },
-                { step: 'Create RCA draft', status: 'running' },
-                { step: 'Close linked alerts', status: 'pending' },
-              ].map((w, i) => (
-                <div key={i} className='flex items-center gap-2'>
-                  {w.status === 'done' ? (
-                    <CheckCircle2 size={12} className='text-[#57ab02] shrink-0' />
-                  ) : w.status === 'running' ? (
-                    <div className='h-3 w-3 rounded-full border-2 border-[#57ab02] border-t-transparent animate-spin shrink-0' />
-                  ) : (
-                    <Circle size={12} className='text-muted-foreground/40 shrink-0' />
-                  )}
-                  <span
-                    className={`text-[10px] ${w.status === 'pending' ? 'text-muted-foreground/60' : 'text-foreground/90'}`}
-                  >
-                    {w.step}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Shell>
-        </MockFrame>
-      );
-
     /* GROUP D — Projects ─────────────────────────────────────────────────── */
 
     case 'projects-board':

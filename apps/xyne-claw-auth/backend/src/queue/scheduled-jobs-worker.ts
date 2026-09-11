@@ -117,7 +117,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     __persistedByCaller: true,
     ...(agentRow?.config ? { agentConfig: agentRow.config as Record<string, unknown> } : {}),
     // Primary provider — the pod keys its model off `provider` (defaults to
-    // "spaces"/kimi when unset). Without this, scheduled runs ran on private-large
+    // "spaces"/kimi when unset). Without this, scheduled runs used the platform default
     // regardless of the agent's configured provider.
     ...(providerParent ? { provider: providerParent } : {}),
     ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),

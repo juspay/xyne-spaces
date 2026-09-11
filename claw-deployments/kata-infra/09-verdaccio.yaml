@@ -70,6 +70,15 @@ spec:
       containers:
         - name: verdaccio
           image: verdaccio/verdaccio:5
+          # NOTE: pod still runs as runAsUser:0 above — verdaccio's PVC data is
+          # root-owned, so dropping to non-root needs an fsGroup + one-time chown
+          # migration (tracked as a follow-up). These guards are safe regardless.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: VERDACCIO_PORT
               value: "4873"

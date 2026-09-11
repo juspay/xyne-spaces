@@ -84,7 +84,13 @@ const UserRow = ({
 
       {/* Actions Column */}
       <div className='w-32 flex justify-end'>
-        <Button variant='secondary' size='sm' onClick={handleEditClick}>
+        <Button
+          variant='secondary'
+          size='sm'
+          onClick={handleEditClick}
+          data-track-category='RESOURCE_ACCESS'
+          data-track-name='EDIT_USER_ACCESS'
+        >
           Edit
         </Button>
       </div>
@@ -163,6 +169,8 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
               variant='ghost'
               size='sm'
               onClick={handlePrevPage}
+              data-track-category='RESOURCE_ACCESS'
+              data-track-name='USER_LIST_PREV_PAGE'
               disabled={currentPage === 1}
               className='h-8 w-8 p-0'
             >
@@ -175,6 +183,8 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
               variant='ghost'
               size='sm'
               onClick={handleNextPage}
+              data-track-category='RESOURCE_ACCESS'
+              data-track-name='USER_LIST_NEXT_PAGE'
               disabled={currentPage === totalPages}
               className='h-8 w-8 p-0'
             >

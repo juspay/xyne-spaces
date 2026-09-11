@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
@@ -17,9 +17,13 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
-import { executeCallLlmWithRetry, executeStreamingLlmRequest } from './callLlmRetry';
+import { executeCallLlmWithRetry, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callLabelService } from '@/services/callLabelService';
+import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
@@ -75,6 +79,11 @@ CITATION RULES:
 - Do NOT cite the Summary overview section — it is too high-level for precise citations
 - Do NOT invent segment numbers — only use numbers that appear in the transcript
 
+CALL PARTICIPANTS:
+- The call creator is: {callCreator}
+- In the Participants section, append "{HOST}" immediately after that person's name if they are listed.
+- Do not add the call creator to the Participants section if they are not otherwise a participant.
+
 MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 
 ## Summary:
@@ -106,9 +115,14 @@ You are summarizing the topic of a call in exactly 1 line.
 
 CRITICAL RULES:
 - Output EXACTLY 1 line
-- One sentence summarizing the main topic (max 100 characters)
+- One sentence summarizing the main topic (max 50 characters)
 - No quotes, no labels, no bullet points, no explanations
 - Write in plain, natural language
+
+INSUFFICIENT TRANSCRIPT:
+- Be VERY lenient here — only treat the transcript as insufficient if it is essentially empty: fewer than roughly 100 characters total, or just noise/silence/a single stray word with no real content.
+- If the TRANSCRIPT has more than that — even a short exchange — treat it as enough to identify a topic and generate a real title as normal. Do not bail out just because a call was short.
+- Only when the transcript is truly that tiny, output EXACTLY this and nothing else: Not enough content
 
 BRAND NAME CORRECTION:
 - The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
@@ -216,13 +230,18 @@ TRANSCRIPT:
 
 // Short topical labels for browsing/search. Kept intentionally simple (no
 // categories/config) — persisted as generic Tag rows by noteTakerTranscriptService.
+// Each label is a single word; multi-word labels would be slugified into
+// hyphenated tags downstream.
+const MAX_CALL_LABELS = 3;
+
 const CALL_LABELS_PROMPT = `
 You are analyzing a call transcript to generate a small set of short topical labels/tags for browsing and search.
 
 CRITICAL RULES:
 - Output ONLY valid JSON
-- Generate 1-4 short labels that best describe the topics/themes discussed
-- Each label must be 1-3 words, lowercase, describing a topic (e.g. "pricing", "bug report", "onboarding")
+- Generate 1-3 short labels that best describe the topics/themes discussed
+- Each label must be EXACTLY ONE word, lowercase (e.g. "pricing", "onboarding", "billing", "latency")
+- NEVER use multi-word labels, spaces, hyphens or underscores (write "pricing", not "pricing-discussion" or "bug report")
 - Do NOT include people's names, company names, or dates as labels
 - Do NOT duplicate labels
 
@@ -232,39 +251,7 @@ BRAND NAME CORRECTION:
 
 JSON STRUCTURE (FOLLOW EXACTLY):
 {
-  "labels": ["[short topic label]", "[short topic label]"]
-}
-
-Only output valid JSON.
-No explanations.
-
-TRANSCRIPT:
-{transcript}
-`;
-
-// Decisions/actions extraction. Transcript lines are prefixed with a "[MM:SS]"
-// (or "[HH:MM:SS]") timestamp relative to call start — the LLM is asked to
-// report that same timestamp back per item so it can be stored alongside the
-// text, instead of us trying to re-locate the sentence in the transcript.
-const MARKED_ITEMS_PROMPT = `
-You are analyzing a call transcript (each line is prefixed with a "[MM:SS]" or "[HH:MM:SS]" timestamp relative to the start of the call) to extract key decisions made and action items assigned.
-
-CRITICAL RULES:
-- Output ONLY valid JSON
-- Extract 0-15 items total across decisions and actions \u2014 only clear, concrete ones
-- For each item, use the exact "[MM:SS]" (or "[HH:MM:SS]") timestamp of the transcript line it is most closely associated with
-- "type" must be exactly "decision" or "action"
-- Keep "text" concise (one sentence)
-- If nothing clear qualifies, return an empty array for "items"
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-
-JSON STRUCTURE (FOLLOW EXACTLY):
-{
-  "items": [
-    { "type": "decision" | "action", "text": "[concise description]", "timestamp": "MM:SS" }
-  ]
+  "labels": ["[one-word topic label]", "[one-word topic label]"]
 }
 
 Only output valid JSON.
@@ -284,12 +271,6 @@ export interface TicketSuggestion {
   createdTicketId?: string;
 }
 
-export interface MarkedItem {
-  type: 'decision' | 'action' | 'moment';
-  text: string;
-  timestampSeconds: number;
-}
-
 export class TranscriptService {
   private transcriptStorage: StorageService;
 
@@ -304,7 +285,7 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string): Promise<Agent | null> {
+  private async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
     try {
       const userId = await this.getCreatedByUserIdForCall(callId);
       const credential = await orgLLMCredentialService.getCredentialByUserId(
@@ -317,7 +298,17 @@ export class TranscriptService {
       // exists yet (e.g. local/dev where AI provisioning never ran).
       const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
       const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
-      const defaultModel = credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
+      // Model tier selection: when the fast/thinking env models are configured
+      // they drive which model runs (that's the whole point of the per-user
+      // preference); otherwise fall back to the org credential's model, then the
+      // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
+      // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
+      const tierModel =
+        modelType === 'thinking'
+          ? config.llm.callRecordingThinkingLitellmModel
+          : config.llm.callRecordingFastLitellmModel;
+      const defaultModel =
+        tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
 
       if (!apiKey || !baseUrl) {
         logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
@@ -534,13 +525,7 @@ export class TranscriptService {
 
       logger.info(`[${callId}] transcript_processing_completed`, { message_id: messageId });
 
-      // 13. Fire-and-forget: Translate transcript asynchronously in background
-      // This updates the same GCS file without blocking the response
-      this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed`, { error: err });
-      });
-
-      // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
+      // 13. Attach identified transcript (real-name labelled) as a second attachment when available.
       // Written by the Python agent's RealtimeIdentifier during the call into
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
@@ -776,11 +761,6 @@ export class TranscriptService {
         });
         logger.info(`[${callId}] identified_transcript_attachment_created`, { attachment_id: attachment.id });
       }
-
-      // Apply the same background translation as the plain transcript
-      this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed`, { error: err });
-      });
     } catch (err) {
       logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err });
     }
@@ -892,203 +872,6 @@ export class TranscriptService {
   }
 
   /**
-   * Translate transcript asynchronously in background (fire-and-forget)
-   * Downloads raw transcript from GCS, translates it, and overwrites the same file
-   * @param callId - The external call ID
-   * @param gcsPath - The GCS path to the transcript file
-   */
-  async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
-    try {
-      logger.info(`Starting background translation for call: ${callId}`);
-
-      // 1. Download raw transcript
-      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      // 2. Translate the transcript
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      // 3. Re-upload translated version (overwrites the same file)
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: storagePath,
-        contentType: 'text/plain',
-        metadata: { callId, type: 'transcript', translated: 'true' },
-      });
-
-      // 4. Update database attachment metadata to mark as translated
-      const attachments = await repositories.messageAttachments.findByCallId(callId);
-
-      if (attachments.length > 0) {
-        const transcriptAttachment = attachments[0];
-        const current = await repositories.messageAttachments.findById(transcriptAttachment.id);
-        const currentMetadata = (current?.metadata as Record<string, any>) || {}; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-        await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
-          ...currentMetadata,
-        });
-        logger.info(`Updated database attachment metadata for call: ${callId}`);
-      } else {
-        logger.warn(`No attachment found in database for call: ${callId}`);
-      }
-
-      logger.info(`Successfully completed background translation for call: ${callId}`);
-    } catch (error) {
-      logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
-    }
-  }
-
-  /**
-   * Same as translateTranscriptAsync but for the identified transcript GCS file.
-   * Overwrites the identified formatted .txt with the translated version.
-   */
-  private async translateIdentifiedTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
-    try {
-      logger.info(`[${callId}] identified_translation_started`);
-
-      const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: gcsPath,
-        contentType: 'text/plain',
-        metadata: { callId, type: 'identified_transcript', translated: 'true' },
-      });
-
-      logger.info(`[${callId}] identified_translation_completed`);
-    } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed`, { error: error });
-    }
-  }
-
-  /**
-   * Post-process transcript: translate to English
-   * Handles long transcripts by chunking them into smaller pieces
-   * @param transcript - The formatted transcript text
-   * @returns Post-processed transcript or original if processing fails
-   */
-  async postProcessTranscript(transcript: string, callId?: string): Promise<string> {
-    const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
-
-IMPORTANT:
-- Keep ALL timestamps exactly as they are: [MM:SS] format
-- Keep ALL speaker names exactly as they are
-- Only translate the spoken text to English
-- Do not modify, fix, or improve the text beyond translation
-- Do not add new lines or remove existing ones
-- Do not add commentary or explanations
-- Do not use placeholders like "[...]" or "[content continues]"
-- Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
-- Translate EVERY line completely, do not skip or truncate any content
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (a product/brand name, pronounced like "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-- When any of word that phonetically sounds like XYNE appear as a standalone word or as part of a compound like "Zain Spaces", "Zine Calls", etc., replace it with "Xyne"
-- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls"), not when it is part of an unrelated proper noun or personal name
-
-Output ONLY the processed transcript, nothing else.`;
-
-    try {
-      const lines = transcript.split('\n').filter((l) => l.trim());
-      const MAX_LINES_PER_CHUNK = 100;
-
-      if (lines.length <= MAX_LINES_PER_CHUNK) {
-        const translated = await executeStreamingLlmRequest({
-          userPrompt: transcript,
-          systemPrompt: systemInstructions,
-          operation: 'transcript_translation',
-          callId,
-        });
-
-        if (!translated.ok) {
-          logger.warn(`post_process_transcript_failed | reason=${translated.reason} | using_original=true`);
-          return transcript;
-        }
-
-        logger.info('Successfully post-processed transcript (streaming translation)');
-        return translated.content;
-      }
-
-      // For long transcripts, process in chunks with LIMITED CONCURRENCY.
-      // Each chunk is a separate streaming request; a bounded worker pool keeps
-      // the number of concurrent streams in check (the previous unbounded
-      // Promise.all overwhelmed the LiteLLM deployment).
-      const CHUNK_CONCURRENCY = 3;
-      const totalChunks = Math.ceil(lines.length / MAX_LINES_PER_CHUNK);
-
-      logger.info(
-        `Transcript has ${lines.length} lines, processing in ${totalChunks} chunks of ${MAX_LINES_PER_CHUNK} (concurrency ${CHUNK_CONCURRENCY})`
-      );
-
-      // Build chunk metadata up front so results can be reassembled in order.
-      const chunks: Array<{ chunkText: string; chunkIndex: number; startLine: number; endLine: number }> = [];
-      for (let i = 0; i < lines.length; i += MAX_LINES_PER_CHUNK) {
-        const chunkLines = lines.slice(i, i + MAX_LINES_PER_CHUNK);
-        chunks.push({
-          chunkText: chunkLines.join('\n'),
-          chunkIndex: Math.floor(i / MAX_LINES_PER_CHUNK) + 1,
-          startLine: i + 1,
-          endLine: i + chunkLines.length,
-        });
-      }
-
-      const results: string[] = new Array(chunks.length);
-      let nextIndex = 0;
-
-      const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
-        logger.info(
-          `Processing chunk ${chunk.chunkIndex}/${totalChunks} (lines ${chunk.startLine}-${chunk.endLine})`
-        );
-
-        try {
-          const translated = await executeStreamingLlmRequest({
-            userPrompt: chunk.chunkText,
-            systemPrompt: systemInstructions,
-            operation: 'transcript_translation',
-            callId,
-          });
-
-          if (!translated.ok) {
-            logger.warn(`post_process_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
-            results[index] = chunk.chunkText;
-            return;
-          }
-
-          logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
-          results[index] = translated.content;
-        } catch (error) {
-          logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
-          results[index] = chunk.chunkText;
-        }
-      };
-
-      // Worker-pool: run up to CHUNK_CONCURRENCY chunks at a time.
-      const workers = Array.from(
-        { length: Math.min(CHUNK_CONCURRENCY, chunks.length) },
-        async () => {
-          while (nextIndex < chunks.length) {
-            const currentIndex = nextIndex;
-            nextIndex += 1;
-            await processChunk(chunks[currentIndex], currentIndex);
-          }
-        }
-      );
-
-      await Promise.all(workers);
-
-      const processedTranscript = results.join('\n');
-      logger.info(
-        `Successfully post-processed transcript in ${results.length} chunks (streaming translation)`
-      );
-      return processedTranscript;
-    } catch (error) {
-      logger.error('Error during transcript post-processing:', error);
-      return transcript; // Fallback to original if processing fails
-    }
-  }
-
-  /**
    * Generate AI summary from the formatted transcript
    * @param transcript - The formatted transcript text
    * @param callId - The call ID for logging
@@ -1102,11 +885,14 @@ Output ONLY the processed transcript, nothing else.`;
   /**
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
-  async generateCallSummary(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
+  async generateCallSummary(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
+    const callCreator = await this.getCallCreatorName(callId);
+    const prompt = CALL_SUMMARY_PROMPT
+      .replace('{callCreator}', callCreator || 'Unknown')
+      .replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(callId),
+      () => this.createAgent(callId, modelType),
       () => prompt,
       'call_summary',
       callId || 'unknown',
@@ -1119,19 +905,32 @@ Output ONLY the processed transcript, nothing else.`;
     return extracted.content;
   }
 
+  /** Resolve the creator's display name for the short-summary prompt. */
+  private async getCallCreatorName(callId?: string): Promise<string | null> {
+    if (!callId) return null;
+    const call = await repositories.calls.findByExternalId(callId);
+    const callCreator = call ? await repositories.users.findById(call.createdByUserId) : null;
+    return callCreator?.displayName || callCreator?.name || null;
+  }
+
   /**
    * Generate a short AI title from transcript
    * @param transcript - The formatted transcript text
-   * @returns AI-generated title (max 100 chars) or null if generation fails
+   * @returns AI-generated title (length is governed by the prompt) or null if generation fails
    */
   /**
    * Generate a short AI title from transcript with explicit retry loop.
    */
-  async generateCallTitle(transcript: string, callId?: string): Promise<string | null> {
-    const prompt = CALL_TITLE_PROMPT.replace('{transcript}', transcript);
+  async generateCallTitle(
+    transcript: string,
+    callId?: string,
+    promptTemplate = CALL_TITLE_PROMPT,
+    modelType?: SummaryModelType,
+  ): Promise<string | null> {
+    const prompt = promptTemplate.replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(callId),
+      () => this.createAgent(callId, modelType),
       () => prompt,
       'call_title',
       callId || 'unknown',
@@ -1141,7 +940,16 @@ Output ONLY the processed transcript, nothing else.`;
       return null;
     }
 
-    return extracted.content.substring(0, 100);
+    return extracted.content;
+  }
+
+  /**
+   * Generate a short AI title for a headless recording (Xyne Scribe) — same
+   * retry/extraction path as `generateCallTitle`, but using the recording-
+   * specific prompt so recording and regular-call title wording can diverge.
+   */
+  async generateRecordingTitle(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
+    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType);
   }
 
   /**
@@ -1291,7 +1099,7 @@ Output ONLY the processed transcript, nothing else.`;
 
       const labels = parsed.labels
         .filter((l: unknown): l is string => typeof l === 'string' && l.trim().length > 0)
-        .slice(0, 4);
+        .slice(0, MAX_CALL_LABELS);
 
       logger.info(`Generated ${labels.length} call labels`);
       return labels;
@@ -1301,74 +1109,34 @@ Output ONLY the processed transcript, nothing else.`;
     }
   }
 
-  /** Parse a "MM:SS" or "HH:MM:SS" string (as emitted by formatTimestamp) back to seconds. */
-  private parseTimestampToSeconds(value: unknown): number {
-    if (typeof value !== 'string') return 0;
-    const match = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
-    if (!match) return 0;
-    const hours = match[1] ? parseInt(match[1], 10) : 0;
-    const minutes = parseInt(match[2], 10);
-    const seconds = parseInt(match[3], 10);
-    return hours * 3600 + minutes * 60 + seconds;
-  }
-
   /**
-   * Generate key decisions/action items from the transcript, each anchored to
-   * the timestamp (in seconds from call start) of the transcript line it came
-   * from. Returns [] on any failure or when nothing qualifies.
+   * Generate topical labels and persist each as a Tag row, returning ids for
+   * Call.labels. Returns [] on any failure, so a bad run never clobbers good
+   * labels. `logPath` names the calling pipeline in the logs.
    */
-  async generateMarkedItems(transcript: string, callId?: string): Promise<MarkedItem[]> {
-    const logCallId = callId || 'unknown';
-    const agent = await this.createAgent(logCallId);
-    if (!agent) {
-      logger.warn('Agent creation failed. Skipping marked items generation.');
+  async generateAndSaveLabels(
+    call: Call,
+    formattedTranscript: string,
+    method: TagMethod = TagMethod.LLM,
+    logPath?: string,
+  ): Promise<string[]> {
+    const callId = call.externalId;
+    if (!call.workspaceId) {
+      logger.warn(`[${callId}] labels_skipped`, { reason: 'no_workspace', path: logPath });
       return [];
     }
 
-    const prompt = MARKED_ITEMS_PROMPT.replace('{transcript}', transcript);
-
-    try {
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
+    const labels = await this.generateCallLabels(formattedTranscript, callId).catch((err) => {
+      logger.error(`[${callId}] generate_labels_threw`, {
+        path: logPath,
+        error: err,
+        stack: err instanceof Error ? err.stack : undefined,
       });
+      return [] as string[];
+    });
+    if (labels.length === 0) return [];
 
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error(`marked_items_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
-        return [];
-      }
-
-      let jsonContent = extracted.content;
-      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
-      if (codeBlockMatch) {
-        jsonContent = codeBlockMatch[1].trim();
-      }
-
-      const parsed = JSON.parse(jsonContent);
-      if (!Array.isArray(parsed.items)) {
-        logger.error(`marked_items_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
-        return [];
-      }
-
-      const items: MarkedItem[] = parsed.items
-        .slice(0, 15)
-        .map((item: any) => {
-          const text = typeof item?.text === 'string' ? item.text.trim() : '';
-          if (!text) return null;
-          return {
-            type: item?.type === 'action' ? 'action' : 'decision',
-            text,
-            timestampSeconds: this.parseTimestampToSeconds(item?.timestamp),
-          } satisfies MarkedItem;
-        })
-        .filter((item: MarkedItem | null): item is MarkedItem => item !== null);
-
-      logger.info(`Generated ${items.length} marked items`);
-      return items;
-    } catch (error) {
-      logger.error(`marked_items_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
-      return [];
-    }
+    return callLabelService.persistGeneratedLabels(call, labels, method, logPath);
   }
 
   /**
@@ -1448,15 +1216,13 @@ Output ONLY the processed transcript, nothing else.`;
    * @param conversationId - The conversation ID of the call message
    * @param callId - The external call ID
    * @param markdownSummary - The AI-generated Markdown summary
-   * @param _createdByUserId - The user who initiated the call (no longer used as sender)
    * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
-    markdownSummary: string,
-    _createdByUserId: string,
-    ticketSuggestions?: TicketSuggestion[]
+    markdownSummary: string | null,
+    ticketSuggestions?: TicketSuggestion[],
   ) {
     logger.info(
       `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
@@ -1493,9 +1259,10 @@ Output ONLY the processed transcript, nothing else.`;
     );
 
     // ── 1. Post / update the AI summary as its own standalone message ──────────
-    const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
+    if (markdownSummary) {
+      const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
-    if (existingSummary) {
+      if (existingSummary) {
       const existingMetadata = existingSummary.metadata as any;
       const currentVersion = existingMetadata?.version || 1;
 
@@ -1515,7 +1282,7 @@ Output ONLY the processed transcript, nothing else.`;
       logger.info(
         `[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`
       );
-    } else {
+      } else {
       const summaryMessage = await repositories.messages.create({
         conversationId,
         senderId: xyneAutomaticBot.id,
@@ -1537,6 +1304,7 @@ Output ONLY the processed transcript, nothing else.`;
       logger.info(
         `[postSummaryAsReply] Summary message created: ${summaryMessage.messageId} in conversation ${conversationId}`
       );
+    }
     }
 
     // ── 3. Post ticket suggestions as batched separate messages ──────────────
@@ -1754,10 +1522,65 @@ Output ONLY the processed transcript, nothing else.`;
   }
 
   /**
+   * Delete every GCS object that holds this call's transcript. Used when the host
+   * chooses to discard the transcript at end-of-call (fully private / incognito).
+   * Best-effort and idempotent — a missing file is treated as already-deleted.
+   */
+  async deleteTranscriptArtifacts(callId: string): Promise<void> {
+    const paths = [
+      `transcriptions/${callId}.jsonl`,
+      `transcriptions/${callId}_identified.jsonl`,
+      `attachments/${callId}_formatted.txt`,
+      `attachments/${callId}_identified_formatted.txt`,
+    ];
+    for (const path of paths) {
+      try {
+        const exists = await this.transcriptStorage.fileExists(path);
+        if (exists) {
+          await this.transcriptStorage.deleteFile(path);
+          logger.info(`[${callId}] transcript_artifact_deleted`, { path });
+        }
+      } catch (error) {
+        logger.warn(`[${callId}] transcript_artifact_delete_failed`, { path, error });
+      }
+    }
+  }
+
+  /**
+   * Queue Vespa indexing for the stored transcript (call.id is the doc id).
+   * Best-effort: a queue failure is logged, never thrown, so it can run from
+   * both the normal tail of processing and the solo-call early exit.
+   */
+  private async queueTranscriptIndexing(
+    call: Pick<Call, 'id' | 'channelId' | 'createdByUserId'>,
+  ): Promise<void> {
+    try {
+      const callChannel = call.channelId
+        ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
+        : null;
+      await vespaQueue.addJob({
+        schema: fileSchema,
+        docId: call.id,
+        jobType: 'feed',
+        userId: call.createdByUserId,
+        app: SubApp.TRANSCRIPT,
+        ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
+      });
+      logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+    } catch (vespaError) {
+      logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+    }
+  }
+
+  /**
    * NOTE_TAKER (HEADLESS / "Xyne Oats") calls never reach this method — their
    * entire pipeline (transcriptReady webhook, reconcile) is routed straight to
    * noteTakerTranscriptService, which never creates or posts a message. This
    * method is for the channel/conversation-based flow only.
+   *
+   * Solo or very short calls (see callRepository.getPostCallAiSkipReason) attach
+   * and index the transcript but produce no AI outputs — no summary, title,
+   * tickets, or detailed-summary canvas.
    */
 
   async processCallWithSummary(
@@ -1797,6 +1620,20 @@ Output ONLY the processed transcript, nothing else.`;
         return;
       }
 
+      // Host kill-switch: if the host chose to discard at end-of-call (transcription was
+      // off), delete whatever was captured and skip all artifacts/indexing. This gate sits
+      // in the single processing chokepoint, so it covers the agent webhook, the legacy
+      // webhook, and the +30s room_finished reconcile alike.
+      const dispositionMeta =
+        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>).transcriptDisposition
+          : undefined;
+      if (dispositionMeta === 'discard') {
+        logger.info(`[${callId}] transcript_discarded_by_host`, { message_id: messageId });
+        await this.deleteTranscriptArtifacts(callId);
+        return;
+      }
+
       // Get the call message to retrieve conversationId for the reply
       const callMessage = await repositories.messages.findById(messageId);
       if (!callMessage) {
@@ -1820,6 +1657,20 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] post_transcript_failed`, { stage: 'post_call_transcript', error: transcriptError, stack: transcriptError instanceof Error ? transcriptError.stack : undefined });
         // Don't rethrow — retrieveTranscript below fetches raw content from GCS directly and
         // may still succeed even if the DB-side attachment step inside postCallTranscript failed.
+      }
+
+      // Solo or very short calls: keep the transcript but skip every LLM output.
+      // Headless recordings never reach this method, so the rule cannot misfire on
+      // note-taker calls.
+      const aiSkip = await repositories.calls.getPostCallAiSkipReason(call);
+      if (aiSkip.reason) {
+        logger.info(`[${callId}] ai_summary_skipped`, {
+          reason: aiSkip.reason,
+          joined_count: aiSkip.joinedCount,
+          duration_seconds: aiSkip.durationSeconds,
+        });
+        await this.queueTranscriptIndexing(call);
+        return;
       }
 
       // Retrieve and format transcript for AI.
@@ -1866,24 +1717,125 @@ Output ONLY the processed transcript, nothing else.`;
         logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
         return [];
       });
+      // Recordings already label themselves on the note-taker path; running here
+      // too would spend a second LLM call on the same tags.
+      const labelsPromise =
+        call.callType === CallType.HEADLESS
+          ? Promise.resolve([] as string[])
+          : this.generateAndSaveLabels(call, formattedTranscript);
 
-      // Preserve the existing requirement that the short summary succeeds, but
-      // do not wait for title/ticket generation before starting the detailed
-      // summary stream. This keeps peak LLM concurrency at three: the detailed
-      // request takes the short-summary slot as soon as that request finishes.
-      const summary = await summaryPromise;
-      pendingDetailedSummary = summary
-        ? callDocumentService.generateAndPostDetailedSummary(
-            callId,
-            formattedTranscript,
-            callMessage.conversationId,
-            undefined,
-            { callTitlePromise },
-          )
-        : null;
-      const [title, ticketSuggestions] = await Promise.all([
-        callTitlePromise,
-        ticketSuggestionsPromise,
+      // Start all five post-call LLM operations immediately. Detailed-summary
+      // streaming remains unchanged; title, summary, and tickets persist their
+      // own result as soon as it is ready rather than waiting on one another.
+      pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
+        callId,
+        formattedTranscript,
+        callMessage.conversationId,
+        undefined,
+        { callTitlePromise },
+      ).catch((error) => {
+        // generateAndPostDetailedSummary logs its own failure exits; reaching
+        // here means it threw outside them, so this is the only record.
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      });
+
+      const summaryUiPromise = summaryPromise.then(async (summary) => {
+        if (!summary) return null;
+        try {
+          await repositories.calls.update(call.id, { aiSummary: summary });
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+        } catch (updateError) {
+          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
+            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+            return null;
+          }
+          logger.error(`[${callId}] call_record_update_failed`, {
+            stage: 'call_record_update', error: updateError,
+            stack: updateError instanceof Error ? updateError.stack : undefined,
+          });
+        }
+
+        try {
+          await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
+        } catch (replyError) {
+          logger.error(`[${callId}] post_summary_reply_failed`, {
+            stage: 'post_summary_reply', error: replyError,
+            stack: replyError instanceof Error ? replyError.stack : undefined,
+          });
+        }
+        return summary;
+      });
+
+      const titleUiPromise = callTitlePromise.then(async (title) => {
+        if (!title) return null;
+        try {
+          if (!call.title) {
+            await repositories.calls.update(call.id, { title });
+            void callRecordingService.updateRecordingFilename(callId, title);
+          }
+
+          // Serialize with first-chunk Canvas URL attachment: both merge the
+          // call-message metadata, so neither can discard the other's fields.
+          await db.$transaction(async (tx) => {
+            const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
+              SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
+            `;
+            if (!message) {
+              logger.warn(`Call message ${messageId} not found for title update`);
+              return;
+            }
+            await tx.message.update({
+              where: { messageId },
+              data: {
+                content: title,
+                metadata: {
+                  ...(message.metadata as any),
+                  callTitle: title,
+                  callEndedText: message.content,
+                },
+              },
+            });
+          });
+          logger.info(`[${callId}] call_title_updated`);
+        } catch (error) {
+          logger.error(`[${callId}] call_title_update_failed`, { error });
+        }
+        return title;
+      });
+
+      const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
+        if (ticketSuggestions.length === 0) return ticketSuggestions;
+        try {
+          await this.postSummaryAsReply(
+            callMessage.conversationId, callId, null, ticketSuggestions,
+          );
+        } catch (ticketError) {
+          logger.error(`[${callId}] post_ticket_suggestions_failed`, {
+            error: ticketError,
+            stack: ticketError instanceof Error ? ticketError.stack : undefined,
+          });
+        }
+        return ticketSuggestions;
+      });
+
+      // appendLabels merges, so a label typed mid-processing survives this write.
+      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.appendLabels(call.id, labelIds);
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error });
+        }
+        return labelIds;
+      });
+
+      const [summary, title, ticketSuggestions] = await Promise.all([
+        summaryUiPromise,
+        titleUiPromise,
+        ticketsUiPromise,
+        labelsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;
@@ -1899,85 +1851,6 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       if (summary) {
-        // Save summary and title to call record.
-        // Skip title update for HEADLESS recordings to preserve user-provided title.
-        // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
-        const effectiveTitle = (title && !call.title) ? title : (call.title ?? null);
-        // Wrap individually so a DB failure here is distinguishable from a transcript
-        // post failure or a summary-post failure in the outer catch.
-        try {
-          await repositories.calls.update(call.id, {
-            aiSummary: summary,
-            ...(title && !call.title ? { title } : {}),
-          });
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
-        } catch (updateError) {
-          // P2025: call was deleted while summary was being generated — ignore gracefully
-          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-            return;
-          }
-          logger.error(`[${callId}] call_record_update_failed`, { stage: 'call_record_update', error: updateError, stack: updateError instanceof Error ? updateError.stack : undefined });
-        }
-
-        // Update recording attachment filename to use call title
-        if (effectiveTitle) {
-          void callRecordingService.updateRecordingFilename(callId, effectiveTitle);
-        }
-
-        // Update the call system message with the title (if generated)
-        if (title) {
-          try {
-            // Serialize with first-chunk Canvas URL attachment. Both operations
-            // merge message metadata, so the row lock prevents either concurrent
-            // writer from replacing the other's newly-added keys.
-            await db.$transaction(async (tx) => {
-              const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-                SELECT "content", "metadata"
-                FROM "messages"
-                WHERE "messageId" = ${messageId}
-                FOR UPDATE
-              `;
-
-              if (message) {
-                // Swap storage: message.content = AI description, metadata.callEndedText = original call text
-                await tx.message.update({
-                  where: { messageId },
-                  data: {
-                    content: title,
-                    metadata: {
-                      ...(message.metadata as any),
-                      callTitle: title,
-                      callEndedText: message.content,
-                    },
-                  },
-                });
-
-                logger.info(`Updated call message ${messageId} with AI description as content, original text stored in metadata`);
-              } else {
-                logger.warn(`Call message ${messageId} not found for title update`);
-              }
-            });
-          } catch (error) {
-            logger.error(`Failed to update call message with title:`, error);
-            // Don't fail the whole process if message update fails
-          }
-        }
-
-        // Wrap individually — a bot-user-not-found or DB error here produces
-        // post_summary_reply_failed rather than the generic process_call_with_summary_failed.
-        try {
-          await this.postSummaryAsReply(
-            callMessage.conversationId,
-            callId,
-            summary,
-            call.createdByUserId,
-            ticketSuggestions
-          );
-        } catch (replyError) {
-          logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', error: replyError, stack: replyError instanceof Error ? replyError.stack : undefined });
-        }
-
         // Pulse block — completely separate from Xyne tickets.
         // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
         if (config.pulse.enabledChannels.length > 0) {
@@ -2040,38 +1913,19 @@ Output ONLY the processed transcript, nothing else.`;
             const detailedSummaryResult = await detailedSummaryPromise;
             if (detailedSummaryResult.success) {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
-            } else {
-              logger.error(`[${callId}] detailed_summary_failed`, {
-                stage: 'detailed_summary_generation',
-                error: detailedSummaryResult.error || 'Unknown detailed summary failure',
-              });
             }
+            // A failure here was already logged by whichever exit gave up, so
+            // there is no second line and the alert counts one per recording.
           } catch (error) {
-            // Include stage label so LLM vs DB vs bot-message failures are distinguishable.
-            logger.error(`[${callId}] detailed_summary_failed`, { stage: 'detailed_summary_generation', error: error, stack: error instanceof Error ? error.stack : undefined });
+            logDetailedSummaryFailed(callId, 'unexpected_error', error);
           }
         }
       } else {
         // Use error (not warn) so LLM-down conditions generate alertable signal.
         logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
       }
-    // Queue Vespa indexing for the transcript (using call.id as the identifier)
-      try {
-        const callChannel = call.channelId
-          ? await db.channel.findUnique({ where: { id: call.channelId }, select: { workspaceId: true } })
-          : null;
-        await vespaQueue.addJob({
-          schema: fileSchema,
-          docId: call.id,
-          jobType: 'feed',
-          userId: call.createdByUserId,
-          app: SubApp.TRANSCRIPT,
-          ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
-        });
-        logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
-      } catch (vespaError) {
-        logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
-      }
+      // Queue Vespa indexing for the transcript (using call.id as the identifier)
+      await this.queueTranscriptIndexing(call);
 
     } catch (error) {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });

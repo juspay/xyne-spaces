@@ -73,13 +73,18 @@ export function parseComposeDraftRow(row: ComposeDraftRecord): ComposeDraftRecor
  * All of the caller's compose drafts for a channel (most-recent first). Reactive —
  * surfaces drafts saved on other devices too.
  */
-export function useComposeDrafts(channelId: string | null | undefined): ComposeDraftRecord[] {
-  const [rows] = useCachedQuery(queries.composeDraftsByChannel({ channelId: channelId || '' }), {
-    enabled: !!channelId,
-  });
+export function useComposeDrafts(channelId: string | null | undefined): {
+  drafts: ComposeDraftRecord[];
+  isLoaded: boolean;
+} {
+  const [rows, details] = useCachedQuery(
+    queries.composeDraftsByChannel({ channelId: channelId || '' }),
+    { enabled: !!channelId },
+  );
   const raw = rows as unknown as ComposeDraftRecord[] | undefined;
   // Memoized on the row snapshot so consumers keep stable references between renders.
-  return useMemo(() => (raw ?? []).map(parseComposeDraftRow), [raw]);
+  const drafts = useMemo(() => (raw ?? []).map(parseComposeDraftRow), [raw]);
+  return { drafts, isLoaded: details.type === 'complete' };
 }
 
 /**

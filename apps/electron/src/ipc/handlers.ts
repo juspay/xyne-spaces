@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -6,7 +6,7 @@ import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } 
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -16,17 +16,28 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
-import { isPillSender, setRecordingPillTheme } from '../services/recording-pill-window';
+import {
+  isPillSender,
+  isRecordingPillEnabled,
+  setRecordingPillTheme,
+} from '../services/recording-pill-window';
+import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
+  isRecordingInProgress,
   markRendererReady,
+  resumeRecordingFromOutside,
+  setCallActive,
   setOverlayMinimized,
+  setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -133,6 +144,23 @@ function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     errorLogger.warn('[ipc] Blocked privileged IPC from untrusted sender');
   }
   return trusted;
+}
+
+function isAppWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  const trusted =
+    !!frame && frame.parent === null && !!BrowserWindow.fromWebContents(event.sender);
+  if (!trusted) {
+    errorLogger.warn('[ipc] Blocked UI-preference IPC from untrusted sender');
+  }
+  return trusted;
+}
+
+function broadcastToAppWindows(channel: string, value: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send(channel, value);
+  }
 }
 
 // XYNE-16859 Issue 24: the error-report screen/mic capture handlers can enumerate
@@ -430,7 +458,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 
@@ -535,15 +563,18 @@ export function setupIpcHandlers(): void {
 
   // Meeting popup actions
   ipcMain.on('meeting-popup:dismiss', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_DISMISSED, {}, 'MeetingDetector');
     // Just close the popup — do NOT show/focus the main window
     hideMeetingPopup();
   });
 
   ipcMain.on('meeting-popup:start-recording', () => {
+    Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // Navigate and auto-start recording without stealing focus from the meeting
-      mainWindow.webContents.send('navigate-to', '/recordings');
+    if (mainWindow && !mainWindow.isDestroyed() && !isRecordingInProgress()) {
+      // Auto-start recording without stealing focus from the meeting. The
+      // renderer navigates itself — main has no workspace id, and the router is
+      // /:workspaceId/recordings.
       mainWindow.webContents.send('meeting:start-recording');
     }
     // Delay close so the popup can show the recording-started state for 3 seconds
@@ -562,6 +593,27 @@ export function setupIpcHandlers(): void {
     setOverlayMinimized(false);
   });
 
+  ipcMain.on('recording-pill:resume-recording', (event) => {
+    if (!isPillSender(event)) return;
+    resumeRecordingFromOutside('pill');
+  });
+
+  ipcMain.handle('tray:get-visible', () => isTrayVisible());
+
+  ipcMain.on('tray:set-visible', (event, visible: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setTrayVisible(!!visible);
+    broadcastToAppWindows('tray:visible-changed', isTrayVisible());
+  });
+
+  ipcMain.handle('recording-pill:get-enabled', () => isRecordingPillEnabled());
+
+  ipcMain.on('recording-pill:set-enabled', (event, enabled: unknown) => {
+    if (!isAppWindowSender(event)) return;
+    setRecordingPillEnabled(!!enabled);
+    broadcastToAppWindows('recording-pill:enabled-changed', isRecordingPillEnabled());
+  });
+
   ipcMain.on('recording:set-minimized', (event, isMinimized: unknown) => {
     if (!isMainWindowSender(event)) return;
     setOverlayMinimized(!!isMinimized);
@@ -569,10 +621,27 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on(
     'recording:state-changed',
-    (event, state: { active: boolean; startTime?: number }) => {
+    (
+      event,
+      state: {
+        active: boolean;
+        starting?: boolean;
+        startTime?: number;
+        paused?: boolean;
+        pauseStartedAt?: number | null;
+        accumulatedPausedMs?: number;
+      },
+    ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
-      syncRecordingState(!!state?.active, state?.startTime);
+      // Applied before clearing `starting`: the reverse order briefly leaves
+      // both flags false, which flickers the pill off and back on every start.
+      syncRecordingState(!!state?.active, state?.startTime, {
+        paused: !!state?.paused,
+        pauseStartedAt: state?.pauseStartedAt ?? null,
+        accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
+      });
+      setRecordingStarting(!!state?.starting);
     },
   );
 
@@ -580,6 +649,11 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setCallActive(!!inCall);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {
@@ -592,14 +666,27 @@ export function setupIpcHandlers(): void {
     syncRecordingState(false);
   });
 
+  // Seeds the renderer's meeting state. The 'meeting:detected' broadcast is
+  // fire-and-forget, so a renderer that reloads mid-meeting would otherwise
+  // never learn one is running and would ring a call it should have silenced.
+  ipcMain.handle('meeting:get-current', () => meetingDetectorService.getCurrentMeeting());
+
+  // Same reason, for the signal that actually silences the ring.
+  ipcMain.handle('mic:get-state', () => meetingDetectorService.getMicActive());
+
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
-    if (enabled) {
-      meetingDetectorService.start();
-    } else {
-      hideMeetingPopup();
-      meetingDetectorService.stop();
-    }
+    Logger.info(
+      enabled
+        ? ElectronEvent.MEETING_DETECTION_ENABLED
+        : ElectronEvent.MEETING_DETECTION_DISABLED,
+      { enabled },
+      'MeetingDetector',
+    );
+    // Only the "record this meeting?" popup. Stopping the detector here used to
+    // take the mic signal down with it, so a user who turned detection off got a
+    // full-volume ringtone through every Zoom call.
+    meetingDetectorService.setPopupEnabled(enabled);
   });
 
   // Browser Settings handlers
@@ -628,4 +715,57 @@ export function setupIpcHandlers(): void {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  const requireLocalHarness = (event: IpcMainInvokeEvent): void => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) throw new Error('Local harness is not available in this build');
+  };
+
+  ipcMain.handle('local-harness:status', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) {
+      return {
+        supported: false,
+        connected: false,
+        deviceId: null,
+        deviceName: '',
+        platform: process.platform,
+        installations: [],
+        lastError: null,
+      };
+    }
+    return localHarnessBridge.status();
+  });
+
+  ipcMain.handle('local-harness:detect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.rescan();
+  });
+
+  ipcMain.handle('local-harness:set-provider', async (event, provider: unknown, enabled: unknown) => {
+    requireLocalHarness(event);
+    if (!LOCAL_HARNESS_PROVIDERS.includes(provider as LocalHarnessProvider)) {
+      throw new Error('Unknown local harness provider');
+    }
+    return localHarnessBridge.setProviderEnabled(
+      provider as LocalHarnessProvider,
+      enabled === true,
+      await xyneCookieHeader(),
+    );
+  });
+
+  ipcMain.handle('local-harness:connect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+}
+
+async function xyneCookieHeader(): Promise<string> {
+  const cookies = await session.defaultSession.cookies.get({ url: config.FRONTEND_URL });
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }

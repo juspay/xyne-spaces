@@ -9,6 +9,9 @@ interface ActionButton {
   variant?: 'default' | 'outline' | 'ghost' | 'destructive';
   className?: string;
   testId?: string;
+  disabled?: boolean;
+  /** Distinct analytics event name; falls back to the generic Action_Modal_Button. */
+  trackName?: string;
 }
 
 interface ActionModalProps {
@@ -21,6 +24,8 @@ interface ActionModalProps {
   iconColor?: string;
   buttons: ActionButton[];
   testId?: string;
+  /** Optional custom content rendered between the description and the buttons. */
+  content?: React.ReactNode;
 }
 
 /**
@@ -39,6 +44,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
   iconColor = 'var(--action-primary)',
   buttons,
   testId,
+  content,
 }) => {
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -67,18 +73,22 @@ export const ActionModal: React.FC<ActionModalProps> = ({
           <p className='text-xs text-muted-foreground mb-4 break-words'>{description}</p>
         )}
 
+        {/* Optional custom content (e.g. the keep-transcript toggle) */}
+        {content && <div className='mb-4'>{content}</div>}
+
         {/* Buttons */}
         <div className='flex items-center justify-between gap-3'>
           {buttons.map((button, index) => (
             <Button
               key={index}
               onClick={button.onClick}
+              disabled={button.disabled ?? false}
               variant={button.variant || 'default'}
               size='sm'
               className={button.className}
               data-testid={button.testId}
-              data-track-category='Calls'
-              data-track-name='Action_Modal_Button'
+              data-track-category='CALLS'
+              data-track-name={button.trackName ?? 'Action_Modal_Button'}
               data-track-metadata={JSON.stringify({ buttonLabel: button.label, modalTitle: title })}
             >
               {button.label}

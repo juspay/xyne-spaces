@@ -2,7 +2,7 @@ import type {
   Conversation,
   ThreadConversation,
 } from '../machines/queryCacheMachine.js';
-import { serializeInitialMessageMd } from '../utils/activityMetadataParser.js';
+import { buildInitialMessageMd } from '../utils/activityMetadataParser.js';
 import { AttachmentEntityType } from '../zero/schema.js';
 import type { PendingAttachment, PendingMessage } from './pending.js';
 
@@ -49,7 +49,7 @@ export function buildPendingChannelConversation(
   const attachmentRows = buildAttachmentRows(entry);
   const hasAttachment = attachmentRows.length > 0;
 
-  const initial_message_md = serializeInitialMessageMd({
+  const initial_message_md = buildInitialMessageMd({
     messageId: entry.messageId,
     conversationId: entry.conversationId,
     workspaceId: entry.workspaceId,
@@ -57,17 +57,7 @@ export function buildPendingChannelConversation(
     content: entry.content,
     msgType: entry.type,
     hasAttachment,
-    edited: false,
-    isDeleted: false,
-    showInChannel: false,
-    visibleTo: null,
     createdAt: entry.timestamp,
-    metadata: null,
-    nudgeCount: null,
-    isSent: false,
-    reactions_md: null,
-    link_preview_md: null,
-    childConversationId: null,
   });
 
   return {

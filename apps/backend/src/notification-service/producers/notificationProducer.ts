@@ -96,7 +96,6 @@ export class NotificationProducer {
         userId,
         orgMemberId,
         type,
-        title,
       });
 
       return event.id;

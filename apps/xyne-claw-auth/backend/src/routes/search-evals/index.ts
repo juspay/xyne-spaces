@@ -7,10 +7,12 @@ import { Router } from "express";
 import { searchEvalSheetsRouter } from "./sheets.js";
 import { searchEvalRunsRouter } from "./runs.js";
 import { searchEvalExportRouter } from "./export.js";
+import { searchEvalRankProfilesRouter } from "./rank-profiles.js";
 
 const router = Router();
 router.use(searchEvalSheetsRouter);
 router.use(searchEvalRunsRouter);
 router.use(searchEvalExportRouter);
+router.use(searchEvalRankProfilesRouter);
 
 export { router as searchEvalsRouter };

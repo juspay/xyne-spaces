@@ -6,6 +6,13 @@ declare const window: {
   location: { protocol: string; hostname: string; origin: string };
 };
 
+interface RecordingPillState {
+  startTime: number;
+  paused: boolean;
+  pauseStartedAt: number | null;
+  accumulatedPausedMs: number;
+}
+
 // ── Renderer trust boundary ────────────────────────────────────────────────
 // This preload injects a *privileged* IPC bridge: mTLS key generation,
 // certificate storage, cookie/session control, screen recording, native file
@@ -89,6 +96,8 @@ const electronAPI = {
     callerEmail: string;
     callType: 'AUDIO' | 'VIDEO';
     callerPicture?: string;
+    body?: string;
+    silent?: boolean;
   }) => {
     ipcRenderer.send('show-call-notification', data);
   },
@@ -137,16 +146,52 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
   },
 
+  onAppWindowLimitReached: (callback: (limit: number) => void) => {
+    const listener = (_event: unknown, limit: number) => callback(limit);
+    ipcRenderer.on('app-window-limit-reached', listener);
+    return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
+  },
+
   onOpenInBrowserPanel: (callback: (url: string) => void) => {
     const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
 
+  onLinkOpenedExternal: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
+    ipcRenderer.on('link-opened-external', listener);
+    return () => ipcRenderer.removeListener('link-opened-external', listener);
+  },
+
   onReloadActiveBrowserTab: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('reload-active-browser-tab', listener);
     return () => ipcRenderer.removeListener('reload-active-browser-tab', listener);
+  },
+
+  onRecordingSystemSuspend: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:system-suspend', listener);
+    return () => ipcRenderer.removeListener('recording:system-suspend', listener);
+  },
+
+  onRecordingStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
+  },
+
+  onRecordingResumeRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:resume-requested', listener);
+    return () => ipcRenderer.removeListener('recording:resume-requested', listener);
+  },
+
+  onRecordingPauseRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:pause-requested', listener);
+    return () => ipcRenderer.removeListener('recording:pause-requested', listener);
   },
 
   onAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
@@ -206,12 +251,6 @@ const electronAPI = {
   exportCanvasPdf: (fileName: string, html: string) =>
     ipcRenderer.invoke('canvas:export-pdf', { fileName, html }),
 
-  // Log listener
-  onLog: (callback: (message: any) => void) => {
-    const listener = (_event: unknown, message: any) => callback(message);
-    ipcRenderer.on('electron-log', listener);
-    return () => ipcRenderer.removeListener('electron-log', listener);
-  },
   getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
   getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
   saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>
@@ -251,7 +290,9 @@ const electronAPI = {
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
       'app:theme-changed',
+      'call:state-changed',
       'meeting-popup:content-height',
+      'agent-consent:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',
       'recording:set-minimized',
@@ -275,6 +316,35 @@ const electronAPI = {
     setEnabled: (enabled: boolean) => {
       ipcRenderer.send('meeting-detection:set-enabled', enabled);
     },
+    // One subscription over both edges, so a consumer that only cares whether a
+    // meeting is running cannot end up handling one event and missing the other.
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => {
+      const onDetected = (_event: unknown, meeting: { app: string; startedAt: string }) =>
+        callback(meeting);
+      const onEnded = () => callback(null);
+      ipcRenderer.on('meeting:detected', onDetected);
+      ipcRenderer.on('meeting:ended', onEnded);
+      return () => {
+        ipcRenderer.removeListener('meeting:detected', onDetected);
+        ipcRenderer.removeListener('meeting:ended', onEnded);
+      };
+    },
+    getCurrentMeeting: (): Promise<{ app: string; startedAt: string } | null> =>
+      ipcRenderer.invoke('meeting:get-current'),
+  },
+
+  // Deliberately its own namespace rather than part of `meetingDetector`: this
+  // is raw mic activity, and unlike everything above it the meeting-detection
+  // preference has no say over it.
+  micMonitor: {
+    onStateChanged: (callback: (active: boolean) => void) => {
+      const listener = (_event: unknown, data: { active: boolean }) => callback(data.active);
+      ipcRenderer.on('mic:state-changed', listener);
+      return () => ipcRenderer.removeListener('mic:state-changed', listener);
+    },
+    getState: (): Promise<boolean> => ipcRenderer.invoke('mic:get-state'),
   },
 
   // Meeting popup (used by the popup window itself)
@@ -296,6 +366,27 @@ const electronAPI = {
     },
     dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
+  },
+
+  // Agent authorization consent modal (used by the consent window itself)
+  agentConsent: {
+    onShow: (
+      callback: (data: {
+        agentName: string;
+        agentType: string;
+        description: string;
+        requestedBy: string;
+        signed: boolean | null;
+        isKnown: boolean;
+        capabilities: string[];
+      }) => void,
+    ) => {
+      const listener = (_event: unknown, data: any) => callback(data);
+      ipcRenderer.on('agent-consent:show', listener);
+      return () => ipcRenderer.removeListener('agent-consent:show', listener);
+    },
+    respond: (result: { approved: boolean; duration: 'none' | '5min' | '1hour' | 'session' }) =>
+      ipcRenderer.send('agent-consent:respond', result),
   },
 
   // Screen Picker — in-app overlay instead of macOS native picker
@@ -323,8 +414,8 @@ const electronAPI = {
 
   // Recording pill (persistent floating pill while recording is active)
   recordingPill: {
-    onShow: (callback: (startTime: number) => void) => {
-      const listener = (_event: unknown, startTime: number) => callback(startTime);
+    onShow: (callback: (state: RecordingPillState) => void) => {
+      const listener = (_event: unknown, state: RecordingPillState) => callback(state);
       ipcRenderer.on('recording-pill:show', listener);
       return () => ipcRenderer.removeListener('recording-pill:show', listener);
     },
@@ -344,10 +435,33 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('recording:minimized-changed', listener);
     },
     stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
+    resumeRecording: () => ipcRenderer.send('recording-pill:resume-recording'),
     openApp: () => ipcRenderer.send('recording-pill:open-app'),
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('recording-pill:set-ignore-mouse', ignore),
     dragStart: () => ipcRenderer.send('recording-pill:drag-start'),
     dragEnd: () => ipcRenderer.send('recording-pill:drag-end'),
+  },
+
+  platform: process.platform,
+
+  tray: {
+    getVisible: () => ipcRenderer.invoke('tray:get-visible'),
+    setVisible: (visible: boolean) => ipcRenderer.send('tray:set-visible', visible),
+    onVisibleChanged: (callback: (visible: boolean) => void) => {
+      const listener = (_event: unknown, visible: boolean) => callback(visible);
+      ipcRenderer.on('tray:visible-changed', listener);
+      return () => ipcRenderer.removeListener('tray:visible-changed', listener);
+    },
+  },
+
+  recordingPillSettings: {
+    getEnabled: () => ipcRenderer.invoke('recording-pill:get-enabled'),
+    setEnabled: (enabled: boolean) => ipcRenderer.send('recording-pill:set-enabled', enabled),
+    onEnabledChanged: (callback: (enabled: boolean) => void) => {
+      const listener = (_event: unknown, enabled: boolean) => callback(enabled);
+      ipcRenderer.on('recording-pill:enabled-changed', listener);
+      return () => ipcRenderer.removeListener('recording-pill:enabled-changed', listener);
+    },
   },
 
   clawOverlay: {
@@ -382,14 +496,19 @@ const electronAPI = {
       return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
     },
   },
+
+  localHarness: {
+    getStatus: () => ipcRenderer.invoke('local-harness:status'),
+    detect: () => ipcRenderer.invoke('local-harness:detect'),
+    connect: () => ipcRenderer.invoke('local-harness:connect'),
+    disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    setProviderEnabled: (provider: string, enabled: boolean) =>
+      ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
+  },
 };
 
 if (isTrustedOrigin()) {
   contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 } else {
-  // eslint-disable-next-line no-console
-  console.warn(
-    '[preload] Untrusted origin — electronAPI bridge withheld:',
-    window.location.origin,
-  );
+  // The privileged bridge is intentionally withheld for untrusted origins.
 }

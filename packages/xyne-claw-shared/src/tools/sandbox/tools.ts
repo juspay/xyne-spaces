@@ -1,8 +1,21 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+import { SDLC_TOOL_NAMES } from "../sdlc-registry.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
+import { createLogger } from "../../logger.js";
+import { readFile } from "node:fs/promises";
+import { resolve, join, sep } from "node:path";
+import {
+  cleanupSdlcGitCredentialMaterial,
+  installSdlcGitCredentialBootstrap,
+  type SdlcRuntimeCredentialBinding,
+} from "./sdlc-credential-bootstrap.js";
+import { classifyWikiCommitRelevance, parseWikiNameStatus } from "./sdlc-wiki-policy.js";
+
+const sandboxLog = createLogger("sandbox-tools");
 
 // Build a redacted `Error: ...` string from a caught error. Several tool
 // catch blocks interpolate err.message straight into tool output, which can
@@ -15,7 +28,7 @@ function sandboxErr(err: unknown): string {
 // exfiltrated as base64/binary (which bypasses pattern redaction on text reads).
 function isCredentialPath(p: string): boolean {
   const s = p.toLowerCase();
-  return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
+  return /(^|\/)\.ssh(\/|$)|id_rsa|id_ed25519|\.git-credentials|\.sdlc-git-credential|\/tmp\/ssh-keys|\/tmp\/github-ssh-keys|\/tmp\/attic|\.netrc|\.npmrc|\.docker\/config|known_hosts/.test(s);
 }
 
 const SESSION_STORE = new Map<string, Session>();
@@ -183,14 +196,18 @@ export function buildSandboxStoreKey(userId: string | undefined, conversationId:
   return slug ? `${cidSeg}_${slug}` : cidSeg;
 }
 
-function isStaleSessionError(err: unknown): boolean {
+export function isStaleSessionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
 function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
   const userId = context?.meta?.["userId"]?.trim();
-  const conversationId = context?.meta?.["conversationId"]?.trim();
+  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
+  const conversationId =
+    context?.meta?.["sdlcWikiRun"] === "true" && executionId
+      ? `chat-sdlc-wiki-${executionId}`
+      : context?.meta?.["conversationId"]?.trim();
   if (!userId || !conversationId) return undefined;
   return {
     userId,
@@ -200,11 +217,121 @@ function ownerFromContext(context: { meta?: Record<string, string> } | undefined
 }
 
 function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
+  const executionId = context?.meta?.["sdlcExecutionId"]?.trim();
+  const conversationId =
+    context?.meta?.["sdlcWikiRun"] === "true" && executionId
+      ? `chat-sdlc-wiki-${executionId}`
+      : context?.meta?.["conversationId"];
   return buildSandboxStoreKey(
     context?.meta?.["userId"],
-    context?.meta?.["conversationId"],
+    conversationId,
     context?.meta?.["agentSlug"],
   );
+}
+
+const EXPERIMENT_IDLE_SLACK_MS = 20 * 60_000;
+const EXPERIMENT_IDLE_FLOOR_MS = 30 * 60_000;
+const EXPERIMENT_IDLE_CAP_MS = 3 * 60 * 60_000;
+
+export function experimentIdleTimeoutMs(ctx: ToolExecutionContext): number | undefined {
+  const raw = ctx.meta?.["experimentDeadlineAt"];
+  if (!raw) return undefined;
+  const deadlineMs = Date.parse(raw);
+  if (!Number.isFinite(deadlineMs)) return undefined;
+  const wantedMs = deadlineMs - Date.now() + EXPERIMENT_IDLE_SLACK_MS;
+  return Math.min(EXPERIMENT_IDLE_CAP_MS, Math.max(EXPERIMENT_IDLE_FLOOR_MS, wantedMs));
+}
+
+function idleTimeoutForSessionCreation(
+  context: ToolExecutionContext,
+  explicitIdleTimeoutMs: number | undefined,
+  fallbackIdleTimeoutMs: number,
+): number {
+  if (explicitIdleTimeoutMs !== undefined) return explicitIdleTimeoutMs;
+  const experimentIdleMs = experimentIdleTimeoutMs(context);
+  if (experimentIdleMs !== undefined) {
+    sandboxLog.info(
+      `[sandbox] applying experiment idle timeout default: ${Math.ceil(experimentIdleMs / 60_000)} min`,
+      { experimentIdleTimeoutMs: experimentIdleMs },
+    );
+    return experimentIdleMs;
+  }
+  return fallbackIdleTimeoutMs;
+}
+
+const AUTH_URL_DEFAULT = "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
+
+/** POST to the experiment control plane. Best-effort by design: a control-plane
+ * outage must never fail the sandbox tool whose real work already succeeded.
+ * No-ops when the run isn't an experiment. */
+async function postToExperiment(
+  context: ToolExecutionContext,
+  suffix: string,
+  payload: Record<string, unknown>,
+  logContext: Record<string, unknown>,
+): Promise<void> {
+  const experimentId = context.meta?.["experimentId"]?.trim();
+  if (!experimentId) return;
+
+  const authUrl = (
+    context.config["XYNE_CLAW_AUTH_URL"] ??
+    process.env["XYNE_CLAW_AUTH_URL"] ??
+    AUTH_URL_DEFAULT
+  ).replace(/\/+$/, "");
+  const s2sKey =
+    context.s2sKey ??
+    context.config["XYNE_CLAW_S2S_KEY"] ??
+    process.env["XYNE_CLAW_S2S_KEY"] ??
+    "";
+
+  const warn = (error: string) =>
+    sandboxLog.warn(`[sandbox] experiment ${suffix} report failed; continuing`, { experimentId, ...logContext, error });
+
+  if (!s2sKey) {
+    warn("XYNE_CLAW_S2S_KEY is unavailable");
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${authUrl}/claw/api/v1/internal/experiments/${encodeURIComponent(experimentId)}${suffix}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-s2s-key": s2sKey },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) warn(`HTTP ${response.status}`);
+  } catch (err) {
+    warn(redactSecrets(err instanceof Error ? err.message : String(err)));
+  }
+}
+
+/** Persist an experiment's newly-created sandbox id outside the ephemeral claw
+ * process, so a later epoch can reuse the sandbox instead of spawning another. */
+async function reportExperimentSandboxCreated(
+  context: ToolExecutionContext,
+  session: Session,
+  template: string,
+): Promise<void> {
+  const epoch = context.meta?.["experimentEpoch"]?.trim() || "unknown";
+  await postToExperiment(
+    context,
+    "/sandbox-note",
+    { note: `sandboxId=${session.id} template=${template} createdAtEpoch=${epoch}` },
+    { sandboxId: session.id },
+  );
+}
+
+/** Register files that actually reached the thread. The control plane gates
+ * `proved` on this list — proof left inside a sandbox dies with the sandbox. */
+async function reportExperimentDelivery(
+  context: ToolExecutionContext,
+  filenames: string[],
+): Promise<void> {
+  if (filenames.length === 0) return;
+  await postToExperiment(context, "/delivered", { filenames }, { filenames: filenames.length });
 }
 
 function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
@@ -232,8 +359,20 @@ function isSessionOwnedByContext(session: Session, lookupKey: string | undefined
     SESSION_OWNER.get(session.id);
   const caller = ownerFromContext(context);
   if (!owner || !caller) return false;
-  return owner.userId === caller.userId &&
-    owner.conversationId === caller.conversationId &&
+  // Match the SAME identity buildSandboxStoreKey uses, or the two disagree.
+  // That key deliberately EXCLUDES userId (a thread's sandbox is shared by every
+  // user in that thread for the same agent), so comparing userId here locked out
+  // every participant except whoever happened to create the session: the lookup
+  // hands you a thread-shared session and this check then refuses it.
+  // Observed 2026-08-25 on credit-doctor — a second user in the thread could not
+  // run, destroy, or recreate the sandbox; every recovery path returned
+  // "not authorized for this user/conversation", including sandbox-destroy, so
+  // the thread could not be unwedged by anyone but the original caller.
+  // userId is part of the identity only for PER_USER_SESSION_AGENTS, which are
+  // exactly the agents whose store key folds userId in.
+  const perUserAgent = !!caller.agentSlug && PER_USER_SESSION_AGENTS.has(caller.agentSlug);
+  if (perUserAgent && owner.userId !== caller.userId) return false;
+  return owner.conversationId === caller.conversationId &&
     owner.agentSlug === caller.agentSlug;
 }
 
@@ -297,6 +436,24 @@ export function getSandboxSession(storeKey: string): Session | undefined {
   return SESSION_STORE.get(storeKey);
 }
 
+/** Remove run-bound Git credential material without destroying reusable sandboxes. */
+export async function cleanupSdlcSandboxCredentialsForContext(
+  context: ToolExecutionContext,
+): Promise<void> {
+  const cleaned = new Set<Session>();
+  for (const [lookupKey, session] of SESSION_STORE.entries()) {
+    if (
+      cleaned.has(session) ||
+      READONLY_SESSIONS.has(session.id) ||
+      !isSessionOwnedByContext(session, lookupKey, context)
+    ) {
+      continue;
+    }
+    cleaned.add(session);
+    await cleanupSdlcGitCredentialMaterial(session).catch(() => undefined);
+  }
+}
+
 export { probeSession };
 
 export interface HealthCheck {
@@ -340,6 +497,11 @@ export interface RepoSetupConfig {
   repoUrl?: string;
   defaultBranch: string;
   cloneDepth?: number;
+  /** Git partial-clone filter. Wiki sandboxes use blobless history so old
+   *  source is fetched lazily instead of cloning every historical blob. */
+  cloneFilter?: "blob:none" | "tree:0";
+  cloneSingleBranch?: boolean;
+  cloneTimeoutMs?: number;
   workDir: string;
   template: string;
   sessionTimeoutMs?: number;
@@ -369,6 +531,32 @@ export interface RepoSetupConfig {
   // The tool input schema then gains `auxBranches: Record<name, branch>`
   // letting the agent override branches on these repos at claim time.
   auxRepos?: AuxRepo[];
+  /** Generic repositories are not baked into their template. Skip the golden
+   * clone probe and clone them immediately. */
+  skipBakedCloneWait?: boolean;
+  /** Durable binding used to mint a fresh one-use envelope for each sandbox bootstrap. */
+  runtimeCredentialBinding?: SdlcRuntimeCredentialBinding;
+}
+
+export function buildRepoCloneCommand(
+  config: RepoSetupConfig,
+  baseBranch: string,
+): string {
+  if (!config.repoUrl) {
+    throw new Error("Repository URL is required for clone");
+  }
+
+  return [
+    "git clone",
+    config.cloneDepth ? `--depth ${config.cloneDepth}` : "",
+    config.cloneFilter ? `--filter=${config.cloneFilter}` : "",
+    config.cloneSingleBranch ? "--single-branch" : "",
+    `--branch ${baseBranch}`,
+    config.repoUrl,
+    config.workDir,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export const SANDBOX_CONFIG_SCHEMA = {
@@ -460,11 +648,26 @@ export const sandboxCreate: ToolDefinition = {
     const storeKey = storeKeyFromContext(context);
     if (!storeKey) return "Error: No userId/conversationId in context.";
     const timeoutMs = (params["timeoutMs"] as number | undefined) ?? 60 * 60 * 1000;
-    const idleTimeoutMs = (params["idleTimeoutMs"] as number | undefined) ?? 10 * 60 * 1000;
+    const idleTimeoutMs = idleTimeoutForSessionCreation(
+      context,
+      params["idleTimeoutMs"] as number | undefined,
+      10 * 60 * 1000,
+    );
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const template = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    // ROTATE, exactly as the repo-setup path does. Without this, every
+    // sandbox-create on a pinned agent clones the BASE template's single
+    // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
+    // which is deliberately the base name (ROTATION_SETS is KEYED by it), so
+    // skipping rotation concentrates every claim on one GCP snapshot and trips
+    // its per-source op-rate limit. Measured 2026-08-25: agent-workspace and
+    // xyne-cli both stormed with RESOURCE_OPERATION_RATE_EXCEEDED and ~35
+    // Pending pods cluster-wide, while the four a/b/c/d rotation pools sat
+    // absorbing nothing. rotateTemplate() returns non-rotated templates
+    // unchanged, so this is a no-op for every template without a rotation set.
+    const template = requestedTemplate ? rotateTemplate(requestedTemplate) : requestedTemplate;
 
     const existing = SESSION_STORE.get(storeKey);
     if (existing) {
@@ -482,6 +685,11 @@ export const sandboxCreate: ToolDefinition = {
       const client = makeClient(context.config, template);
       const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
       rememberSession(storeKey, session, template, ownerFromContext(context));
+      await reportExperimentSandboxCreated(
+        context,
+        session,
+        template ?? context.config["KATA_TEMPLATE"] ?? "kata-workspace-template",
+      );
       return JSON.stringify({ sessionId: session.id, status: "ready" });
     } catch (err) {
       return sandboxErr(err);
@@ -589,7 +797,11 @@ export const sandboxRun: ToolDefinition = {
     // never the legacy kata default.
     try {
       const pinnedTemplate = await pinnedTemplateForContext(context);
-      const client = makeClient(context.config, pinnedTemplate);
+      // Rotate here too — a one-shot exec still provisions a VM from the
+      // template's snapshot, so an un-rotated base name concentrates clones
+      // the same way sandbox-create did.
+      const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
+      const client = makeClient(context.config, oneShotTemplate);
       const result = await client.exec(cmd, { timeoutMs });
       return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
     } catch (err) {
@@ -764,6 +976,189 @@ export const sandboxWriteFile: ToolDefinition = {
   },
 };
 
+/**
+ * Surgical string-replace edit — the revision fast path. Without it every
+ * design/code revision re-emits the ENTIRE file through sandbox-write-file
+ * (tens of thousands of tokens for one changed line, minutes of decode).
+ * Same contract as claw's own Edit tool: oldString must match exactly once
+ * unless replaceAll, so a bad match can never silently corrupt the file.
+ */
+export const sandboxEditFile: ToolDefinition = {
+  slug: "sandbox-edit-file",
+  name: "Sandbox Edit File",
+  description:
+    "Edit an existing text file in the sandbox by exact string replacement — MUCH faster than rewriting the whole file with sandbox-write-file. " +
+    "oldString must appear exactly once in the file (or pass replaceAll: true). Include enough surrounding context to make it unique.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Session ID returned by sandbox-create",
+      },
+      path: {
+        type: "string",
+        description: "Absolute path inside the sandbox (e.g. /workspace/design.html)",
+      },
+      oldString: {
+        type: "string",
+        description: "Exact text to replace, including whitespace/indentation. Must match exactly once unless replaceAll.",
+      },
+      newString: {
+        type: "string",
+        description: "Replacement text.",
+      },
+      replaceAll: {
+        type: "boolean",
+        description: "Replace every occurrence instead of requiring a unique match. Default false.",
+      },
+    },
+    required: ["sessionId", "path", "oldString", "newString"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const path = params["path"] as string;
+    const oldString = params["oldString"] as string;
+    const newString = params["newString"] as string;
+    const replaceAll = params["replaceAll"] === true;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+    if (!oldString) return "Error: oldString must be non-empty.";
+    if (oldString === newString) return "Error: oldString and newString are identical.";
+
+    try {
+      const current = (await session.files.read(path)).toString("utf8");
+      const count = current.split(oldString).length - 1;
+      if (count === 0) {
+        return `Error: oldString not found in ${path}. Read the file and copy the exact text (including whitespace).`;
+      }
+      if (count > 1 && !replaceAll) {
+        return `Error: oldString matches ${count} times in ${path}. Add surrounding context to make it unique, or pass replaceAll: true.`;
+      }
+      const next = replaceAll ? current.split(oldString).join(newString) : current.replace(oldString, newString);
+      await session.files.write(path, Buffer.from(next, "utf8"));
+      return JSON.stringify({ path, replaced: replaceAll ? count : 1 });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
+/**
+ * Copy a companion file from THIS run's materialized skill directory directly
+ * into the sandbox — server-side, so the bytes never round-trip through the
+ * model's context (no token cost, no base64 corruption of binaries, no
+ * truncation of large scripts). This is the ergonomic path for "a skill ships
+ * a script, run it in the sandbox": instead of reading the file into context
+ * and re-emitting it through sandbox-write-file, point at the skill file and
+ * the runtime streams the bytes across.
+ *
+ * Confinement: the source is resolved ONLY under this run's session-skills
+ * root (`context.meta.skillsRoot`, injected by the claw runtime as
+ * `<dataDir>/session-skills/<sessionId>` — the SAME directory the agent's
+ * read tools are granted). Absolute inputs and `..` traversal that escape that
+ * root are rejected, so this can't read another user's session or arbitrary
+ * pod files.
+ */
+export const sandboxCopyIn: ToolDefinition = {
+  slug: "sandbox-copy-in",
+  name: "Sandbox Copy Skill File",
+  description:
+    "Copy a companion file bundled with a loaded skill (a script or asset in the skill's folder) directly into a sandbox session, WITHOUT pasting its content. " +
+    "Prefer this over sandbox-write-file when a skill ships a script/binary you need to run in the sandbox: the file is streamed server-side, so large or binary files stay intact and don't bloat context. " +
+    "`skillPath` is relative to the skill directory shown in the skill's <location> (e.g. 'sandbox-record-video/scripts/recorder.mjs').",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: {
+        type: "string",
+        description: "Sandbox session ID returned by sandbox-create / sandbox-repo-setup",
+      },
+      skillPath: {
+        type: "string",
+        description:
+          "Path of the skill companion file RELATIVE to this run's session-skills root, e.g. '<skill-slug>/scripts/run.sh'. Leading '/' and '..' are rejected.",
+      },
+      destPath: {
+        type: "string",
+        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of skillPath>).",
+      },
+    },
+    required: ["sessionId", "skillPath"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const sessionId = params["sessionId"] as string;
+    const skillPathRaw = params["skillPath"] as string;
+    const destPathRaw = params["destPath"] as string | undefined;
+
+    const skillsRoot = context.meta?.["skillsRoot"];
+    if (!skillsRoot) {
+      return "Error: No skills are materialized for this run (context.meta.skillsRoot is unset), so there is nothing to copy in. Use sandbox-write-file for ad-hoc content.";
+    }
+    if (typeof skillPathRaw !== "string" || skillPathRaw.trim().length === 0) {
+      return "Error: skillPath must be a non-empty path relative to the skill directory.";
+    }
+
+    // Confine the source to THIS run's session-skills root. Reject absolute
+    // inputs and any '..' traversal that escapes the root — otherwise this
+    // becomes an arbitrary pod-file / cross-session read primitive.
+    const rootAbs = resolve(skillsRoot);
+    const sourceAbs = resolve(join(rootAbs, skillPathRaw));
+    if (sourceAbs !== rootAbs && !sourceAbs.startsWith(rootAbs + sep)) {
+      return "Error: skillPath escapes the skill directory. Pass a path relative to the skill folder (no leading '/' and no '..').";
+    }
+    if (isCredentialPath(sourceAbs)) {
+      return JSON.stringify({ error: "Refused: path looks like a credential file" });
+    }
+
+    const destPath =
+      typeof destPathRaw === "string" && destPathRaw.trim().length > 0
+        ? destPathRaw.trim()
+        : `/workspace/${sourceAbs.split("/").pop()}`;
+
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    const roWrite = readOnlyGuard(session, { write: true });
+    if (roWrite) return roWrite;
+
+    try {
+      const buf = await readFile(sourceAbs);
+      await session.files.write(destPath, buf);
+      return JSON.stringify({ skillPath: skillPathRaw, destPath, bytes: buf.length, copied: true });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+      }
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return `Error: Skill file not found at '${skillPathRaw}'. Check the path relative to the skill's <location> directory.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
+
 const BINARY_MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
@@ -898,10 +1293,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
 
     const blocks: string[] = [];
     const errors: string[] = [];
+    const deliveredNames: string[] = [];
     for (const p of paths) {
       try {
         const buf = await session.files.read(p);
         const fileName = p.split("/").pop() ?? "file";
+        deliveredNames.push(fileName);
         const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
         const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
         blocks.push(`[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`);
@@ -917,6 +1314,10 @@ export const sandboxDeliverFiles: ToolDefinition = {
     if (blocks.length === 0) {
       return `Error: failed to read any of ${paths.length} file(s):\n${errors.join("\n")}`;
     }
+
+    // Only files that actually produced an attachment block are reported —
+    // this list is what lets a finding be marked `proved`.
+    await reportExperimentDelivery(context, deliveredNames);
 
     // Concatenate ATTACHMENT blocks. xyne-claw's custom-tools.ts scans for all
     // matches and emits one attachment per block. Trailing error notes are
@@ -1121,10 +1522,11 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         const client = makeClient(context.config, config.template);
         const session = await client.createSession({
           timeoutMs: noRepoDuration,
-          idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+          idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
           template: config.template,
         });
         rememberSession(storeKey, session, config.template, ownerFromContext(context));
+        await reportExperimentSandboxCreated(context, session, config.template);
         return JSON.stringify({ sessionId: session.id, status: "ready", template: config.template, ports: config.ports || {} });
       }
 
@@ -1205,6 +1607,18 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
           if (isRepoTemplate && await probeSession(cached, storeKey)) {
             log.push(`Reusing existing sandbox session ${cached.id}`);
+            if (config.runtimeCredentialBinding) {
+              await cleanupSdlcGitCredentialMaterial(cached).catch(() => undefined);
+              const credentialMode = await installSdlcGitCredentialBootstrap(
+                cached,
+                config.runtimeCredentialBinding,
+              );
+              log.push(
+                credentialMode === "credential"
+                  ? "SDLC bootstrap refreshed: PAT helper and PAT-account commit identity installed."
+                  : "SDLC bootstrap refreshed: anonymous read-only Git access selected.",
+              );
+            }
             try {
               // The pod prebakes a shallow clone of the default branch.
               // branchName might be:
@@ -1237,7 +1651,11 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // Refresh git identity on reuse too — the userEmail/userName in
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
-            await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            if (config.runtimeCredentialBinding) {
+              log.push("SDLC Git access binding refreshed for this run.");
+            } else {
+              await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            }
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -1265,12 +1683,30 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       const client = makeClient(context.config, claimTemplate);
       const session = await client.createSession({
         timeoutMs: sessionDurationMs,
-        idleTimeoutMs: config.idleTimeoutMs || 60 * 60 * 1000,
+        idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
         template: claimTemplate,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
       });
       rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
+      await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
+      if (config.runtimeCredentialBinding) {
+        try {
+          const credentialMode = await installSdlcGitCredentialBootstrap(
+            session,
+            config.runtimeCredentialBinding,
+          );
+          log.push(
+            credentialMode === "credential"
+              ? "SDLC bootstrap completed: PAT helper and PAT-account commit identity installed."
+              : "SDLC bootstrap completed: anonymous read-only Git access selected.",
+          );
+        } catch (error) {
+          await session.destroy().catch(() => undefined);
+          evictSession(session, storeKey);
+          throw error;
+        }
+      }
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
         const deadline = Date.now() + timeoutMs;
@@ -1307,8 +1743,8 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // hit it once the prebake's clone step lands (typically <60s).
       // If it really never appears (network failure on git clone), we
       // fall through to the manual-clone safety net as before.
-      log.push("Waiting for baked clone to appear...");
-      const cloneWaitDeadline = Date.now() + 10 * 60_000;
+      log.push(config.skipBakedCloneWait ? "Generic repository; cloning immediately..." : "Waiting for baked clone to appear...");
+      const cloneWaitDeadline = config.skipBakedCloneWait ? Date.now() : Date.now() + 10 * 60_000;
       let bakedCloneFound = false;
       while (Date.now() < cloneWaitDeadline) {
         try {
@@ -1438,10 +1874,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // Should never happen with the agent-workspace image (entrypoint
         // prebakes the clone), but kept as a safety net for older / bare
         // sandbox templates that haven't been migrated.
-        const cloneCmd = `git clone ${config.cloneDepth ? `--depth ${config.cloneDepth}` : ""} --branch ${baseBranch} ${config.repoUrl} ${config.workDir}`;
+        const cloneCmd = buildRepoCloneCommand(config, baseBranch);
         log.push(`No baked clone — cloning ${config.repoUrl} (${baseBranch})...`);
         const cloneJobId = await session.commands.runDetached(cloneCmd);
-        await pollUntilDone(cloneJobId, "git clone", 5 * 60_000);
+        await pollUntilDone(cloneJobId, "git clone", config.cloneTimeoutMs ?? 5 * 60_000);
         log.push("Cutting branch: " + branchName);
         const branchJobId = await session.commands.runDetached(
           `cd ${config.workDir} && (git checkout ${branchName} 2>/dev/null || git checkout -b ${branchName})`,
@@ -1457,7 +1893,11 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
-      await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
+      if (config.runtimeCredentialBinding) {
+        log.push("SDLC Git access binding configured for this run.");
+      } else {
+        await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
+      }
 
       const jobIds: Record<string, string> = {};
 
@@ -1677,6 +2117,411 @@ export const gitRead: ToolDefinition = {
   },
 };
 
+const WIKI_GIT_SHA = /^[0-9a-f]{40}$/i;
+const WIKI_GIT_REF = /^[0-9a-f]{9,40}$/i;
+const WIKI_GIT_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[^\0\r\n]+$/;
+const WIKI_GIT_CUMULATIVE_OUTPUT_LIMIT = 5_000_000;
+export const WIKI_GIT_COMMAND_TIMEOUT_MS = 120_000;
+export const WIKI_GIT_METADATA_TIMEOUT_MS = 30_000;
+const WIKI_GIT_OUTPUT_BYTES = new Map<string, number>();
+
+class WikiGitCommandTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Wiki Git sandbox command exceeded the ${timeoutMs}ms wall-clock deadline`);
+    this.name = "WikiGitCommandTimeoutError";
+  }
+}
+
+/**
+ * The sandbox SDK receives its own timeout, but a disconnected command stream
+ * can fail to settle that promise. Keep the agent run bounded independently.
+ */
+export async function withWikiGitWallClockTimeout<T>(
+  startOperation: () => Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new WikiGitCommandTimeoutError(timeoutMs)), timeoutMs);
+      timer.unref?.();
+    });
+    // Defer the SDK invocation by one microtask so the deadline is armed even
+    // when the SDK does synchronous work before returning its command promise.
+    const operation = Promise.resolve().then(startOperation);
+    return await Promise.race([operation, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function runWikiGitCommand(session: Session, command: string, timeoutMs: number) {
+  return withWikiGitWallClockTimeout(() => session.commands.run(command, timeoutMs), timeoutMs);
+}
+
+function wikiGitSandboxFailure(
+  error: unknown,
+  session: Session,
+  storeKey: string,
+): string | null {
+  if (error instanceof WikiGitCommandTimeoutError) {
+    evictSession(session, storeKey);
+    void session.destroy().catch(() => undefined);
+    return "Error: sandbox command timed out; sandbox was evicted — call sandbox-repo-setup to recreate it.";
+  }
+  if (isStaleSessionError(error)) {
+    evictSession(session, storeKey);
+    return "Error: sandbox session died; call sandbox-repo-setup to recreate it.";
+  }
+  return null;
+}
+
+export function wikiGitOutputBudgetKey(
+  context: ToolExecutionContext,
+  sandboxStoreKey: string,
+): string {
+  const agentSessionId = context.meta?.["sdlcSessionId"]?.trim();
+  return agentSessionId ? `${sandboxStoreKey}:${agentSessionId}` : sandboxStoreKey;
+}
+
+function recordWikiGitOutput(key: string, bytes: number): void {
+  if (!WIKI_GIT_OUTPUT_BYTES.has(key) && WIKI_GIT_OUTPUT_BYTES.size >= 1_000) {
+    const oldest = WIKI_GIT_OUTPUT_BYTES.keys().next().value;
+    if (typeof oldest === "string") WIKI_GIT_OUTPUT_BYTES.delete(oldest);
+  }
+  WIKI_GIT_OUTPUT_BYTES.set(key, bytes);
+}
+
+export function truncateWikiGitOutput(value: string, maxBytes: number): {
+  value: string;
+  totalBytes: number;
+  truncated: boolean;
+} {
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maxBytes) return { value, totalBytes: buffer.length, truncated: false };
+  return {
+    value: buffer.subarray(0, maxBytes).toString("utf8"),
+    totalBytes: buffer.length,
+    truncated: true,
+  };
+}
+
+function wikiGitArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function wikiAllowedRefs(context: ToolExecutionContext): Set<string> {
+  const refs = new Set<string>();
+  const raw = context.meta?.["sdlcWikiAssignedCommitShas"];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const value of parsed) if (typeof value === "string" && WIKI_GIT_SHA.test(value)) refs.add(value);
+      }
+    } catch { /* invalid trusted context is rejected by the empty set */ }
+  }
+  for (const key of ["sdlcWikiBootstrapRef", "sdlcWikiTargetHeadSha"]) {
+    const value = context.meta?.[key];
+    if (value && WIKI_GIT_SHA.test(value)) refs.add(value);
+  }
+  return refs;
+}
+
+export function resolveWikiGitCommitRef(
+  requestedRef: string,
+  allowedRefs: ReadonlySet<string>,
+): string | null {
+  const requested = requestedRef.trim().toLowerCase();
+  if (!WIKI_GIT_REF.test(requested)) return null;
+  const matches = [...allowedRefs]
+    .map((ref) => ref.toLowerCase())
+    .filter((ref) => ref.startsWith(requested));
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+function wikiGitDisplayRef(ref: string, allowedRefs: ReadonlySet<string>): string {
+  for (let length = 9; length < ref.length; length += 1) {
+    const prefix = ref.slice(0, length);
+    if ([...allowedRefs].filter((candidate) => candidate.startsWith(prefix)).length === 1) {
+      return prefix;
+    }
+  }
+  return ref;
+}
+
+export function sanitizeWikiGitCommitOutput(
+  value: string,
+  canonicalRef: string,
+  displayRef: string,
+): string {
+  return value.replaceAll(canonicalRef, displayRef);
+}
+
+/** Historical Git reader dedicated to backend-supervised SDLC Wiki runs. */
+export const sdlcGitContext: ToolDefinition = {
+  slug: SDLC_TOOL_NAMES.gitContext,
+  name: "SDLC Git Context",
+  description:
+    "Read bounded historical code for the trusted SDLC run. " +
+    "No checkout, branch, commit, push, reset, clean, interpreter, or arbitrary shell input.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: ["commit_context", "range_context", "read_patch", "read_file", "list_tree", "search", "path_history"],
+      },
+      commitSha: { type: "string", pattern: "^[0-9a-fA-F]{9,40}$" },
+      beforeSha: { type: "string", pattern: "^(?:[0-9a-fA-F]{9,40}|ROOT_BOOTSTRAP)$", description: "Trusted history-window boundary ref." },
+      afterSha: { type: "string", pattern: "^[0-9a-fA-F]{9,40}$", description: "Trusted history-window endpoint ref." },
+      path: { type: "string", minLength: 1, maxLength: 1024, pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[^\\0\\r\\n]+$" },
+      pattern: { type: "string", minLength: 1, maxLength: 500, pattern: "^[^\\0\\r\\n]+$" },
+      maxBytes: { type: "integer", minimum: 1_000, maximum: 500_000, description: "Maximum returned bytes; capped at 500000." },
+      offset: {
+        type: "integer",
+        minimum: 0,
+        description: "Byte offset for read_patch continuation; defaults to 0.",
+      },
+    },
+    required: ["operation"],
+    oneOf: [
+      { properties: { operation: { const: "commit_context" } }, required: ["operation", "commitSha"] },
+      { properties: { operation: { const: "range_context" } }, required: ["operation", "beforeSha", "afterSha"] },
+      {
+        properties: { operation: { const: "read_patch" } },
+        required: ["operation"],
+        oneOf: [
+          { required: ["commitSha"] },
+          { required: ["beforeSha", "afterSha"] },
+        ],
+      },
+      { properties: { operation: { const: "read_file" } }, required: ["operation", "commitSha", "path"] },
+      { properties: { operation: { const: "list_tree" } }, required: ["operation", "commitSha"] },
+      { properties: { operation: { const: "search" } }, required: ["operation", "commitSha", "pattern"] },
+      { properties: { operation: { const: "path_history" } }, required: ["operation", "commitSha", "path"] },
+    ],
+  },
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    if (context.meta?.["sdlcWikiRun"] !== "true") return "Error: tool is restricted to SDLC Wiki runs.";
+    const operation = String(params["operation"] ?? "");
+    const requestedCommitRef =
+      typeof params["commitSha"] === "string" ? params["commitSha"].trim() : "";
+    const requestedPath = typeof params["path"] === "string" ? params["path"].trim() : "";
+    const requestedBeforeRef = typeof params["beforeSha"] === "string" ? params["beforeSha"].trim() : "";
+    const requestedAfterRef = typeof params["afterSha"] === "string" ? params["afterSha"].trim() : "";
+    const pattern = typeof params["pattern"] === "string" ? params["pattern"] : "";
+    const maximumBytes = 500_000;
+    const requestedMax = Number(params["maxBytes"] ?? maximumBytes);
+    const requestedOffset = Number(params["offset"] ?? 0);
+    const offset = Number.isSafeInteger(requestedOffset) && requestedOffset >= 0 ? requestedOffset : -1;
+    const maxBytes = Number.isSafeInteger(requestedMax) && requestedMax >= 1_000 && requestedMax <= maximumBytes
+      ? requestedMax
+      : -1;
+
+    const allowedRefs = wikiAllowedRefs(context);
+    const isRangeRequest =
+      operation === "range_context" ||
+      (operation === "read_patch" && Boolean(requestedBeforeRef || requestedAfterRef));
+    const rangeBeforeIsRoot =
+      isRangeRequest &&
+      requestedBeforeRef === "ROOT_BOOTSTRAP" &&
+      context.meta?.["sdlcWikiBootstrapRef"] === "ROOT_BOOTSTRAP";
+    const rangeBeforeSha = rangeBeforeIsRoot
+      ? null
+      : resolveWikiGitCommitRef(requestedBeforeRef, allowedRefs);
+    const rangeAfterSha = resolveWikiGitCommitRef(requestedAfterRef, allowedRefs);
+    if (isRangeRequest && ((!rangeBeforeIsRoot && !rangeBeforeSha) || !rangeAfterSha)) {
+      return "Error: range boundary is not assigned to this Wiki run.";
+    }
+    const commitSha =
+      isRangeRequest ? rangeAfterSha! : resolveWikiGitCommitRef(requestedCommitRef, allowedRefs);
+    if (!commitSha) {
+      return "Error: commit is not assigned to this Wiki run.";
+    }
+    const displayCommitRef = wikiGitDisplayRef(commitSha, allowedRefs);
+    if (
+      requestedPath &&
+      (requestedPath.length > 1024 || requestedPath.includes("//") || !WIKI_GIT_PATH.test(requestedPath))
+    ) return "Error: invalid repository-relative path.";
+    if (pattern && (pattern.length > 500 || /[\0\r\n]/.test(pattern))) return "Error: invalid search pattern.";
+    if (operation === "read_patch" && offset < 0) {
+      return "Error: offset must be a non-negative integer.";
+    }
+    if (maxBytes < 0) {
+      return "Error: maxBytes must be an integer between 1000 and 500000.";
+    }
+
+    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
+    if (!dynamicRepo) return "Error: trusted SDLC repository context is required.";
+    const storeKey = storeKeyFromContext(context);
+    if (!storeKey) return "Error: trusted Wiki execution identity is required.";
+    const session = SESSION_STORE.get(storeKey);
+    if (!session) return "Error: no sandbox session — call sandbox-repo-setup first.";
+    if (!isSessionOwnedByContext(session, storeKey, context)) return unauthorizedSessionMessage(session.id);
+    const outputBudgetKey = wikiGitOutputBudgetKey(context, storeKey);
+    const usedOutputBytes = WIKI_GIT_OUTPUT_BYTES.get(outputBudgetKey) ?? 0;
+    const remainingOutputBytes = WIKI_GIT_CUMULATIVE_OUTPUT_LIMIT - usedOutputBytes;
+    if (remainingOutputBytes <= 0) {
+      return "Error: Wiki Git cumulative output limit reached for this run.";
+    }
+    const boundedMaxBytes = Math.min(maxBytes, remainingOutputBytes);
+    const repoPath = dynamicRepo.config.workDir;
+    const git = `git -C ${wikiGitArg(repoPath)}`;
+    const patchPath =
+      isRangeRequest
+        ? `/tmp/sdlc-wiki-range-${(rangeBeforeSha ?? "root").slice(0, 12)}-${commitSha.slice(0, 12)}.patch`
+        : `/tmp/sdlc-wiki-${commitSha.toLowerCase()}.patch`;
+    if (operation === "commit_context" || operation === "range_context" || operation === "read_patch") {
+      try {
+        if (operation === "commit_context" || operation === "range_context") {
+          const diffBase = rangeBeforeSha ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+          const writeCommand =
+            operation === "range_context"
+              ? `${git} diff --find-renames --stat --patch --binary ${wikiGitArg(diffBase)} ${wikiGitArg(commitSha)} > ${wikiGitArg(patchPath)}`
+              : `${git} show --find-renames --format=fuller --stat --patch ${wikiGitArg(commitSha)} > ${wikiGitArg(patchPath)}`;
+          const written = await runWikiGitCommand(session, writeCommand, WIKI_GIT_COMMAND_TIMEOUT_MS);
+          if (written.exitCode !== 0) {
+            return redactAndStringify({ operation, stderr: written.stderr.slice(0, 20_000), exitCode: written.exitCode });
+          }
+        }
+        const readCommand = `dd if=${wikiGitArg(patchPath)} bs=1 skip=${offset} count=${boundedMaxBytes} 2>/dev/null`;
+        const result = await runWikiGitCommand(session, readCommand, WIKI_GIT_COMMAND_TIMEOUT_MS);
+        const sizeResult = await runWikiGitCommand(
+          session,
+          `wc -c < ${wikiGitArg(patchPath)}`,
+          WIKI_GIT_METADATA_TIMEOUT_MS,
+        );
+        const totalBytes = Number.parseInt(sizeResult.stdout.trim(), 10);
+        const returnedBytes = Buffer.byteLength(result.stdout, "utf8");
+        const consumedBytes = Number.isFinite(totalBytes)
+          ? Math.max(0, Math.min(boundedMaxBytes, totalBytes - offset))
+          : returnedBytes;
+        const nextOffset = offset + consumedBytes;
+        recordWikiGitOutput(outputBudgetKey, usedOutputBytes + consumedBytes);
+        let changedFiles;
+        let relevance;
+        let commits;
+        if (operation === "commit_context" || operation === "range_context") {
+          const diffBase = rangeBeforeSha ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+          const namesResult = await runWikiGitCommand(
+            session,
+            operation === "range_context"
+              ? `${git} diff --name-status --find-renames ${wikiGitArg(diffBase)} ${wikiGitArg(commitSha)}`
+              : `${git} show --first-parent --format= --name-status --find-renames ${wikiGitArg(commitSha)}`,
+            WIKI_GIT_METADATA_TIMEOUT_MS,
+          );
+          if (namesResult.exitCode !== 0) {
+            return redactAndStringify({
+              operation,
+              stderr: namesResult.stderr.slice(0, 20_000),
+              exitCode: namesResult.exitCode,
+            });
+          }
+          changedFiles = parseWikiNameStatus(namesResult.stdout);
+          relevance = classifyWikiCommitRelevance(changedFiles);
+          if (operation === "range_context") {
+            const logRange = rangeBeforeSha ? `${rangeBeforeSha}..${commitSha}` : commitSha;
+            const logResult = await runWikiGitCommand(
+              session,
+              `${git} log --first-parent --reverse --abbrev=9 --format=%h%x09%p%x09%aI%x09%s ${wikiGitArg(logRange)}`,
+              WIKI_GIT_METADATA_TIMEOUT_MS,
+            );
+            if (logResult.exitCode !== 0) {
+              return redactAndStringify({
+                operation,
+                stderr: logResult.stderr.slice(0, 20_000),
+                exitCode: logResult.exitCode,
+              });
+            }
+            commits = logResult.stdout
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => {
+                const [sha, parents, authoredAt, ...subject] = line.split("\t");
+                return { sha, parents: parents?.split(" ").filter(Boolean) ?? [], authoredAt, subject: subject.join("\t") };
+              });
+          }
+        }
+        return redactAndStringify({
+          operation,
+          stdout: sanitizeWikiGitCommitOutput(result.stdout, commitSha, displayCommitRef),
+          ...(operation === "commit_context" || operation === "range_context"
+            ? {
+                changedFiles,
+                relevance,
+                ...(commits ? { commits } : {}),
+                ...(operation === "range_context"
+                  ? {
+                      beforeRef: rangeBeforeSha
+                        ? wikiGitDisplayRef(rangeBeforeSha, allowedRefs)
+                        : "ROOT_BOOTSTRAP",
+                      afterRef: displayCommitRef,
+                    }
+                  : {}),
+              }
+            : {}),
+          patchPath,
+          offset,
+          nextOffset,
+          truncated: Number.isFinite(totalBytes) && nextOffset < totalBytes,
+          totalBytes: Number.isFinite(totalBytes) ? totalBytes : null,
+          stderr: result.stderr.slice(0, 20_000),
+          exitCode: result.exitCode,
+        });
+      } catch (error) {
+        const failure = wikiGitSandboxFailure(error, session, storeKey);
+        if (failure) return failure;
+        return sandboxErr(error);
+      }
+    }
+    let args: string[];
+    switch (operation) {
+      case "read_file":
+        if (!requestedPath) return "Error: path is required.";
+        args = ["show", `${commitSha}:${requestedPath}`];
+        break;
+      case "list_tree":
+        args = ["ls-tree", "-r", "--name-only", commitSha, ...(requestedPath ? ["--", requestedPath] : [])];
+        break;
+      case "search":
+        if (!pattern) return "Error: pattern is required.";
+        args = ["grep", "-n", "-I", "-e", pattern, commitSha, ...(requestedPath ? ["--", requestedPath] : [])];
+        break;
+      case "path_history":
+        if (!requestedPath) return "Error: path is required.";
+        args = ["log", "--follow", "--abbrev=9", "--format=%h%x09%aI%x09%s", commitSha, "--", requestedPath];
+        break;
+      default:
+        return "Error: unsupported Wiki Git operation.";
+    }
+    try {
+      const command = `${git} ${args.map(wikiGitArg).join(" ")}`;
+      const result = await runWikiGitCommand(session, command, WIKI_GIT_COMMAND_TIMEOUT_MS);
+      const bounded = truncateWikiGitOutput(result.stdout, boundedMaxBytes);
+      recordWikiGitOutput(
+        outputBudgetKey,
+        usedOutputBytes + Buffer.byteLength(bounded.value, "utf8"),
+      );
+      return redactAndStringify({
+        operation,
+        stdout: bounded.value,
+        truncated: bounded.truncated,
+        totalBytes: bounded.totalBytes,
+        stderr: result.stderr.slice(0, 20_000),
+        exitCode: result.exitCode,
+      });
+    } catch (error) {
+      const failure = wikiGitSandboxFailure(error, session, storeKey);
+      if (failure) return failure;
+      return sandboxErr(error);
+    }
+  },
+};
+
 /**
  * Resolve (create-or-reuse) the SINGLE shared read-only sbx-git session and
  * return the read-only result message for the agent. All scheduled/automation
@@ -1723,12 +2568,17 @@ async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContex
   // Boot the one shared read-only sandbox (repos are cloned in its prebake).
   try {
     const client = makeClient(context.config, SBX_GIT.template);
-    const session = await client.createSession({ timeoutMs: SBX_GIT.sessionTimeoutMs, template: SBX_GIT.template });
+    const session = await client.createSession({
+      timeoutMs: SBX_GIT.sessionTimeoutMs,
+      idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, 10 * 60 * 1000),
+      template: SBX_GIT.template,
+    });
     // No owner → shared across conversations; mark it so ownership checks pass.
     rememberSession(key, session, SBX_GIT.template);
     bindCaller(session);
     SHARED_SESSIONS.add(session.id);
     READONLY_SESSIONS.add(session.id);
+    await reportExperimentSandboxCreated(context, session, SBX_GIT.template);
     return sbxGitResultMessage(requestedRepo, session.id, focusRepos, reason);
   } catch (err) {
     return sandboxErr(err);
@@ -1754,11 +2604,10 @@ export const sandboxRepoSetup: ToolDefinition = {
   slug: "sandbox-repo-setup",
   name: "Sandbox Repository Setup",
   description:
-    "Set up a repository workspace. For read-first repos (e.g. xyne-spaces) this DEFAULTS to an INSTANT " +
-    "READ-ONLY sandbox (shared git server, no clone/wait): use it for reading, grepping, inspecting code, " +
-    "and PR review — what you want almost always. Pass write:true ONLY when you must edit files, build, run " +
-    "tests, or commit — that claims a short-lived (~20 min, auto-expiring) writable dev sandbox for the given " +
-    "branch. Prefer read; escalate to write only when you actually need to change code, then let it expire.",
+    "Set up a repository workspace. Trusted SDLC repository contexts always receive one write-capable " +
+    "workspace, independent of request type. Access capability does not authorize mutation: agents must only " +
+    "edit/build/commit when their task explicitly requires implementation. Non-SDLC read-first repositories " +
+    "retain their shared read-only default.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1771,9 +2620,8 @@ export const sandboxRepoSetup: ToolDefinition = {
       write: {
         type: "boolean",
         description:
-          "Default false = instant READ-ONLY git sandbox (read/grep/inspect; no build/run/write). " +
-          "Set true ONLY to edit/build/run/commit — claims a short-lived (~20 min) writable dev sandbox that auto-expires. " +
-          "Do NOT set true just to look at code.",
+          "For SDLC repository contexts this is normalized to true. For other read-first repositories, " +
+          "false uses the shared read-only workspace and true claims a writable workspace.",
       },
       branchName: {
         type: "string",
@@ -1795,11 +2643,23 @@ export const sandboxRepoSetup: ToolDefinition = {
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const repoName = pinnedRepo || (params["repoName"] as string);
-    const branchName = params["branchName"] as string;
+    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
+    const hasSdlcRepositoryMetadata = [
+      "sdlcRepositoryId",
+      "sdlcRepositoryName",
+      "sdlcRepositoryUrl",
+      "sdlcRepositoryBaseBranch",
+    ].some((key) => context.meta?.[key] !== undefined);
+    if (
+      !dynamicRepo &&
+      (hasSdlcRepositoryMetadata || context.meta?.["requireSdlcRepository"] === "true")
+    ) {
+      return "Error: Valid SDLC repository context is required; refusing to fall back to a static repository.";
+    }
+    const repoName = dynamicRepo?.name || pinnedRepo || (params["repoName"] as string);
+    const wantWrite = Boolean(dynamicRepo) || params["write"] === true;
+    const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
-    const wantWrite = params["write"] === true;
-
     // Import here to avoid circular dependency
     const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
 
@@ -1819,11 +2679,11 @@ export const sandboxRepoSetup: ToolDefinition = {
     const forcedReadOnly =
       (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
-    if (forcedReadOnly) {
+    if (forcedReadOnly && !dynamicRepo) {
       return resolveSbxGit(repoName, context);
     }
 
-    const config = REPO_CONFIGS[repoName];
+    let config = dynamicRepo?.config ?? REPO_CONFIGS[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -1840,12 +2700,62 @@ export const sandboxRepoSetup: ToolDefinition = {
       const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
+    if (dynamicRepo) {
+      const operation = context.meta?.["sdlcRuntimeCredentialOperation"]?.trim();
+      const executionId = context.meta?.["sdlcExecutionId"]?.trim();
+      const sessionId = context.meta?.["sdlcSessionId"]?.trim();
+      const conversationId = context.meta?.["sdlcConversationId"]?.trim();
+      const interactiveGrant = context.meta?.["sdlcInteractiveGrant"]?.trim();
+      const agentSlug = context.meta?.["agentSlug"]?.trim();
+      if (agentSlug !== "sdlc-agent") {
+        return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
+      }
+      if (
+        operation === "INTERACTIVE" &&
+        interactiveGrant &&
+        conversationId &&
+        !executionId &&
+        !sessionId
+      ) {
+        config = {
+          ...config,
+          runtimeCredentialBinding: {
+            agentSlug: "sdlc-agent",
+            operation,
+            interactiveGrant,
+            conversationId,
+            repoId: dynamicRepo.repoId,
+          },
+        };
+      } else if (
+        (operation === "CLONE" || operation === "PUSH") &&
+        executionId &&
+        sessionId &&
+        !interactiveGrant
+      ) {
+        config = {
+          ...config,
+          runtimeCredentialBinding: {
+            agentSlug: "sdlc-agent",
+            operation,
+            executionId,
+            sessionId,
+            repoId: dynamicRepo.repoId,
+          },
+        };
+      } else {
+        return "Error: Incomplete SDLC runtime credential grant context.";
+      }
+    }
     // branchName is now optional in the schema (read-first calls don't pass it).
     // On the writable path, default a missing branch to the repo's defaultBranch
     // so a non-read-first (legacy) repo — or a write:true call that forgot the
     // branch — still provisions cleanly instead of erroring. The agent can cut a
     // feature branch afterwards via sandbox-run before pushing.
-    const effectiveBranch = branchName || config.defaultBranch;
+    const effectiveBranch = requestedBranchName || config.defaultBranch;
+    if (!isSafeGitRef(effectiveBranch)) {
+      return "Error: Invalid branch name for SDLC sandbox.";
+    }
 
     // On-demand write sandbox lifetime: per-repo writeSessionTimeoutMs when set
     // (e.g. xyne-spaces = 20 min, to keep concurrent golden-snapshot clones low),
@@ -1889,6 +2799,20 @@ export const sandboxRepoSetup: ToolDefinition = {
     // — bad-branch / repo-not-found errors pass through unchanged.
     if (isSandboxProvisioningFailure(result)) {
       const firstLine = result.split("\n")[0]?.replace(/^Error:\s*/i, "").slice(0, 160) ?? "provisioning failed";
+      // Flag-gated (SANDBOX_UNAVAILABLE_DEFER, default ON; =false restores the
+      // old behaviour): instead of silently
+      // substituting a read-only session — which lets a write-needing agent
+      // "succeed" with an unusable sandbox, conclude it cannot work, and end the
+      // run with NO retry signal (forcing a human to re-tag) — emit a stable
+      // `sandbox_unavailable` sentinel. custom-tools.ts turns this into a typed
+      // SandboxUnavailableError, run.ts ends the run with error:"sandbox_unavailable",
+      // and claw-auth run-recovery defers + auto-resumes once a SandboxClaim binds.
+      // See apps/xyne-claw/docs/sbx-availability-signal.md.
+      if (isSandboxUnavailableDeferEnabled()) {
+        return formatSandboxUnavailable(firstLine);
+      }
+      // SDLC repositories never fall back to a static mirror or sbx-git.
+      if (dynamicRepo) return result;
       const reason =
         `the writable dev sandbox could NOT be provisioned right now (${firstLine}) — likely no capacity for a fresh machine.`;
       const ro = await resolveSbxGit(repoName, context, reason);
@@ -1899,6 +2823,70 @@ export const sandboxRepoSetup: ToolDefinition = {
     return result;
   },
 };
+
+function isSafeGitRef(value: string): boolean {
+  return value.length > 0 && value.length <= 255 && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) &&
+    !value.includes("..") && !value.includes("//") && !value.endsWith(".") && !value.endsWith("/");
+}
+
+export function resolveDynamicSdlcRepositoryConfig(
+  context: ToolExecutionContext,
+): { repoId: string; name: string; config: RepoSetupConfig } | null {
+  const rawId = context.meta?.["sdlcRepositoryId"]?.trim();
+  const rawUrl = context.meta?.["sdlcRepositoryUrl"]?.trim();
+  const rawName = context.meta?.["sdlcRepositoryName"]?.trim();
+  const baseBranch = context.meta?.["sdlcRepositoryBaseBranch"]?.trim() || "main";
+  if (!rawId || !rawUrl || !rawName) return null;
+  if (!isSafeGitRef(baseBranch)) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname.toLowerCase() !== "github.com" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    return null;
+  }
+  const segments = parsed.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
+  if (segments.length !== 2 || segments.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))) {
+    return null;
+  }
+  const name = rawName.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80) || segments[1]!;
+  const repoUrl = `https://github.com/${segments[0]}/${segments[1]}.git`;
+  return {
+    repoId: rawId,
+    name,
+    config: {
+      slug: "sandbox-sdlc-repository-setup",
+      name: `SDLC repository: ${name}`,
+      description: "Run-scoped public GitHub repository attached to an SDLC hub.",
+      repoUrl,
+      defaultBranch: baseBranch,
+      ...(context.meta?.["sdlcWikiRun"] === "true"
+        ? {
+            cloneFilter: "blob:none" as const,
+            cloneSingleBranch: true,
+            cloneTimeoutMs: 30 * 60 * 1000,
+          }
+        : { cloneDepth: 1 }),
+      workDir: `/workspace/${name}`,
+      template: "kata-workspace-template",
+      sessionTimeoutMs: 60 * 60 * 1000,
+      idleTimeoutMs: 20 * 60 * 1000,
+      readyTimeoutMs: 10 * 60 * 1000,
+      steps: [],
+      skipBakedCloneWait: true,
+    },
+  };
+}
 
 /**
  * Destroy a sandbox session and free its resources.
@@ -1936,6 +2924,7 @@ export const sandboxDestroy: ToolDefinition = {
 
     let destroyError: string | undefined;
     try {
+      await cleanupSdlcGitCredentialMaterial(session).catch(() => undefined);
       await session.destroy();
     } catch (err) {
       destroyError = err instanceof Error ? err.message : String(err);

@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -11,8 +11,62 @@ import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
+import {
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 
 export type { Call, CallParticipant };
+
+// Shorter channel calls skip post-call AI outputs (see getPostCallAiSkipReason).
+const MIN_CALL_DURATION_FOR_AI_SECONDS = 30;
+
+function parseRecordingParticipantIds(stored: string | null): string[] {
+  if (!stored) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The outbound mirror of a Call on the organizer's Google Calendar, recorded
+ * under `calls.metadata.googleCalendarPush`. Absent until the call has been
+ * pushed; removed again when the remote event is deleted.
+ */
+export type GoogleCalendarPushState = {
+  /** Google's event id on the organizer's primary calendar. */
+  eventId: string;
+  /** ExternalSource the event was written through, so a reconnect is detectable. */
+  sourceId: string;
+  /** Organizer whose calendar owns the event — the only account allowed to edit it. */
+  organizerUserId: string;
+  /**
+   * Digest of the event body last written. A reconcile whose payload hashes to
+   * this skips the PATCH entirely — Google emails every attendee on an event
+   * update, so a no-op write is not free.
+   */
+  contentHash: string;
+  htmlLink?: string;
+  syncedAt: string;
+};
+
+/**
+ * Shape of `calls.metadata` as written by this repository.
+ * `artifactMessageId` is set only for calls started from a slash-command
+ * artifact card, and links the call back to the message that owns it.
+ */
+export interface CallMetadata {
+  systemMessageId?: string;
+  conversationId?: string;
+  artifactMessageId?: string;
+  googleCalendarPush?: GoogleCalendarPushState;
+}
+
+const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
+  (metadata as CallMetadata | null)?.artifactMessageId;
 
 export interface CreateCallParticipantInput {
   id: string;
@@ -60,6 +114,7 @@ export interface CreateCallWithParticipantsInput {
   startsAt: Date;
   endsAt: Date;
   targetUserIds?: string[];
+  participantInviters?: Record<string, string>;
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
@@ -205,13 +260,132 @@ export class CallRepository {
     });
   }
 
+  /**
+   * All calls whose detailed summary has sat in 'pending' since
+   * before `staleBefore` with no row activity. Summary generation runs
+   * in-process in the API, so a backend restart mid-run leaves the row
+   * 'pending' forever — this is the query the validation worker sweeps.
+   * updatedAt is part of the predicate so a fresh manual regenerate on an old
+   * recording (which re-publishes 'pending' and bumps updatedAt) is not swept
+   * on the next cycle.
+   */
+  async findStalePendingSummaryCalls(take: number, staleBefore: Date): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        endedAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
+        metadata: { path: ['detailedSummaryStatus'], equals: 'pending' },
+      },
+      orderBy: { endedAt: 'asc' },
+      take,
+    });
+  }
+
   async update(id: string, data: UpdateCallInput): Promise<Call> {
-    const result = await DatabaseClient.getInstance().call.update({
+    const client = DatabaseClient.getInstance();
+    const result = await client.call.update({
       where: { id },
       data
     });
+    if (data.status === CallStatus.ENDED) {
+      await this.syncArtifactLifecycle(
+        client,
+        result,
+        MessageArtifactStatus.COMPLETED,
+        data.endedAt ?? new Date(),
+      );
+    }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
     return result;
+  }
+
+  /**
+   * Adopt an already-running call as a slash-command artifact's call.
+   *
+   * "Start call" on an artifact card is channel-scoped, so it lands on the
+   * channel's existing call whenever one is already live instead of creating a
+   * room. Without this the card would sit in its pending state forever and the
+   * artifact would never be completed when that call ends, because completion
+   * is driven off `calls.metadata.artifactMessageId`.
+   *
+   * Refuses to steal a call that already belongs to a different artifact — the
+   * first incident to claim it keeps it.
+   */
+  async linkArtifactToActiveCall(params: {
+    callId: string;
+    callExternalId: string;
+    channelId: string;
+    artifactMessageId: string;
+    metadata: Prisma.JsonValue | null;
+  }): Promise<boolean> {
+    const { callId, callExternalId, channelId, artifactMessageId, metadata } = params;
+    const existingArtifactMessageId = getArtifactMessageId(metadata);
+    if (existingArtifactMessageId) return existingArtifactMessageId === artifactMessageId;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.call.update({
+        where: { id: callId },
+        data: {
+          metadata: {
+            ...((metadata as CallMetadata | null) ?? {}),
+            artifactMessageId,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await setSlashCommandArtifactLifecycle(tx, {
+        messageId: artifactMessageId,
+        channelId,
+        status: MessageArtifactStatus.ACTIVE,
+        callExternalId,
+      });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
+    return true;
+  }
+
+  /**
+   * Mirror a call transition onto the slash-command artifact that started it.
+   * A no-op for every other call, which is why it can sit directly on the
+   * shared end-of-call paths without altering their behavior.
+   */
+  private async syncArtifactLifecycle(
+    tx: Prisma.TransactionClient,
+    call: {
+      id: string;
+      externalId: string;
+      channelId: string | null;
+      startedAt: Date | null;
+      metadata: Prisma.JsonValue | null;
+    },
+    status: MessageArtifactLifecycleStatus,
+    endedAt?: Date
+  ): Promise<void> {
+    const artifactMessageId = getArtifactMessageId(call.metadata);
+    if (!artifactMessageId || !call.channelId) return;
+
+    // On completion, summarise the call for the card. An ended call has left
+    // the client's active-call subscription, so these two numbers are baked
+    // into the message once here — the same thing updateCallSystemMessageIfNeeded
+    // does for the ordinary "started a call" system message.
+    const endedCall =
+      status === MessageArtifactStatus.COMPLETED && endedAt && call.startedAt
+        ? {
+            durationMs: Math.max(0, endedAt.getTime() - call.startedAt.getTime()),
+            joinedCount: await tx.callParticipant.count({
+              where: { callId: call.id, joinedAt: { not: null } },
+            }),
+          }
+        : undefined;
+
+    await setSlashCommandArtifactLifecycle(tx, {
+      messageId: artifactMessageId,
+      channelId: call.channelId,
+      status,
+      callExternalId: call.externalId,
+      ...(endedCall && { endedCall }),
+    });
   }
 
   async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
@@ -221,6 +395,108 @@ export class CallRepository {
       WHERE "externalId" = ${externalId}
     `;
     return rowsUpdated > 0;
+  }
+
+  /**
+   * Why a channel call should get no post-call AI outputs, or null to proceed.
+   * Channel calls only: headless calls have no CallParticipant rows. A null
+   * endedAt (webhook race) never triggers the duration skip.
+   */
+  async getPostCallAiSkipReason(
+    call: Pick<Call, 'id' | 'startedAt' | 'endedAt'>,
+  ): Promise<{
+    reason: 'single_joined_participant' | 'call_too_short' | null;
+    joinedCount: number;
+    durationSeconds: number | null;
+  }> {
+    const joinedCount = await DatabaseClient.getInstance().callParticipant.count({
+      where: { callId: call.id, joinedAt: { not: null } },
+    });
+    const durationSeconds = call.endedAt
+      ? Math.max(0, (call.endedAt.getTime() - call.startedAt.getTime()) / 1000)
+      : null;
+
+    const reason =
+      joinedCount <= 1
+        ? 'single_joined_participant'
+        : durationSeconds !== null && durationSeconds < MIN_CALL_DURATION_FOR_AI_SECONDS
+          ? 'call_too_short'
+          : null;
+
+    return { reason, joinedCount, durationSeconds };
+  }
+
+  async updateRecordingParticipants(
+    externalId: string,
+    action: 'add' | 'remove',
+    userId: string,
+  ): Promise<boolean> {
+    const lockKey = `call-recording-participants:${externalId}`;
+
+    return DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({
+        where: { externalId },
+        select: { recordingParticipants: true },
+      });
+      if (!call) return false;
+
+      const current = parseRecordingParticipantIds(call.recordingParticipants);
+      const next =
+        action === 'add'
+          ? [...new Set([...current, userId])]
+          : current.filter((id) => id !== userId);
+
+      await tx.call.update({
+        where: { externalId },
+        data: { recordingParticipants: JSON.stringify(next) },
+      });
+      return true;
+    });
+  }
+
+  async appendLabels(callId: string, labelIds: string[]): Promise<void> {
+    if (labelIds.length === 0) return;
+    const lockKey = `call-labels:${callId}`;
+
+    await DatabaseClient.getInstance().$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const call = await tx.call.findUnique({ where: { id: callId }, select: { labels: true } });
+      if (!call) return;
+
+      const relevantIds = [...new Set([...call.labels, ...labelIds])];
+      const tags = await tx.tag.findMany({
+        where: { id: { in: relevantIds }, sourceId: callId, isDeleted: false },
+        select: { id: true, tag: true, method: true },
+      });
+      const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+      
+      const resolve = (id: string): { slug: string; method: TagMethod } => {
+        const tag = tagById.get(id);
+        return tag ? { slug: tag.tag, method: tag.method as TagMethod } : { slug: id, method: TagMethod.MANUAL };
+      };
+
+      const bySlug = new Map<string, string>();
+
+      for (const id of call.labels) {
+        const { slug, method } = resolve(id);
+        if (method !== TagMethod.MANUAL) continue;
+        bySlug.set(slug, id);
+      }
+
+      for (const id of labelIds) {
+        const { slug } = resolve(id);
+        if (bySlug.has(slug)) continue;
+        bySlug.set(slug, id);
+      }
+
+      const labels = [...bySlug.values()];
+      await tx.call.update({ where: { id: callId }, data: { labels } });
+    });
+
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdate });
   }
 
   async findById(id: string): Promise<Call | null> {
@@ -448,7 +724,7 @@ export class CallRepository {
         callId: params.callId,
         workspaceId,
         userId,
-        invitedBy: params.createdByUserId,
+        invitedBy: params.participantInviters?.[userId] ?? params.createdByUserId,
         invitedAt: new Date(),
         response: InvitationResponse.INVITED,
         meetingStatus: userId === params.createdByUserId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
@@ -505,9 +781,9 @@ export class CallRepository {
   }
 
   /**
-   * Get all participants for a call
+   * Get all participants for a call, with the user who invited each of them.
    */
-  async findParticipants(callId: string): Promise<Array<{ userId: string }>> {
+  async findParticipants(callId: string): Promise<Array<{ userId: string; invitedBy: string }>> {
     return await DatabaseClient.getInstance().callParticipant.findMany({
       where: {
         callId,
@@ -515,6 +791,7 @@ export class CallRepository {
       },
       select: {
         userId: true,
+        invitedBy: true,
       },
     });
   }
@@ -534,6 +811,88 @@ export class CallRepository {
     return participants
       .map(p => p.email)
       .filter((email): email is string => Boolean(email));
+  }
+
+  /**
+   * Everything the outbound Google Calendar push needs to mirror a call, in a
+   * single query. Not `findByExternalId`: the push job runs outside any tenant
+   * scope and knows only a call id, so it reads the row's own `workspaceId`
+   * here and opens a scope with it before doing anything else.
+   */
+  async findForCalendarPush(callId: string): Promise<{
+    id: string;
+    externalId: string;
+    workspaceId: string;
+    title: string | null;
+    description: string | null;
+    status: string;
+    callOrigin: string;
+    createdByUserId: string;
+    roomLink: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    timezone: string;
+    metadata: Prisma.JsonValue | null;
+    updatedAt: Date;
+  } | null> {
+    return await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: {
+        id: true,
+        externalId: true,
+        workspaceId: true,
+        title: true,
+        description: true,
+        status: true,
+        callOrigin: true,
+        createdByUserId: true,
+        roomLink: true,
+        startsAt: true,
+        endsAt: true,
+        timezone: true,
+        metadata: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /** `updatedAt` alone, to detect a call edited while a push job was running. */
+  async findCalendarPushRevision(callId: string): Promise<Date | null> {
+    const row = await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: { updatedAt: true },
+    });
+    return row?.updatedAt ?? null;
+  }
+
+  /**
+   * Record (or clear) the Google Calendar event this call is mirrored to.
+   *
+   * Written as a jsonb merge rather than a read-modify-write of the whole
+   * column: `calls.metadata` also carries `systemMessageId` / `conversationId`
+   * written by unrelated flows, and a push job that round-tripped the object
+   * would silently drop whichever of those landed in between.
+   */
+  async setGoogleCalendarPushState(
+    callId: string,
+    state: GoogleCalendarPushState | null,
+  ): Promise<void> {
+    const db = DatabaseClient.getInstance();
+
+    if (state === null) {
+      await db.$executeRaw`
+        UPDATE "calls"
+        SET "metadata" = COALESCE("metadata", '{}'::jsonb) - 'googleCalendarPush'
+        WHERE "id" = ${callId}
+      `;
+      return;
+    }
+
+    await db.$executeRaw`
+      UPDATE "calls"
+      SET "metadata" = COALESCE("metadata", '{}'::jsonb) || ${JSON.stringify({ googleCalendarPush: state })}::jsonb
+      WHERE "id" = ${callId}
+    `;
   }
 
   /**
@@ -750,7 +1109,7 @@ export class CallRepository {
     endedAt: Date,
     tx: Prisma.TransactionClient
   ): Promise<void> {
-    await tx.call.update({
+    const call = await tx.call.update({
       where: { id: callId },
       data: {
         status: CallStatus.ENDED,
@@ -758,6 +1117,7 @@ export class CallRepository {
       }
     });
     await refreshCallParticipantPreview(tx, callId);
+    await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
   }
 
@@ -828,6 +1188,7 @@ export class CallRepository {
         shouldEndCall = finalStatus === CallStatus.ENDED;
         if (shouldEndCall) {
           await refreshCallParticipantPreview(tx, call.id);
+          await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, leftAt);
         }
 
         // Update system message whether the call is fully ended or just rescheduled
@@ -904,8 +1265,12 @@ export class CallRepository {
         });
       }
 
+      if (call.status === CallStatus.ENDED || shouldEndCall) {
+        await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
+      }
+
       // Clear conversation.callId when call ends (for conversation calls)
-      const callMetadata = call.metadata as { conversationId?: string } | null;
+      const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
           await tx.conversation.update({
@@ -1053,7 +1418,10 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            // Merge (not replace) so calendar-derived fields already on the call
+            // (organizer, attendees, provider, etc. — set by the calendar sync
+            // upsert) survive activation instead of being wiped out.
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else if (!callMetadata?.systemMessageId) {
@@ -1095,16 +1463,21 @@ export class CallRepository {
             startedAt: now,
             lastActivityAt: now,
             updatedAt: now,
-            metadata: { systemMessageId: messageId, conversationId },
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
           },
         });
       } else {
-        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
+        // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE.
+        // Preserve startedAt from the first session so it reflects the actual start of the call;
+        // endedAt is refreshed on every leave/room_finished, so the pair spans first join → last leave.
+        // `startedAt` is NOT NULL with a DB default of creation time, so it cannot be used to detect
+        // "never joined". `endedAt` is only ever written when a session ends, so a non-null endedAt is
+        // the reliable signal that a prior session exists and startedAt must be kept.
         await tx.call.update({
           where: { id: call.id },
           data: {
             status: CallStatus.ACTIVE,
-            startedAt: now,
+            startedAt: call.endedAt ? call.startedAt : now,
             lastActivityAt: now,
             updatedAt: now,
           },
@@ -1171,6 +1544,10 @@ export class CallRepository {
       messageId: string;
       now: Date;
       callOrigin?: CallOrigin;
+      artifactMessageId?: string;
+      /** Transcription agent this call was pinned to at creation time (from room metadata). */
+      agentName?: string;
+      dispatchStatus?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1186,7 +1563,10 @@ export class CallRepository {
       conversationId,
       messageId,
       now,
-      callOrigin
+      callOrigin,
+      artifactMessageId,
+      agentName,
+      dispatchStatus,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1216,9 +1596,14 @@ export class CallRepository {
           metadata: {
             systemMessageId: messageId,
             conversationId,
+            ...(artifactMessageId && { artifactMessageId }),
+            ...(agentName && { agentName }),
+            ...(dispatchStatus && { dispatchStatus }),
           },
         },
       });
+
+      await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.ACTIVE);
 
       // Create call_participants: joining user as ACCEPTED, others as INVITED
       const invitedParticipantIds: string[] = [];
@@ -1445,6 +1830,8 @@ export class CallRepository {
    * Update a SCHEDULED call's fields and manage participant delta.
    * Only modifies fields that are explicitly provided.
    * Participant changes: addUserIds are added (skipping duplicates), removeUserIds are deleted.
+   * `invitedByUserId` is stamped on the newly added rows — it is the editor, not necessarily
+   * the organizer, so a participant who added someone can later be allowed to remove them.
    */
   async updateScheduledCall(params: {
     callId: string;
@@ -1454,11 +1841,12 @@ export class CallRepository {
     channelId?: string;
     addUserIds?: string[];
     removeUserIds?: string[];
+    invitedByUserId?: string;
     metadata?: Record<string, unknown>;
     callUpdatesChannel?: string | null;
     externalInvitees?: string[];
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, metadata, callUpdatesChannel, externalInvitees } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees } = params;
     const db = DatabaseClient.getInstance();
 
     const updatedCall = await db.$transaction(async (tx) => {
@@ -1488,7 +1876,7 @@ export class CallRepository {
             callId,
             workspaceId: updatedCall.workspaceId,
             userId,
-            invitedBy: updatedCall.createdByUserId,
+            invitedBy: invitedByUserId ?? updatedCall.createdByUserId,
             invitedAt: new Date(),
             response: InvitationResponse.INVITED,
             meetingStatus: MeetingStatus.PENDING,
@@ -1585,6 +1973,29 @@ export class CallRepository {
       callId: call.id,
       createdByUserId: call.createdByUserId,
       roomName: call.externalId, // LiveKit room name == externalId
+    };
+  }
+
+  /**
+   * Return only the fields needed to decide whether a public invite can route
+   * into an authenticated workspace session. Kept separate from
+   * getPublicCallInfo so workspaceId is never exposed by the public lobby API.
+   */
+  async getCallInviteRoutingInfo(externalId: string): Promise<{
+    status: CallStatus;
+    workspaceId: string;
+  } | null> {
+    const call = await DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select: {
+        status: true,
+        workspaceId: true,
+      },
+    });
+    if (!call?.workspaceId) return null;
+    return {
+      status: call.status as CallStatus,
+      workspaceId: call.workspaceId,
     };
   }
 
@@ -1912,7 +2323,9 @@ export class CallRepository {
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
-    channelId: null;
+    xyneManaged?: boolean;
+    /** Self-DM channel backing a Xyne-managed calendar call; null for a plain mirrored (unmanaged) event. */
+    channelId: string | null;
     isRecurring: boolean;
     recordingEnabled: boolean;
     startedAt: Date;
@@ -1930,12 +2343,15 @@ export class CallRepository {
       startsAt: true,
       endsAt: true,
       timezone: true,
+      xyneManaged: true,
+      channelId: true,
       metadata: true,
     });
 
     if (!existing) {
-      // No channel to denormalize from (external calendar calls have channelId=null),
-      // so inherit the workspace of the organizer who owns the calendar sync.
+      // Xyne-managed calendar calls carry a resolved self-DM channelId; plain
+      // mirrored (unmanaged) events have none, so inherit the workspace of the
+      // organizer who owns the calendar sync instead of denormalizing from a channel.
       const workspaceId = await resolveWorkspaceIdFromModel(DatabaseClient.getInstance(), 'user', { id: data.createdByUserId });
       await DatabaseClient.getInstance().call.create({ data: { ...data, workspaceId } });
       queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
@@ -1943,6 +2359,16 @@ export class CallRepository {
     }
 
     if (!hasExternalCallChanged(existing as unknown as ExistingCallRow, data)) return;
+
+    // Merge (not replace): once a call is activated, its metadata also carries
+    // `conversationId`/`systemMessageId` (see activateScheduledCall). A plain
+    // overwrite here would wipe those out on the next calendar resync, causing
+    // the following join to think it's a fresh call and create a duplicate
+    // conversation + "started a call" system message instead of reusing them.
+    const mergedMetadata = {
+      ...(existing.metadata as Prisma.InputJsonObject ?? {}),
+      ...data.metadata,
+    };
 
     const updated = await DatabaseClient.getInstance().call.update({
       where: { externalId: data.externalId },
@@ -1954,7 +2380,9 @@ export class CallRepository {
         startsAt: data.startsAt,
         endsAt: data.endsAt,
         timezone: data.timezone,
-        metadata: data.metadata,
+        xyneManaged: data.xyneManaged ?? false,
+        channelId: data.channelId,
+        metadata: mergedMetadata,
         updatedAt: data.updatedAt,
         lastActivityAt: data.lastActivityAt,
       },
@@ -1988,6 +2416,8 @@ interface ExistingCallRow {
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
+  xyneManaged: boolean;
+  channelId: string | null;
   metadata: Prisma.JsonValue;
 }
 
@@ -2002,6 +2432,15 @@ function stableStringify(val: unknown): string {
   return `{${sorted.join(',')}}`;
 }
 
+/** Strips the activation-only keys (`conversationId`, `systemMessageId`) that
+ * activateScheduledCall stamps onto call.metadata, so calendar-resync change
+ * detection only looks at calendar-derived fields. */
+function omitActivationKeys(metadata: Prisma.JsonValue): unknown {
+  if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
+  const { conversationId, systemMessageId, ...rest } = metadata as Record<string, unknown>;
+  return rest;
+}
+
 function hasExternalCallChanged(
   existing: ExistingCallRow,
   data: {
@@ -2012,6 +2451,8 @@ function hasExternalCallChanged(
     startsAt?: Date;
     endsAt?: Date;
     timezone: string;
+    xyneManaged?: boolean;
+    channelId: string | null;
     metadata: Prisma.InputJsonObject;
   },
 ): boolean {
@@ -2023,6 +2464,12 @@ function hasExternalCallChanged(
     existing.startsAt?.getTime() !== data.startsAt?.getTime() ||
     existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
     existing.timezone !== data.timezone ||
-    stableStringify(existing.metadata) !== stableStringify(data.metadata)
+    existing.xyneManaged !== (data.xyneManaged ?? false) ||
+    existing.channelId !== data.channelId ||
+    // Compare only the calendar-derived subset of existing.metadata: once activated,
+    // existing.metadata also carries conversationId/systemMessageId (see
+    // activateScheduledCall), which never appear in the freshly computed data.metadata
+    // and would otherwise make this always report "changed".
+    stableStringify(omitActivationKeys(existing.metadata)) !== stableStringify(data.metadata)
   );
 }

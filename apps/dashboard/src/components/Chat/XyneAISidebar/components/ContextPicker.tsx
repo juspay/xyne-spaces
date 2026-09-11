@@ -1,22 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactElement } from 'react';
 import { Command } from 'cmdk';
 import { FileText, Hashtag, MicOn, PhoneDefault, TicketToken } from '@xyne/icons';
-import { Hash, Loader2, Lock, Users } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import type { Channel } from '@xyne/shared';
-import { ChannelVisibility } from '@xyne/shared';
-import Avatar from '../../../ui/Avatar/Avatar';
+import { isDeskChannelType } from '@xyne/shared';
+import ChannelIcon from '../../ChannelIcon/ChannelIcon';
 import { useSearchMetrics } from '../../../../hooks/useSearchMetrics';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 import { ChannelCommandItem } from '../../ChatDirectory/ChannelCommandMenu';
 import SearchResultItem from '../../ChatDirectory/SearchResultItem';
 import { ChannelCategory } from '../../ChatDirectory/ChatDirectory.types';
-import {
-  groupChannelsByScope,
-  getDMSearchableNames,
-  isDMChannel,
-  isGroupDMChannel,
-  getDMParticipantIdsToFetch,
-} from '../../ChatDirectory/ChatDirectory.utils';
+import { groupChannelsByScope, getDMNames } from '../../ChatDirectory/ChatDirectory.utils';
 import {
   useAllChannels,
   useAllVisibleChannels,
@@ -163,6 +157,7 @@ export const ContextPicker = ({
       channel => visibleAllChannels.find(vc => vc.id === channel.id) ?? { ...channel },
     ) as VisibleChannel[];
     const grouped = groupChannelsByScope(visibleChannels, allChannelsUserStatus);
+    const deskChannels = visibleChannels.filter(c => isDeskChannelType(c.type));
 
     const sortByActivity = (list: VisibleChannel[]): VisibleChannel[] =>
       [...list].sort(
@@ -175,15 +170,18 @@ export const ContextPicker = ({
       channel: Channel;
       category: ChannelCategory;
       searchableNames?: string[];
+      searchNames?: string[];
     }> = [];
     sortByActivity(grouped.starred).forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.STARRED,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
-    sortByActivity(grouped.channels).forEach(channel => {
+    sortByActivity([...grouped.channels, ...deskChannels]).forEach(channel => {
       result.push({
         channel,
         category: ChannelCategory.CHANNELS,
@@ -191,10 +189,12 @@ export const ContextPicker = ({
       });
     });
     sortByActivity(grouped.directMessages).forEach(channel => {
+      const dmNames = getDMNames(channel, currentUserID, usersById);
       result.push({
         channel,
         category: ChannelCategory.DIRECT_MESSAGES,
-        searchableNames: getDMSearchableNames(channel, currentUserID, usersById),
+        searchableNames: dmNames.display,
+        searchNames: dmNames.search,
       });
     });
     return result;
@@ -269,33 +269,9 @@ export const ContextPicker = ({
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
-  // Same avatar/lock/hash logic as ChannelCommandMenu's getChannelIcon — that
-  // one is a closure inside the menu component, so it can't be imported.
-  const getChannelIcon = (channel: Channel): ReactElement => {
-    if (isGroupDMChannel(channel.scopeType)) {
-      const otherCount = getDMParticipantIdsToFetch(channel, currentUserID).length;
-      return (
-        <div className='relative flex h-5 w-5 items-center justify-center'>
-          <Users size={16} className='text-muted-foreground' />
-          {otherCount > 0 && (
-            <span className='absolute -bottom-0.5 -right-0.5 min-w-3 rounded-full bg-muted px-0.5 text-xs font-semibold leading-none text-muted-foreground'>
-              {otherCount}
-            </span>
-          )}
-        </div>
-      );
-    }
-    if (isDMChannel(channel.scopeType)) {
-      const userIds = getDMParticipantIdsToFetch(channel, currentUserID);
-      if (userIds.length > 0 && userIds[0]) {
-        return <Avatar userId={userIds[0]} size='sm' />;
-      }
-    }
-    if (channel.visibility === ChannelVisibility.PRIVATE) {
-      return <Lock size={14} />;
-    }
-    return <Hash size={14} />;
-  };
+  const getChannelIcon = (channel: Channel): ReactElement => (
+    <ChannelIcon channel={channel} glyphClassName='text-muted-foreground' avatarSize='sm' />
+  );
 
   // CHANNELS tab renders the local corpus grouped by category, like the menu.
   const groupedChannels = useMemo(() => {

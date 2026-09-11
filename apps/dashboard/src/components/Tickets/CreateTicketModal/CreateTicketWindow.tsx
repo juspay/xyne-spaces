@@ -61,6 +61,8 @@ export const CreateTicketWindow: React.FC = () => {
       initialPriority={(f.priority as TicketPriority | null) ?? null}
       isFromSubTicket={!!draft.isFromSubTicket}
       isFromAI={!!draft.isFromAI}
+      {...(draft.sourceMessageId ? { sourceMessageId: draft.sourceMessageId } : {})}
+      {...(draft.entityLinkContext ? { entityLinkContext: draft.entityLinkContext } : {})}
       standaloneSeed={{
         ...(f.workflowType ? { workflowType: f.workflowType } : {}),
         ...(draft.excludedChatAttachmentIds

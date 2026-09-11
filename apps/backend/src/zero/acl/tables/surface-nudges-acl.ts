@@ -18,8 +18,7 @@ export class SurfaceNudgesACL extends BaseACL<'surface_nudges'> {
   private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel) throw new MutationACLError('Surface nudge not found: channel does not exist', 'surface_nudges');
-    const project = await tx.run(zql.projects.where('id', channel.projectId).one());
-    if (!project || project.workspaceId !== this.ctx.workspaceId) {
+    if (channel.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Surface nudge not found in this workspace', 'surface_nudges');
     }
   }

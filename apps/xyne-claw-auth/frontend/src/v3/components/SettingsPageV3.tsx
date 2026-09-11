@@ -23,6 +23,7 @@ import {
   listCopilotModelsForUser,
   listClaudeModelsForUser,
   listCodexModelsForUser,
+  listLitellmModelsForUser,
   startCodexOauth,
   exchangeCodexOauth,
   shareMyProviderCredential,
@@ -70,6 +71,11 @@ const PROVIDER_META: Record<
     name: "OpenAI (Codex)",
     description: "Code generation and editing",
     icon: CodeIcon,
+  },
+  litellm: {
+    name: "LiteLLM (own key)",
+    description: "Use models allowed by your Grid/LiteLLM key",
+    icon: SparkleIcon,
   },
 };
 
@@ -734,7 +740,7 @@ function CopilotConfigForm({
   );
 }
 
-/* ── Generic provider config (Claude + Codex) ──────────────────────── */
+/* ── Generic provider config (Claude + Codex + LiteLLM) ─────────────── */
 
 function GenericProviderConfigForm({
   provider,
@@ -751,6 +757,7 @@ function GenericProviderConfigForm({
 }) {
   const isClaude = provider === "claude";
   const isCodex = provider === "codex";
+  const isLitellm = provider === "litellm";
   const supportsOauth = isClaude || isCodex;
 
   const [existing, setExisting] = useState<ProviderCredential | undefined>();
@@ -777,39 +784,54 @@ function GenericProviderConfigForm({
         const cred = creds.find((c) => c.provider === provider);
         setExisting(cred);
         if (cred) {
-          setModel(cred.model ?? (isClaude ? "claude-sonnet-4-5" : "gpt-4.1"));
-          setBaseUrl(cred.baseUrl ?? (isClaude ? "https://api.anthropic.com" : "https://api.openai.com/v1"));
+          setModel(cred.model ?? (isClaude ? "claude-sonnet-4-5" : isLitellm ? "private-large" : "gpt-4.1"));
+          setBaseUrl(cred.baseUrl ?? (isClaude ? "https://api.anthropic.com" : isLitellm ? "" : "https://api.openai.com/v1"));
           setAuthType(cred.authType === "oauth_token" ? "oauth_token" : "api_key");
           if (cred.reasoningEffort === "low" || cred.reasoningEffort === "medium" || cred.reasoningEffort === "high") {
             setReasoningEffort(cred.reasoningEffort);
           }
         } else {
-          setModel(isClaude ? "claude-sonnet-4-5" : "gpt-4.1");
-          setBaseUrl(isClaude ? "https://api.anthropic.com" : "https://api.openai.com/v1");
+          setModel(isClaude ? "claude-sonnet-4-5" : isLitellm ? "private-large" : "gpt-4.1");
+          setBaseUrl(isClaude ? "https://api.anthropic.com" : isLitellm ? "" : "https://api.openai.com/v1");
         }
       })
       .catch(() => {});
-  }, [provider, userId, isClaude]);
+  }, [provider, userId, isClaude, isLitellm]);
 
-  // Fetch models when connected
+  // Fetch models when connected. LiteLLM additionally supports a just-typed key
+  // so the user can pick from the Grid/LiteLLM allow-list before saving.
   useEffect(() => {
-    if (!existing?.hasApiKey) return;
+    const typedKey = apiKey.trim();
+    const typedBase = baseUrl.trim();
+    if (!isLitellm && !existing?.hasApiKey) return;
+    if (isLitellm && !typedKey && !existing?.hasApiKey) return;
+
+    let cancelled = false;
     setModelsErr(null);
-    const fetcher = isClaude ? listClaudeModelsForUser : listCodexModelsForUser;
-    fetcher(userId)
-      .then((rows) =>
-        setModels(
-          rows.map((r) => ({
-            id: r.id,
-            displayName: (r as { name?: string; displayName?: string }).displayName ?? (r as { name?: string }).name ?? r.id,
-          })),
-        ),
-      )
-      .catch((e) => {
-        setModels(null);
-        setModelsErr(e instanceof Error ? e.message : "Failed to load models");
-      });
-  }, [provider, existing?.hasApiKey, userId, isClaude]);
+    const t = setTimeout(() => {
+      const promise = isLitellm
+        ? listLitellmModelsForUser(userId, typedKey ? { apiKey: typedKey, ...(typedBase ? { baseUrl: typedBase } : {}) } : (typedBase ? { baseUrl: typedBase } : undefined))
+        : (isClaude ? listClaudeModelsForUser : listCodexModelsForUser)(userId);
+
+      promise
+        .then((rows) => {
+          if (cancelled) return;
+          setModels(
+            rows.map((r) => ({
+              id: r.id,
+              displayName: (r as { name?: string; displayName?: string }).displayName ?? (r as { name?: string }).name ?? r.id,
+            })),
+          );
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setModels(null);
+          setModelsErr(e instanceof Error ? e.message : "Failed to load models");
+        });
+    }, isLitellm ? 400 : 0);
+
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [provider, existing?.hasApiKey, userId, isClaude, isLitellm, apiKey, baseUrl]);
 
   const hasKey = existing?.hasApiKey ?? false;
   const isOauth = authType === "oauth_token";
@@ -970,7 +992,7 @@ function GenericProviderConfigForm({
           label={isOauth ? (isClaude ? "OAuth Token" : "ChatGPT OAuth Token") : "API Key"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={hasKey ? "••••••••" : "sk-…"}
+          placeholder={hasKey ? "••••••••" : isLitellm ? "JUSPAY_GRID_API_KEY" : "sk-…"}
           hint={hasKey ? "Leave blank to keep current" : undefined}
         />
       )}
@@ -989,7 +1011,12 @@ function GenericProviderConfigForm({
         {modelsErr && <p className="mt-1 text-[11px] text-xyne-warning-fg">Couldn&apos;t fetch models — {modelsErr}</p>}
       </div>
 
-      <TextField label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+      <TextField
+        label="Base URL"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder={isLitellm ? "blank = https://grid.ai.juspay.net" : undefined}
+      />
 
       <div>
         <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">

@@ -2,9 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
 
 const TOKEN_VERSION = 1;
-const KEY_LABEL = "xyne-claw-auth/session-token/v1";
-
-const SIGNING_KEY: Buffer = createHmac("sha256", CONFIG.encryptionKey).update(KEY_LABEL).digest();
 
 export interface SessionTokenPayload {
   v: number;
@@ -27,7 +24,12 @@ function fromB64url(input: string): Buffer {
 }
 
 function sign(payloadB64: string): string {
-  const sig = createHmac("sha256", SIGNING_KEY).update(payloadB64).digest();
+  const sig = createHmac("sha256", CONFIG.sessionSigningKey).update(payloadB64).digest();
+  return b64url(sig);
+}
+
+function signLegacy(payloadB64: string): string {
+  const sig = createHmac("sha256", CONFIG.legacySessionSigningKey).update(payloadB64).digest();
   return b64url(sig);
 }
 
@@ -74,11 +76,12 @@ export function verifySessionToken(raw: string | undefined): SessionTokenPayload
   const payloadB64 = raw.slice(0, dot);
   const sigB64 = raw.slice(dot + 1);
 
-  const expected = sign(payloadB64);
-  const expectedBuf = fromB64url(expected);
   const givenBuf = fromB64url(sigB64);
-  if (expectedBuf.length !== givenBuf.length) return "bad-signature";
-  if (!timingSafeEqual(expectedBuf, givenBuf)) return "bad-signature";
+  const expectedBuf = fromB64url(sign(payloadB64));
+  const legacyExpectedBuf = fromB64url(signLegacy(payloadB64));
+  const matchesCurrent = expectedBuf.length === givenBuf.length && timingSafeEqual(expectedBuf, givenBuf);
+  const matchesLegacy = legacyExpectedBuf.length === givenBuf.length && timingSafeEqual(legacyExpectedBuf, givenBuf);
+  if (!matchesCurrent && !matchesLegacy) return "bad-signature";
 
   let payload: SessionTokenPayload;
   try {

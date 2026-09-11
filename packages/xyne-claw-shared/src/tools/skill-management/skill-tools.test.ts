@@ -4,7 +4,7 @@ import { createSkillTool, updateSkillTool } from "./tools.js";
 describe("createSkillTool definition", () => {
   it("is an approval-gated write tool", () => {
     expect(createSkillTool.slug).toBe("create-skill");
-    expect(createSkillTool.source).toBe("custom:skill");
+    expect(createSkillTool.source).toBe("custom:agent-tools");
     expect(createSkillTool.isWriteTool).toBe(true);
   });
   it("requires name, description and content", () => {
@@ -21,13 +21,11 @@ describe("createSkillTool definition", () => {
 describe("updateSkillTool definition", () => {
   it("is a proposal (non-write) tool", () => {
     expect(updateSkillTool.slug).toBe("update-skill");
-    expect(updateSkillTool.source).toBe("custom:skill-update");
+    expect(updateSkillTool.source).toBe("custom:agent-tools");
     expect(updateSkillTool.isWriteTool).toBeFalsy();
   });
-  it("requires slug and content", () => {
-    expect(updateSkillTool.inputSchema.required).toEqual(
-      expect.arrayContaining(["slug", "content"]),
-    );
+  it("requires slug while accepting edits or content", () => {
+    expect(updateSkillTool.inputSchema.required).toEqual(["slug"]);
   });
 });
 
@@ -38,9 +36,9 @@ describe("updateSkillTool.execute validation", () => {
     const out = JSON.parse(await updateSkillTool.execute({ content: "x" }, ctx));
     expect(out.error).toMatch(/slug is required/i);
   });
-  it("errors when content empty", async () => {
+  it("errors when both edits and content are empty", async () => {
     const out = JSON.parse(await updateSkillTool.execute({ slug: "s", content: "   " }, ctx));
-    expect(out.error).toMatch(/content is required/i);
+    expect(out.error).toMatch(/edits.*or.*content/i);
   });
   it("errors when requesting user id absent from context", async () => {
     const out = JSON.parse(await updateSkillTool.execute({ slug: "s", content: "x" }, { config: {}, meta: {} }));

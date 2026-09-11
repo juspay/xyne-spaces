@@ -1,12 +1,16 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Search, Check, ChevronDown } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check, ChevronDown } from '@xyne/icons';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers } from '../../../../../hooks/useUsers';
 import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
 import { queries } from '../../../../../zero/queries';
 import type { User } from '../../../../../machines/stateMachine';
-import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
+import {
+  getUserDisplayName,
+  isUserDeactivated,
+  matchesUserQuery,
+} from '../../../../../utils/userDisplayName';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 
 export interface RoleAssignmentValue {
@@ -103,12 +107,7 @@ export const RoleSubmenu = ({
     const selected = selectedByRoleId.get(roleId) ?? [];
     const selectedSet = new Set(selected);
     const term = (userSearchByRole[roleId] ?? '').toLowerCase().trim();
-    const list = term
-      ? userPool.filter(u => {
-          const name = getUserDisplayName(u).toLowerCase();
-          return name.includes(term);
-        })
-      : userPool;
+    const list = term ? userPool.filter(u => matchesUserQuery(u, term)) : userPool;
     return [...list].sort((a, b) => {
       const aSel = selectedSet.has(a.id) ? 1 : 0;
       const bSel = selectedSet.has(b.id) ? 1 : 0;

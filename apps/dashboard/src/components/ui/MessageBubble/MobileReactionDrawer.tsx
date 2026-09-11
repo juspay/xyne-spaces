@@ -180,6 +180,8 @@ export default function MobileReactionDrawer({
         <Drawer.Overlay
           className='fixed inset-0 z-[100] bg-background/80 backdrop-blur-[2px]'
           onClick={() => setIsOpen(false)}
+          data-track-category='MESSAGE'
+          data-track-name='CLOSE_REACTION_DRAWER_OVERLAY'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
@@ -208,6 +210,8 @@ export default function MobileReactionDrawer({
                   className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                   value='all'
                   onClick={() => handleTabClick('all')}
+                  data-track-category='MESSAGE'
+                  data-track-name='SWITCH_REACTION_TAB'
                 >
                   <span>All</span>
                   <span className='text-xs text-muted-foreground'>
@@ -220,6 +224,8 @@ export default function MobileReactionDrawer({
                     className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                     value={emojiName}
                     onClick={() => handleTabClick(emojiName)}
+                    data-track-category='MESSAGE'
+                    data-track-name='SWITCH_REACTION_TAB'
                   >
                     <span>{renderEmoji(emojiName)}</span>
                     <span className='text-xs text-muted-foreground'>{count}</span>
@@ -256,6 +262,8 @@ export default function MobileReactionDrawer({
                         <button
                           key={idx}
                           onClick={() => paginate(idx + 1 - currentTabIndex)}
+                          data-track-category='MESSAGE'
+                          data-track-name='SWITCH_REACTION_TAB'
                           className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
                           <span className='*:text-2xl flex-shrink-0'>
@@ -275,6 +283,8 @@ export default function MobileReactionDrawer({
                           <>
                             <button
                               onClick={() => handleUserClick(user.userId)}
+                              data-track-category='MESSAGE'
+                              data-track-name='OPEN_REACTOR_PROFILE'
                               key={idx}
                               className='flex items-center gap-3 px-2 py-2'
                             >

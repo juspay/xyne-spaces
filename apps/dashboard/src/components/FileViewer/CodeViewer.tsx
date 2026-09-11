@@ -81,6 +81,7 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
           className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
           data-track-category='FileViewer'
           data-track-name='RetryLoadCode'
+          data-ph-capture-attribute-track-id='retry_load_code'
         >
           Try Again
         </button>
@@ -106,7 +107,9 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
     ? fileName.toLowerCase().endsWith('.md') || fileName.toLowerCase().endsWith('.markdown')
     : false;
 
-  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>('raw');
+  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>(
+    isMarkdown ? 'rendered' : 'raw',
+  );
 
   const fileSizeMB = useMemo(() => {
     return source ? source.size / (1024 * 1024) : 0;

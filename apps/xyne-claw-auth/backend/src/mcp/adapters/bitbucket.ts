@@ -77,6 +77,39 @@ export const BITBUCKET_CUSTOM_TOOLS: McpToolInfo[] = [
   },
 
   {
+    name: "list-pull-requests",
+    description:
+      "List pull requests with SERVER-SIDE filtering by state and target branch, walking every page to completion. " +
+      "Use this instead of listing PRs page-by-page and filtering client-side — Bitbucket Server filters target branch natively " +
+      "(`at=refs/heads/<branch>&direction=INCOMING`), so client-side filtering silently under-counts whenever a page boundary falls " +
+      "inside the filtered set.\n\n" +
+      "Returns a MANIFEST built for provable completeness: the exact PR id list, the count, and a `complete` flag that is true ONLY when " +
+      "Bitbucket reported isLastPage (i.e. the whole result set was enumerated, not truncated by `max`). Every returned PR is also " +
+      "re-checked client-side against `targetBranch`; any mismatch is reported in `targetBranchMismatches` rather than silently dropped. " +
+      "If you need 'the last N merged PRs into branch X', call this once with state=MERGED, targetBranch=X, order=NEWEST, max=N.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: { type: "string", description: "Bitbucket project key (e.g. JBIZ)" },
+        repoSlug: { type: "string", description: "Repository slug (e.g. ardra-b2b)" },
+        state: {
+          type: "string",
+          enum: ["MERGED", "OPEN", "DECLINED", "ALL"],
+          description: "PR state filter. Default MERGED.",
+        },
+        targetBranch: {
+          type: "string",
+          description: "Destination branch name (e.g. vpa-beta) — bare name or refs/heads/<name>. Filtered server-side.",
+        },
+        order: { type: "string", enum: ["NEWEST", "OLDEST"], description: "Sort order. Default NEWEST." },
+        max: { type: "number", description: "Maximum PRs to return (default 1000). `complete` reports whether the full set fit." },
+        idsOnly: { type: "boolean", description: "Return only the id manifest, omitting per-PR rows. Default false." },
+      },
+      required: ["projectKey", "repoSlug"],
+    },
+  },
+
+  {
     name: "get-pr-template",
     description:
       "Fetch a repository's pull-request description template so a bot can pre-fill a PR body. " +
@@ -560,4 +593,173 @@ export async function handleGetPrTemplate(
   }
 
   return { content: JSON.stringify({ found: false, path: null, at: at ?? null, content: null, triedPaths: tried }, null, 2) };
+}
+
+// ── list-pull-requests ────────────────────────────────────────────────────────
+
+interface BbPrRef {
+  id?: string;                 // e.g. refs/heads/vpa-beta
+  displayId?: string;          // e.g. vpa-beta
+  repository?: { slug?: string; project?: { key?: string } };
+}
+
+interface BbPullRequest {
+  id?: number;
+  title?: string;
+  state?: string;
+  createdDate?: number;
+  updatedDate?: number;
+  closedDate?: number;
+  author?: { user?: { name?: string; displayName?: string } };
+  fromRef?: BbPrRef;
+  toRef?: BbPrRef;
+}
+
+interface BbPrPage {
+  values?: BbPullRequest[];
+  size?: number;
+  isLastPage?: boolean;
+  nextPageStart?: number;
+}
+
+/** `vpa-beta` and `refs/heads/vpa-beta` are the same branch; callers pass either. */
+function normalizeBranchRef(branch: string): { ref: string; displayId: string } {
+  const trimmed = branch.trim().replace(/^\/+|\/+$/g, "");
+  const displayId = trimmed.replace(/^refs\/heads\//, "");
+  return { ref: `refs/heads/${displayId}`, displayId };
+}
+
+/**
+ * Enumerate pull requests with server-side state + target-branch filtering.
+ *
+ * The upstream MCP's PR list returns one page and leaves target-branch matching
+ * to the caller. Filtering client-side across pages is where "the last 1000
+ * merged PRs into <branch>" quietly becomes a partial list: each page is capped
+ * BEFORE the filter, so a page of 100 may contribute 3 matches, and stopping at
+ * N pages stops at an arbitrary point in the filtered set. Bitbucket Server
+ * supports `at=<ref>&direction=INCOMING`, which applies the branch filter before
+ * pagination — so a page boundary can no longer hide matches.
+ *
+ * Completeness is reported, not assumed: `complete` is true only when Bitbucket
+ * itself said isLastPage. A caller that needs a provable manifest can assert on
+ * that flag rather than trusting a count.
+ */
+export async function handleListPullRequests(
+  credentials: Record<string, unknown>,
+  params: Record<string, unknown>,
+): Promise<{ content: string; citations?: Citation[] }> {
+  const username = credentials["username"] as string;
+  const token = credentials["token"] as string;
+  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+
+  const projectKey = params["projectKey"] as string;
+  const repoSlug = params["repoSlug"] as string;
+  if (!projectKey || !repoSlug) {
+    throw new Error("list-pull-requests: projectKey and repoSlug are required");
+  }
+
+  const state = ((params["state"] as string) || "MERGED").toUpperCase();
+  const order = ((params["order"] as string) || "NEWEST").toUpperCase();
+  const max = typeof params["max"] === "number" ? Math.max(1, params["max"] as number) : 1000;
+  const idsOnly = params["idsOnly"] === true;
+  const targetBranchRaw = typeof params["targetBranch"] === "string" ? (params["targetBranch"] as string).trim() : "";
+  const target = targetBranchRaw ? normalizeBranchRef(targetBranchRaw) : null;
+
+  const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
+  const pageSize = 100;
+  const collected: BbPullRequest[] = [];
+  const mismatches: Array<{ id: number; toRef: string }> = [];
+  let start = 0;
+  let pagesWalked = 0;
+  let sawLastPage = false;
+  const maxPages = 500; // 50k PRs — far beyond any real repo, purely a runaway guard
+
+  while (collected.length < max && pagesWalked < maxPages) {
+    const qs = new URLSearchParams({
+      state,
+      order,
+      limit: String(pageSize),
+      start: String(start),
+    });
+    if (target) {
+      // `at` alone matches EITHER side of the PR; direction=INCOMING restricts
+      // it to PRs whose DESTINATION is this ref, which is what "merged into X"
+      // means. Without direction, PRs merged FROM this branch leak in.
+      qs.set("at", target.ref);
+      qs.set("direction", "INCOMING");
+    }
+
+    const url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/pull-requests?${qs.toString()}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: authHeader, Accept: "application/json" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Bitbucket pull-requests API failed (${res.status}): ${errText.slice(0, 300)}`);
+    }
+
+    const page = (await res.json()) as BbPrPage;
+    pagesWalked++;
+    const values = page.values ?? [];
+
+    for (const pr of values) {
+      if (typeof pr.id !== "number") continue;
+      // Belt-and-braces: re-assert the server-side filter actually held. A
+      // mismatch is surfaced, never silently dropped — a wrong filter that
+      // quietly returns fewer rows is exactly the failure this tool exists to
+      // rule out.
+      if (target) {
+        const toDisplay = pr.toRef?.displayId ?? pr.toRef?.id?.replace(/^refs\/heads\//, "") ?? "";
+        if (toDisplay !== target.displayId) {
+          mismatches.push({ id: pr.id, toRef: toDisplay || "(unknown)" });
+          continue;
+        }
+      }
+      collected.push(pr);
+      if (collected.length >= max) break;
+    }
+
+    if (page.isLastPage === true) { sawLastPage = true; break; }
+    const next = typeof page.nextPageStart === "number" ? page.nextPageStart : start + values.length;
+    // No forward progress => stop rather than loop forever on a server that
+    // omits both isLastPage and nextPageStart.
+    if (values.length === 0 || next <= start) { sawLastPage = values.length === 0; break; }
+    start = next;
+  }
+
+  const ids = collected.map((pr) => pr.id as number);
+  const complete = sawLastPage && collected.length < max;
+
+  const manifest = {
+    projectKey,
+    repoSlug,
+    state,
+    targetBranch: target?.displayId ?? null,
+    order,
+    count: ids.length,
+    /** TRUE only when Bitbucket reported isLastPage — i.e. this is the entire
+     *  matching set, not a page-limited prefix. Assert on this before claiming
+     *  "all N were processed". */
+    complete,
+    truncatedByMax: collected.length >= max,
+    pagesWalked,
+    ids,
+    ...(mismatches.length > 0 ? { targetBranchMismatches: mismatches } : {}),
+    ...(idsOnly ? {} : {
+      pullRequests: collected.map((pr) => ({
+        id: pr.id,
+        title: pr.title ?? "",
+        state: pr.state ?? "",
+        author: pr.author?.user?.displayName ?? pr.author?.user?.name ?? "",
+        fromRef: pr.fromRef?.displayId ?? "",
+        toRef: pr.toRef?.displayId ?? "",
+        closedDate: pr.closedDate ? new Date(pr.closedDate).toISOString() : null,
+        updatedDate: pr.updatedDate ? new Date(pr.updatedDate).toISOString() : null,
+      })),
+    }),
+  };
+
+  return { content: JSON.stringify(manifest, null, 2) };
 }
