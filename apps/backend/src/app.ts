@@ -959,11 +959,9 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    // Commit analysis queue (producer only — messages are enqueued from webhook handlers)
     logger.info('Initializing commit analysis queue (producer)...');
     await commitAnalysisQueue.initialize();
 
-    // Start worker/consumer only on worker pods
     if (config.enableCommitAnalysisWorker) {
       logger.info('Starting commit analysis queue worker (consumer)...');
       await commitAnalysisQueue.startWorker();

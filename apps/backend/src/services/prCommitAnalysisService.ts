@@ -41,7 +41,6 @@ export class PrCommitAnalysisService {
    * - Store in Commit table with agentSlug field
    */
   async analyzePullRequestCommits(input: CommitAnalysisInput): Promise<CommitAnalysisResult> {
-    // Step 1: Fetch commits from VCS
     const commits = await this.vcsClient.getCommitsForPullRequest(
       input.projectKey,
       input.repositorySlug,
@@ -59,7 +58,6 @@ export class PrCommitAnalysisService {
       };
     }
 
-    // Step 2: Process and persist commits
     const { botCommitCount, humanCommitCount } = await this.processCommits(
       commits,
       input.prInternalId,
