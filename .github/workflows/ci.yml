@@ -143,6 +143,13 @@ jobs:
       - name: Run automation tests
         run: pnpm run test
 
+      - name: Show container states and logs
+        if: always()
+        run: |
+          find tools/xyne-automation/reports -type f \( -name '*.log' -o -name '*.txt' \) | sort | while read -r f; do
+            echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
+          done
+
       - name: Push report to Spaces
         if: always()
         env:
