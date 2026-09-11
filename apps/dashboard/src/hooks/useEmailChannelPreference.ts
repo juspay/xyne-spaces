@@ -36,6 +36,7 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug,
       metricsEnabled,
       frtStageNames,
+      metricsGuestVisibility,
       appWebhookDeliveryEnabled,
       deskReportEnabled,
       deskReportAgentSlug,
@@ -52,6 +53,7 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug?: string | null;
       metricsEnabled?: boolean;
       frtStageNames?: string | null;
+      metricsGuestVisibility?: string | null;
       appWebhookDeliveryEnabled?: boolean;
       deskReportEnabled?: boolean;
       deskReportAgentSlug?: string | null;
@@ -72,6 +74,7 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
           ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+          ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
           ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
           ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
           ...(deskReportAgentSlug !== undefined

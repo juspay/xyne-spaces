@@ -74,7 +74,22 @@ export interface DeskMetricsResponse {
   tagBreakdown: Array<{ tag: string; tagCategory: string; count: number }>;
   tickets: DeskMetricsTicketRow[];
   agents: DeskMetricsAgentRow[];
+  /**
+   * Only sent to guests: what the desk owner lets them see, stored as JSON in
+   * email_channel_preferences.metricsGuestVisibility. Keys: `kpi:*`, `chart:*` (tag charts use
+   * `chart:tags`), `column:*`, stageCounts, ticketTable, csvDownload, moreFilters, agentsTab.
+   * A key without an entry is shown. It only hides UI.
+   */
+  guestVisibility?: Record<string, boolean>;
 }
+
+export const parseDeskMetricsGuestVisibility = (raw?: string | null): Record<string, boolean> => {
+  try {
+    return (JSON.parse(raw || '{}') as Record<string, boolean> | null) ?? {};
+  } catch {
+    return {};
+  }
+};
 
 export interface DeskMetricsPerDeskRow {
   channelId: string;

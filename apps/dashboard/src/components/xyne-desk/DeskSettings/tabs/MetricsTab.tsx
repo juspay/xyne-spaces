@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { FormFieldType, type FormFields } from '@xyne/shared';
 import { Switch } from '../../../ui/Switch';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
+import { CHART_VIEW_LABELS } from '../../../../hooks/usePersistedDeskMetricsFilters';
 import { useZero } from '../../../../hooks/useZero';
 import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
@@ -22,6 +25,8 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
     boardId,
     canManage,
     channelId,
+    guestVisibility,
+    toggleGuestVisibility,
   } = form;
 
   const [fallbackBoardId, setFallbackBoardId] = useState<string | null>(null);
@@ -55,6 +60,66 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
   const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: effectiveBoardId ?? '' }), {
     enabled: !!effectiveBoardId,
   });
+  const [boardDetail] = useCachedQuery(
+    queries.boardDetailById({ boardId: effectiveBoardId ?? '' }),
+    { enabled: !!effectiveBoardId },
+  );
+
+  // Every board custom field is a table column; DATE and DOC fields can't be charted.
+  const [columnFieldNames, chartFieldNames] = useMemo(() => {
+    const fieldTypes = new Map<string, string>();
+    for (const mapping of boardDetail?.formContextMappings ?? []) {
+      const { formId, formFields } = mapping as unknown as {
+        formId?: string;
+        formFields?: FormFields[];
+      };
+      for (const field of formId ? resolveDisplayFormFields(formId, formFields ?? []) : []) {
+        fieldTypes.set(field.fieldName, field.fieldType);
+      }
+    }
+    const names = [...fieldTypes.keys()].sort();
+    const chartable = (name: string): boolean =>
+      fieldTypes.get(name) !== FormFieldType.DATE && fieldTypes.get(name) !== FormFieldType.DOC;
+    return [names, names.filter(chartable)] as const;
+  }, [boardDetail]);
+
+  const guestOptionGroups: Record<string, Record<string, string>> = {
+    'Summary cards': {
+      'kpi:ticketsCreated': 'Tickets created',
+      'kpi:avgFirstResponse': 'Avg first response',
+      'kpi:avgResolution': 'Avg resolution',
+      'kpi:csat': 'CSAT',
+      'kpi:emailReplies': 'Email replies',
+    },
+    Sections: {
+      stageCounts: 'Tickets by stage',
+      ticketTable: 'Ticket table',
+      csvDownload: 'CSV download',
+      moreFilters: 'More filters',
+      agentsTab: 'Agents tab',
+    },
+    'Chart breakdowns': Object.fromEntries([
+      // Guests only ever see one desk, so there is no desk breakdown to offer.
+      ...Object.entries(CHART_VIEW_LABELS)
+        .filter(([view]) => view !== 'desk')
+        .map(([view, label]) => [`chart:${view}`, label] as const),
+      ...chartFieldNames.map(name => [`chart:field:${name}`, name] as const),
+    ]),
+    'Table columns': {
+      'column:id': 'ID',
+      'column:title': 'Title',
+      'column:assignee': 'Assignee',
+      'column:priority': 'Priority',
+      'column:stage': 'Stage',
+      'column:frt': 'FRT',
+      'column:rt': 'RT',
+      'column:csat': 'CSAT',
+      'column:tags': 'Tags',
+      ...Object.fromEntries(columnFieldNames.map(name => [`column:field:${name}`, name] as const)),
+      'column:createdAt': 'Created at',
+      'column:age': 'Age',
+    },
+  };
 
   // "__emailReply" sentinel in frtStageNames means email-reply arm is active.
   // Empty array (legacy) → also treated as email-reply active for backward compat.
@@ -115,8 +180,9 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
               onChange={toggleEmailReply}
               disabled={!canManage}
               size='sm'
+              label='Agent sends an email reply'
+              labelClassName='text-sm text-foreground'
             />
-            <span className='text-sm text-foreground'>Agent sends an email reply</span>
             <span className='text-xs text-muted-foreground'>(default)</span>
           </div>
 
@@ -139,12 +205,41 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
                     onChange={() => toggleStage(stage.name)}
                     disabled={!canManage}
                     size='sm'
+                    label={stage.name}
+                    labelClassName='text-sm text-foreground'
                   />
-                  <span className='text-sm text-foreground'>{stage.name}</span>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {metricsEnabled && canManage && (
+        <div className='flex flex-col gap-[12px]'>
+          <div>
+            <div className='text-sm font-medium text-foreground'>What can guests see?</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Guests see these parts of the metrics dashboard unless you turn them off.
+            </div>
+          </div>
+          {Object.entries(guestOptionGroups).map(([title, options]) => (
+            <div key={title} className='flex flex-col gap-1.5'>
+              <div className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
+                {title}
+              </div>
+              {Object.entries(options).map(([key, label]) => (
+                <Checkbox
+                  key={key}
+                  checked={guestVisibility[key] !== false}
+                  onChange={() => toggleGuestVisibility(key)}
+                  size='sm'
+                  label={label}
+                  labelClassName='text-sm text-foreground'
+                />
+              ))}
+            </div>
+          ))}
         </div>
       )}
     </>
