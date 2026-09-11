@@ -2185,7 +2185,7 @@ export class ChannelController {
           workspaceId,
         };
 
-        const channel = await this.channelRepository.create(channelData);
+        const { channel, created } = await this.channelRepository.getOrCreateDmChannel(channelData);
 
         // Add current user as the only participant
         await this.channelParticipantRepository.addParticipant(channel.id, currentUserId, ChannelRole.ADMIN);
@@ -2201,7 +2201,7 @@ export class ChannelController {
         const currentUserInfo = await this.getUserInfo(currentUserId);
 
         const response = {
-          message: 'Self-DM channel created successfully',
+          message: created ? 'Self-DM channel created successfully' : 'Self-DM channel already exists',
           id: channel.id,
           name: channel.name,
           scopeType: channel.scopeType,
@@ -2219,11 +2219,11 @@ export class ChannelController {
             email: currentUserInfo.email,
             picture: currentUserInfo.picture
           },
-          isExisting: false,
+          isExisting: !created,
           initialConversation
         };
 
-        res.status(201).json(response);
+        res.status(created ? 201 : 200).json(response);
 
         // Queue Vespa job in background for self-DM
         vespaQueue.addJob({
@@ -2301,7 +2301,7 @@ export class ChannelController {
           workspaceId,
         };
 
-        const channel = await this.channelRepository.create(channelData);
+        const { channel, created } = await this.channelRepository.getOrCreateDmChannel(channelData);
 
         // Add participants - creator sees DM immediately unless this is a silent auto-create
         // without an initial message, in which case the channel is hidden until the first
@@ -2323,7 +2323,7 @@ export class ChannelController {
         }
 
         const response = {
-          message: 'DM channel created successfully',
+          message: created ? 'DM channel created successfully' : 'DM channel already exists',
           id: channel.id,
           name: channel.name,
           scopeType: channel.scopeType,
@@ -2340,11 +2340,11 @@ export class ChannelController {
             email: targetUser.email,
             picture: targetUser.picture
           },
-          isExisting: false,
+          isExisting: !created,
           initialConversation
         };
 
-        res.status(201).json(response);
+        res.status(created ? 201 : 200).json(response);
 
         // Queue Vespa job in background for DM - worker will handle all processing
         vespaQueue.addJob({
@@ -2419,7 +2419,7 @@ export class ChannelController {
           workspaceId,
         };
 
-        const channel = await this.channelRepository.create(channelData);
+        const { channel, created } = await this.channelRepository.getOrCreateDmChannel(channelData);
 
         // Add all participants - creator sees DM immediately unless this is a silent auto-create
         // without an initial message, in which case the channel is hidden until the first
@@ -2460,7 +2460,7 @@ export class ChannelController {
         }
 
         const response = {
-          message: 'Group DM created successfully',
+          message: created ? 'Group DM created successfully' : 'Group DM already exists',
           id: channel.id,
           name: channel.name,
           scopeType: channel.scopeType,
@@ -2472,11 +2472,11 @@ export class ChannelController {
           lastActivityAt: channel.createdAt,
           createdAt: channel.createdAt,
           participants: allParticipantDetails,
-          isExisting: false,
+          isExisting: !created,
           initialConversation
         };
 
-        res.status(201).json(response);
+        res.status(created ? 201 : 200).json(response);
 
         // Queue Vespa job in background for Group DM - worker will handle all processing
         vespaQueue.addJob({

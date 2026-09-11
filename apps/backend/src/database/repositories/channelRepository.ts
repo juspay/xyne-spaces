@@ -1,6 +1,6 @@
 import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
-import { Channel } from '@prisma/client';
+import { Channel, Prisma } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
@@ -96,6 +96,66 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     }
 
     return result;
+  }
+
+  /**
+   * Concurrency-safe get-or-create for DM / GROUP_DM / self-DM channels.
+   *
+   * The normalized participant set is materialized in `channel.name` (sorted,
+   * comma-joined user IDs), and a partial unique index on
+   * (workspaceId, name) WHERE scopeType IN ('DM','GROUP_DM') is the real
+   * source of truth. We insert optimistically and, if a concurrent request
+   * won the race (Prisma P2002), we re-fetch and return the existing channel.
+   *
+   * Unlike `create()`, this path deliberately skips the app-level
+   * `checkDuplicateName` SELECT — that check is itself part of the check-then-
+   * create race; the DB constraint is what actually guarantees uniqueness.
+   *
+   * @returns the channel plus `created` = false when an existing channel was
+   *          returned because of a concurrent insert.
+   */
+  async getOrCreateDmChannel(
+    data: CreateChannelInput,
+  ): Promise<{ channel: Channel; created: boolean }> {
+    if (data.scopeType !== ChannelScopeType.DM && data.scopeType !== ChannelScopeType.GROUP_DM) {
+      throw new Error(`getOrCreateDmChannel only supports DM/GROUP_DM, got ${data.scopeType}`);
+    }
+
+    try {
+      const channel = await this.db.channel.create({
+        data: {
+          scopeType: data.scopeType,
+          name: data.name,
+          description: data.description,
+          visibility: data.visibility || 'PRIVATE',
+          createdBy: data.createdBy,
+          projectId: data.projectId,
+          workspaceId: data.workspaceId,
+          ...(data.type && { type: data.type }),
+        },
+      });
+      return { channel, created: true };
+    } catch (error) {
+      // A concurrent "open DM" request inserted the same (workspaceId, name)
+      // between our lookup and this insert — the partial unique index rejects
+      // it (P2002). Return the winner's channel instead of a duplicate.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.db.channel.findFirst({
+          where: {
+            workspaceId: data.workspaceId,
+            name: data.name,
+            scopeType: data.scopeType,
+          },
+        });
+        if (existing) {
+          logger.info(
+            `[getOrCreateDmChannel] Lost create race for ${data.scopeType} "${data.name}" in workspace ${data.workspaceId}; returning existing channel ${existing.id}`,
+          );
+          return { channel: existing, created: false };
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -407,14 +467,15 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // Create new DM channel
       const dmChannelName = [userId, targetUserId].sort().join(',');
 
-      dmChannel = await this.create({
+      // Concurrency-safe: partial unique index guards against duplicate DMs.
+      dmChannel = (await this.getOrCreateDmChannel({
         scopeType: ChannelScopeType.DM,
         name: dmChannelName,
         visibility: ChannelVisibility.PRIVATE,
         createdBy: userId,
         projectId,
         workspaceId,
-      });
+      })).channel;
 
       // Add both users as participants
       await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
@@ -440,14 +501,15 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       }
 
       // Create new group DM channel
-      const groupDMChannel = await this.create({
+      // Concurrency-safe: partial unique index guards against duplicate group DMs.
+      const groupDMChannel = (await this.getOrCreateDmChannel({
         scopeType: ChannelScopeType.GROUP_DM,
         name: groupDmName,
         visibility: ChannelVisibility.PRIVATE,
         createdBy: userId,
         projectId,
         workspaceId,
-      });
+      })).channel;
 
       // Add all users as participants
       await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
