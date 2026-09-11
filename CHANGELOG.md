@@ -1,3 +1,10 @@
+## [1.310.2](https://github.com/juspay/xyne-spaces/compare/v1.310.1...v1.310.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* unify session cookies expiry ([#1656](https://github.com/juspay/xyne-spaces/issues/1656)) ([62b4168](https://github.com/juspay/xyne-spaces/commit/62b41688ed1987e28f9ddcc4046edb28e169ccc2))
+
 ## [1.310.1](https://github.com/juspay/xyne-spaces/compare/v1.310.0...v1.310.1) (2026-09-10)
 
 
