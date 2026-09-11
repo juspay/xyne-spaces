@@ -450,6 +450,7 @@ schema ticket {
     summary replyCount {}
     summary threadSenders {}
     summary formFields {}
+    summary tags {}
     # imported from channelRef
     summary channelId {}
     summary channelName {}
