@@ -40,7 +40,15 @@ SERVICES=(
 )
 
 echo "=== Collecting container logs into $OUTPUT_DIR ==="
+STATES_FILE="$OUTPUT_DIR/container-states.txt"
+: > "$STATES_FILE"
 for service in "${SERVICES[@]}"; do
+  container_name="${COMPOSE_PROJECT_NAME:-xyne}-${service}"
+  STATE=$(docker inspect "$container_name" \
+    --format 'Status={{.State.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' \
+    2>/dev/null || echo "container not found (never created, or already removed)")
+  printf '%s: %s\n' "$service" "$STATE" >> "$STATES_FILE"
+
   # Suppress errors (service may be disabled via compose profile) and skip empty logs.
   LOG_OUTPUT=$(docker compose $COMPOSE_ARGS logs --no-color "$service" 2>/dev/null || true)
   if [ -n "$(printf '%s' "$LOG_OUTPUT" | tr -d '[:space:]')" ]; then

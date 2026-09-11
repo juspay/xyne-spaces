@@ -158,7 +158,7 @@ jobs:
             | sort -n | tail -n1 | cut -d' ' -f2-)
           UPLOAD_ARGS=()
           if [ -n "$DOCKER_LOGS_DIR" ]; then
-            for log in "$DOCKER_LOGS_DIR"/*.log; do
+            for log in "$DOCKER_LOGS_DIR"/*.log "$DOCKER_LOGS_DIR"/*.txt; do
               [ -e "$log" ] && UPLOAD_ARGS+=(-F "files=@${log};type=text/plain")
             done
           fi
