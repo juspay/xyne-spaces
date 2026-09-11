@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.14](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.13...v1.295.0-release-20260909.14) (2026-09-11)
+
+
+### Bug Fixes
+
+* workflow execution written to both schema ([#1813](https://github.com/juspay/xyne-spaces/issues/1813)) ([83454c8](https://github.com/juspay/xyne-spaces/commit/83454c8dd6bef9f7b9e7f37a2cf4a50c9cd645ca))
+
 ## [1.295.0-release-20260909.13](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.12...v1.295.0-release-20260909.13) (2026-09-11)
 
 
