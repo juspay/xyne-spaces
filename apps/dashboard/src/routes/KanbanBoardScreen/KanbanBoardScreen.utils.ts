@@ -397,8 +397,15 @@ export const applyTicketFilters = (
       }
     }
 
-    // User groups filter
-    if (filters.userGroups && filters.userGroups.length > 0) {
+    // User groups filter.
+    //
+    // '' means the group is UNKNOWN, not absent: search-backed rows are built by toTicket
+    // (useVespaTicketSearch) from Vespa's `lean` document summary, which does not project
+    // userGroupId, so it defaults to ''. Vespa already applied this filter server-side, so
+    // such a row cannot and need not be re-judged here — dropping it emptied the board (and
+    // with it the derived group list) when switching to assignee/priority grouping while a
+    // search was active. A Zero row that genuinely has no group is null and still drops.
+    if (filters.userGroups && filters.userGroups.length > 0 && ticket.userGroupId !== '') {
       if (!ticket.userGroupId || !filters.userGroups.includes(ticket.userGroupId)) {
         return false;
       }
