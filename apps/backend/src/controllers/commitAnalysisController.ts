@@ -619,15 +619,10 @@ export class CommitAnalysisController {
       // canonical helper, for the right SYSTEM/isTicketActivity invariants) pointing at it.
       if (hotfixSync) {
         try {
-          const canvasLink =
-            canvasId && config.frontendUrl
-              ? buildWorkspaceCanvasUrl(params.workspaceId, canvasId)
-              : null;
+          const canvasLink = canvasId ? buildWorkspaceCanvasUrl(params.workspaceId, canvasId) : null;
           let content: string;
           if (canvasLink) {
             content = `Hotfix synced — release analysis canvas updated ${canvasLink}`;
-          } else if (canvasId) {
-            content = 'Hotfix synced — release analysis canvas updated. No link available: the frontend URL is not configured.';
           } else if (viewResults.length === 0) {
             content = 'Hotfix synced — no new commits to analyse, so the analysis canvas was left unchanged. Nothing to open.';
           } else {

@@ -287,11 +287,10 @@ const CanvasLink = ({
         void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
         // Fallback to full page navigation, keeping any query/hash the link
-        // carries. The router re-adds the workspace, so hand it the path
-        // without one.
-        const routerPath = linkWorkspaceId
-          ? url.pathname.slice(`/${linkWorkspaceId}`.length)
-          : url.pathname;
+        // carries. Every canvas route lives under /:workspaceId, so a bare
+        // link needs the current workspace prepended.
+        const routerPath =
+          linkWorkspaceId || !workspaceId ? url.pathname : `/${workspaceId}${url.pathname}`;
         void navigate(`${routerPath}${url.search}${url.hash}`);
       }
     }
