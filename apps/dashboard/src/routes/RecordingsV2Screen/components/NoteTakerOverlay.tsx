@@ -9,7 +9,7 @@ import {
   type TouchEvent as ReactTouchEvent,
 } from 'react';
 import { ChevronDown, Flag, PauseBig, PlayBig, Spinner, StopBig, CloudDisabled } from '@xyne/icons';
-import { Maximize2 } from 'lucide-react';
+import { Maximize2, Monitor, MonitorOff, Video, VideoOff, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useWorkspaceNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { Button } from '../../../components/ui/Button/Button';
@@ -27,10 +27,12 @@ import {
   setLiveRecordingV2Tab,
 } from '../../../utils/recordingTabPreference';
 import { canvasService } from '../../../services/Canvas/canvasService';
+import type { RecordingVideoControls } from '../../../hooks/useRecordingStore';
+import { canShareScreen } from '../../../utils/recordingMedia';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface NoteTakerOverlayProps {
+interface NoteTakerOverlayProps extends RecordingVideoControls {
   status: RecordingState['status'];
   startTime: number | null;
   pauseStartedAt: number | null;
@@ -63,7 +65,7 @@ interface RecordingPanelHeaderProps {
   onTitleUpdated?: ((title: string) => void) | undefined;
 }
 
-interface RecordingControlBarProps {
+interface RecordingControlBarProps extends RecordingVideoControls {
   recordingId: string | null;
   isPaused: boolean;
   markedCount: number;
@@ -71,6 +73,17 @@ interface RecordingControlBarProps {
   onResume: () => void;
   onStop: () => void;
   onMarkMoment: () => void;
+}
+
+interface MediaToggleButtonProps {
+  isOn: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  onLabel: string;
+  offLabel: string;
+  onIcon: LucideIcon;
+  offIcon: LucideIcon;
+  trackName: string;
 }
 
 interface NotesTabProps {
@@ -306,6 +319,43 @@ const MarkMomentButton = ({
   );
 };
 
+const MediaToggleButton = ({
+  isOn,
+  disabled,
+  onClick,
+  onLabel,
+  offLabel,
+  onIcon,
+  offIcon,
+  trackName,
+}: MediaToggleButtonProps): ReactElement => {
+  const Icon = isOn ? onIcon : offIcon;
+  const label = isOn ? onLabel : offLabel;
+
+  return (
+    <Button
+      type='button'
+      variant='ghost'
+      size='iconSm'
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'rounded-xl transition-colors',
+        isOn
+          ? 'bg-foreground text-background hover:bg-foreground/85 hover:text-background'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
+      aria-label={label}
+      aria-pressed={isOn}
+      title={label}
+      data-track-category={TRACK_CATEGORY}
+      data-track-name={`${trackName}_${isOn ? 'off' : 'on'}`}
+    >
+      <Icon size={17} />
+    </Button>
+  );
+};
+
 const RecordingControlBar = ({
   recordingId,
   isPaused,
@@ -314,6 +364,10 @@ const RecordingControlBar = ({
   onResume,
   onStop,
   onMarkMoment,
+  isCameraEnabled,
+  isScreenShareEnabled,
+  onToggleCamera,
+  onToggleScreenShare,
 }: RecordingControlBarProps): ReactElement => {
   const navigate = useWorkspaceNavigate();
 
@@ -343,6 +397,28 @@ const RecordingControlBar = ({
         <span>Full screen</span>
       </Button>
       <div className='flex flex-1 shrink-0 items-center justify-end gap-1.5'>
+        <MediaToggleButton
+          isOn={isCameraEnabled}
+          disabled={isPaused}
+          onClick={onToggleCamera}
+          onLabel='Turn off camera'
+          offLabel='Turn on camera'
+          onIcon={Video}
+          offIcon={VideoOff}
+          trackName='camera'
+        />
+        {canShareScreen() && (
+          <MediaToggleButton
+            isOn={isScreenShareEnabled}
+            disabled={isPaused}
+            onClick={onToggleScreenShare}
+            onLabel='Stop sharing screen'
+            offLabel='Share screen'
+            onIcon={Monitor}
+            offIcon={MonitorOff}
+            trackName='screen_share'
+          />
+        )}
         <MarkMomentButton markedCount={markedCount} onMarkMoment={onMarkMoment} />
         <Button
           type='button'
@@ -632,6 +708,7 @@ export function NoteTakerOverlay({
   onMinimize,
   onExpand,
   onTitleUpdated,
+  ...videoControls
 }: NoteTakerOverlayProps): ReactElement | null {
   const shouldReduceMotion = useReducedMotion();
 
@@ -869,6 +946,7 @@ export function NoteTakerOverlay({
               onResume={onResume}
               onStop={onStop}
               onMarkMoment={onMarkMoment}
+              {...videoControls}
             />
           </div>
         </section>

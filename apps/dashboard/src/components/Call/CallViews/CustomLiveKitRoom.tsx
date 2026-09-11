@@ -30,8 +30,6 @@ import {
 import { useAFKDetection } from '../hooks/useAFKDetection';
 import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
-import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 import { mutators } from '../../../zero/mutators';
 import { playAudio } from '../../../utils/audioPlayer';
 
@@ -64,8 +62,6 @@ export function CustomLiveKitRoom({
   externalId,
   zero,
 }: CustomLiveKitRoomProps): React.ReactElement {
-  // Sync custom screen picker on/off from CAC — only active while in a call
-  useScreenPickerFlag();
   const isSavingWhiteboardRef = useRef(false);
 
   // Subscribe to room state from global XState machine using a single snapshot
@@ -606,7 +602,6 @@ export function CustomLiveKitRoom({
             onTicketCreated={handleTicketCreated}
           />
         )}
-        <ScreenPickerModal />
       </>
     );
   }
@@ -703,7 +698,6 @@ export function CustomLiveKitRoom({
           onTicketCreated={handleTicketCreated}
         />
       )}
-      <ScreenPickerModal />
     </>
   );
 }
