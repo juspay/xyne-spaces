@@ -112,6 +112,7 @@ export interface TicketFilters {
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
+  userGroupId?: string[]; // Filter by user group ID - comma-separated
   // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
   // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
   entityNames?: string[];
@@ -1105,6 +1106,14 @@ export class YqlBuilder {
         .map((assignedTo) => `assignedTo contains ${params.bind('assignedTo', assignedTo.trim())}`)
         .join(' or ');
       conditions.push(`(${assignees})`);
+    }
+
+    // User group filter (array - comma-separated)
+    if (filters.userGroupId && filters.userGroupId.length > 0) {
+      const userGroups = filters.userGroupId
+        .map((userGroupId) => `userGroupId contains ${params.bind('userGroupId', userGroupId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${userGroups})`);
     }
 
     // Date filters (ISO or dd/mm/yy or dd mon yy - no time keywords)
