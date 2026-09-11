@@ -143,6 +143,7 @@ export function buildToolCatalog(params: {
 
   if (params.includeSubagentTools) {
     for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
       const def = findSubagentDefinitionForServer(group.serverType);
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
@@ -198,6 +199,7 @@ export function buildFastModeDirectTools(params: {
   const remainingCustomTools: ToolDefinition[] = [];
 
   for (const group of params.groups) {
+    if (group.sourceSubagent) continue;
     const def = findSubagentDefinitionForServer(group.serverType);
     if (!def) {
       directTools.push(...group.tools);
@@ -239,8 +241,22 @@ export function buildFastModeDirectTools(params: {
 export function buildFastModeMetaTools(options: {
   catalog: ToolCatalogEntry[];
   controller: FastToolRuntimeController;
+  /**
+   * Extra detail appended to the empty-catalog answer of list-tools/load-tools,
+   * e.g. which configured subagents resolved to zero tools. The runtime loader
+   * is only wired when the catalog has entries (see agent.ts), so without this
+   * an empty catalog answered load-tools with the internal-sounding
+   * "tool loader is not initialized".
+   */
+  emptyCatalogNote?: string;
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
+  const emptyCatalogMessage = [
+    "No loadable tools are configured for this agent.",
+    options.emptyCatalogNote?.trim(),
+  ]
+    .filter(Boolean)
+    .join(" ");
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
 
   const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
@@ -282,7 +298,7 @@ export function buildFastModeMetaTools(options: {
         const pool = scoped.entries;
         if (pool.length === 0) {
           return {
-            content: [{ type: "text" as const, text: "The tool catalog is empty — no loadable tools are configured for this agent." }],
+            content: [{ type: "text" as const, text: `The tool catalog is empty. ${emptyCatalogMessage}` }],
             details: {},
           };
         }
@@ -329,6 +345,9 @@ export function buildFastModeMetaTools(options: {
         },
       }),
       async execute(_toolCallId: string, params: unknown) {
+        if (catalog.length === 0) {
+          return { content: [{ type: "text" as const, text: emptyCatalogMessage }], details: {} };
+        }
         if (!options.controller?.loadTools) {
           return { content: [{ type: "text" as const, text: "Error: tool loader is not initialized." }], details: {} };
         }

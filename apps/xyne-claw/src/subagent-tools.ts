@@ -1569,6 +1569,11 @@ export function buildSubagentTools(
   };
 
   for (const group of groups) {
+    // Subagent-sourced groups exist only because a subagent definition holds
+    // the credentials. resolveCustomSubagentTools below still reads them out
+    // of `groups`, so the palette is built — but nothing here may hoist them
+    // into the parent agent's direct/write tools.
+    if (group.sourceSubagent) continue;
     const def = findSubagentDefinitionForServer(group.serverType);
 
     if (def) {

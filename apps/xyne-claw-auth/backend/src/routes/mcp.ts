@@ -34,6 +34,10 @@ import {
   type EffectiveCredentials,
 } from "../lib/credentials-loader.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import {
+  loadSubagentMcpListingEntries,
+  type SubagentMcpListingEntry,
+} from "../lib/subagent-mcp-listing.js";
 import { requireSessionToken } from "../middleware/require-session-token.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { validateWriteAction } from "../mcp/validators.js";
@@ -1073,6 +1077,30 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
+    // Servers whose ONLY credentials live on one of the agent's custom
+    // subagents. Without this the group never reaches the run, the subagent
+    // resolves to 0 tools and gets skipped. Existing user/agent/global sources
+    // win — the call-time pin in credentials-loader already routes the
+    // subagent's own calls to its own identity.
+    let subagentListingEntries: SubagentMcpListingEntry[] = [];
+    if (sessionAgentTools) {
+      try {
+        subagentListingEntries = await loadSubagentMcpListingEntries({
+          orgId: sessionAgentOrgId,
+          subagentNames: sessionAgentTools.toolsConfig?.subagents ?? [],
+          existingServerTypes: new Set(entries.map((e) => e.serverType)),
+        });
+      } catch (err) {
+        log.error(`[mcp/tools] subagent connection listing failed for agent=${sessionAgentTools.slug}:`, err);
+      }
+      if (subagentListingEntries.length > 0) {
+        log.info(
+          `[mcp/tools] subagent-sourced servers agent=${sessionAgentTools.slug} ` +
+          `${subagentListingEntries.map((e) => `${e.serverType}<-${e.subagentName}`).join(",")}`,
+        );
+      }
+    }
+
     // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
     // Skipped under the automation app-mode swap — that path must NOT re-list the
     // user xyne-spaces server (with app creds) that the swap just removed.
@@ -1140,6 +1168,32 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // Add app token fallback result if available
     if (appTokenToolsResult) {
       data.push(appTokenToolsResult);
+    }
+
+    if (subagentListingEntries.length > 0) {
+      const subagentResults = await Promise.allSettled(
+        subagentListingEntries.map(async (entry) => {
+          if (!(await hasConnectorDefinition(entry.serverType))) return null;
+          const serverTools = await listToolsForUser(
+            userId,
+            entry.serverType,
+            entry.serverName,
+            entry.credentials,
+            agentSlug,
+          );
+          return {
+            ...serverTools,
+            sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
+          } satisfies McpServerTools;
+        }),
+      );
+      for (const result of subagentResults) {
+        if (result.status === "rejected") {
+          log.error("[mcp/tools] subagent-sourced server failed to list tools:", result.reason);
+          continue;
+        }
+        if (result.value) data.push(result.value);
+      }
     }
 
     // Add gateway tools selected in the agent config as extra MCP groups.

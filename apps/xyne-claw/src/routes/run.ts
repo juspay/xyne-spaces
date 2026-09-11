@@ -3115,6 +3115,13 @@ export async function processTask(
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
           controller: fastToolController,
+          ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
+            ? {
+                emptyCatalogNote:
+                  `Configured subagents: ${customSubagents!.map((s) => s.name).join(", ")} — they resolved to 0 tools, ` +
+                  "so their MCP servers have no credentials in this run.",
+              }
+            : {}),
         }),
         ...allTools.filter((tool) => {
           if (!fastCatalogCandidateByName.has(tool.name)) return true;

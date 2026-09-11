@@ -68,6 +68,7 @@ interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
 interface AuthResponse<T> {
@@ -151,6 +152,12 @@ export interface McpToolGroup {
   serverName: string;
   tools: ToolDefinition[];
   writeTools: string[];
+  /**
+   * Present when claw-auth listed this server ONLY because a subagent
+   * definition holds its credentials. Such a group belongs to that subagent's
+   * palette; it must never fall through to the parent agent's direct tools.
+   */
+  sourceSubagent?: { id: string; name: string };
 }
 
 // ── Inbound file forwarding (INPUT counterpart of claw-auth file forwarding) ──
@@ -474,6 +481,7 @@ export async function loadMcpToolsForUser(
       serverName: server.serverName,
       tools,
       writeTools: [...(server.writeTools ?? [])],
+      ...(server.sourceSubagent ? { sourceSubagent: server.sourceSubagent } : {}),
     });
   }
 
