@@ -4,6 +4,11 @@
  * activity), computed from ticket_activities. The dashboard endpoints are
  * gated on the per-desk metricsEnabled preference so desks that never opted in
  * cost nothing; the agent-facing query endpoint is not (see queryMetrics).
+ *
+ * Access rule: no exemptions — every caller, agent or human, must be the
+ * desk owner or a channel admin. Sole carve-out: workspace guests keep
+ * trend-only read access on the two dashboard handlers (getMetrics and
+ * getAggregateMetrics) per XYNE-63224; they are forbidden on the claw mount.
  */
 
 import { Request, Response } from 'express';
@@ -11,7 +16,11 @@ import { z } from 'zod';
 import { deskMetricsRepository } from '../database/repositories/deskMetricsRepository.js';
 import { EmailChannelPreferenceRepository } from '../database/repositories/emailChannelPreferenceRepository.js';
 import { ChannelRepository } from '../database/repositories/channelRepository.js';
-import { assertChannelMembership } from '@/utils/channelMembership';
+import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
+import {
+  assertChannelMembership,
+  isDeskOwnerOrChannelAdmin,
+} from '@/utils/channelMembership';
 import {
   aggregateDeskMetrics,
   fillDeskMetrics,
@@ -26,6 +35,7 @@ import {
   DESK_METRIC_KEYS,
   DESK_METRICS_MAX_AGGREGATE_DESKS,
   TicketPriority,
+  WorkspaceRole,
 } from '@xyne/shared';
 import type {
   DeskMetricKey,
@@ -96,14 +106,7 @@ const getStringQueryParam = (req: Request, name: string): string | undefined => 
 export class DeskMetricsController {
   private channelRepo = new ChannelRepository();
   private preferenceRepo = new EmailChannelPreferenceRepository();
-
-  private async assertChannelAccess(
-    req: Request,
-    channelId: string,
-  ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-    const access = await assertChannelMembership(req, channelId);
-    return access.ok ? { ok: true } : access;
-  }
+  private channelParticipantRepo = new ChannelParticipantRepository();
 
   private parseMetricsQuery(
     req: Request,
@@ -255,7 +258,7 @@ export class DeskMetricsController {
     const { channelId } = req.params;
 
     try {
-      const access = await this.assertChannelAccess(req, channelId);
+      const access = await assertChannelMembership(req, channelId);
       if (!access.ok) {
         res.status(access.status).json({ error: access.error });
         return;
@@ -264,6 +267,16 @@ export class DeskMetricsController {
       const preference = await this.preferenceRepo.findByChannelId(channelId);
       if (!preference?.metricsEnabled) {
         res.status(403).json({ error: 'Metrics are not enabled for this desk' });
+        return;
+      }
+
+      // Guests keep trend-only metrics (XYNE-63224); everyone else manages the desk.
+      const isGuestUser = req.user?.role === WorkspaceRole.GUEST;
+      if (
+        !isGuestUser &&
+        !(await isDeskOwnerOrChannelAdmin(channelId, access.userId, preference.ownerUserId))
+      ) {
+        res.status(403).json({ error: 'Only the desk owner or a channel admin can view metrics for this desk' });
         return;
       }
 
@@ -283,6 +296,8 @@ export class DeskMetricsController {
 
   /**
    * GET /desk-metrics/desks
+   * No exemptions: every caller (agent or human, on either mount) is trimmed
+   * to the desks they manage.
    */
   listDesks = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -293,13 +308,29 @@ export class DeskMetricsController {
         return;
       }
 
-      const desks = await deskMetricsRepository.listAccessibleDesks(workspaceId, userId);
+      let desks = await deskMetricsRepository.listAccessibleDesks(workspaceId, userId);
+      desks = await this.filterToManagedDesks(desks, userId);
       res.json({ desks } satisfies DeskMetricsDeskListResponse);
     } catch (error) {
       logger.error('[DeskMetrics] Failed to list desks', { error });
       res.status(500).json({ error: 'Failed to list desks' });
     }
   };
+
+  /** Keep only desks the user manages (desk owner or channel admin). */
+  private async filterToManagedDesks(
+    desks: DeskMetricsDeskSummary[],
+    userId: string,
+  ): Promise<DeskMetricsDeskSummary[]> {
+    const channelIds = desks.map(desk => desk.channelId);
+    const [adminChannelIds, ownedChannelIds] = await Promise.all([
+      this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
+      this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+    ]);
+    return desks.filter(
+      desk => adminChannelIds.has(desk.channelId) || ownedChannelIds.has(desk.channelId),
+    );
+  }
 
   /**
    * POST /desk-metrics/claw/query
@@ -360,6 +391,20 @@ export class DeskMetricsController {
         ...(body.customFieldFilter ? { customFieldFilter: body.customFieldFilter } : {}),
       };
 
+      // No exemptions: every caller — agent or human, whatever token it
+      // carries — must manage each requested desk (owner or channel admin).
+      const userId = req.user?.id;
+      let adminChannelIds = new Set<string>();
+      let ownedChannelIds = new Set<string>();
+      if (userId) {
+        [adminChannelIds, ownedChannelIds] = await Promise.all([
+          this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
+          this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+        ]);
+      }
+      const deskForbidden = (channelId: string): boolean =>
+        !adminChannelIds.has(channelId) && !ownedChannelIds.has(channelId);
+
       const contributions: DeskMetricsContribution[] = [];
       const partials: DeskMetricsPartial[] = [];
       const desks: DeskMetricsDeskSummary[] = [];
@@ -370,17 +415,22 @@ export class DeskMetricsController {
       // Sequential, matching getAggregateMetrics — bounds peak DB connections.
       for (const channelId of channelIds) {
         try {
-          const access = await this.assertChannelAccess(req, channelId);
+          const access = await assertChannelMembership(req, channelId);
           if (!access.ok) {
             skipped.push({ channelId, reason: access.status === 404 ? 'not_found' : 'forbidden' });
             continue;
           }
 
+          if (deskForbidden(channelId)) {
+            skipped.push({ channelId, reason: 'forbidden' });
+            continue;
+          }
+
           // Deliberately no metricsEnabled gate here — that flag gates the
-          // dashboard tab, not access to the numbers, and membership above is
-          // the real boundary. Consequence: this path never emits the
-          // 'metrics_disabled' skip reason; unconfigured desks are computed and
-          // called out in `notes` instead. The dashboard endpoints still gate.
+          // dashboard tab, not access to the numbers. Consequence: this path
+          // never emits the 'metrics_disabled' skip reason; unconfigured desks
+          // are computed and called out in `notes` instead. The dashboard
+          // endpoints still gate.
           const preference = await this.preferenceRepo.findByChannelId(channelId);
           if (!preference) {
             skipped.push({ channelId, reason: 'not_found' });
@@ -642,10 +692,24 @@ export class DeskMetricsController {
       const contributions: DeskMetricsContribution[] = [];
       const skipped: DeskMetricsSkippedDesk[] = [];
 
+      // Guests skip role checks. Other callers get ONE batched
+      // lookup for admin + owned desks rather than a per-desk findParticipant
+      // round-trip in the loop below.
+      const isGuestUser = req.user?.role === WorkspaceRole.GUEST;
+      const userId = req.user?.id;
+      let adminChannelIds = new Set<string>();
+      let ownedChannelIds = new Set<string>();
+      if (!isGuestUser && userId) {
+        [adminChannelIds, ownedChannelIds] = await Promise.all([
+          this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
+          this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+        ]);
+      }
+
       // Keep per-desk fan-out sequential to bound peak DB connections.
       for (const channelId of channelIds) {
         try {
-          const access = await this.assertChannelAccess(req, channelId);
+          const access = await assertChannelMembership(req, channelId);
           if (!access.ok) {
             skipped.push({
               channelId,
@@ -657,6 +721,15 @@ export class DeskMetricsController {
           const preference = await this.preferenceRepo.findByChannelId(channelId);
           if (!preference?.metricsEnabled) {
             skipped.push({ channelId, reason: 'metrics_disabled' });
+            continue;
+          }
+
+          if (
+            !isGuestUser &&
+            !adminChannelIds.has(channelId) &&
+            !ownedChannelIds.has(channelId)
+          ) {
+            skipped.push({ channelId, reason: 'forbidden' });
             continue;
           }
 
