@@ -12,11 +12,11 @@ export const setXyneCalendarPanelRef = (ref: RefObject<PanelImperativeHandle | n
   globalXyneCalendarPanelRef = ref;
 };
 
-export type XyneCalendarState = 'closed' | 'open';
+type XyneCalendarState = 'closed' | 'open';
 
 export type CalendarViewMode = 'day' | 'week' | 'month';
 
-export interface XyneCalendarContext {
+interface XyneCalendarContext {
   xyneCalendarState: XyneCalendarState;
   /** ISO day string (yyyy-MM-dd) — the day the timeline is showing. */
   selectedDate: string;
@@ -24,7 +24,7 @@ export interface XyneCalendarContext {
   viewMode: CalendarViewMode;
 }
 
-export type XyneCalendarEvent =
+type XyneCalendarEvent =
   | { type: 'OPEN'; date?: string }
   | { type: 'CLOSE' }
   | { type: 'SELECT_DATE'; date: string }
@@ -86,7 +86,7 @@ const savePersistedState = async (
   } catch (error) {
     logger.error(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_error',
-      message: String('Failed to save XyneCalendar state to IndexedDB:'),
+      message: 'Failed to save XyneCalendar state to IndexedDB:',
       error: error,
     });
   }
@@ -110,9 +110,9 @@ const loadPersistedState = async (): Promise<{
         }
         const isStale = Date.now() - result.savedAt > STALE_DATE_MS;
         resolve({
-          state: result.xyneCalendarState ?? 'closed',
-          selectedDate: isStale ? null : (result.selectedDate ?? null),
-          viewMode: result.viewMode ?? null,
+          state: result.xyneCalendarState,
+          selectedDate: isStale ? null : result.selectedDate,
+          viewMode: result.viewMode,
         });
       };
       request.onerror = () =>
@@ -123,7 +123,7 @@ const loadPersistedState = async (): Promise<{
   } catch (error) {
     logger.error(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_error',
-      message: String('Failed to load XyneCalendar state from IndexedDB:'),
+      message: 'Failed to load XyneCalendar state from IndexedDB:',
       error: error,
     });
     return { state: 'closed', selectedDate: null, viewMode: null };

@@ -1,5 +1,16 @@
-import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useSelector } from '@xstate/react';
+import { DndContext, useDraggable, useDroppable } from '@dnd-kit/core';
 import {
   ChevronLeft,
   ChevronRight,
@@ -22,7 +33,6 @@ import {
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
-import { CallStatus } from '@xyne/shared';
 import {
   xyneCalendarActor,
   globalXyneCalendarPanelRef,
@@ -30,8 +40,10 @@ import {
 } from '../../../machines/xyneCalendarMachine';
 import {
   getNearPeriodPhrase,
+  getPeriodCallCounts,
   getPeriodCallCountLabel,
   getXyneCalendarChannelPresentation,
+  useXyneCalendarChannelPresentations,
   XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
 } from './xyneCalendarSidebar.utils';
 import { cn } from '../../../utils/classNames';
@@ -44,29 +56,34 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { useAuth } from '../../../hooks/useAuth';
-import { useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useUsersById } from '../../../hooks/useUsers';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useCallHistory } from '../../../routes/CallHistoryScreen/useCallHistory';
-import {
-  type Call,
-  isScheduledCallJoinable,
-} from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import {
   ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE,
   COMPACT_METADATA_MIN_WIDTH_PERCENTAGE,
   computeEventPositions,
   createSlotClickHandler,
+  dayKey,
   formatHourLabel,
   getCalendarCreateSlot,
   getCallPillVariant,
   getCallsOverlappingDay,
   hasCallEnded,
+  isCallDraggable,
+  isCallJoinableNow,
   isSameDay,
+  mergeCallsById,
+  minutesSinceMidnight,
   minutesFromTopPx,
   topPxForMinutes,
 } from '../../../routes/CallHistoryScreen/CalenderViewUtils';
-import { useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
-import { XyneCalendarCallPill } from './XyneCalendarCallPill';
+import { DAY_MINUTES, useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
+import { useDragReschedule } from '../../../routes/CallHistoryScreen/useDragReschedule';
+import { useResizeEndTime } from '../../../routes/CallHistoryScreen/useResizeEndTime';
+import RecurringRescheduleDialog from '../../../routes/CallHistoryScreen/RecurringRescheduleDialog';
+import { CalendarEventGhost } from '../../../routes/CallHistoryScreen/CalendarEventGhost';
+import { XyneCalendarCallPill, type XyneCalendarCallPillVariant } from './XyneCalendarCallPill';
 import CallDetailSidebarView from './CallDetailSidebarView';
 import CalendarWeekView from '../../../routes/CallHistoryScreen/CalendarWeekView';
 import CalendarMonthView from '../../../routes/CallHistoryScreen/CalenderMonthView';
@@ -77,14 +94,6 @@ import { dateToIso, isoToDate, formatWeekRangeLabel } from '../../../utils/dateU
 import { DeleteCallModal } from '../../Call/DeleteCallModal';
 import { roomActor } from '../../../machines/roomMachine';
 import { useCalendarSync } from '../../../hooks/useCalendarSync';
-
-const TIMELINE_HOUR_HEIGHT = 72;
-const TIMELINE_HOURS = Array.from({ length: 25 }, (_, hour) => hour);
-const TIMELINE_DAY_MINUTES = 24 * 60;
-const MINIMUM_CALL_PILL_HEIGHT = 20;
-const CALL_PILL_VERTICAL_INSET = 2;
-const CREATE_SLOT_DURATION_MINUTES = 30;
-const CREATE_SLOT_SNAP_MINUTES = 15;
 
 const XyneCalendarSidebarComponent = (): ReactElement => {
   const { user } = useAuth();
@@ -134,25 +143,21 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
   }, []);
 
   // Steps by whatever unit the active view shows a page of.
-  const handlePreviousDay = useCallback((): void => {
-    const previous =
-      viewMode === 'week'
-        ? addDays(selectedDate, -7)
-        : viewMode === 'month'
-          ? addMonths(selectedDate, -1)
-          : addDays(selectedDate, -1);
-    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(previous) });
-  }, [selectedDate, viewMode]);
+  const stepPeriod = useCallback(
+    (direction: 1 | -1): void => {
+      const nextDate =
+        viewMode === 'week'
+          ? addDays(selectedDate, direction * 7)
+          : viewMode === 'month'
+            ? addMonths(selectedDate, direction)
+            : addDays(selectedDate, direction);
+      xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(nextDate) });
+    },
+    [selectedDate, viewMode],
+  );
 
-  const handleNextDay = useCallback((): void => {
-    const next =
-      viewMode === 'week'
-        ? addDays(selectedDate, 7)
-        : viewMode === 'month'
-          ? addMonths(selectedDate, 1)
-          : addDays(selectedDate, 1);
-    xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(next) });
-  }, [selectedDate, viewMode]);
+  const handlePreviousDay = useCallback((): void => stepPeriod(-1), [stepPeriod]);
+  const handleNextDay = useCallback((): void => stepPeriod(1), [stepPeriod]);
 
   const handleToday = useCallback((): void => {
     xyneCalendarActor.send({ type: 'SELECT_DATE', date: dateToIso(startOfDay(new Date())) });
@@ -411,14 +416,25 @@ interface XyneCalendarSidebarTimelineProps {
   onToday: () => void;
 }
 
+// ── Day view ─────────────────────────────────────────────────────────────────
+
+const TIMELINE_HOUR_HEIGHT = 72;
+const TIMELINE_HOURS = Array.from({ length: 25 }, (_, hour) => hour);
+const MINIMUM_CALL_PILL_HEIGHT = 20;
+const CALL_PILL_VERTICAL_INSET = 2;
+const CREATE_SLOT_DURATION_MINUTES = 30;
+const CREATE_SLOT_SNAP_MINUTES = 15;
+const CREATE_SLOT_OPTIONS = {
+  clampToDay: true,
+  snapMode: 'nearest' as const,
+  snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+};
+
 const getTimelineOffset = (minutes: number): number =>
   topPxForMinutes(minutes, TIMELINE_HOUR_HEIGHT);
 
-const getMinutesSinceMidnight = (date: Date): number =>
-  date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
-
 const shouldShowCurrentTimeLabel = (date: Date): boolean => {
-  const minutesPastHour = getMinutesSinceMidnight(date) % 60;
+  const minutesPastHour = minutesSinceMidnight(date) % 60;
   const minutesFromNearestHour = Math.min(minutesPastHour, 60 - minutesPastHour);
   return minutesFromNearestHour > 1;
 };
@@ -433,7 +449,7 @@ const getBestTimelineWindowStart = (
   visibleMinutes: number,
   currentMinutes?: number,
 ): number => {
-  const maximumStart = Math.max(0, TIMELINE_DAY_MINUTES - visibleMinutes);
+  const maximumStart = Math.max(0, DAY_MINUTES - visibleMinutes);
   const clampStart = (start: number): number => Math.min(maximumStart, Math.max(0, start));
   const preferredCenter = currentMinutes ?? intervals[0]?.startMins ?? 8 * 60;
   const candidates = new Set<number>([clampStart(preferredCenter - visibleMinutes / 2)]);
@@ -465,9 +481,9 @@ const getBestTimelineWindowStart = (
     const containsCurrentTime =
       currentMinutes !== undefined && currentMinutes >= windowStart && currentMinutes <= windowEnd;
     const score =
-      visibleCallCount * TIMELINE_DAY_MINUTES +
+      visibleCallCount * DAY_MINUTES +
       visibleCallMinutes +
-      (containsCurrentTime ? TIMELINE_DAY_MINUTES / 2 : 0);
+      (containsCurrentTime ? DAY_MINUTES / 2 : 0);
     const distance = Math.abs(windowStart + visibleMinutes / 2 - preferredCenter);
 
     if (score > bestScore || (score === bestScore && distance < bestDistance)) {
@@ -479,6 +495,577 @@ const getBestTimelineWindowStart = (
 
   return bestStart;
 };
+
+interface XyneCalendarDraggableDayPillProps {
+  call: Call;
+  draggable: boolean;
+  isBeingResized: boolean;
+  top: number;
+  height: number;
+  leftPct: number;
+  widthPct: number;
+  variant: XyneCalendarCallPillVariant;
+  channel?: ReturnType<typeof getXyneCalendarChannelPresentation>;
+  onSelect: (callId: string) => void;
+  onJoin: (callId: string) => void;
+  joinable: boolean;
+  /** True once the user's room session already holds this call's externalId. */
+  joinDisabled: boolean;
+  showJoinByDefault: boolean;
+  past: boolean;
+  compact: boolean;
+  showCompactMetadata: boolean;
+  continuesFromPreviousDay: boolean;
+  continuesToNextDay: boolean;
+  onResizePointerDown: (e: React.PointerEvent, call: Call) => void;
+}
+
+function XyneCalendarDraggableDayPill({
+  call,
+  draggable,
+  isBeingResized,
+  top,
+  height,
+  leftPct,
+  widthPct,
+  variant,
+  channel,
+  onSelect,
+  onJoin,
+  joinable,
+  joinDisabled,
+  showJoinByDefault,
+  past,
+  compact,
+  showCompactMetadata,
+  continuesFromPreviousDay,
+  continuesToNextDay,
+  onResizePointerDown,
+}: XyneCalendarDraggableDayPillProps): ReactElement {
+  const { listeners, setNodeRef, isDragging } = useDraggable({
+    id: call.id,
+    disabled: !draggable,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...(draggable ? listeners : {})}
+      data-calendar-pill='true'
+      className='group absolute z-10 pr-1'
+      style={{
+        top,
+        height,
+        left: `${leftPct}%`,
+        width: `${widthPct}%`,
+        opacity: isDragging || isBeingResized ? 0.3 : 1,
+        cursor: draggable ? 'grab' : undefined,
+        userSelect: 'none',
+        touchAction: 'none',
+      }}
+    >
+      <XyneCalendarCallPill
+        callId={call.id}
+        title={call.title ?? 'Call'}
+        variant={variant}
+        startsAt={call.startsAt}
+        endsAt={call.endsAt}
+        {...(channel && { channel })}
+        onSelect={onSelect}
+        onJoin={onJoin}
+        joinable={joinable}
+        joinDisabled={joinDisabled}
+        showJoinByDefault={showJoinByDefault}
+        past={past}
+        compact={compact}
+        showCompactMetadata={showCompactMetadata}
+        continuesFromPreviousDay={continuesFromPreviousDay}
+        continuesToNextDay={continuesToNextDay}
+        className='h-full'
+      />
+      {draggable && (
+        <div
+          role='none'
+          className='absolute bottom-0 left-2 right-2 z-20 h-2.5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity'
+          style={{ cursor: 'ns-resize', touchAction: 'none' }}
+          onPointerDown={e => onResizePointerDown(e, call)}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => e.stopPropagation()}
+          data-track-category='Calendar'
+          data-track-name='calendar-day-resize-handle'
+        >
+          <div className='w-6 h-0.5 rounded-full bg-primary-foreground' />
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface XyneCalendarDayTimelineSurfaceProps {
+  currentDay: Date;
+  surfaceRef: RefObject<HTMLDivElement | null>;
+  onClick: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerLeave: () => void;
+  children: ReactNode;
+}
+
+function XyneCalendarDayTimelineSurface({
+  currentDay,
+  surfaceRef,
+  onClick,
+  onKeyDown,
+  onPointerDown,
+  onPointerMove,
+  onPointerLeave,
+  children,
+}: XyneCalendarDayTimelineSurfaceProps): ReactElement {
+  const { setNodeRef } = useDroppable({ id: dayKey(currentDay) });
+  const setMergedRef = useCallback(
+    (node: HTMLDivElement | null): void => {
+      surfaceRef.current = node;
+      setNodeRef(node);
+    },
+    [setNodeRef, surfaceRef],
+  );
+
+  return (
+    <div
+      ref={setMergedRef}
+      role='gridcell'
+      tabIndex={0}
+      className='absolute bottom-0 left-16 right-0 top-0 cursor-crosshair'
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
+      data-track-category='Calendar'
+      data-track-name='CREATE_SCHEDULE_FROM_SIDEBAR'
+    >
+      {children}
+    </div>
+  );
+}
+
+interface XyneCalendarDayViewProps {
+  calls: Call[];
+  currentDay: Date;
+  currentUserId: string | undefined;
+  defaultCallTitle: string;
+  isLoading: boolean;
+  isScheduledCallsLoading: boolean;
+  isCreatingCall: boolean;
+  onSelectCall: (callId: string) => void;
+  onCallClick: (call: Call) => void;
+  onCreateCallAtSlot: (startsAt: Date, endsAt: Date) => void;
+  channelPresentationsById: Map<string, ReturnType<typeof getXyneCalendarChannelPresentation>>;
+}
+
+const XyneCalendarDayView = memo(
+  ({
+    calls,
+    currentDay,
+    currentUserId,
+    defaultCallTitle,
+    isLoading,
+    isScheduledCallsLoading,
+    isCreatingCall,
+    onSelectCall,
+    onCallClick,
+    onCreateCallAtSlot,
+    channelPresentationsById,
+  }: XyneCalendarDayViewProps): ReactElement => {
+    const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
+    const isRoomSessionActive = useSelector(
+      roomActor,
+      state =>
+        state.matches('joining') || state.matches('connecting') || state.matches('connected'),
+    );
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const timelineSurfaceRef = useRef<HTMLDivElement>(null);
+    const focusedDateRef = useRef<number | null>(null);
+    const [now, setNow] = useState(() => new Date());
+    const [hoverCreateSlot, setHoverCreateSlot] = useState<{
+      startMins: number;
+      endMins: number;
+    } | null>(null);
+
+    useEffect(() => {
+      const intervalId = window.setInterval(() => setNow(new Date()), 12_000);
+      return (): void => window.clearInterval(intervalId);
+    }, []);
+
+    const handleCreateCallAtSlot = useCallback(
+      (startsAt: Date, endsAt: Date): void => {
+        setHoverCreateSlot(null);
+        onCreateCallAtSlot(startsAt, endsAt);
+      },
+      [onCreateCallAtSlot],
+    );
+
+    const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
+      scrollContainerRef,
+      handleCreateCallAtSlot,
+      {
+        coordinateRef: timelineSurfaceRef,
+        hourHeight: TIMELINE_HOUR_HEIGHT,
+        minimumDurationMins: CREATE_SLOT_DURATION_MINUTES,
+        snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
+      },
+    );
+
+    const dailyCalls = useMemo(
+      () =>
+        mergeCallsById(getCallsOverlappingDay(calls, currentDay)).sort(
+          (firstCall, secondCall) =>
+            new Date(firstCall.startsAt ?? 0).getTime() -
+            new Date(secondCall.startsAt ?? 0).getTime(),
+        ),
+      [calls, currentDay],
+    );
+
+    const {
+      sensors,
+      dragPreview,
+      activeCall,
+      onDragStart,
+      onDragMove,
+      onDragEnd,
+      onDragCancel,
+      dialogOpen: rescheduleDialogOpen,
+      confirm: confirmReschedule,
+      cancel: cancelReschedule,
+      pendingChange: pendingRescheduleChange,
+    } = useDragReschedule(dailyCalls, TIMELINE_HOUR_HEIGHT, currentDay);
+
+    const {
+      resizePreview,
+      activeResizeCallId,
+      onResizePointerDown,
+      dialogOpen: resizeDialogOpen,
+      confirm: confirmResize,
+      cancel: cancelResize,
+      pendingChange: pendingResizeChange,
+    } = useResizeEndTime(scrollContainerRef, TIMELINE_HOUR_HEIGHT, currentDay);
+
+    useEffect(() => {
+      const surface = timelineSurfaceRef.current;
+      if (!surface) return;
+      surface.style.cursor = activeCall ? 'grabbing' : activeResizeCallId ? 'ns-resize' : '';
+    }, [activeCall, activeResizeCallId]);
+
+    const handleTimelinePointerMove = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>): void => {
+        if (
+          isCreatingCall ||
+          dragPreview ||
+          resizePreview ||
+          (event.target as HTMLElement).closest('button, [data-calendar-pill]')
+        ) {
+          setHoverCreateSlot(null);
+          return;
+        }
+
+        const rawMins = minutesFromTopPx(
+          event.clientY - event.currentTarget.getBoundingClientRect().top,
+          TIMELINE_HOUR_HEIGHT,
+        );
+        const { startMins, endMins } = getCalendarCreateSlot(currentDay, rawMins, {
+          ...CREATE_SLOT_OPTIONS,
+          durationMins: CREATE_SLOT_DURATION_MINUTES,
+        });
+
+        setHoverCreateSlot(currentSlot =>
+          currentSlot?.startMins === startMins ? currentSlot : { startMins, endMins },
+        );
+      },
+      [currentDay, dragPreview, isCreatingCall, resizePreview],
+    );
+
+    const handleTimelineClick = createSlotClickHandler(
+      currentDay,
+      isCreatingCall,
+      consumeDragEnd,
+      handleCreateCallAtSlot,
+      {
+        ...CREATE_SLOT_OPTIONS,
+        durationMins: CREATE_SLOT_DURATION_MINUTES,
+        hourHeight: TIMELINE_HOUR_HEIGHT,
+      },
+    );
+
+    const handleTimelineKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLDivElement>): void => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+
+        const rawStartMins =
+          hoverCreateSlot?.startMins ?? (isToday(currentDay) ? minutesSinceMidnight(now) : 8 * 60);
+        const { startsAt, endsAt } = getCalendarCreateSlot(currentDay, rawStartMins, {
+          ...CREATE_SLOT_OPTIONS,
+          durationMins: CREATE_SLOT_DURATION_MINUTES,
+        });
+        handleCreateCallAtSlot(startsAt, endsAt);
+      },
+      [currentDay, handleCreateCallAtSlot, hoverCreateSlot?.startMins, now],
+    );
+
+    useEffect(() => setHoverCreateSlot(null), [currentDay]);
+
+    const handleJoinPill = useCallback(
+      (callId: string): void => {
+        const call = dailyCalls.find(candidate => candidate.id === callId);
+        if (call) onCallClick(call);
+      },
+      [dailyCalls, onCallClick],
+    );
+
+    const callPositions = useMemo(
+      () => computeEventPositions(dailyCalls, currentDay),
+      [dailyCalls, currentDay],
+    );
+
+    // Scroll the timeline to show the current time (or the best window of calls) when the day changes, but only if the user hasn't already scrolled to a different time.
+    useEffect(() => {
+      const selectedDateKey = startOfDay(currentDay).getTime();
+      if (focusedDateRef.current === selectedDateKey || isLoading || isScheduledCallsLoading) {
+        return;
+      }
+
+      const frameId = window.requestAnimationFrame(() => {
+        const scrollContainer = scrollContainerRef.current;
+        if (!scrollContainer) return;
+
+        const visibleMinutes = Math.min(
+          DAY_MINUTES,
+          (scrollContainer.clientHeight / TIMELINE_HOUR_HEIGHT) * 60,
+        );
+        const currentMinutes = isToday(currentDay) ? minutesSinceMidnight(new Date()) : undefined;
+        const windowStart = getBestTimelineWindowStart(
+          Array.from(callPositions.values()),
+          visibleMinutes,
+          currentMinutes,
+        );
+
+        scrollContainer.scrollTop = getTimelineOffset(windowStart);
+        focusedDateRef.current = selectedDateKey;
+      });
+
+      return (): void => window.cancelAnimationFrame(frameId);
+    }, [callPositions, isLoading, isScheduledCallsLoading, currentDay]);
+
+    const visibleCreatePreview = dragCreatePreview ?? hoverCreateSlot;
+    const visibleCreateDates = visibleCreatePreview
+      ? getCalendarCreateSlot(currentDay, visibleCreatePreview.startMins, {
+          ...CREATE_SLOT_OPTIONS,
+          durationMins: visibleCreatePreview.endMins - visibleCreatePreview.startMins,
+        })
+      : null;
+
+    return (
+      <DndContext
+        sensors={sensors}
+        onDragStart={onDragStart}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+        onDragCancel={onDragCancel}
+      >
+        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7'>
+          <div
+            className='relative min-w-0'
+            style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
+            aria-label='Calendar day timeline'
+          >
+            {TIMELINE_HOURS.map(hour => (
+              <div
+                key={hour}
+                className='absolute left-0 right-0 flex -translate-y-1/2 items-center gap-4'
+                style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
+              >
+                <span className='w-10 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
+                  {formatHourLabel(hour)}
+                </span>
+                <span className='h-px flex-1 bg-muted-foreground/15 rounded' aria-hidden='true' />
+              </div>
+            ))}
+
+            <XyneCalendarDayTimelineSurface
+              currentDay={currentDay}
+              surfaceRef={timelineSurfaceRef}
+              onClick={event => {
+                if ((event.target as HTMLElement).closest('[data-calendar-pill]')) return;
+                handleTimelineClick(event);
+              }}
+              onKeyDown={handleTimelineKeyDown}
+              onPointerDown={event => {
+                if ((event.target as HTMLElement).closest('[data-calendar-pill]')) return;
+                onDragCreatePointerDown(event, currentDay);
+              }}
+              onPointerMove={handleTimelinePointerMove}
+              onPointerLeave={() => setHoverCreateSlot(null)}
+            >
+              {isToday(currentDay) && (
+                <div
+                  className='pointer-events-none absolute left-0 right-0 z-0 flex -translate-y-1/2 items-center'
+                  style={{
+                    top: getTimelineOffset(minutesSinceMidnight(now)),
+                  }}
+                  aria-label={`Current time ${format(now, 'h:mm a')}`}
+                >
+                  {shouldShowCurrentTimeLabel(now) && (
+                    <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-sm'>
+                      {format(now, 'h:mm a')}
+                    </span>
+                  )}
+                  <span className='z-10 -ml-1 size-2 shrink-0 rounded-full bg-primary ring-2 ring-background' />
+                  <span className='h-0.5 flex-1 rounded bg-primary ring-1 ring-background' />
+                </div>
+              )}
+
+              {/* Move-drag ghost — shows the proposed drop time */}
+              {dragPreview && (
+                <CalendarEventGhost
+                  top={getTimelineOffset(dragPreview.newStartMins)}
+                  height={Math.max(
+                    MINIMUM_CALL_PILL_HEIGHT,
+                    getTimelineOffset(
+                      Math.max(15, (dragPreview.newEndsAt - dragPreview.newStartsAt) / 60_000),
+                    ),
+                  )}
+                  formattedTime={dragPreview.formattedTime}
+                />
+              )}
+
+              {resizePreview && (
+                <CalendarEventGhost
+                  top={getTimelineOffset(resizePreview.startMins)}
+                  height={Math.max(
+                    MINIMUM_CALL_PILL_HEIGHT,
+                    getTimelineOffset(resizePreview.newEndMins - resizePreview.startMins),
+                  )}
+                  formattedTime={resizePreview.formattedTime}
+                />
+              )}
+
+              {visibleCreatePreview && visibleCreateDates && (
+                <div
+                  className={
+                    dragCreatePreview
+                      ? 'pointer-events-none absolute left-1 right-1 overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
+                      : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-sm'
+                  }
+                  style={{
+                    top:
+                      getTimelineOffset(visibleCreatePreview.startMins) + CALL_PILL_VERTICAL_INSET,
+                    height: Math.max(
+                      MINIMUM_CALL_PILL_HEIGHT,
+                      getTimelineOffset(
+                        visibleCreatePreview.endMins - visibleCreatePreview.startMins,
+                      ) -
+                        CALL_PILL_VERTICAL_INSET * 2,
+                    ),
+                  }}
+                  aria-hidden='true'
+                >
+                  {dragCreatePreview ? (
+                    <div className='flex h-full min-w-0 flex-col justify-start overflow-hidden'>
+                      <span className='truncate text-sm font-semibold leading-4'>
+                        {defaultCallTitle}
+                      </span>
+                      <span className='truncate text-xs leading-4'>
+                        {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
+                        {format(visibleCreateDates.endsAt, 'h:mm a')}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className='truncate text-xs font-semibold flex gap-1.5 items-center'>
+                      <PlusDefault className='size-3 shrink-0' strokeWidth={3} aria-hidden='true' />
+                      New call · {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
+                      {format(visibleCreateDates.endsAt, 'h:mm a')}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {dailyCalls.map(call => {
+                const position = callPositions.get(call.id);
+                if (!position || !call.startsAt) return null;
+
+                const callHasEnded = hasCallEnded(call, now);
+                const variant = getCallPillVariant(call, currentUserId, now);
+                const joinable = isCallJoinableNow(call, variant, now);
+                const continuesFromPreviousDay = !isSameDay(new Date(call.startsAt), currentDay);
+                const continuesToNextDay =
+                  !!call.endsAt && !isSameDay(new Date(call.endsAt), currentDay);
+                const topInset = continuesFromPreviousDay ? 0 : CALL_PILL_VERTICAL_INSET;
+                const bottomInset = continuesToNextDay ? 0 : CALL_PILL_VERTICAL_INSET;
+                const top = getTimelineOffset(position.startMins) + topInset;
+                const height = Math.max(
+                  MINIMUM_CALL_PILL_HEIGHT,
+                  getTimelineOffset(position.endMins - position.startMins) - topInset - bottomInset,
+                );
+                const channel = call.channelId
+                  ? channelPresentationsById.get(call.channelId)
+                  : undefined;
+                const joinDisabled =
+                  isRoomSessionActive && currentRoomExternalId === call.externalId;
+                return (
+                  <XyneCalendarDraggableDayPill
+                    key={call.id}
+                    call={call}
+                    draggable={isCallDraggable(call, currentUserId)}
+                    isBeingResized={activeResizeCallId === call.id}
+                    top={top}
+                    height={height}
+                    leftPct={position.leftPct}
+                    widthPct={position.widthPct}
+                    variant={variant}
+                    {...(channel && { channel })}
+                    onSelect={onSelectCall}
+                    onJoin={handleJoinPill}
+                    joinable={joinable}
+                    joinDisabled={joinDisabled}
+                    showJoinByDefault={
+                      position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
+                    }
+                    past={callHasEnded}
+                    compact={height < 40}
+                    showCompactMetadata={position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE}
+                    continuesFromPreviousDay={continuesFromPreviousDay}
+                    continuesToNextDay={continuesToNextDay}
+                    onResizePointerDown={onResizePointerDown}
+                  />
+                );
+              })}
+            </XyneCalendarDayTimelineSurface>
+          </div>
+        </div>
+
+        <RecurringRescheduleDialog
+          isOpen={rescheduleDialogOpen}
+          onConfirm={confirmReschedule}
+          onCancel={cancelReschedule}
+          pendingChange={pendingRescheduleChange}
+          isRecurring={Boolean(pendingRescheduleChange?.call.recurringSeriesId)}
+          confirmLabel='Confirm move'
+        />
+        <RecurringRescheduleDialog
+          isOpen={resizeDialogOpen}
+          onConfirm={confirmResize}
+          onCancel={cancelResize}
+          pendingChange={pendingResizeChange}
+          isRecurring={Boolean(pendingResizeChange?.call.recurringSeriesId)}
+          confirmLabel='Confirm resize'
+        />
+      </DndContext>
+    );
+  },
+);
+
+XyneCalendarDayView.displayName = 'XyneCalendarDayView';
 
 const XyneCalendarSidebarTimeline = memo(
   ({
@@ -513,30 +1100,20 @@ const XyneCalendarSidebarTimeline = memo(
       handleDeleteConfirm,
       closeDeleteModal,
     } = useCallHistory(user?.id);
-    const channels = useAllChannels();
     const visibleChannels = useAllVisibleChannels();
-    const usersById = useUsersById();
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(
       roomActor,
       state =>
         state.matches('joining') || state.matches('connecting') || state.matches('connected'),
     );
-    const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const timelineSurfaceRef = useRef<HTMLDivElement>(null);
-    const focusedDateRef = useRef<number | null>(null);
     const selectedCallSnapshotRef = useRef<Call | null>(null);
     const [now, setNow] = useState(() => new Date());
-    const [hoverCreateSlot, setHoverCreateSlot] = useState<{
-      startMins: number;
-      endMins: number;
-    } | null>(null);
     const [scheduleInitialTime, setScheduleInitialTime] = useState<{
       startsAt: Date;
       endsAt: Date;
     } | null>(null);
 
-    const isCallDetailOpen = selectedCallId !== null;
     const defaultCallTitle = useMemo(() => {
       const displayName = getUserDisplayName(user);
       return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
@@ -556,7 +1133,6 @@ const XyneCalendarSidebarTimeline = memo(
     }, [calendarScheduledCalls, now]);
 
     const handleCreateCallAtSlot = useCallback((startsAt: Date, endsAt: Date): void => {
-      setHoverCreateSlot(null);
       setScheduleInitialTime({ startsAt, endsAt });
     }, []);
 
@@ -571,113 +1147,29 @@ const XyneCalendarSidebarTimeline = memo(
     );
 
     // Week/month aren't day-scoped, so they need the full pool `dailyCalls` filters down from.
-    const allCalls = useMemo(() => {
-      const callsById = new Map<string, Call>();
-      for (const call of [...(calls ?? []), ...(calendarScheduledCalls ?? [])]) {
-        callsById.set(call.id, call);
-      }
-      return Array.from(callsById.values());
-    }, [calls, calendarScheduledCalls]);
-
-    const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
-      scrollContainerRef,
-      handleCreateCallAtSlot,
-      {
-        coordinateRef: timelineSurfaceRef,
-        hourHeight: TIMELINE_HOUR_HEIGHT,
-        minimumDurationMins: CREATE_SLOT_DURATION_MINUTES,
-        snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
-      },
+    const allCalls = useMemo(
+      () => mergeCallsById([...(calls ?? []), ...(calendarScheduledCalls ?? [])]),
+      [calls, calendarScheduledCalls],
     );
-
-    const handleTimelinePointerMove = useCallback(
-      (event: React.PointerEvent<HTMLDivElement>): void => {
-        if (scheduleInitialTime || (event.target as HTMLElement).closest('button')) {
-          setHoverCreateSlot(null);
-          return;
-        }
-
-        const rawMins = minutesFromTopPx(
-          event.clientY - event.currentTarget.getBoundingClientRect().top,
-          TIMELINE_HOUR_HEIGHT,
-        );
-        const { startMins, endMins } = getCalendarCreateSlot(selectedDate, rawMins, {
-          clampToDay: true,
-          durationMins: CREATE_SLOT_DURATION_MINUTES,
-          snapMode: 'nearest',
-          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
-        });
-
-        setHoverCreateSlot(currentSlot =>
-          currentSlot?.startMins === startMins ? currentSlot : { startMins, endMins },
-        );
-      },
-      [scheduleInitialTime, selectedDate],
-    );
-
-    const handleTimelineClick = createSlotClickHandler(
-      selectedDate,
-      scheduleInitialTime !== null,
-      consumeDragEnd,
-      handleCreateCallAtSlot,
-      {
-        clampToDay: true,
-        durationMins: CREATE_SLOT_DURATION_MINUTES,
-        hourHeight: TIMELINE_HOUR_HEIGHT,
-        snapMode: 'nearest',
-        snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
-      },
-    );
-
-    const handleTimelineKeyDown = useCallback(
-      (event: React.KeyboardEvent<HTMLDivElement>): void => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-
-        const rawStartMins =
-          hoverCreateSlot?.startMins ??
-          (isToday(selectedDate) ? getMinutesSinceMidnight(now) : 8 * 60);
-        const { startsAt, endsAt } = getCalendarCreateSlot(selectedDate, rawStartMins, {
-          clampToDay: true,
-          durationMins: CREATE_SLOT_DURATION_MINUTES,
-          snapMode: 'nearest',
-          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
-        });
-        handleCreateCallAtSlot(startsAt, endsAt);
-      },
-      [handleCreateCallAtSlot, hoverCreateSlot?.startMins, now, selectedDate],
-    );
-
-    useEffect(() => setHoverCreateSlot(null), [selectedDate]);
 
     useEffect(() => {
       const intervalId = window.setInterval(() => setNow(new Date()), 12_000);
       return (): void => window.clearInterval(intervalId);
     }, []);
 
-    const dailyCalls = useMemo(() => {
-      const callsById = new Map<string, Call>();
-
-      for (const call of getCallsOverlappingDay(
-        [...(calls ?? []), ...(calendarScheduledCalls ?? [])],
-        selectedDate,
-      )) {
-        callsById.set(call.id, call);
-      }
-
-      return Array.from(callsById.values()).sort(
-        (firstCall, secondCall) =>
-          new Date(firstCall.startsAt ?? 0).getTime() -
-          new Date(secondCall.startsAt ?? 0).getTime(),
-      );
-    }, [calendarScheduledCalls, calls, selectedDate]);
-
-    const handleJoinPill = useCallback(
-      (callId: string): void => {
-        const call = dailyCalls.find(candidate => candidate.id === callId);
-        if (call) handleCallRowClick(call);
-      },
-      [dailyCalls, handleCallRowClick],
+    const dailyCalls = useMemo(
+      () =>
+        mergeCallsById(
+          getCallsOverlappingDay(
+            [...(calls ?? []), ...(calendarScheduledCalls ?? [])],
+            selectedDate,
+          ),
+        ).sort(
+          (firstCall, secondCall) =>
+            new Date(firstCall.startsAt ?? 0).getTime() -
+            new Date(secondCall.startsAt ?? 0).getTime(),
+        ),
+      [calendarScheduledCalls, calls, selectedDate],
     );
 
     // Header count badge — Day reuses dailyCalls; Week/Month filter the full pool
@@ -699,68 +1191,15 @@ const XyneCalendarSidebarTimeline = memo(
     }, [viewMode, dailyCalls, allCalls, selectedDate]);
 
     const { liveCount, scheduledCount, endedCount } = useMemo(
-      () => ({
-        liveCount: viewPeriodCalls.filter(call => call.status === CallStatus.ACTIVE).length,
-        scheduledCount: viewPeriodCalls.filter(call => call.status === CallStatus.SCHEDULED).length,
-        endedCount: viewPeriodCalls.filter(call => call.status === CallStatus.ENDED).length,
-      }),
+      () => getPeriodCallCounts(viewPeriodCalls),
       [viewPeriodCalls],
     );
 
-    const callPositions = useMemo(
-      () => computeEventPositions(dailyCalls, selectedDate),
-      [dailyCalls, selectedDate],
-    );
-    const channelPresentationsById = useMemo(
-      () =>
-        new Map(
-          channels.map(channel => [
-            channel.id,
-            getXyneCalendarChannelPresentation(channel, user?.id ?? '', usersById),
-          ]),
-        ),
-      [channels, user?.id, usersById],
-    );
+    const channelPresentationsById = useXyneCalendarChannelPresentations(user?.id);
     const accessibleChannelIds = useMemo(
       () => new Set(visibleChannels.map(channel => channel.id)),
       [visibleChannels],
     );
-
-    // Scroll to the selected date when it changes, if user isn't focused on it.
-    useEffect(() => {
-      if (isCallDetailOpen) {
-        focusedDateRef.current = null;
-        return;
-      }
-
-      const selectedDateKey = startOfDay(selectedDate).getTime();
-      if (focusedDateRef.current === selectedDateKey || isLoading || isScheduledCallsLoading) {
-        return;
-      }
-
-      const frameId = window.requestAnimationFrame(() => {
-        const scrollContainer = scrollContainerRef.current;
-        if (!scrollContainer) return;
-
-        const visibleMinutes = Math.min(
-          TIMELINE_DAY_MINUTES,
-          (scrollContainer.clientHeight / TIMELINE_HOUR_HEIGHT) * 60,
-        );
-        const currentMinutes = isToday(selectedDate)
-          ? getMinutesSinceMidnight(new Date())
-          : undefined;
-        const windowStart = getBestTimelineWindowStart(
-          Array.from(callPositions.values()),
-          visibleMinutes,
-          currentMinutes,
-        );
-
-        scrollContainer.scrollTop = getTimelineOffset(windowStart);
-        focusedDateRef.current = selectedDateKey;
-      });
-
-      return (): void => window.cancelAnimationFrame(frameId);
-    }, [callPositions, isCallDetailOpen, isLoading, isScheduledCallsLoading, selectedDate]);
 
     // Not `dailyCalls`: that list requires `startsAt` (getCallsOverlappingDay) and only
     // covers SCHEDULED/ended-history statuses.
@@ -784,16 +1223,6 @@ const XyneCalendarSidebarTimeline = memo(
       selectedCallSnapshot.externalId === currentRoomExternalId;
     const selectedCall =
       queriedSelectedCall ?? (isMatchingRoomSession ? selectedCallSnapshot : null);
-
-    const visibleCreatePreview = dragCreatePreview ?? hoverCreateSlot;
-    const visibleCreateDates = visibleCreatePreview
-      ? getCalendarCreateSlot(selectedDate, visibleCreatePreview.startMins, {
-          clampToDay: true,
-          durationMins: visibleCreatePreview.endMins - visibleCreatePreview.startMins,
-          snapMode: 'nearest',
-          snapIntervalMins: CREATE_SLOT_SNAP_MINUTES,
-        })
-      : null;
 
     // A selected call can vanish (cancelled, hidden, rescheduled off this day) —
     // fall back once queries settle, except during its scheduled-to-active transition.
@@ -888,168 +1317,19 @@ const XyneCalendarSidebarTimeline = memo(
       mainContent = (
         <>
           {sharedHeader}
-          <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7 pt-1'>
-            <div
-              className='relative min-w-0'
-              style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
-              aria-label='Calendar day timeline'
-            >
-              {TIMELINE_HOURS.map(hour => (
-                <div
-                  key={hour}
-                  className='absolute left-0 right-0 flex -translate-y-1/2 items-center gap-4'
-                  style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
-                >
-                  <span className='w-10 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
-                    {formatHourLabel(hour)}
-                  </span>
-                  <span className='h-px flex-1 bg-muted-foreground/15 rounded' aria-hidden='true' />
-                </div>
-              ))}
-
-              <div
-                ref={timelineSurfaceRef}
-                role='gridcell'
-                tabIndex={0}
-                className='absolute bottom-0 left-16 right-0 top-0 cursor-crosshair'
-                onClick={handleTimelineClick}
-                onKeyDown={handleTimelineKeyDown}
-                onPointerDown={event => onDragCreatePointerDown(event, selectedDate)}
-                onPointerMove={handleTimelinePointerMove}
-                onPointerLeave={() => setHoverCreateSlot(null)}
-                data-track-category='Calendar'
-                data-track-name='CREATE_SCHEDULE_FROM_SIDEBAR'
-              >
-                {isToday(selectedDate) && (
-                  <div
-                    className='pointer-events-none absolute left-0 right-0 z-0 flex -translate-y-1/2 items-center'
-                    style={{
-                      top: getTimelineOffset(getMinutesSinceMidnight(now)),
-                    }}
-                    aria-label={`Current time ${format(now, 'h:mm a')}`}
-                  >
-                    {shouldShowCurrentTimeLabel(now) && (
-                      <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-sm'>
-                        {format(now, 'h:mm a')}
-                      </span>
-                    )}
-                    <span className='z-10 -ml-1 size-2 shrink-0 rounded-full bg-primary ring-2 ring-background' />
-                    <span className='h-0.5 flex-1 rounded bg-primary ring-1 ring-background' />
-                  </div>
-                )}
-
-                {visibleCreatePreview && visibleCreateDates && (
-                  <div
-                    className={
-                      dragCreatePreview
-                        ? 'pointer-events-none absolute left-1 right-1 overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
-                        : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-sm'
-                    }
-                    style={{
-                      top:
-                        getTimelineOffset(visibleCreatePreview.startMins) +
-                        CALL_PILL_VERTICAL_INSET,
-                      height: Math.max(
-                        MINIMUM_CALL_PILL_HEIGHT,
-                        getTimelineOffset(
-                          visibleCreatePreview.endMins - visibleCreatePreview.startMins,
-                        ) -
-                          CALL_PILL_VERTICAL_INSET * 2,
-                      ),
-                    }}
-                    aria-hidden='true'
-                  >
-                    {dragCreatePreview ? (
-                      <div className='flex h-full min-w-0 flex-col justify-start overflow-hidden'>
-                        <span className='truncate text-sm font-semibold leading-4'>
-                          {defaultCallTitle}
-                        </span>
-                        <span className='truncate text-xs leading-4'>
-                          {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
-                          {format(visibleCreateDates.endsAt, 'h:mm a')}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className='truncate text-xs font-semibold flex gap-1.5 items-center'>
-                        <PlusDefault
-                          className='size-3 shrink-0'
-                          strokeWidth={3}
-                          aria-hidden='true'
-                        />
-                        New call · {format(visibleCreateDates.startsAt, 'h:mm a')} –{' '}
-                        {format(visibleCreateDates.endsAt, 'h:mm a')}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {dailyCalls.map(call => {
-                  const position = callPositions.get(call.id);
-                  if (!position || !call.startsAt) return null;
-
-                  const callHasEnded = hasCallEnded(call, now);
-                  const variant = getCallPillVariant(call, user?.id, now);
-                  const joinable =
-                    !callHasEnded &&
-                    (variant === 'joinable' ||
-                      (variant === 'highlighted' && isScheduledCallJoinable(call, now.getTime())));
-                  const continuesFromPreviousDay = !isSameDay(
-                    new Date(call.startsAt),
-                    selectedDate,
-                  );
-                  const continuesToNextDay =
-                    !!call.endsAt && !isSameDay(new Date(call.endsAt), selectedDate);
-                  const topInset = continuesFromPreviousDay ? 0 : CALL_PILL_VERTICAL_INSET;
-                  const bottomInset = continuesToNextDay ? 0 : CALL_PILL_VERTICAL_INSET;
-                  const top = getTimelineOffset(position.startMins) + topInset;
-                  const height = Math.max(
-                    MINIMUM_CALL_PILL_HEIGHT,
-                    getTimelineOffset(position.endMins - position.startMins) -
-                      topInset -
-                      bottomInset,
-                  );
-                  const channel = call.channelId
-                    ? channelPresentationsById.get(call.channelId)
-                    : undefined;
-                  return (
-                    <div
-                      key={call.id}
-                      className='absolute z-10 pr-1'
-                      style={{
-                        top,
-                        height,
-                        left: `${position.leftPct}%`,
-                        width: `${position.widthPct}%`,
-                      }}
-                    >
-                      <XyneCalendarCallPill
-                        callId={call.id}
-                        title={call.title ?? 'Call'}
-                        variant={variant}
-                        startsAt={call.startsAt}
-                        endsAt={call.endsAt}
-                        {...(channel && { channel })}
-                        onSelect={onSelectCall}
-                        onJoin={handleJoinPill}
-                        joinable={joinable}
-                        showJoinByDefault={
-                          position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
-                        }
-                        past={callHasEnded}
-                        compact={height < 40}
-                        showCompactMetadata={
-                          position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE
-                        }
-                        continuesFromPreviousDay={continuesFromPreviousDay}
-                        continuesToNextDay={continuesToNextDay}
-                        className='h-full'
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <XyneCalendarDayView
+            calls={allCalls}
+            currentDay={selectedDate}
+            currentUserId={user?.id}
+            defaultCallTitle={defaultCallTitle}
+            isLoading={isLoading}
+            isScheduledCallsLoading={isScheduledCallsLoading}
+            isCreatingCall={scheduleInitialTime !== null}
+            onSelectCall={onSelectCall}
+            onCallClick={handleCallRowClick}
+            onCreateCallAtSlot={handleCreateCallAtSlot}
+            channelPresentationsById={channelPresentationsById}
+          />
         </>
       );
     }

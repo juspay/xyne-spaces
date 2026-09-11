@@ -8,14 +8,11 @@ import {
   startOfDay,
   startOfWeek,
 } from 'date-fns';
-import { CallStatus } from '@xyne/shared';
 import { ChevronLeft, ChevronRight } from '@xyne/icons';
 import { Button } from '../ui/Button';
 import { DatePicker } from '../ui/DatePicker/DatePicker';
 import { xyneCalendarActor } from '../../machines/xyneCalendarMachine';
 import { useAuth } from '../../hooks/useAuth';
-import { useAllChannels } from '../../hooks/useChannels';
-import { useUsersById } from '../../hooks/useUsers';
 import { useCallHistory } from '../../routes/CallHistoryScreen/useCallHistory';
 import CalendarWeekView from '../../routes/CallHistoryScreen/CalendarWeekView';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
@@ -23,10 +20,11 @@ import { DeleteCallModal } from '../Call/DeleteCallModal';
 import { dateToIso, isoToDate, formatWeekRangeLabel } from '../../utils/dateUtils';
 import {
   getNearPeriodPhrase,
+  getPeriodCallCounts,
   getPeriodCallCountLabel,
-  getXyneCalendarChannelPresentation,
+  useXyneCalendarChannelPresentations,
 } from '../Chat/XyneCalendarSidebar/xyneCalendarSidebar.utils';
-import type { Call } from '../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { mergeCallsById } from '../../routes/CallHistoryScreen/CalenderViewUtils';
 
 /**
  * Renders a call activity's week directly in the Activity center pane, as a real
@@ -69,26 +67,25 @@ export const ActivityCalendarWeekView = (): ReactElement => {
   } = useCallHistory(user?.id);
 
   // Week view isn't day-scoped, so it needs calls + scheduled calls merged, deduped by id.
-  const allCalls = useMemo(() => {
-    const callsById = new Map<string, Call>();
-    for (const call of [...(calls ?? []), ...(calendarScheduledCalls ?? [])]) {
-      callsById.set(call.id, call);
-    }
-    return Array.from(callsById.values());
-  }, [calls, calendarScheduledCalls]);
-
-  const channels = useAllChannels();
-  const usersById = useUsersById();
-  const channelPresentationsById = useMemo(
-    () =>
-      new Map(
-        channels.map(channel => [
-          channel.id,
-          getXyneCalendarChannelPresentation(channel, user?.id ?? '', usersById),
-        ]),
-      ),
-    [channels, user?.id, usersById],
+  const allCalls = useMemo(
+    () => mergeCallsById([...(calls ?? []), ...(calendarScheduledCalls ?? [])]),
+    [calls, calendarScheduledCalls],
   );
+
+  const upcomingCallDates = useMemo(() => {
+    const dates = new Set<number>();
+    const now = Date.now();
+
+    for (const call of calendarScheduledCalls ?? []) {
+      if (!call.startsAt) continue;
+      const startsAt = new Date(call.startsAt).getTime();
+      if (startsAt > now) dates.add(startOfDay(new Date(startsAt)).getTime());
+    }
+
+    return Array.from(dates, date => new Date(date));
+  }, [calendarScheduledCalls]);
+
+  const channelPresentationsById = useXyneCalendarChannelPresentations(user?.id);
 
   const [scheduleInitialTime, setScheduleInitialTime] = useState<{
     startsAt: Date;
@@ -120,12 +117,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
   }, [allCalls, currentWeekStart]);
 
   const callCountLabel = getPeriodCallCountLabel(
-    {
-      callCount: weekCalls.length,
-      liveCount: weekCalls.filter(call => call.status === CallStatus.ACTIVE).length,
-      scheduledCount: weekCalls.filter(call => call.status === CallStatus.SCHEDULED).length,
-      endedCount: weekCalls.filter(call => call.status === CallStatus.ENDED).length,
-    },
+    getPeriodCallCounts(weekCalls),
     getNearPeriodPhrase('week', currentWeekStart, new Date()),
     isLoading || isScheduledCallsLoading,
   );
@@ -171,6 +163,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
               inputClassName='min-w-0 flex-1 border-0 bg-transparent px-2 shadow-none rounded-lg'
               contentClassName='z-50'
               displayLabel={formatWeekRangeLabel(currentWeekStart)}
+              markedDates={upcomingCallDates}
             />
 
             <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>

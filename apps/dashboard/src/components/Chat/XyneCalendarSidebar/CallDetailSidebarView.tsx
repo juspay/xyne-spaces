@@ -68,11 +68,8 @@ interface CallDetailMetadata {
 
 /** Fields present on the row but not surfaced by the `Call` list query type. */
 type CallWithDetails = Call & {
-  recurrenceRule?: string | null;
   recurringSeries?: { recurrenceRule?: string } | null;
   metadata?: CallDetailMetadata | null;
-  organizerId?: string | null;
-  roomLink?: string | null;
 };
 
 export interface CallDetailSidebarViewProps {
@@ -286,16 +283,6 @@ function CallParticipantRow({
         canOpenProfile && 'cursor-pointer',
       )}
       onClick={canOpenProfile ? handleOpenProfile : undefined}
-      onKeyDown={
-        canOpenProfile
-          ? event => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                handleOpenProfile();
-              }
-            }
-          : undefined
-      }
       data-track-category='Calendar'
       data-track-name='CALL_DETAIL_PARTICIPANT_PROFILE'
     >
@@ -525,7 +512,7 @@ const CallDetailSidebarView = ({
   });
 
   const organizerUserId = callDetails.organizerId ?? call.createdByUserId;
-  const metadata = callDetails.metadata ?? null;
+  const metadata = callDetails.metadata;
 
   const participants = useMemo<readonly CallParticipant[]>(() => {
     const rows = participantRows?.length ? participantRows : (call.participants ?? []);
@@ -595,7 +582,7 @@ const CallDetailSidebarView = ({
     ? (metadata?.organizer?.displayName ?? metadata?.organizer?.email ?? undefined)
     : undefined;
   const htmlLink = metadata?.htmlLink ?? null;
-  const roomLink = callDetails.roomLink ?? null;
+  const roomLink = call.roomLink;
   const meetLink = roomLink && roomLink !== htmlLink ? roomLink : null;
   const isOrganizerCurrentUser = isExternalCalendar
     ? metadata?.organizer?.self === true || organizerUserId === currentUserId

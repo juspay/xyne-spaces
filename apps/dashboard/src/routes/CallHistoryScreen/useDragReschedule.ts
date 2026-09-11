@@ -13,10 +13,12 @@ import { callService } from '../../services/Call/callService';
 import {
   HOUR_HEIGHT,
   minutesSinceMidnight,
-  snapTo15,
+  snapMinutes,
   parseDayKey,
   dayKey,
   formatTime,
+  isSameDay,
+  getVisibleMinutesForDay,
 } from './CalenderViewUtils';
 
 export interface DragPreview {
@@ -29,11 +31,8 @@ export interface DragPreview {
   newEndsAt: number;
   /** dayKey of the column showing the ghost */
   targetDateKey: string;
-  /** Human-readable time range shown on the overlay and ghost, e.g. "10:15 am – 11:15 am" */
+  /** Human-readable time range shown on the ghost, e.g. "10:15 am – 11:15 am" */
   formattedTime: string;
-  /** Dimensions captured from the dragged element's bounding rect — used to size the DragOverlay */
-  overlayWidth: number;
-  overlayHeight: number;
 }
 
 interface DragState {
@@ -41,8 +40,6 @@ interface DragState {
   originalStartMins: number;
   originalDurationMins: number;
   originalDateKey: string;
-  overlayWidth: number;
-  overlayHeight: number;
 }
 
 interface PendingReschedule {
@@ -51,22 +48,29 @@ interface PendingReschedule {
   newEndsAt: number;
 }
 
+/** Everything the confirmation dialog needs to show a before/after summary. */
+export interface PendingCallChange {
+  call: Call;
+  currentStartsAt: number;
+  currentEndsAt: number;
+  newStartsAt: number;
+  newEndsAt: number;
+}
+
 interface UseDragRescheduleReturn {
   sensors: ReturnType<typeof useSensors>;
-  /** Reactive value — drives the drop-zone ghost and DragOverlay label */
+  /** Reactive value — drives the drop-zone ghost */
   dragPreview: DragPreview | null;
-  /** The call card currently being dragged — drives DragOverlay rendering */
+  /** The call card currently being dragged */
   activeCall: Call | null;
   onDragStart: (event: DragStartEvent) => void;
   onDragMove: (event: DragMoveEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onDragCancel: () => void;
-  recurringDialogOpen: boolean;
-  confirmReschedule: () => void;
-  cancelReschedule: () => void;
-  singleDialogOpen: boolean;
-  confirmSingleReschedule: () => void;
-  cancelSingleReschedule: () => void;
+  dialogOpen: boolean;
+  confirm: () => void;
+  cancel: () => void;
+  pendingChange: PendingCallChange | null;
 }
 
 function buildPreview(state: DragState, newStartMins: number, targetDateKey: string): DragPreview {
@@ -83,12 +87,14 @@ function buildPreview(state: DragState, newStartMins: number, targetDateKey: str
     newEndsAt,
     targetDateKey,
     formattedTime: `${formatTime(newStartsAt)} – ${formatTime(newEndsAt)}`,
-    overlayWidth: state.overlayWidth,
-    overlayHeight: state.overlayHeight,
   };
 }
 
-export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
+export function useDragReschedule(
+  calls: Call[],
+  hourHeight: number = HOUR_HEIGHT,
+  referenceDay?: Date,
+): UseDragRescheduleReturn {
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -116,8 +122,8 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
 
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
-  const [recurringDialogOpen, setRecurringDialogOpen] = useState(false);
-  const [singleDialogOpen, setSingleDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [pendingChange, setPendingChange] = useState<PendingCallChange | null>(null);
 
   // ── Helpers ──
 
@@ -132,6 +138,11 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
     setPreview(null);
   }, [setPreview]);
 
+  const openDialogFor = useCallback((change: PendingCallChange): void => {
+    setPendingChange(change);
+    setDialogOpen(true);
+  }, []);
+
   // ── DndContext handlers ──
 
   const onDragStart = useCallback(
@@ -139,23 +150,20 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
       const call = calls.find(c => c.id === event.active.id);
       if (!call?.startsAt) return;
 
-      const rect = event.active.rect.current.initial;
-      const startMins = minutesSinceMidnight(new Date(call.startsAt));
-      const endMins = call.endsAt ? minutesSinceMidnight(new Date(call.endsAt)) : startMins + 60;
+      const day = referenceDay ?? new Date(call.startsAt);
+      const { startMins, endMins } = getVisibleMinutesForDay(call, day);
 
       const state: DragState = {
         call,
         originalStartMins: startMins,
         originalDurationMins: Math.max(15, endMins - startMins),
-        originalDateKey: dayKey(new Date(call.startsAt)),
-        overlayWidth: rect?.width ?? 120,
-        overlayHeight: rect?.height ?? 40,
+        originalDateKey: dayKey(day),
       };
       dragStateRef.current = state;
       setActiveCall(call);
       setPreview(buildPreview(state, startMins, state.originalDateKey));
     },
-    [calls, setPreview],
+    [calls, referenceDay, setPreview],
   );
 
   const onDragMove = useCallback(
@@ -163,50 +171,55 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
       const state = dragStateRef.current;
       if (!state) return;
 
-      const deltaMinutes = (event.delta.y / HOUR_HEIGHT) * 60;
-      const rawStartMins = state.originalStartMins + deltaMinutes;
-      const maxStartMins = 24 * 60 - state.originalDurationMins;
-      const snappedStartMins = Math.max(0, Math.min(maxStartMins, snapTo15(rawStartMins)));
-
       const targetDateKey =
         typeof event.over?.id === 'string' ? event.over.id : state.originalDateKey;
 
+      const deltaMinutes = (event.delta.y / hourHeight) * 60;
+      const rawStartMins = state.originalStartMins + deltaMinutes;
+      const maxStartMins = 24 * 60 - state.originalDurationMins;
+
+      const minStartMins = isSameDay(parseDayKey(targetDateKey), new Date())
+        ? Math.ceil(minutesSinceMidnight(new Date()) / 15) * 15
+        : 0;
+      const snappedStartMins = Math.max(
+        minStartMins,
+        Math.min(maxStartMins, snapMinutes(rawStartMins, 15)),
+      );
+
       setPreview(buildPreview(state, snappedStartMins, targetDateKey));
     },
-    [setPreview],
+    [hourHeight, setPreview],
   );
 
   const onDragEnd = useCallback(
     (event: DragEndEvent): void => {
       const state = dragStateRef.current;
-      // Read from ref — always has the latest value, no stale closure risk
       const preview = dragPreviewRef.current;
 
       cleanup();
 
       if (!state || !preview) return;
 
-      // No-op if position didn't actually change
       const originalEndsAt =
         state.call.endsAt ?? state.call.startsAt! + state.originalDurationMins * 60_000;
       if (preview.newStartsAt === state.call.startsAt && preview.newEndsAt === originalEndsAt)
         return;
 
-      // Only commit if the card was dropped over a valid column
       if (!event.over) return;
 
       const { externalId } = state.call;
       const { newStartsAt, newEndsAt } = preview;
 
-      // Store in ref so confirm handler always reads the latest value
       pendingRescheduleRef.current = { externalId, newStartsAt, newEndsAt };
-      if (state.call.recurringSeriesId) {
-        setRecurringDialogOpen(true);
-      } else {
-        setSingleDialogOpen(true);
-      }
+      openDialogFor({
+        call: state.call,
+        currentStartsAt: state.call.startsAt!,
+        currentEndsAt: originalEndsAt,
+        newStartsAt,
+        newEndsAt,
+      });
     },
-    [cleanup],
+    [cleanup, openDialogFor],
     // No dragPreview or pendingReschedule in deps — we read from refs instead
   );
 
@@ -214,8 +227,7 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
     cleanup();
   }, [cleanup]);
 
-  const confirmReschedule = useCallback((): void => {
-    // Read from ref — guaranteed to be the value set in onDragEnd
+  const confirm = useCallback((): void => {
     const pending = pendingRescheduleRef.current;
     if (!pending) return;
     void callService.updateScheduledCall(pending.externalId, {
@@ -223,29 +235,11 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
       endsAt: pending.newEndsAt,
     });
     pendingRescheduleRef.current = null;
-    setRecurringDialogOpen(false);
+    setDialogOpen(false);
   }, []);
-  // No pendingReschedule state in deps — we read from the ref directly
-
-  const cancelReschedule = useCallback((): void => {
+  const cancel = useCallback((): void => {
     pendingRescheduleRef.current = null;
-    setRecurringDialogOpen(false);
-  }, []);
-
-  const confirmSingleReschedule = useCallback((): void => {
-    const pending = pendingRescheduleRef.current;
-    if (!pending) return;
-    void callService.updateScheduledCall(pending.externalId, {
-      startsAt: pending.newStartsAt,
-      endsAt: pending.newEndsAt,
-    });
-    pendingRescheduleRef.current = null;
-    setSingleDialogOpen(false);
-  }, []);
-
-  const cancelSingleReschedule = useCallback((): void => {
-    pendingRescheduleRef.current = null;
-    setSingleDialogOpen(false);
+    setDialogOpen(false);
   }, []);
 
   return {
@@ -256,11 +250,9 @@ export function useDragReschedule(calls: Call[]): UseDragRescheduleReturn {
     onDragMove,
     onDragEnd,
     onDragCancel,
-    recurringDialogOpen,
-    confirmReschedule,
-    cancelReschedule,
-    singleDialogOpen,
-    confirmSingleReschedule,
-    cancelSingleReschedule,
+    dialogOpen,
+    confirm,
+    cancel,
+    pendingChange,
   };
 }

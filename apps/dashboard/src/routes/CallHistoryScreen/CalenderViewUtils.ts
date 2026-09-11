@@ -80,11 +80,6 @@ export function createSlotClickHandler(
   };
 }
 
-/** Snap a minute value to the nearest 15-minute interval */
-export function snapTo15(minutes: number): number {
-  return snapMinutes(minutes, 15);
-}
-
 /**
  * Parse a dayKey string (YYYY-M-D, 0-indexed month) back to a Date at local midnight.
  * Mirrors the dayKey() function above.
@@ -172,6 +167,41 @@ export function getCallPillVariant(
   }
 
   return isScheduledCallJoinable(call, currentTime.getTime()) ? 'joinable' : 'scheduled';
+}
+
+export function isCallJoinableNow(
+  call: Call,
+  variant: XyneCalendarCallPillVariant,
+  currentTime: Date,
+): boolean {
+  return (
+    !hasCallEnded(call, currentTime) &&
+    (variant === 'joinable' ||
+      (variant === 'highlighted' && isScheduledCallJoinable(call, currentTime.getTime())))
+  );
+}
+
+/**
+ * Border/background/text classes for a pill variant — shared by the Day pill
+ * (XyneCalendarCallPill) and Week call card, which render the same full-border style.
+ */
+export function getCallPillVariantClasses(variant: XyneCalendarCallPillVariant): string {
+  switch (variant) {
+    case 'past':
+      return 'border-border bg-muted/60 text-muted-foreground';
+    case 'highlighted':
+      return 'border-primary bg-primary text-primary-foreground';
+    case 'declined':
+      return 'border-border bg-background text-muted-foreground';
+    default:
+      return 'border-primary bg-background text-foreground';
+  }
+}
+
+export function mergeCallsById<T extends { id: string }>(calls: T[]): T[] {
+  const callsById = new Map<string, T>();
+  for (const call of calls) callsById.set(call.id, call);
+  return Array.from(callsById.values());
 }
 
 export const MAX_AVATARS_TO_SHOW = 3;
@@ -315,6 +345,23 @@ export function getCallsOverlappingDay<
   });
 }
 
+export function getVisibleMinutesForDay(
+  call: PositionableEvent,
+  referenceDay: Date,
+): { startMins: number; endMins: number } {
+  const startDate = new Date(call.startsAt!);
+  const startMins = isSameDay(startDate, referenceDay) ? minutesSinceMidnight(startDate) : 0;
+
+  const endDate = call.endsAt ? new Date(call.endsAt) : null;
+  const rawEnd = endDate
+    ? isSameDay(endDate, referenceDay)
+      ? minutesSinceMidnight(endDate)
+      : 24 * 60
+    : startMins + 60;
+
+  return { startMins, endMins: Math.max(rawEnd, startMins + 15) };
+}
+
 /**
  * Google Calendar-style cluster algorithm.
  * Groups overlapping events into clusters, assigns each event a column within
@@ -333,19 +380,10 @@ export function computeEventPositions(
 
   type Item = { id: string; startMins: number; endMins: number };
 
-  const items: Item[] = valid.map(call => {
-    const startDate = new Date(call.startsAt!);
-    const startMins = isSameDay(startDate, referenceDay) ? minutesSinceMidnight(startDate) : 0;
-
-    const endDate = call.endsAt ? new Date(call.endsAt) : null;
-    const rawEnd = endDate
-      ? isSameDay(endDate, referenceDay)
-        ? minutesSinceMidnight(endDate)
-        : 24 * 60
-      : startMins + 60;
-
-    return { id: call.id, startMins, endMins: Math.max(rawEnd, startMins + 15) };
-  });
+  const items: Item[] = valid.map(call => ({
+    id: call.id,
+    ...getVisibleMinutesForDay(call, referenceDay),
+  }));
 
   // Sort by start time; break ties by longest duration first
   items.sort((a, b) =>
