@@ -1,3 +1,10 @@
+## [1.316.0](https://github.com/juspay/xyne-spaces/compare/v1.315.0...v1.316.0) (2026-09-11)
+
+
+### Features
+
+* keyboard navigation for the SDLC finder, tickets and sidebar ([#1804](https://github.com/juspay/xyne-spaces/issues/1804)) ([1baa3ae](https://github.com/juspay/xyne-spaces/commit/1baa3aea3b6bb99199b7b42250854f6f85a94a76))
+
 ## [1.315.0](https://github.com/juspay/xyne-spaces/compare/v1.314.0...v1.315.0) (2026-09-11)
 
 
