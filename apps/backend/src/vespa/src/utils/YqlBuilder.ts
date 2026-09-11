@@ -88,6 +88,7 @@ export interface TicketFilters {
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
+  userGroupId?: string[]; // Filter by user group ID - comma-separated
 }
 
 export interface FileFilters {
@@ -1043,6 +1044,14 @@ export class YqlBuilder {
         .map((assignedTo) => `assignedTo contains ${params.bind('assignedTo', assignedTo.trim())}`)
         .join(' or ');
       conditions.push(`(${assignees})`);
+    }
+
+    // User group filter (array - comma-separated)
+    if (filters.userGroupId && filters.userGroupId.length > 0) {
+      const userGroups = filters.userGroupId
+        .map((userGroupId) => `userGroupId contains ${params.bind('userGroupId', userGroupId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${userGroups})`);
     }
 
     // Date filters (ISO or dd/mm/yy or dd mon yy - no time keywords)
