@@ -68,6 +68,7 @@ interface EmailRow {
   to: string[];
   cc: string[];
   bcc: string[];
+  replyTo: string[];
   type: EmailType;
   conversationId: string;
   channelId: string;
@@ -125,6 +126,7 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     to: email.to,
     cc: email.cc,
     bcc: email.bcc,
+    replyTo: email.replyTo,
     type: email.type,
     conversationId: email.conversationId,
     channelId: email.channelId,

@@ -113,6 +113,7 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     to: z.array(z.string()),
     cc: z.array(z.string()),
     bcc: z.array(z.string()),
+    replyTo: z.array(z.string()),
     type: z.nativeEnum(EmailType),
     conversationId: z.string(),
     channelId: z.string(),
