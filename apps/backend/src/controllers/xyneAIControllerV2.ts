@@ -68,7 +68,7 @@ const SelectionContextSchema = z
 // `collection` and `file` are appended below from top-level `collection_ids`
 // and `file_ids` so the dashboard can keep its existing payload shape.
 const AttachedContextItemSchema = z.object({
-  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file']),
+  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file', 'folder']),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
@@ -581,20 +581,40 @@ export class XyneAIControllerV2 {
         }
       }
       if (effectiveFileIds && effectiveFileIds.length > 0) {
-        // The dashboard sends the stable `fileId` UUID, but the agent's
-        // kb-read-file expects CollectionItem.id (cuid). Resolve UUIDs to
-        // latest-version row ids in a single query.
+        // The dashboard SHOULD send the stable `fileId` UUID here, but not
+        // every picker does: the KB file viewer's own "Ask AI" button
+        // (FileViewerLayout.tsx, KnowledgeBaseV2Screen.tsx) sends
+        // CollectionItem.id (cuid) instead — that data simply isn't exposed
+        // as `fileId` at those call sites today. Rather than chase every
+        // caller, accept either id shape here: a cuid IS already the row id
+        // kb-read-file expects, so matching on `id` OR `fileId` (latest
+        // version only) resolves both conventions in one query.
         const items = await db.collectionItem.findMany({
-          where: { fileId: { in: effectiveFileIds }, isLatest: true, deletedAt: null },
+          where: {
+            OR: [{ fileId: { in: effectiveFileIds } }, { id: { in: effectiveFileIds } }],
+            isLatest: true,
+            deletedAt: null,
+          },
           select: { id: true, name: true },
         });
         for (const it of items) {
           kbAttachedContextItems.push({ type: 'file', id: it.id, title: it.name });
         }
       }
+      // The client may already have pre-built some of these (e.g. the
+      // dashboard's own toAttachedContext for file/folder/collection scopes)
+      // — kbAttachedContextItems is meant to FILL GAPS for callers that only
+      // send bare id arrays, not duplicate what's already there. Skip any
+      // (type, id) pair the client's own attached_context already covers.
+      const existingContextKeys = new Set(
+        (effectiveAttachedContext ?? []).map((item) => `${item.type}:${item.id}`),
+      );
+      const newKbAttachedContextItems = kbAttachedContextItems.filter(
+        (item) => !existingContextKeys.has(`${item.type}:${item.id}`),
+      );
       const mergedAttachedContext = [
         ...(effectiveAttachedContext ?? []),
-        ...kbAttachedContextItems,
+        ...newKbAttachedContextItems,
       ];
 
       try {

@@ -65,6 +65,12 @@ export interface ContextSelections {
   canvases: SelectedCanvas[];
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
+  /** KB files scoped from the composer's "+" picker or the KB file viewer's Ask AI chip. */
+  files?: { id: string; name: string }[];
+  /** KB sub-folders (non-root collection nodes) scoped the same way. */
+  folders?: { id: string; name: string }[];
+  /** KB root collections scoped from the composer's collection picker. */
+  collections?: { id: string; name: string }[];
 }
 
 // Attached context item for v2 API. The KB types ('collection' | 'folder' |
@@ -91,6 +97,22 @@ export interface AttachedContextItem {
  */
 export function toAttachedContext(selections: ContextSelections): AttachedContextItem[] {
   const items: AttachedContextItem[] = [];
+
+  // KB file/folder/collection ids are the CollectionItem.id (cuid) the agent's
+  // kb-read-file / kb-list-files tools expect directly — see claw-auth's
+  // agentChatContextService.ts resolveFileSection / resolveFolderSection /
+  // resolveCollectionSection, which this shape is built to match exactly.
+  for (const file of selections.files ?? []) {
+    items.push({ type: 'file', id: file.id, title: file.name });
+  }
+
+  for (const folder of selections.folders ?? []) {
+    items.push({ type: 'folder', id: folder.id, title: folder.name });
+  }
+
+  for (const collection of selections.collections ?? []) {
+    items.push({ type: 'collection', id: collection.id, title: collection.name });
+  }
 
   for (const channel of selections.channels) {
     items.push({
