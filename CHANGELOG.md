@@ -1,3 +1,17 @@
+## [1.311.0](https://github.com/juspay/xyne-spaces/compare/v1.310.2...v1.311.0) (2026-09-11)
+
+
+### Features
+
+* ask ai event bus ([#1769](https://github.com/juspay/xyne-spaces/issues/1769)) ([26390c6](https://github.com/juspay/xyne-spaces/commit/26390c69fe77d949271075b3a7f094a6df43e7ab))
+
+
+### Bug Fixes
+
+* Kanban ticket scan ([#1750](https://github.com/juspay/xyne-spaces/issues/1750)) ([ede38fd](https://github.com/juspay/xyne-spaces/commit/ede38fd89ef3c00cb66ae3a731dd5d9a8dae5f6e))
+* make supportTicketsPageV4 a faithful V3 copy with IN filters and repoint callers ([#1774](https://github.com/juspay/xyne-spaces/issues/1774)) ([f56d5e1](https://github.com/juspay/xyne-spaces/commit/f56d5e1c4f35a0636bfdfbfacfb17cb3d77b2824))
+* stamp initial_message_md at write time so conversations cannot render empty ([#1749](https://github.com/juspay/xyne-spaces/issues/1749)) ([6374956](https://github.com/juspay/xyne-spaces/commit/637495648a1f877a22b812e56219175312d1216e))
+
 ## [1.310.2](https://github.com/juspay/xyne-spaces/compare/v1.310.1...v1.310.2) (2026-09-11)
 
 
