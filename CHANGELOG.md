@@ -1,3 +1,16 @@
+## [1.314.0](https://github.com/juspay/xyne-spaces/compare/v1.313.0...v1.314.0) (2026-09-11)
+
+
+### Features
+
+* screen-recordings in scribe ([#1788](https://github.com/juspay/xyne-spaces/issues/1788)) ([e1eb5a0](https://github.com/juspay/xyne-spaces/commit/e1eb5a0c0358dc5a259994aba777a6dd8a6706b5))
+* xyne automatic tile hide by default ([#1793](https://github.com/juspay/xyne-spaces/issues/1793)) ([892176a](https://github.com/juspay/xyne-spaces/commit/892176a946e22d83bba384a2573959f240a34a6d))
+
+
+### Bug Fixes
+
+* Add tracking for calls & recordings ([#1798](https://github.com/juspay/xyne-spaces/issues/1798)) ([da5993b](https://github.com/juspay/xyne-spaces/commit/da5993b31c44dad33fea10c5f4d73b9069e80133))
+
 ## [1.313.0](https://github.com/juspay/xyne-spaces/compare/v1.312.2...v1.313.0) (2026-09-11)
 
 
