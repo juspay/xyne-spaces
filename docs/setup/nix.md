@@ -50,6 +50,26 @@ Run `direnv reload` after preparation creates local secrets or after changing
 your environment configuration. Review changes to `.envrc` before approving
 them again with `direnv allow`.
 
+## Access over a LAN or Tailscale
+
+Set `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` to your hostname in the local
+`apps/backend/.env.local`, then run `direnv reload`. In
+`apps/dashboard/.env.local`, enable the development proxy:
+
+```dotenv
+VITE_DEV_PROXY=true
+VITE_API_BASE_URL=http://127.0.0.1:3001
+VITE_ZERO_SERVER=http://127.0.0.1:4848
+VITE_ENABLE_REMOTE_LOGGING=false
+VITE_ENABLE_OTEL_METRICS=false
+```
+
+Restart the dashboard and use the port printed by Vite. API and Zero requests
+then use the dashboard's own origin, with Vite forwarding them to the local
+services. This avoids production URL inference and cross-origin API requests.
+The telemetry switches disable exports to collectors absent from the native
+stack. Keep machine-specific values in these gitignored files.
+
 ## Services and scope
 
 `just services` runs PostgreSQL on 5433, Redis on 6379, LiveKit on 7880, Zero on

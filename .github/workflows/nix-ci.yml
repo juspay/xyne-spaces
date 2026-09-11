@@ -82,8 +82,8 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: nix develop --command just prepare
 
-      - name: Check local secret generation preserves custom credentials
-        run: nix develop --command node --test scripts/generate-local-secrets.test.mjs
+      - name: Check local secrets and development proxy configuration
+        run: nix develop --command node --test scripts/generate-local-secrets.test.mjs scripts/dashboard-dev-proxy.test.mjs
 
       # Uses the exact generated process commands, without the launcher's port
       # cleanup. A fresh runner cannot accidentally pass using an existing service.

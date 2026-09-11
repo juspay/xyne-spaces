@@ -6,6 +6,7 @@ import {
   MAX_BATCH_SIZE,
   MAX_RETRIES,
   isLocalhost,
+  ENABLE_REMOTE_LOGGING,
 } from '../config';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
@@ -336,6 +337,7 @@ export class Logger implements LoggerConfig {
   }
 
   private initializeWorker(): void {
+    if (!ENABLE_REMOTE_LOGGING) return;
     try {
       this.worker = new Worker(new URL('./logger.worker.ts', import.meta.url), {
         type: 'module',
