@@ -27,6 +27,7 @@ import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { microsoftDeskService } from '@/services/microsoftDeskService';
 import { ExternalSourcePlatform } from '../core/types';
+import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
 import { extractEmailAddress } from '@/utils/email';
 // Reuse the OAuth primitives from the route files that own them — keeps
@@ -85,7 +86,12 @@ async function findActiveSourceForChannel(
   channelId: string,
 ): Promise<{ id: string; sourceType: string; displayName: string; credentials: string } | null> {
   return db.externalSource.findFirst({
-    where: { channelId, isActive: true, NOT: { name: { startsWith: 'google-dl-sync' } } },
+    where: {
+      channelId,
+      isActive: true,
+      sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+      NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
+    },
     select: { id: true, sourceType: true, displayName: true, credentials: true },
     orderBy: { createdAt: 'desc' },
   });
@@ -234,8 +240,14 @@ router.post(
 
       // Use findFirst (not findActiveSourceForChannel) — reconnect should
       // also work when the source is currently inactive (post-disconnect).
+      // Scoped to email-family types: app-desk bindings share the channel and
+      // are newer, which would be picked instead and carry no email.
       const source = await db.externalSource.findFirst({
-        where: { channelId },
+        where: {
+          channelId,
+          sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+          NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
+        },
         select: { id: true, sourceType: true, displayName: true },
         orderBy: { createdAt: 'desc' },
       });

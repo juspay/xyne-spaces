@@ -4,8 +4,11 @@
  */
 
 import express, { Router, Request, Response } from 'express';
-import { DeskType } from '@xyne/shared';
+import crypto from 'crypto';
+import { DeskType, isDeskChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
+import { extractEmailAddress } from '@/utils/email';
+import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
 import { externalSourceCore } from '../core/core';
@@ -19,8 +22,33 @@ import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 
 const router = Router();
+
+async function assertChannelParticipant(channelId: string, userId: string): Promise<void> {
+  const channel = await db.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true },
+  });
+  if (!channel) {
+    const err = new Error('Channel not found') as Error & { status?: number };
+    err.status = 404;
+    throw err;
+  }
+
+  const participant = await db.channelParticipant.findFirst({
+    where: { channelId, userId },
+    select: { id: true },
+  });
+  if (participant) return;
+
+  const err = new Error('Forbidden: only channel participants can fetch from this desk') as Error & {
+    status?: number;
+  };
+  err.status = 403;
+  throw err;
+}
 
 router.use(
   express.json({
@@ -124,6 +152,87 @@ router.post(
 const MAX_REFETCH_RANGE_MS = 365 * 24 * 60 * 60 * 1000;
 
 /**
+ * Sources bound to a channel, for the dashboard fetch UI.
+ * GET /api/external-source-sync/:channelId/sources
+ */
+router.get(
+  '/:channelId/sources',
+  authMiddleware.authenticate,
+  async (req: Request, res: Response) => {
+    const { channelId } = req.params;
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        return res.status(401).json({ success: false, error: 'Unauthenticated' });
+      }
+
+      const channel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { workspaceId: true, type: true },
+      });
+      if (!channel || channel.workspaceId !== workspaceId) {
+        return res.status(404).json({ success: false, error: 'Channel not found' });
+      }
+      if (!isDeskChannelType(channel.type)) {
+        return res.status(400).json({ success: false, error: 'Channel is not a desk channel' });
+      }
+      await assertChannelParticipant(channelId, userId);
+
+      const repo = new ExternalSourceRepository();
+      // Email first, then apps oldest-first; both active-only.
+      const [emailSources, appSources] = await Promise.all([
+        repo.listChannelEmailSources(channelId, { activeOnly: true }),
+        repo.listChannelAppSources(channelId, { activeOnly: true }),
+      ]);
+
+      const installedAppIds = appSources
+        .map(resolveAppDeskInstalledAppId)
+        .filter((id): id is string => !!id);
+      const installs = installedAppIds.length
+        ? await db.installedApps.findMany({
+            where: { id: { in: installedAppIds } },
+            select: { id: true, app: { select: { name: true } } },
+          })
+        : [];
+      const appNameByInstallId = new Map(installs.map(i => [i.id, i.app.name] as const));
+
+      const appRows = appSources.map(source => {
+        const installedAppId = resolveAppDeskInstalledAppId(source);
+        return {
+          sourceId: source.id,
+          sourceType: 'app-desk' as const,
+          displayName:
+            (installedAppId && appNameByInstallId.get(installedAppId)) ??
+            installedAppId ??
+            source.displayName,
+          ...(installedAppId && { installedAppId }),
+          isActive: source.isActive,
+        };
+      });
+      const emailRows = emailSources.map(source => ({
+        sourceId: source.id,
+        sourceType: source.sourceType,
+        displayName: extractEmailAddress(source.displayName) ?? source.displayName,
+        isActive: source.isActive,
+      }));
+
+      return res.status(200).json({ sources: [...emailRows, ...appRows] });
+    } catch (error) {
+      const status = (error as { status?: number } | undefined)?.status ?? 500;
+      const message = error instanceof Error ? error.message : String(error);
+      if (status === 500) {
+        logger.error('List channel sources failed', { channelId, error: message });
+      }
+      return res.status(status).json({
+        success: false,
+        error: status === 500 ? 'Internal server error' : message,
+      });
+    }
+  },
+);
+
+/**
  * Manual refetch for the external source bound to a channel.
  * POST /api/external-source-sync/:channelId/refetch
  */
@@ -133,9 +242,10 @@ router.post(
   async (req: Request, res: Response) => {
     const { channelId } = req.params;
     try {
-      const { startDate, endDate } = (req.body ?? {}) as {
+      const { startDate, endDate, sourceId: requestedSourceId } = (req.body ?? {}) as {
         startDate?: unknown;
         endDate?: unknown;
+        sourceId?: unknown;
       };
       if (typeof startDate !== 'string' || typeof endDate !== 'string') {
         return res.status(400).json({
@@ -154,80 +264,206 @@ router.post(
       if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
         return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
       }
-      let source = await new ExternalSourceRepository().findChannelSource(channelId, {
-        sourceTypes: ['google', 'microsoft', 'zoho'],
-      });
-      let targetChannelId: string | undefined;
-      let dlEmail: string | undefined;
-
-      if (!source || !source.isActive) {
-        const pref = await db.emailChannelPreference.findUnique({
-          where: { channelId },
-          select: { deskType: true, dlEmail: true, workspaceId: true },
-        });
-        if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
-          source = await db.externalSource.findFirst({ where: { workspaceId: pref.workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] }, isActive: true } });
-          if (source?.isActive) {
-            targetChannelId = channelId;
-            dlEmail = pref.dlEmail;
-          } else {
-            source = null;
-          }
-        }
-      }
-
-      if (!source) {
-        return res.status(404).json({ success: false, error: 'No active external source for this channel' });
-      }
-
-      const adapter = adapterRegistry.getAdapter(source.name);
-      if (!adapter.refetch) {
-        return res.status(400).json({ success: false, error: `Fetch not supported for ${source.sourceType}` });
+      if (requestedSourceId !== undefined && typeof requestedSourceId !== 'string') {
+        return res.status(400).json({ success: false, error: 'sourceId must be a string' });
       }
 
       const requesterUserId = req.user?.id;
       if (!requesterUserId) {
         return res.status(401).json({ success: false, error: 'Unauthenticated' });
       }
+      await assertChannelParticipant(channelId, requesterUserId);
 
-      const options = {
-        startDate,
-        endDate,
-        ...(targetChannelId && { targetChannelId }),
-        ...(dlEmail && { dlEmail }),
-      };
+      // Identical in-flight refetches share a Bull jobId so Bull drops the
+      // duplicate add. The hash is scoped per desk: DL desks share one
+      // workspace-level mailbox source row, so sourceId+window alone would
+      // collide across desks. jobData.targetChannelId carries the requesting
+      // desk for the DL fallback (equal to channelId there) and jobData.dlEmail
+      // further separates DL desks bound to different lists.
+      const refetchJobIdFor = (sourceId: string, jobData: FetchTarget['jobData']) =>
+        `refetch-${sourceId}-${crypto
+          .createHash('sha1')
+          .update(`${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}`)
+          .digest('hex')}`;
 
-      if (appConfig.enableEmailFetchWorker) {
-        if (!emailFetchQueue.isReady) {
-          await emailFetchQueue.initialize();
+      // Target resolution: either the explicitly requested source, or the
+      // mailbox (with DL fallback) plus every active app binding on the desk.
+      interface FetchTarget {
+        source: import('@prisma/client').ExternalSource;
+        installedAppId: string | null;
+        jobData: {
+          targetChannelId?: string;
+          dlEmail?: string;
+        };
+      }
+      const targets: FetchTarget[] = [];
+
+      if (requestedSourceId) {
+        const requested = await new ExternalSourceRepository().findById(requestedSourceId);
+        if (!requested || requested.channelId !== channelId || !requested.isActive) {
+          return res.status(404).json({ success: false, error: 'No active external source for this channel' });
         }
-        const job = await emailFetchQueue.getQueue().add('refetch', {
-          sourceId: source.id,
-          channelId,
-          requesterUserId,
-          workspaceId: req.user!.workspaceId,
-          startDate,
-          endDate,
-          ...(targetChannelId && { targetChannelId }),
-          ...(dlEmail && { dlEmail }),
+        targets.push({
+          source: requested,
+          installedAppId: resolveAppDeskInstalledAppId(requested),
+          jobData: {},
         });
-        logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId, targetChannelId, dlEmail });
-        return res.status(202).json({ success: true, queued: true, jobId: String(job.id) });
+      } else {
+        const repo = new ExternalSourceRepository();
+        let mailbox = await repo.findChannelSource(channelId, {
+          sourceTypes: [...MAILBOX_SOURCE_TYPES],
+        });
+        let targetChannelId: string | undefined;
+        let dlEmail: string | undefined;
+
+        if (!mailbox || !mailbox.isActive) {
+          const pref = await db.emailChannelPreference.findUnique({
+            where: { channelId },
+            select: { deskType: true, dlEmail: true, workspaceId: true },
+          });
+          if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
+            mailbox = await db.externalSource.findFirst({
+              where: {
+                workspaceId: pref.workspaceId,
+                ...WORKSPACE_LEVEL,
+                sourceType: { in: ['google', 'microsoft'] },
+                isActive: true,
+              },
+            });
+            if (mailbox?.isActive) {
+              targetChannelId = channelId;
+              dlEmail = pref.dlEmail;
+            } else {
+              mailbox = null;
+            }
+          }
+        }
+
+        if (mailbox) {
+          targets.push({
+            source: mailbox,
+            installedAppId: null,
+            jobData: {
+              ...(targetChannelId && { targetChannelId }),
+              ...(dlEmail && { dlEmail }),
+            },
+          });
+        }
+        for (const appSource of await repo.listChannelAppSources(channelId, { activeOnly: true })) {
+          targets.push({
+            source: appSource,
+            installedAppId: resolveAppDeskInstalledAppId(appSource),
+            jobData: {},
+          });
+        }
       }
 
-      const result = await adapter.refetch(source, options);
-      return res.json({ success: true, ...result });
+      if (targets.length === 0) {
+        return res.status(404).json({ success: false, error: 'No active external source for this channel' });
+      }
+
+      // One unsupported target must not abort the whole fetch: skip it and
+      // report it. getAdapter throws for unknown sourceTypes — treated as
+      // unsupported rather than a 500.
+      const skippedUnsupported: Array<{ sourceId: string; sourceType: string; reason: string }> = [];
+      const actionable = targets.filter(({ source }) => {
+        let supported = false;
+        try {
+          supported = !!adapterRegistry.getAdapter(source.sourceType).refetch;
+        } catch {
+          supported = false;
+        }
+        if (!supported) {
+          skippedUnsupported.push({
+            sourceId: source.id,
+            sourceType: source.sourceType,
+            reason: `Fetch not supported for ${source.sourceType}`,
+          });
+        }
+        return supported;
+      });
+      if (actionable.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'No fetchable sources for this channel: ' +
+            skippedUnsupported.map(s => `${s.sourceId} (${s.reason})`).join('; '),
+        });
+      }
+
+      if (!appConfig.enableEmailFetchWorker) {
+        // The app export is paginated over up to 500 sequential requests —
+        // far beyond one HTTP response's lifetime, so it requires the worker.
+        const mailboxTarget = actionable.find(t => t.source.sourceType !== 'app-desk');
+        if (!mailboxTarget) {
+          return res.status(409).json({
+            success: false,
+            error: 'App desk history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
+          });
+        }
+        if (mailboxTarget !== actionable[0] || actionable.length > 1) {
+          logger.info('Worker disabled — skipping app targets, fetching mailbox inline', {
+            channelId,
+            skippedSources: actionable.filter(t => t !== mailboxTarget).map(t => t.source.id),
+          });
+        }
+        const adapter = adapterRegistry.getAdapter(mailboxTarget.source.sourceType);
+        const result = await adapter.refetch!(mailboxTarget.source, {
+          startDate,
+          endDate,
+          ...mailboxTarget.jobData,
+        });
+        return res.json({
+          success: true,
+          ...result,
+          ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
+        });
+      }
+
+      if (!emailFetchQueue.isReady) {
+        await emailFetchQueue.initialize();
+      }
+      // Fan-out over the concurrency-1 'refetch' processor: history pulls are
+      // human-triggered, and a second queue buys a new failure domain for no
+      // real urgency win. removeOnComplete/removeOnFail keep the stable jobId
+      // dead-letter key from wedging that source+range permanently.
+      const jobs: Array<{ sourceId: string; installedAppId: string | null; jobId: string }> = [];
+      for (const { source, installedAppId, jobData } of actionable) {
+        const job = await emailFetchQueue.getQueue().add(
+          'refetch',
+          {
+            sourceId: source.id,
+            channelId,
+            requesterUserId,
+            workspaceId: req.user!.workspaceId,
+            startDate,
+            endDate,
+            ...jobData,
+          },
+          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true, removeOnFail: true },
+        );
+        logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
+        jobs.push({ sourceId: source.id, installedAppId, jobId: String(job.id) });
+      }
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        jobs,
+        ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
+      });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
+      const thrownStatus = (error as { status?: number } | undefined)?.status;
       const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
-      const status = needsReauth ? 403 : 500;
-      logger.error('Fetch failed', { error: raw });
+      const status = thrownStatus ?? (needsReauth ? 403 : 500);
+      logger.error('Fetch failed', { error: raw, status });
       return res.status(status).json({
         success: false,
-        error: needsReauth
-          ? 'Account requires re-authorization. Please reconnect the source.'
-          : raw,
-        ...(needsReauth && { needsReauth: true }),
+        error:
+          needsReauth && !thrownStatus
+            ? 'Account requires re-authorization. Please reconnect the source.'
+            : raw,
+        ...(needsReauth && !thrownStatus && { needsReauth: true }),
       });
     }
   },
