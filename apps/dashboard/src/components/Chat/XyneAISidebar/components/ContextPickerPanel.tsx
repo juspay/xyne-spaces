@@ -73,10 +73,11 @@ export interface ContextSelections {
   collections?: { id: string; name: string }[];
 }
 
-// Attached context item for v2 API. The KB types ('collection' | 'folder' |
-// 'file') are not sent by the composer directly — the Spaces backend merges
-// them into attachedContext from collectionIds/folderIds/fileIds (see
-// xyneAIControllerV2.ts) and persists them, so a reloaded message carries them.
+// Attached context item for v2 API. 'collection'/'folder' are sent by the
+// composer directly (via ContextSelections.collections/folders above); 'file'
+// is the one KB type NOT sent this way — the Spaces backend resolves it from
+// the top-level `fileIds` instead (see xyneAIControllerV2.ts), since only it
+// needs the fileId(UUID)-or-id(cuid) DB lookup the client can't do itself.
 export interface AttachedContextItem {
   type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'folder' | 'file';
   id: string;
