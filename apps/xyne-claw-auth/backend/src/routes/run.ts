@@ -28,13 +28,11 @@ import {
 } from "../lib/callable-agent-resolver.js";
 
 import {
-  buildSdlcAgentToolProfile,
   ClawSseParser,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
 } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken, verifySessionToken } from "../lib/session-tokens.js";
 import { consumeAlreadyOpenStream, streamDispatcher } from "../lib/consume-claw-stream.js";
 import {
@@ -52,7 +50,7 @@ import {
   requireResultToken,
   s2sKeyMatches,
 } from "../middleware/require-auth.js";
-import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
+import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
@@ -80,9 +78,6 @@ import {
 } from "../lib/start-run.js";
 import type { SessionContext } from "./webhook.js";
 const log = createLogger("run");
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
 
 const router = Router();
 
@@ -725,30 +720,6 @@ router.post(
     const content = (payload["result"] as string) || (payload["error"] as string) || "";
     const status = payload["status"] as string;
     const reasoning = (payload["reasoning"] as string | undefined) || undefined;
-
-    if (status === "handoff") {
-      const lastTurn = typeof payload["lastTurn"] === "number" ? payload["lastTurn"] : undefined;
-      log.info(
-        `[sessions] ${id}: handoff callback received conversation=${conversationId ?? ""} agent=${agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`,
-      );
-      const handoff = await handleRunHandoff(id).catch((err) => {
-        log.warn(
-          `[sessions] ${id}: handoff re-dispatch failed:`,
-          errMsg(err),
-        );
-        return null;
-      });
-      if (handoff) {
-        log.info(
-          `[sessions] ${id}: handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`,
-        );
-      } else {
-        log.warn(
-          `[sessions] ${id}: handoff callback had no active recovery state; recovery is not registered for this callback/session`,
-        );
-      }
-      return;
-    }
 
     const toolInvocations = payload["toolInvocations"] as unknown[] | undefined;
     const toolsUsed = payload["toolsUsed"] as string[] | undefined;

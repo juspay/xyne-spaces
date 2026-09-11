@@ -3,10 +3,12 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Attachment } from "./agent.js";
 import { SERVER } from "./config.js";
 import { promoteIfOversized } from "./tool-output.js";
+import { currentSubagentMcpId } from "./subagent-mcp-context.js";
 import { writeAttachmentToContext } from "./attachment-write.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve as resolvePath, isAbsolute, sep } from "node:path";
 import crypto from "node:crypto";
+import { Agent } from "undici";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("mcp");
@@ -66,6 +68,7 @@ interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
 interface AuthResponse<T> {
@@ -74,7 +77,8 @@ interface AuthResponse<T> {
   readonly error?: string;
 }
 
-export type TrustedMcpToolBindings = Record<string, Record<string, unknown>>;
+export type { TrustedMcpToolBindings } from "xyne-claw-shared";
+import type { TrustedMcpToolBindings } from "xyne-claw-shared";
 
 export function schemaWithTrustedMcpBindings(
   inputSchema: Record<string, unknown>,
@@ -96,20 +100,43 @@ export function applyTrustedMcpBindings(
   return bindings ? { ...params, ...bindings } : params;
 }
 
-async function authFetch<T>(path: string, sessionToken: string, init?: RequestInit): Promise<T> {
+export class McpAuthServiceError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "McpAuthServiceError";
+    this.status = status;
+  }
+}
+
+const MCP_CALL_TIMEOUT_MS = 660_000;
+
+const mcpCallDispatcher = new Agent({
+  headersTimeout: MCP_CALL_TIMEOUT_MS,
+  bodyTimeout: MCP_CALL_TIMEOUT_MS,
+  connectTimeout: 10_000,
+});
+
+async function authFetch<T>(
+  path: string,
+  sessionToken: string,
+  init?: RequestInit,
+  dispatcher?: Agent,
+): Promise<T> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
     ...init,
+    ...(dispatcher ? { dispatcher } : {}),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
       "x-s2s-key": SERVER.s2sKey,
       ...init?.headers,
     },
-  });
+  } as unknown as RequestInit);
   const body = (await res.json()) as AuthResponse<T>;
   if (!body.success || body.data === undefined) {
-    throw new Error(body.error ?? `Auth service error: ${res.status}`);
+    throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
   }
   return body.data;
 }
@@ -125,6 +152,12 @@ export interface McpToolGroup {
   serverName: string;
   tools: ToolDefinition[];
   writeTools: string[];
+  /**
+   * Present when claw-auth listed this server ONLY because a subagent
+   * definition holds its credentials. Such a group belongs to that subagent's
+   * palette; it must never fall through to the parent agent's direct tools.
+   */
+  sourceSubagent?: { id: string; name: string };
 }
 
 // ── Inbound file forwarding (INPUT counterpart of claw-auth file forwarding) ──
@@ -229,6 +262,27 @@ export async function injectForwardedFiles(
   return { params: rewritten, forwarded };
 }
 
+async function callMcpWithBlockedCapture<T>(
+  path: string,
+  sessionToken: string,
+  init: RequestInit,
+  serverType: string,
+  onConnectorBlocked?: (serverType: string, status: number) => void,
+): Promise<T> {
+  try {
+    return await authFetch<T>(path, sessionToken, init, mcpCallDispatcher);
+  } catch (err) {
+    if (err instanceof McpAuthServiceError && isCredentialRejection(err.status)) {
+      onConnectorBlocked?.(serverType, err.status);
+    }
+    throw err;
+  }
+}
+
+function isCredentialRejection(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 export async function loadMcpToolsForUser(
   sessionId: string,
   sessionToken: string,
@@ -248,6 +302,8 @@ export async function loadMcpToolsForUser(
   // execution identity stable across context compaction and prevents a model
   // from omitting or replacing trusted run bindings.
   trustedToolBindings?: TrustedMcpToolBindings,
+  onConnectorBlocked?: (serverType: string, status: number) => void,
+  subagentId?: string,
 ): Promise<{
   groups: McpToolGroup[];
   cleanup: () => Promise<void>;
@@ -284,8 +340,9 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string } = {
         name: safeName,
+        mcpToolName: mcpTool.name,
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }
@@ -323,7 +380,7 @@ export async function loadMcpToolsForUser(
             }
           }
           callParams = applyTrustedMcpBindings(callParams, trustedBindings);
-          const result = await authFetch<{
+          const result = await callMcpWithBlockedCapture<{
             content: string;
             citations?: import("xyne-claw-shared").Citation[];
             pendingAction?: Record<string, unknown>;
@@ -343,8 +400,11 @@ export async function loadMcpToolsForUser(
                 params: callParams,
                 permission,
                 agentSlug,
+                ...((subagentId ?? currentSubagentMcpId()) ? { subagentId: subagentId ?? currentSubagentMcpId() } : {}),
               }),
             },
+            server.serverType,
+            onConnectorBlocked,
           );
 
           if (result.pendingAction) {
@@ -399,11 +459,14 @@ export async function loadMcpToolsForUser(
           // result, return a small preview. Without this, MCP tools that
           // return tens-of-MB blobs (iswitch_list_resources, etc.) blow
           // through the LLM's context window in a single turn.
+          // forceFile: always keep the raw MCP result on disk so the agent can forward the whole file to a sandbox instead of retyping it.
           const promotedText = await promoteIfOversized(
             toolOutputDir,
             server.serverType,
             mcpTool.name,
             persistedAttachmentText ?? renderedContent,
+            undefined,
+            true,
           );
           return {
             content: [{ type: "text" as const, text: promotedText }],
@@ -419,6 +482,7 @@ export async function loadMcpToolsForUser(
       serverName: server.serverName,
       tools,
       writeTools: [...(server.writeTools ?? [])],
+      ...(server.sourceSubagent ? { sourceSubagent: server.sourceSubagent } : {}),
     });
   }
 

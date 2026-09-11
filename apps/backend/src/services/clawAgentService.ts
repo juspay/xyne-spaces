@@ -83,6 +83,11 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowContext?: {
+    workflowId?: string | null;
+    executionId?: string | null;
+    stepId?: string | null;
+  };
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;

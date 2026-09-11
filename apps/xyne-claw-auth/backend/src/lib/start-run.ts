@@ -27,10 +27,11 @@ import {
   resolveOrchestratorCallableAgentsForRun,
 } from "./callable-agent-resolver.js";
 import {
-  buildSdlcAgentToolProfile,
+  sdlcAgentToolProfile,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
+  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { mintSessionToken } from "./session-tokens.js";
@@ -52,15 +53,14 @@ import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
-import { fetchClawRunWithRetry } from "./claw-fetch.js";
-import { isScheduledOrAutomationEvent, runBridgeForProbeResponse } from "./run-bridge.js";
-import { dispatchRun, type RunDispatchResult } from "./dispatch-run.js";
+import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { dispatchRun } from "./dispatch-run.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
 const log = createLogger("run");
 
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
   xyneSpacesTools.map((tool) => tool.name),
 );
 
@@ -783,6 +783,10 @@ export async function prepareRun(
     };
     const attachedThreadConversationId = readAgentConfigString("SPACES_CONVERSATION_ID");
     const attachedCanvasViewAccessId = readAgentConfigString("SPACES_CANVAS_VIEW_ACCESS_ID");
+    // Same treatment for the workflow screen's scalars: they steer the workflow tools via
+    // run-scalars, but the agent also needs to be told IN PROSE what it is looking at.
+    const attachedWorkflowId = readAgentConfigString("SPACES_WORKFLOW_ID");
+    const attachedWorkflowExecutionId = readAgentConfigString("SPACES_WORKFLOW_EXECUTION_ID");
     let resolvedAttachedContext:
       | { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string }
       | undefined;
@@ -792,7 +796,13 @@ export async function prepareRun(
       if (normalized.error) log.warn(`[run] attachedContext ignored: ${normalized.error}`);
       normalizedAttached = normalized.items;
     }
-    if (normalizedAttached.length > 0 || attachedThreadConversationId || attachedCanvasViewAccessId) {
+    if (
+      normalizedAttached.length > 0 ||
+      attachedThreadConversationId ||
+      attachedCanvasViewAccessId ||
+      attachedWorkflowId ||
+      attachedWorkflowExecutionId
+    ) {
       // Try to get Spaces auth from request cookies
       const spacesAuth = (await input.resolveSpacesAuth?.(resolved.userId)) ?? undefined;
       if (spacesAuth) {
@@ -800,9 +810,13 @@ export async function prepareRun(
           resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
             ...(attachedThreadConversationId ? { threadConversationId: attachedThreadConversationId } : {}),
             ...(attachedCanvasViewAccessId ? { canvasViewAccessId: attachedCanvasViewAccessId } : {}),
+            ...(attachedWorkflowId ? { workflowId: attachedWorkflowId } : {}),
+            ...(attachedWorkflowExecutionId
+              ? { workflowExecutionId: attachedWorkflowExecutionId }
+              : {}),
           });
           log.info(
-            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
+            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""}${attachedWorkflowExecutionId ? " + workflow-run" : attachedWorkflowId ? " + workflow" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
           );
         } catch (err) {
           log.warn(
@@ -900,7 +914,7 @@ export async function prepareRun(
       ...agent.agentConfig,
       ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
-    if (agentSlug === "sdlc-agent") {
+    if (agentSlug === SDLC_AGENT_SLUG) {
       const configuredTools = (mergedAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
       const configuredPermissions =
         (mergedAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {};
@@ -1226,22 +1240,27 @@ export async function prepareRun(
       storeAttachedContextForSession(sessionId, normalizedAttached).catch(() => {});
     }
 
-    // Dashboard-ai run scalars: the Spaces proxy passes the dashboard being
-    // edited via agentConfig. Stored per-session so the MCP /call boundary can
-    // force-inject them into xyne-dashboard tool calls. Fire-and-forget.
+    // Run scalars: the Spaces proxy passes what the user has OPEN via agentConfig — the
+    // dashboard being edited, or the workflow/run the Ask AI panel was opened on. Stored
+    // per-session so the MCP /call boundary can force-inject them into that server's tool
+    // calls, rather than trusting the model to carry an id across a compaction.
+    // Fire-and-forget.
     {
       const ac = mergedAgentConfig as Record<string, unknown>;
       const scalar = (k: string): string | undefined =>
         typeof ac[k] === "string" && ac[k] ? (ac[k] as string) : undefined;
-      const dashboardDataSourceId = scalar("SPACES_DATA_SOURCE_ID");
-      const dashboardDraftId = scalar("SPACES_DASHBOARD_DRAFT_ID");
-      const dashboardFocusedComponentId = scalar("SPACES_FOCUSED_COMPONENT_ID");
-      if (dashboardDataSourceId || dashboardDraftId || dashboardFocusedComponentId) {
-        storeRunScalars(sessionId, {
-          ...(dashboardDataSourceId ? { dataSourceId: dashboardDataSourceId } : {}),
-          ...(dashboardDraftId ? { draftId: dashboardDraftId } : {}),
-          ...(dashboardFocusedComponentId ? { focusedComponentId: dashboardFocusedComponentId } : {}),
-        }).catch(() => {});
+      const pick = (k: string, v: string | undefined): Record<string, string> =>
+        v ? { [k]: v } : {};
+      const scalars = {
+        ...pick("dataSourceId", scalar("SPACES_DATA_SOURCE_ID")),
+        ...pick("draftId", scalar("SPACES_DASHBOARD_DRAFT_ID")),
+        ...pick("focusedComponentId", scalar("SPACES_FOCUSED_COMPONENT_ID")),
+        ...pick("workflowId", scalar("SPACES_WORKFLOW_ID")),
+        ...pick("executionId", scalar("SPACES_WORKFLOW_EXECUTION_ID")),
+        ...pick("focusedStepId", scalar("SPACES_WORKFLOW_STEP_ID")),
+      };
+      if (Object.keys(scalars).length > 0) {
+        storeRunScalars(sessionId, scalars).catch(() => {});
       }
     }
 
@@ -1408,147 +1427,6 @@ export async function prepareRun(
   }
 }
 
-async function httpForwardRun(prepared: PreparedRun): Promise<RunDispatchResult> {
-  const {
-    sessionId,
-    sessionToken,
-    forwardBody,
-    conversationId,
-    agentSlug,
-    eventType,
-    progressUrl,
-    effectiveCallbackUrl,
-  } = prepared;
-
-  if (prepared.detached) {
-    log.info(`[run] proxy: detached mode (sessionId=${sessionId})`);
-    const clawRes = await fetchClawRunWithRetry(
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        },
-        body: JSON.stringify(forwardBody),
-      },
-      "detached-json",
-    );
-
-    const body = (await clawRes.json().catch(() => null)) as {
-      success?: boolean;
-      sessionId?: string;
-      error?: string;
-    } | null;
-    if (clawRes.status !== 202 || !body?.success || !body.sessionId) {
-      const error = body?.error ?? `Detached /run failed: HTTP ${clawRes.status}`;
-      log.error(`[run] proxy: detached claw /run rejected (sessionId=${sessionId}): ${error}`);
-      return { success: false, error, status: clawRes.status || 502 };
-    }
-
-    // Persist the AgentRun BEFORE acking. This branch used to return with
-    // no row writer at all, so every detached API/service-token dispatch
-    // ran invisibly: no history, no metrics, no token audit trail, and
-    // status lookups 404'd (found 2026-07-20 during the first xyne_svc_
-    // end-to-end test — the run completed but "didn't exist").
-    await persistDetachedRunStart(prepared);
-
-    return { success: true, sessionId: body.sessionId, status: 202 };
-  }
-
-  // SSE-with-legacy-translation: the caller (webhook / agent-chat / etc.)
-  // didn't ask for SSE — they expect the fire-and-forget {success, sessionId}
-  // hand-off and POSTs from claw to their own progressUrl. We give them
-  // exactly that, but the wire to claw is SSE: one ordered connection. A
-  // background bridge translates each SSE frame back into the POST body
-  // shape claw's old push functions used, hitting the caller's progressUrl
-  // serially so ordering is preserved by construction. ZERO caller code
-  // changes — this is the unified-wire migration for the legacy callers.
-  if (CONFIG.clawSseTransport) {
-    log.info(`[run] proxy: SSE bridge mode (caller is legacy POST consumer, sessionId=${sessionId})`);
-
-    // Probe with the SSE Accept header. If claw rejects (auth, validation),
-    // we want to surface the same HTTP status the legacy path would have so
-    // the caller's error handling stays identical. We can't actually
-    // consume in the foreground (the legacy contract is fire-and-forget),
-    // so we just buy a quick "did /run accept" signal by waiting for the
-    // first response chunk.
-    const probeRes = await fetchClawRunWithRetry(
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        },
-        body: JSON.stringify(forwardBody),
-      },
-      "sse-bridge",
-    );
-
-    if (!probeRes.ok || !probeRes.body) {
-      const errText = await probeRes.text().catch(() => "");
-      log.error(
-        `[run] proxy: claw SSE returned ${probeRes.status} (legacy bridge, sessionId=${sessionId}): ${errText.slice(0, 300)}`,
-      );
-      return {
-        success: false,
-        error: errText || "Failed to reach agent service",
-        status: probeRes.status || 502,
-      };
-    }
-
-    // Replicate the legacy persistence + tracking before we hand back
-    // {success, sessionId}, because the caller treats that response as the
-    // signal to add Control Center / AgentRun rows. sessionId is the one we
-    // already minted above and forwardBody carries it.
-    await persistRunStart(prepared);
-
-    // We already have probeRes open; pass its body straight into the bridge
-    // so we don't re-open the connection to claw and the started frame
-    // (already on the wire) is the first thing the bridge consumes.
-    void runBridgeForProbeResponse({
-      probeRes,
-      progressUrl,
-      callbackUrl: effectiveCallbackUrl,
-      sessionId,
-      sessionToken,
-      conversationId: typeof conversationId === "string" ? conversationId : undefined,
-      agentSlug: typeof agentSlug === "string" ? agentSlug : undefined,
-      eventType,
-      forwardBody,
-    });
-    return { success: true, sessionId, status: 200 };
-  }
-
-  // Legacy JSON path — unchanged. Used when CLAW_SSE_TRANSPORT=off so a flag
-  // flip is the only thing required to roll back to per-chunk POSTs.
-  const clawRes = await fetchClawRunWithRetry(
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify(forwardBody),
-    },
-    "legacy-json",
-  );
-
-  const body = (await clawRes.json()) as { success: boolean; sessionId?: string; error?: string };
-
-  if (!body.success || !body.sessionId) {
-    return {
-      success: false,
-      ...(body.error ? { error: body.error } : {}),
-      status: clawRes.status,
-    };
-  }
-
-  await persistRunStart(prepared, body.sessionId);
-
-  return { success: true, sessionId: body.sessionId, status: 200 };
-}
-
 export async function startRun(input: StartRunInput, caller: RunCaller): Promise<StartRunResult> {
   try {
     const preparation = await prepareRun(input, caller);
@@ -1556,7 +1434,6 @@ export async function startRun(input: StartRunInput, caller: RunCaller): Promise
     const prepared = preparation.prepared;
 
     const dispatched = await dispatchRun(prepared.forwardBody, {
-      httpDispatch: () => httpForwardRun(prepared),
       onEnqueued: async () => {
         if (prepared.detached) await persistDetachedRunStart(prepared);
         else await persistRunStart(prepared);

@@ -26,7 +26,7 @@ export interface WebhookCommandCtx {
   reply: (markdownText: string, failureLabel: string) => Promise<void>;
   reconcileStoppedRuns: (
     conversationId: string,
-    fallbackAgentSlug: string,
+    targetAgentSlug: string,
   ) => Promise<StopReconcileResult>;
 }
 

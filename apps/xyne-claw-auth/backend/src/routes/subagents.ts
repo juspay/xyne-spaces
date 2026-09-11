@@ -18,6 +18,9 @@ import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
+import { encrypt } from "../crypto.js";
+import { CONFIG } from "../config.js";
+import { writeAuditLog } from "../lib/audit.js";
 import {
   subagentDefinitionRepository,
   subagentShareRepository,
@@ -34,6 +37,11 @@ import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
 
 const router = Router();
+
+// Instance-slug convention, identical to AgentMcpConnection.slug.
+const SUBAGENT_MCP_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const isValidInstanceSlug = (v: unknown): v is string =>
+  typeof v === "string" && SUBAGENT_MCP_SLUG_RE.test(v);
 
 // ── Response shapes ──────────────────────────────────────────────────────
 
@@ -413,5 +421,176 @@ router.delete("/:name/shares/:userId", asyncHandler(async (req: Request, res: Re
   await subagentShareRepository.delete(row.id, userId).catch(() => undefined);
   ok(res);
 }));
+
+// ── Per-subagent MCP credentials ─────────────────────────────────────────
+// Companion to the agent-level routes in agents.ts. A subagent can pin its own
+// MCP credential per (server type, instance slug); when `nonOverridable` is set
+// (default) the credentials-loader forces that identity above the
+// agent/user/global cascade. Built-in subagents (code-defined, no DB row)
+// cannot hold pinned creds. All three routes require edit rights on the
+// subagent because credential configuration is sensitive.
+
+async function resolveEditableSubagent(req: Request): Promise<NonNullable<DbRow>> {
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest("Built-in subagents cannot hold pinned MCP credentials");
+  }
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("authentication required");
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) throw notFound("subagent not found");
+  if (!(await canEditSubagent(row, requesterId))) {
+    throw forbidden("you do not have edit access to this subagent");
+  }
+  return row;
+}
+
+// GET /:name/mcp/connections — list pinned instances (metadata only, no secrets).
+router.get("/:name/mcp/connections", asyncHandler(async (req: Request, res: Response) => {
+  const subagent = await resolveEditableSubagent(req);
+  const connections = await prisma.subagentMcpConnection.findMany({
+    where: { subagentDefinitionId: subagent.id },
+    include: { mcpServer: { select: { id: true, type: true, name: true } } },
+    orderBy: [{ mcpServerId: "asc" }, { createdAt: "asc" }],
+  });
+  ok(res, connections.map((c) => ({
+    id: c.id,
+    mcpServerId: c.mcpServerId,
+    mcpServerType: c.mcpServer.type,
+    mcpServerName: c.mcpServer.name,
+    slug: c.slug,
+    displayName: c.displayName ?? c.mcpServer.name,
+    nonOverridable: c.nonOverridable,
+    createdByUserId: c.createdByUserId,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  })));
+}));
+
+// POST /:name/mcp/connections — create or update a pinned instance in place.
+// Identified by (subagent, serverType, slug). slug defaults to 'default'.
+router.post("/:name/mcp/connections", asyncHandler(async (req: Request, res: Response) => {
+  const subagent = await resolveEditableSubagent(req);
+  const requesterId = getRequesterId(req)!;
+  const { mcpServerType, slug: rawSlug, displayName, credentials, nonOverridable } = req.body as {
+    mcpServerType?: string;
+    slug?: string;
+    displayName?: string;
+    credentials?: Record<string, unknown>;
+    nonOverridable?: boolean;
+  };
+  if (!mcpServerType || typeof mcpServerType !== "string") {
+    throw badRequest("mcpServerType is required");
+  }
+  if (!credentials || typeof credentials !== "object") {
+    throw badRequest("credentials object is required");
+  }
+  const instanceSlug = rawSlug ?? "default";
+  if (!isValidInstanceSlug(instanceSlug)) {
+    throw badRequest("slug must be lowercase alphanumeric + hyphen, 1-32 chars");
+  }
+  if (nonOverridable !== undefined && typeof nonOverridable !== "boolean") {
+    throw badRequest("nonOverridable must be a boolean");
+  }
+  const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+  if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+  const { ciphertext, iv, authTag } = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+  const cleanDisplayName = typeof displayName === "string" && displayName.trim().length > 0
+    ? displayName.trim()
+    : null;
+
+  const row = await prisma.subagentMcpConnection.upsert({
+    where: {
+      subagentDefinitionId_mcpServerId_slug: {
+        subagentDefinitionId: subagent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
+      },
+    },
+    create: {
+      subagentDefinitionId: subagent.id,
+      mcpServerId: server.id,
+      slug: instanceSlug,
+      displayName: cleanDisplayName,
+      nonOverridable: nonOverridable ?? true,
+      encryptedCreds: ciphertext,
+      iv,
+      authTag,
+      createdByUserId: requesterId,
+    },
+    update: {
+      encryptedCreds: ciphertext,
+      iv,
+      authTag,
+      // Only overwrite optional fields when the caller explicitly sent them,
+      // so a creds-only update doesn't clobber a previously-set label/flag.
+      ...(cleanDisplayName !== null ? { displayName: cleanDisplayName } : {}),
+      ...(nonOverridable !== undefined ? { nonOverridable } : {}),
+    },
+  });
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "SUBAGENT_MCP_UPDATED",
+    targetId: subagent.id,
+    description: `Set MCP "${mcpServerType}" / instance "${instanceSlug}" (nonOverridable=${row.nonOverridable}) on subagent "${subagent.name}"`,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: {
+      id: row.id,
+      mcpServerId: row.mcpServerId,
+      mcpServerType: server.type,
+      mcpServerName: server.name,
+      slug: row.slug,
+      displayName: row.displayName ?? server.name,
+      nonOverridable: row.nonOverridable,
+      createdByUserId: row.createdByUserId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    },
+  });
+}));
+
+// DELETE /:name/mcp/connections/:mcpServerType/:instanceSlug
+router.delete(
+  "/:name/mcp/connections/:mcpServerType/:instanceSlug",
+  asyncHandler(async (req: Request, res: Response) => {
+    const subagent = await resolveEditableSubagent(req);
+    const requesterId = getRequesterId(req)!;
+    const { mcpServerType, instanceSlug } = req.params as { mcpServerType: string; instanceSlug: string };
+    if (!isValidInstanceSlug(instanceSlug)) throw badRequest("Invalid instance slug");
+    const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+    if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+    // deleteMany is idempotent: it removes the row if present and reports the
+    // count, without throwing when the pin does not exist. This avoids the old
+    // `.catch(() => undefined)` which swallowed EVERY error (e.g. a DB outage)
+    // and then emitted a "deleted" audit log that never happened.
+    const { count } = await prisma.subagentMcpConnection.deleteMany({
+      where: {
+        subagentDefinitionId: subagent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
+      },
+    });
+
+    // Only record the audit event when a row was actually removed, so the
+    // audit trail cannot claim a deletion that did not occur.
+    if (count > 0) {
+      await writeAuditLog({
+        actorUserId: requesterId,
+        eventType: "SUBAGENT_MCP_DELETED",
+        targetId: subagent.id,
+        description: `Removed MCP "${mcpServerType}" / instance "${instanceSlug}" from subagent "${subagent.name}"`,
+      });
+    }
+
+    ok(res, { deleted: count > 0 });
+  }),
+);
 
 export default router;

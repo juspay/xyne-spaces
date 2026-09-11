@@ -22,6 +22,7 @@ import {
   agentRequestRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
 import {
   identityFromAgentRow,
   identityFromDraftSpec,
@@ -34,8 +35,7 @@ import {
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
-import { isTransientUpstream } from "../lib/claw-fetch.js";
-import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension } from "xyne-claw-shared";
+import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
@@ -76,8 +76,6 @@ import {
   touchRunRecovery,
   handleRunCompletion,
   classifyRunRecoveryCallback,
-  handleRunHandoff,
-  hasActiveRunRecovery,
   getRecoveryContextForSession,
   cancelRunRecovery,
   type RecoverySessionContext,
@@ -124,7 +122,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
 
 import {
-  buildSdlcAgentToolProfile,
+  sdlcAgentToolProfile,
   buildWriteApprovalFlow,
   buildTicketProposalFlow,
   buildTwinApprovalFlow,
@@ -152,11 +150,11 @@ import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
-import { connectorTypesFromText, connectorTypesUserAskedToConnect } from "../lib/connector-hints.js";
-import { availableServerIds } from "../lib/connector-availability.js";
+import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 
 const clog = createLogger("webhook");
-const SDLC_AGENT_TOOL_PROFILE = buildSdlcAgentToolProfile(
+const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
   xyneSpacesTools.map((tool) => tool.name),
 );
 
@@ -539,6 +537,7 @@ import {
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 import { postGoalPhase, USE_EPHEMERAL_PROGRESS } from "../lib/goal-phase.js";
 import { postGeneratedMarkdownFile } from "../lib/spaces-generated-file.js";
+import { normalizeReviewRoomReason, reviewRoomFailureText } from "../lib/review-room-notice.js";
 import { handleWebhookCommands, type PendingGoalStart } from "../lib/webhook-commands/index.js";
 import {
   MAX_MESSAGE_CHARS,
@@ -2099,18 +2098,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
       await setSession(body.sessionId, sessionContext);
 
-      // Run-recovery / goal-replay reuses the SAME dispatchPayload that was
-      // dispatched above (built once before the per-user gate) — byte-identical
-      // replay, no mention-note drift.
-      await registerRunRecovery({
-        rootSessionId: body.sessionId,
-        maxRetries: CONFIG.runRecoveryMaxRetries,
-        timeoutMs: CONFIG.runRecoveryTimeoutMs,
-        retryBackoffMs: CONFIG.runRecoveryBackoffMs,
-        dispatchPayload,
-        sessionContext,
-      });
-
       // /goal turn-0 persistence: same dispatchPayload is replayed by the
       // relooper for each subsequent turn (task is overwritten with the
       // relooper template each loop).
@@ -2158,15 +2145,9 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // noise), and resultForward callers get the failure via their callback.
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
-      // Three shapes of refusal, three honest messages. A transient upstream
-      // failure that survived the retries above is an infra blip, not a broken
-      // agent — saying "I couldn't start this request: no healthy upstream"
-      // reads as an agent fault and tells the user nothing actionable.
       const notice = /disabled/i.test(refusal)
         ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : isTransientUpstream(body.status, refusal)
-          ? `⏳ The agent service is briefly unavailable (deploy or restart in progress). Please send that again in a moment.`
-          : `⚠️ I couldn't start this request: ${refusal}`;
+        : `⚠️ I couldn't start this request: ${refusal}`;
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
@@ -2328,22 +2309,10 @@ interface StopReconcileSummary {
   hadRunningRows: boolean;
 }
 
-// Reconcile the whole conversation for Spaces /stop. Enumerates every running
-// AgentRun row, POSTs the runtime's per-session cancel, and treats
-// status="not_running" as the existing stale-row janitor signal.
-async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: string): Promise<StopReconcileSummary> {
-  const runningRuns = await agentRunRepository.listRunningByConversation(conversationId);
-  const agentSlugs = new Set<string>([fallbackAgentSlug, ...runningRuns.map((run) => run.agentSlug)]);
-  // DROP queued messages BEFORE cancelling. The cancelled run's failure result
-  // drains the queue in the same breath as the cancel, so a queued message
-  // would instantly re-start the work the user just stopped — /queue clear can
-  // never win that race (2026-07-16: customer-support resumed its stopped plan
-  // one second after 🛑 from a queued "\help"). /stop means halt everything in
-  // the thread; the user can resend a message to continue.
-  let queued = 0;
-  for (const agentSlug of agentSlugs) {
-    queued += await clearQueue(conversationId, agentSlug);
-  }
+async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: string): Promise<StopReconcileSummary> {
+  const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
+    .filter((run) => run.agentSlug === targetAgentSlug);
+  const queued = await clearQueue(conversationId, targetAgentSlug);
 
   const summary: StopReconcileSummary = {
     stopped: 0,
@@ -2382,10 +2351,15 @@ async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: s
         continue;
       }
 
-      const body = (await res.json().catch(() => ({}))) as { status?: string };
+      const body = (await res.json().catch(() => ({}))) as { status?: string; ownerPod?: string };
       if (body.status === "cancelled") {
         summary.stopped++;
         clog.info(`[stop] cancelled run ${run.sessionId} for conv ${conversationId}`);
+        continue;
+      }
+      if (body.status === "forwarded") {
+        summary.stopped++;
+        clog.info(`[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`);
         continue;
       }
 
@@ -2911,7 +2885,7 @@ export async function handleAutomationWebhook(
   // per-agent DB flag is needed.
   const sdlcProfile =
     payload.executionProfile === "sdlc" &&
-    agentSlug === "sdlc-agent" &&
+    agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
@@ -3407,18 +3381,59 @@ async function publishThreadArtifactShare(
 }
 
 const REVIEW_ROOM_MAX_HTML_BYTES = 10 * 1024 * 1024;
-
 router.post("/review-room", requireStrictS2S, async (req: Request, res: Response) => {
   const body = req.body as {
     sessionId?: string;
     roomConversationId?: string;
     fileName?: string;
     html?: string;
+    failed?: boolean;
+    reason?: string;
     pr?: { title?: string; url?: string; number?: string; repo?: string };
   };
   const sessionId = typeof body.sessionId === "string" ? body.sessionId.trim() : "";
   const roomConversationId = typeof body.roomConversationId === "string" ? body.roomConversationId.trim() : "";
   const html = typeof body.html === "string" ? body.html : "";
+
+  // The abort variant: claw could not build a room and is asking us to say so
+  // in the thread. No artifact, no share, no base64 — just the notice.
+  if (body.failed === true) {
+    const reason = normalizeReviewRoomReason(body.reason);
+    if (!sessionId || !roomConversationId || !reason) {
+      res.status(400).json({ success: false, error: "sessionId, roomConversationId and reason are required" });
+      return;
+    }
+    try {
+      const ctx = await getSession(sessionId);
+      if (!ctx || !ctx.conversationId || !ctx.agentSlug || !ctx.agentOrgId) {
+        res.status(404).json({ success: false, error: "No deliverable session context for this run" });
+        return;
+      }
+      const runOwnerId = ctx.targetUserId ?? (ctx.responseMode === "approval" ? ctx.mentionedUserId : ctx.senderId);
+      if (!runOwnerId) {
+        res.status(404).json({ success: false, error: "Run owner is unknown" });
+        return;
+      }
+      if (ctx.responseMode === "conversation") {
+        await postAgentMessage(
+          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          {
+            channelId: ctx.channelId,
+            conversationId: ctx.conversationId,
+            markdownText: reviewRoomFailureText(body.pr?.number ? `#${body.pr.number}` : "", reason),
+            metadata: { contentFormat: "markdown" },
+          }
+        );
+      }
+      clog.info(`[webhook/review-room] notified failure room=${roomConversationId} session=${sessionId} reason=${reason}`);
+      res.json({ success: true, notified: true });
+    } catch (err) {
+      clog.warn(`[webhook/review-room] failure notice failed: ${errMsg(err)}`);
+      res.status(500).json({ success: false, error: "Failed to post review room notice" });
+    }
+    return;
+  }
+
   if (!sessionId || !roomConversationId || !html) {
     res.status(400).json({ success: false, error: "sessionId, roomConversationId and html are required" });
     return;
@@ -3482,22 +3497,38 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     });
     const link = designShareUrl(share.sharePath);
 
+    const markdownText =
+      `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+      `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`;
+
+    // ONE message carries both the link and the HTML: `/files/filesUpload`
+    // takes `markdownText` alongside the file parts (same shape the copilot
+    // attachment path and postGeneratedMarkdownFile use), so there is no reason
+    // to split this into a text post plus a file post. Spaces failing here must
+    // not fail the request — the artifact and its share link are already
+    // persisted, and the caller gets `delivered: false`.
+    let delivered = true;
     if (ctx.responseMode === "conversation") {
-      await postAgentMessage(
-        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
-        {
+      try {
+        await postGeneratedMarkdownFile({
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
-          markdownText:
-            `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
-            `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`,
-          metadata: { contentFormat: "markdown" },
-        }
-      );
+          ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
+          userId: ctx.spacesAppUserId,
+          appToken: ctx.appToken,
+          filename: fileName,
+          markdown: buffer,
+          mimeType: "text/html",
+          summary: markdownText,
+        });
+      } catch (err) {
+        delivered = false;
+        clog.warn(`[webhook/review-room] Spaces delivery failed room=${roomConversationId}: ${errMsg(err)}`);
+      }
     }
 
     clog.info(`[webhook/review-room] published shareId=${share.id} room=${roomConversationId} session=${sessionId}`);
-    res.json({ success: true, url: link });
+    res.json({ success: true, url: link, delivered });
   } catch (err) {
     clog.warn(`[webhook/review-room] failed: ${errMsg(err)}`);
     res.status(500).json({ success: false, error: "Failed to publish review room" });
@@ -3574,6 +3605,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    blockedConnectors?: string[];
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -3583,49 +3615,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   res.json({ success: true });
 
   // Free the twin concurrency slot on ANY terminal callback (completed /
-  // failed / handoff). Cheap no-op ZREM for non-twin sessions; the limiter's
+  // failed). Cheap no-op ZREM for non-twin sessions; the limiter's
   // TTL prune is the backstop when a callback never arrives.
   if (sessionId) void releaseTwinSlot(sessionId);
-
-  if (payload.status === "handoff") {
-    const lastTurn = typeof (payload as { lastTurn?: unknown }).lastTurn === "number"
-      ? (payload as { lastTurn: number }).lastTurn
-      : undefined;
-    clog.info(`[webhook/result] handoff callback session=${sessionId} conversation=${payload.conversationId ?? ""} agent=${payload.agentSlug ?? ""} lastTurn=${lastTurn ?? "unknown"}`);
-    const handoff = await handleRunHandoff(sessionId).catch((err) => {
-      clog.warn(`[webhook/result] handoff re-dispatch failed session=${sessionId}:`, errMsg(err));
-      return null;
-    });
-    if (handoff) {
-      clog.info(`[webhook/result] handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`);
-    } else if (await hasActiveRunRecovery(sessionId).catch(() => false)) {
-      // A failed handoff dispatch schedules a recovery retry. A duplicate/stale
-      // handoff can also race a live continuation; both will produce a result later.
-      clog.info(`[webhook/result] handoff continuation remains active session=${sessionId}`);
-    } else {
-      clog.warn(`[webhook/result] handoff callback had no recovery state session=${sessionId}`);
-      // No new run was dispatched, so this handoff is terminal for an external
-      // caller. Notify it now instead of waiting for a result that cannot arrive.
-      let handoffCtx = await resolveSessionContext(sessionId, payload.conversationId, payload.agentSlug, payload.userId);
-      handoffCtx = await ensureSessionContextOrg(handoffCtx, sessionId);
-      let callback = handoffCtx?.externalResultCallback;
-      if (!handoffCtx && sessionId) {
-        const storedRun = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
-        const metadata = storedRun?.metadata as { externalResultCallback?: ExternalResultCallbackConfig } | null | undefined;
-        callback = metadata?.externalResultCallback;
-      }
-      if (callback) {
-        await sendStoredExternalResultCallback(callback, {
-          sessionId,
-          status: "failed",
-          result: "",
-          error: "run_handoff_not_recoverable",
-        });
-        await deleteSession(sessionId);
-      }
-    }
-    return;
-  }
 
   // ── Mid-run message queue: this /result is the END of the active run for
   // this conversation. On EVERY exit path below (success, empty, failed, early
@@ -4902,10 +4894,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   let inferredTypes: string[] = [];
   if (!payload.pendingConnectorSuggestions) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "").slice(
-        0,
-        MCP_SUGGEST_INFERRED_MAX,
-      );
+      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
+        includeKeywords: true,
+      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
     } catch (err) {
       log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -4913,9 +4904,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
+  const rosterAsked =
+    !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
+
   const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
     payload.pendingConnectorSuggestions ??
-    (inferredTypes.length > 0 ? { serverTypes: inferredTypes, inferred: true } : undefined);
+    (rosterAsked
+      ? { serverTypes: [], listAll: true, inferred: true }
+      : inferredTypes.length > 0
+        ? { serverTypes: inferredTypes, inferred: true }
+        : undefined);
   if (pendingConnectorSuggestions && agentCardDeliverable) {
     try {
       // Roster mode: the user asked what exists, so the SERVER picks the sample
@@ -4928,23 +4926,27 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve every requested type against the catalog. The model supplies
       // names only — descriptions and display names come from the row, and an
       // unknown type is dropped rather than rendered as an empty card.
-      const rows = listAll
+      const candidates = listAll
         ? await prisma.mcpServer.findMany({
             where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
             orderBy: { name: "asc" },
-            take: MCP_SUGGEST_ROSTER_SAMPLE,
           })
         : await prisma.mcpServer.findMany({
             where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true },
+            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
           });
+      const visibleRows = candidates.filter((row) =>
+        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
+      );
+      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
       const byType = new Map(rows.map((row) => [row.type, row]));
 
-      const connectedIds = await availableServerIds(
+      const availability = await availabilityForServerIds(
         ctx.senderId,
         rows.map((r) => r.id),
       );
+      const blockedTypes = new Set(payload.blockedConnectors ?? []);
 
       // Roster mode is already ordered by the query; otherwise preserve the
       // model's ordering, since it ranked them by relevance.
@@ -4961,7 +4963,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // request, which is exactly how an already-usable connector slipped
       // through. The server owns this fact like every other on the card.
       const askedToConnect = new Set(
-        connectorTypesUserAskedToConnect(ctx.rootTask ?? ctx.task ?? ""),
+        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
       );
 
       const connectors = ordered
@@ -4970,12 +4972,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // exceptions, both genuine user intent: roster mode ("what exists?"),
         // and the user naming a connector they want to connect, where a personal
         // connection is a legitimate want even under an org credential.
-        .filter((row) => listAll || askedToConnect.has(row.type) || !connectedIds.has(row.id))
+        .filter((row) => {
+          if (listAll || askedToConnect.has(row.type)) return true;
+          if (availability.personal.has(row.id)) return false;
+          if (availability.org.has(row.id)) return blockedTypes.has(row.type);
+          return true;
+        })
         .map((row) => ({
           serverType: row.type,
           name: row.name,
           ...(row.description ? { description: row.description } : {}),
-          connected: connectedIds.has(row.id),
+          connected: availability.personal.has(row.id) || availability.org.has(row.id),
         }));
 
       if (connectors.length === 0) {

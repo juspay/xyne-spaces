@@ -5,8 +5,9 @@ import { gcsDownloadResultMarker } from "./storage.js";
 import {
   claimOwnership,
   createOwnerToken,
+  currentOwnerPod,
   fenceSession,
-  isOwnedByOther,
+  ownerStatus,
   refreshOwnership,
   releaseOwnership,
   registerOwnedSession,
@@ -14,6 +15,7 @@ import {
   unfenceSession,
   warmOwnershipClient,
 } from "./run-ownership.js";
+import { startRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { SERVER } from "./config.js";
@@ -99,10 +101,6 @@ async function notifyTerminalFailure(job: Job<InternalRunPayload> | undefined, e
 
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
 
-function queueEnabled(): boolean {
-  return process.env["XYNE_RUN_QUEUE"] === "1";
-}
-
 function connectionOptions(): {
   host: string;
   port: number;
@@ -122,10 +120,9 @@ function connectionOptions(): {
 }
 
 export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
-  if (!queueEnabled()) return null;
   const connection = connectionOptions();
   if (!connection) {
-    clog.error("[run-queue] XYNE_RUN_QUEUE=1 but REDIS_HOST is not set — worker not started");
+    clog.error("[run-queue] REDIS_HOST is not set — run queue worker not started");
     return null;
   }
 
@@ -148,11 +145,17 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         throw new DelayedError();
       }
       const ownerToken = createOwnerToken();
-      if (await isOwnedByOther(sessionId, ownerToken)) {
+      const status = await ownerStatus(sessionId, ownerToken);
+      if (status === "alive-other") {
         metric.count("run_queue_owner_alive", { agent, session: sessionId });
         clog.warn(`[run-queue] previous runner still owns session=${sessionId} — deferring takeover`);
         await job.moveToDelayed(Date.now() + OWNER_DEFER_MS, token);
         throw new DelayedError();
+      }
+      if (status === "dead-other") {
+        const deadPod = await currentOwnerPod(sessionId).catch(() => null);
+        metric.count("run_queue_owner_dead_takeover", { agent, session: sessionId });
+        clog.warn(`[run-queue] owner pod ${deadPod ?? "unknown"} has no alive key — taking over session=${sessionId}`);
       }
       metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
       await postProgressLabel(job.data, "Working on it...").catch(() => {});
@@ -192,10 +195,12 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     {
       connection,
       concurrency: 10_000,
-      lockDuration: 120_000,
-      maxStalledCount: 1,
+      lockDuration: 180_000,
+      maxStalledCount: 2,
     },
   );
+
+  startRunControlSubscriber();
 
   worker.on("error", (err: Error) => {
     clog.warn(`[run-queue] worker error: ${err.message}`);

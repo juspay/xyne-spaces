@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { publishHandoffSignal } from "../handoff-redis.js";
-import { isFencedSession } from "../run-ownership.js";
+import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import {
+  decideRunControl,
+  publishRunControl,
+  registerRunControlApplier,
+  type RunControlMessage,
+} from "../run-control.js";
 import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
@@ -43,7 +48,7 @@ import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser } from "../mcp.js";
-import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
+import { packSdlcRunMeta, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
@@ -80,7 +85,6 @@ import {
   buildSubagentTools,
   loadDeepwikiTools,
   loadContext7Tools,
-  loadPlaywrightTools,
   type SkillTrigger,
 } from "../subagent-tools.js";
 import {
@@ -92,6 +96,7 @@ import {
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
+  A2A_DEFAULTS,
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
@@ -297,6 +302,27 @@ function dedupeToolsByName(tools: ToolDefinition[]): ToolDefinition[] {
 }
 
 /** Snapshot for shutdown/drain forensics — one line per still-active run. */
+/**
+ * `read-app-file` rides on `create-app` selection.
+ *
+ * The two are one feature. `create-app` writes a project but hands back only a
+ * manifest — file paths, never contents — so without the read half an
+ * incremental update is authored from memory, which is how earlier features get
+ * silently dropped. Registering a new tool does NOT add it to agents that
+ * already have a saved `tools.custom` list, so fractal-agent held `create-app`
+ * while never being offered its reader (observed 2026-09-02: an explicit "read
+ * the code and tell me…" turn made zero tool calls and answered from context).
+ *
+ * Pairing at resolution time rather than per-agent means no saved selection has
+ * to be migrated and no new agent can be configured into the same half-state.
+ * Mirrors the sandbox → playwright hoist below.
+ */
+function expandCustomSelection(custom: string[] | undefined): Set<string> {
+  const selected = new Set(custom ?? []);
+  if (selected.has("create-app")) selected.add("read-app-file");
+  return selected;
+}
+
 export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
   const now = Date.now();
   return [...activeRuns.entries()].map(([sessionId, a]) => ({
@@ -925,8 +951,16 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
           : processTaskError !== undefined
             ? String(processTaskError)
             : "Run ended without emitting a result (likely session-locked or silent early-return — check claw logs for this sessionId)";
-        const status: "completed" | "failed" | "cancelled" = processTaskError || activeRun.handoffCapFired ? "failed" : "completed";
-        emitter.forceDone(sessionId, status, reason);
+        // Reaching here means the emitter never wrote a done frame — the run
+        // produced NO result. That is a failure whether or not something was
+        // thrown: a loop that gives up after every LLM turn 429s throws
+        // nothing, yet used to finalize as "completed" with a zero-length
+        // answer. Eight consecutive runs reported success that way on
+        // 2026-09-02 while the LiteLLM key was rate-limited, which is why the
+        // outage read as "the agent silently does nothing" for hours. The
+        // `reason` string above already describes a failure; the status now
+        // agrees with it.
+        emitter.forceDone(sessionId, "failed", reason);
       }
       const terminal = emitter.terminalPayload();
       if (terminal && emitter.deliveryFailed() && typeof callbackUrl === "string" && callbackUrl.trim()) {
@@ -1136,47 +1170,33 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-/**
- * Liveness probe for claw-auth's run-recovery watchdog.
- *
- * The watchdog previously inferred death from heartbeat age alone, but a
- * heartbeat only lands on progress events — so a run sitting inside ONE long
- * tool call (a /design browser QA pass, a big sandbox build) looks dead while
- * it is working perfectly. It would then re-dispatch the whole request, and
- * the retry raced the original: two agents, two sandboxes, duplicate
- * deliverables (2026-08-18 /design thread — one request produced four runs and
- * shipped the same HTML twice).
- *
- * `activeRuns` is the authoritative answer to "is this still executing"; it is
- * in-process, which is sound while xyne-claw runs a single replica. If that
- * ever scales out this must move to Redis, otherwise a run on another replica
- * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
- * one boolean about a session id the caller already holds, and it must keep
- * working for recovery paths that have no user context.
- */
-router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
-});
-
-router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-
-  const active = activeRuns.get(sessionId);
-  if (!active) {
-    res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
 
   const callerUserId = req.headers["x-user-id"];
+  const active = activeRuns.get(sessionId);
+  if (!active) {
+    if (typeof callerUserId !== "string" || !callerUserId) {
+      res.json({ success: true, sessionId, status: "not_running" });
+      return;
+    }
+    const decision = await decideRunControl(
+      { type: "interrupt", sessionId, requestedBy: callerUserId },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] interrupt forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
+    res.json({ success: true, sessionId, status: "not_running" });
+    return;
+  }
+
   if (typeof callerUserId !== "string" || !callerUserId) {
     res
       .status(403)
@@ -1189,14 +1209,19 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
     );
   }
 
-  // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // follow-up in the thread wants the active turn to summarize/post what it has,
-  // then let claw-auth drain the queued follow-up as the next user turn. The
-  // follow-up may come from ANY user in the conversation, not just the run's
-  // owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
-  // just needs a caller identity for the audit line above. Prefer a
-  // model-generated summary via steering, but keep a bounded hard-abort fallback
-  // so a stuck tool/provider cannot block the new prompt forever.
+  applyGracefulInterrupt(sessionId, active);
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
+});
+
+// This is intentionally NOT userCancelled. /cancel suppresses output; a
+// follow-up in the thread wants the active turn to summarize/post what it has,
+// then let claw-auth drain the queued follow-up as the next user turn. The
+// follow-up may come from ANY user in the conversation, not just the run's
+// owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
+// just needs a caller identity for the audit line above. Prefer a
+// model-generated summary via steering, but keep a bounded hard-abort fallback
+// so a stuck tool/provider cannot block the new prompt forever.
+function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): void {
   active.gracefulInterruptRequested = true;
   if (!active.gracefulInterruptSummaryTimer) {
     const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
@@ -1214,10 +1239,9 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
       active.abortController.abort();
     }
   });
-  res.json({ success: true, sessionId, status: "interrupt_requested" });
-});
+}
 
-router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/cancel", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1226,6 +1250,20 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
 
   const active = activeRuns.get(sessionId);
   if (!active) {
+    const callerId = req.headers["x-user-id"];
+    const decision = await decideRunControl(
+      {
+        type: "cancel",
+        sessionId,
+        ...(typeof callerId === "string" && callerId ? { userId: callerId } : {}),
+      },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] cancel forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
     res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
@@ -1254,6 +1292,30 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
   active.userCancelled = true;
   active.abortController.abort();
   res.json({ success: true, sessionId, status: "cancelled" });
+});
+
+registerRunControlApplier((msg: RunControlMessage): boolean => {
+  const active = activeRuns.get(msg.sessionId);
+  if (!active) return false;
+  if (msg.type === "cancel") {
+    if (!msg.userId || msg.userId !== active.userId) {
+      clog.warn(
+        `[run-control] refusing cancel session=${msg.sessionId} owner=${active.userId} by=${msg.userId ?? "?"}`,
+      );
+      return false;
+    }
+    active.userCancelled = true;
+    active.abortController.abort();
+    return true;
+  }
+  if (!msg.requestedBy) return false;
+  if (msg.requestedBy !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${msg.sessionId} owner=${active.userId} by=${msg.requestedBy}`,
+    );
+  }
+  applyGracefulInterrupt(msg.sessionId, active);
+  return true;
 });
 
 // POST /clone-session — branch a persistent session to a new conversationId
@@ -1437,58 +1499,6 @@ export async function processTask(
       if (active) active.handoffLastTurn = Math.max(active.handoffLastTurn ?? 0, lastTurn);
     },
   };
-  const sendHandoffCallback = async (lastTurn?: number): Promise<void> => {
-    const active = activeRuns.get(sessionId);
-    const resolvedLastTurn = Math.max(0, lastTurn ?? active?.handoffLastTurn ?? 0);
-    log(`Session handoff checkpointed: ${sessionId} lastTurn=${resolvedLastTurn} aborted=${active?.handoffCapFired === true}`);
-    // NEVER deliver handoff over an in-process SSE emitter: during a drain the
-    // bridge is dead (or dying) almost by definition — the first live drill
-    // (2026-07-15, session c304df10) lost the handoff exactly this way. Force
-    // the HTTP /sessions/:id/result fallback (sendCallback builds it when
-    // callbackUrl is null), whose claw-auth handler owns the handoff branch.
-    // Real string callback URLs (scheduled-jobs result etc.) stay as-is —
-    // their handlers have handoff branches too.
-    // PRIMARY channel: Redis. The recovery worker only needs the sessionId —
-    // all run state lives in its Redis registration — and the HTTP hop to
-    // claw-auth failed three different ways in two days (zero-endpoint window,
-    // purge-on-boot, and a version-skew 401 on 2026-07-16 that dropped ~50
-    // handoffs in one drain). One LPUSH has no endpoint, no auth contract,
-    // and no rollout-timing dependency. See handoff-redis.ts.
-    const viaRedis = await publishHandoffSignal(sessionId, resolvedLastTurn);
-    if (viaRedis) {
-      log(`Handoff signal published to Redis for ${sessionId} (lastTurn=${resolvedLastTurn})`);
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId, channel: "redis" });
-      return;
-    }
-    const handoffDest = typeof callbackUrl === "string" ? callbackUrl : undefined;
-    // HTTP FALLBACK (Redis unreachable/unconfigured only). Long retry schedule
-    // (~90s total): when claw and claw-auth roll in the same window, the auth
-    // Service can briefly have ZERO ready endpoints (old pod Terminating, new
-    // pod Pending on node scale-up) and the default ~4s budget drops the
-    // callback — round-6 drill (2026-07-15) lost 3 handoffs exactly this way.
-    // The draining pod has DRAIN_TIMEOUT (900s) / grace (1000s) to live, so
-    // waiting out the endpoint gap is free.
-    const delivered = await sendCallback(
-      handoffDest,
-      sessionToken,
-      {
-        sessionId,
-        userId,
-        conversationId: conversationId ?? null,
-        agentSlug: agentSlug ?? null,
-        fastMode: fastModeForCallback,
-        status: "handoff",
-        lastTurn: resolvedLastTurn,
-      },
-      { backoffsMs: [1_000, 2_000, 5_000, 10_000, 15_000, 15_000, 15_000, 15_000, 15_000] },
-    );
-    if (delivered) {
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId });
-    } else {
-      metric.count("handoff_callback_lost", { agent: agentSlug ?? "unknown", session: sessionId });
-    }
-  };
-
   // Idempotency backstop: only re-dispatches carry idempotencyKey (the recovery
   // rootSessionId). If a terminal-result marker for it already exists in GCS,
   // this run already finished and its completion callback was lost — replay the
@@ -1537,6 +1547,7 @@ export async function processTask(
   const proposeAgentRef: ProposeAgentRef = {};
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
   // Seed from THIS run's provider — a hardcoded default made every early
@@ -1729,7 +1740,7 @@ export async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"], channelId);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1744,6 +1755,7 @@ export async function processTask(
       mcpOutputDir,
       (att) => pushAttachment(progressUrl, sessionId, att),
       trustedSdlcBindings,
+      (serverType) => blockedConnectors.add(serverType),
     );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
@@ -1763,6 +1775,8 @@ export async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
+    meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
     if (recordingFiles.length > 0) {
       // Server-authored metadata consumed only by analyze-skill-recording. The
@@ -1811,76 +1825,7 @@ export async function processTask(
       sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
         ? (sdlcContext as Record<string, unknown>)
         : undefined;
-    const trustedSdlcRepository =
-      trustedSdlcContext?.["repository"] &&
-      typeof trustedSdlcContext["repository"] === "object" &&
-      !Array.isArray(trustedSdlcContext["repository"])
-        ? (trustedSdlcContext["repository"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcExecution =
-      trustedSdlcContext?.["execution"] &&
-      typeof trustedSdlcContext["execution"] === "object" &&
-      !Array.isArray(trustedSdlcContext["execution"])
-        ? (trustedSdlcContext["execution"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcWiki =
-      trustedSdlcContext?.["wiki"] &&
-      typeof trustedSdlcContext["wiki"] === "object" &&
-      !Array.isArray(trustedSdlcContext["wiki"])
-        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
-        : undefined;
-    const isTrustedSdlcWikiRun =
-      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
-    if (trustedSdlcRepository) {
-      if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
-      if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
-      if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
-      if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
-        meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
-      }
-      if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
-        meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
-      }
-      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
-        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
-      }
-      // Runtime credentials are issued per dispatched execution (setup/
-      // artifact/work). Chat-surface runs carry repository context but no
-      // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
-      // execution identifiers so chat runs degrade to baseline-canvas access.
-      if (
-        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
-        typeof trustedSdlcExecution?.["sessionId"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
-      } else if (
-        trustedSdlcContext?.["operation"] === "interactive" &&
-        typeof trustedSdlcContext["interactiveGrant"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
-        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
-      }
-    }
-    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
-      meta["sdlcWikiRun"] = "true";
-      if (typeof trustedSdlcWiki["role"] === "string") {
-        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
-      }
-      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
-        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
-          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
-        );
-      }
-      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
-        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
-      }
-      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
-        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
-      }
-    }
+    Object.assign(meta, packSdlcRunMeta(trustedSdlcContext));
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
@@ -2004,10 +1949,9 @@ export async function processTask(
     // Load deepwiki/context7/playwright MCP tool groups (stdio transport, cached).
     // Playwright doesn't get its own subagent — its tools are spliced into the
     // sandbox subagent's palette via bonusToolsBySubagent below.
-    const [deepwikiGroup, context7Group, playwrightGroup] = await Promise.all([
+    const [deepwikiGroup, context7Group] = await Promise.all([
       loadDeepwikiTools(),
       loadContext7Tools(),
-      loadPlaywrightTools(),
     ]);
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
@@ -2304,15 +2248,6 @@ export async function processTask(
       return src === "custom:sandbox" && t.name !== "sandbox-destroy";
     });
 
-    // Playwright browser tools (@playwright/mcp) ride on sandbox selection —
-    // they were previously only in the sandbox subagent palette. An agent that
-    // selects any sandbox tool gets the browser tools on the parent too. They
-    // bypass the tools.custom gate (not custom-sourced), so only add them when
-    // sandbox is actually selected.
-    const sandboxSelected = (toolsConfigEarly?.custom ?? []).some((s) => s.startsWith("sandbox-"));
-    const playwrightHoistedTools =
-      sandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
-
     const emitDelegationProgress = (label: string): void => {
       if (!progressUrl) return;
       if (typeof progressUrl !== "string") {
@@ -2374,7 +2309,7 @@ export async function processTask(
       if (!cfg) return tools;
       const allowedSubagents = new Set(cfg.subagents ?? []);
       const allowedDirect = cfg.direct ?? [];
-      const allowedCustom = new Set(cfg.custom ?? []);
+      const allowedCustom = expandCustomSelection(cfg.custom);
       const allowedGatewayServices = new Set(cfg.gateway ?? []);
       return tools.filter((t) => {
         if (sets.subagentTools.some((s) => s.name === t.name)) {
@@ -2404,6 +2339,7 @@ export async function processTask(
       if (userName) calleeMeta["userName"] = userName;
       if (userEmail) calleeMeta["userEmail"] = userEmail;
       calleeMeta["agentSlug"] = spec.slug;
+      calleeMeta["contextRoot"] = join(mcpOutputDir, ".context");
       if (channelId) calleeMeta["channelId"] = channelId;
       if (conversationId) calleeMeta["conversationId"] = conversationId;
       if (eventType) calleeMeta["eventType"] = eventType;
@@ -2489,19 +2425,15 @@ export async function processTask(
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
           calleeDirectPickSuffixes,
         );
-        const calleeSandboxSelected = (calleeToolsConfig?.custom ?? []).some((s) => s.startsWith("sandbox-"));
         const calleeParentHoistedTools = calleeCustom.tools.filter((t) => {
           const src = (t as { source?: string }).source ?? "";
           return src === "custom:sandbox" && t.name !== "sandbox-destroy";
         });
-        const calleePlaywrightTools =
-          calleeSandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
         let calleePalette = [
           ...calleeSubagents.subagentTools,
           ...calleeSubagents.directTools,
           ...calleeSubagents.remainingCustomTools,
           ...calleeParentHoistedTools,
-          ...calleePlaywrightTools,
           ...calleeKbTools,
         ];
         calleePalette = applyAgentToolFilter(calleePalette, calleeToolsConfig, {
@@ -2546,9 +2478,13 @@ export async function processTask(
 
     // Per-agent, per-run delegation budget. Read from the parent agent's
     // free-form config bag (set in the Behaviour screen) and clamped to a safe
-    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset.
+    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset
+    // (the higher MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR for orchestrator-tier runs).
     const maxDelegationsPerRun = clampMaxDelegationsPerRun(
       agentConfig?.["maxDelegationsPerRun"],
+      delegationMode === "orchestrator"
+        ? A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR
+        : undefined,
     );
     if (agentConfig?.["maxDelegationsPerRun"] !== undefined) {
       log(
@@ -2558,6 +2494,11 @@ export async function processTask(
     const delegationGovernor = new AgentDelegationGovernor({
       ownerSlug: agentSlug ?? "root",
       maxDelegationsPerRun,
+      // Orchestrator-tier runs fan a multi-part request out to one specialist
+      // per part; serializing them would make the wait the SUM of the callees
+      // instead of the slowest, which is the whole point of routing. Standard
+      // callers keep the concurrency-1 mutex. Budget + depth cap still bound it.
+      ...(delegationMode === "orchestrator" ? { concurrency: Number.POSITIVE_INFINITY } : {}),
       onEvent: (ev) => {
         log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
         if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
@@ -2609,20 +2550,18 @@ export async function processTask(
       ...directTools,
       ...remainingCustomTools,
       ...parentHoistedTools,
-      ...playwrightHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
     ].map((tool) => tool.name));
 
     let allTools = [
       ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7
-      ...fastMetaTools, // search-tools/load-tools in fast mode only
+      ...fastMetaTools, // list-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
-      ...playwrightHoistedTools, // browser tools, for sandbox-selected agents
       ...kbHoistedTools, // kb-* tools when the agent has ≥1 AgentCollection grant
     ];
 
@@ -2648,7 +2587,7 @@ export async function processTask(
     if (toolsConfigEarly) {
       const allowedSubagents = new Set(toolsConfigEarly.subagents ?? []);
       const allowedDirect = toolsConfigEarly.direct ?? [];
-      const allowedCustom = new Set(toolsConfigEarly.custom ?? []);
+      const allowedCustom = expandCustomSelection(toolsConfigEarly.custom);
       const allowedGatewayServices = new Set(toolsConfigEarly.gateway ?? []);
 
       allTools = allTools.filter((t) => {
@@ -2869,7 +2808,7 @@ export async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
       // Same gate as describe-agent: a connector card is only worth posting
       // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef));
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
     }
 
 
@@ -3074,9 +3013,17 @@ export async function processTask(
       eventType === "artifact_app" || (conversationId?.startsWith("app_") ?? false);
     if (isArtifactAppRun) {
       const before = allTools.length;
-      allTools = allTools.filter((t) => t.name !== "create-app" && t.name !== "schedule-task");
+      // read-app-file goes with create-app: it is keyed by conversation, and an
+      // app-invoked run carries the `app_` conversation of the app itself, so
+      // leaving it in would let an app read its own source back.
+      allTools = allTools.filter(
+        (t) =>
+          t.name !== "create-app" && t.name !== "read-app-file" && t.name !== "schedule-task",
+      );
       if (allTools.length !== before) {
-        log("Artifact-app run — create-app + schedule-task removed (self-replication ban)");
+        log(
+          "Artifact-app run — create-app + read-app-file + schedule-task removed (self-replication ban)",
+        );
       }
     }
 
@@ -3154,7 +3101,7 @@ export async function processTask(
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // search-tools/load-tools.
+    // list-tools/load-tools.
     const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
     if (catalogActive) {
       const registeredToolNames = new Set(allTools.map((tool) => tool.name));
@@ -3168,13 +3115,20 @@ export async function processTask(
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
           controller: fastToolController,
+          ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
+            ? {
+                emptyCatalogNote:
+                  `Configured subagents: ${customSubagents!.map((s) => s.name).join(", ")} — they resolved to 0 tools, ` +
+                  "so their MCP servers have no credentials in this run.",
+              }
+            : {}),
         }),
         ...allTools.filter((tool) => {
           if (!fastCatalogCandidateByName.has(tool.name)) return true;
           return finalFastCatalogNameSet.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name);
         }),
       ]);
-      fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
+      fastMetaTools = allTools.filter((tool) => tool.name === "list-tools" || tool.name === "load-tools");
     }
 
     const fastModeLoadedToolBudget = catalogActive
@@ -4449,6 +4403,7 @@ export async function processTask(
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),
+      ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
         : {}),
@@ -4501,11 +4456,11 @@ export async function processTask(
         const decision = await execution.hooks.onDrainRequested();
         if (decision === "reschedule") {
           execution.outcome = "rescheduled";
-          log(`Run rescheduled instead of handoff-signalled: ${sessionId} lastTurn=${err.lastTurn}`);
+          log(`Run rescheduled for drain: ${sessionId} lastTurn=${err.lastTurn}`);
           return;
         }
       }
-      await sendHandoffCallback(err.lastTurn);
+      log(`Run drain-signalled with no reschedule hook: ${sessionId} lastTurn=${err.lastTurn}`);
       return;
     }
     // HA: another pod already owns this conversation's lock. In callback mode
@@ -4644,6 +4599,7 @@ export async function processTask(
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
           : {}),
+        ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
         ...(dedupedPendingActionsAtError.length > 0 ? { pendingActions: dedupedPendingActionsAtError } : {}),
         ...(attachmentsAtError.length > 0 ? { attachments: attachmentsAtError } : {}),

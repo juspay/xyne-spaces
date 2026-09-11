@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ToolDefinition, ToolExecutionContext, UiWidget } from "../types.js";
 import { publishUiWidget } from "../ui-widget.js";
+import { normalizeUnifiedPatch } from "../../flow/unified-patch.js";
 
 function widgetId(context: ToolExecutionContext | undefined, type: UiWidget["type"]): string {
   return `${type}:${context?.toolCallId ?? crypto.randomUUID()}`;
@@ -61,7 +62,9 @@ export const postDiff: ToolDefinition = {
     "changed lines rendered in place with an expand-to-full-patch control. Use this whenever " +
     "you are showing a change to an existing file, instead of pasting before/after blocks. " +
     "`patch` is unified-diff text: `@@` hunk headers with ` `/`+`/`-` line prefixes. Bare " +
-    "hunks are fine — the file headers are added for you from `path`. " +
+    "`@@` headers are fine — the file headers, line ranges and line counts are all filled " +
+    "in for you from `path` and from the hunk bodies. What you MUST get right is the line " +
+    "prefixes: every line inside a hunk starts with a space (context), `+` or `-`. " +
     "This card only DISPLAYS the change: it applies nothing and asks the user for nothing, so " +
     "if you need the edit made, still say what you intend to do next.",
   source: "custom:code-artifacts",
@@ -78,18 +81,27 @@ export const postDiff: ToolDefinition = {
     const patch = typeof params["patch"] === "string" ? params["patch"] : "";
     if (!path) return "Error: path is required.";
     if (!patch.trim()) return "Error: patch is required.";
-    if (!/^@@|^diff --git |^--- /m.test(patch)) {
-      return "Error: patch must be unified-diff text (at least one @@ hunk header).";
+
+    // Repair the patch HERE rather than trusting the shape check that used to
+    // live in its place: the renderer drops an unparseable patch silently, so a
+    // patch that merely *contains* an @@ could still post a blank card.
+    const normalized = normalizeUnifiedPatch(path, patch);
+    if (!normalized.patch) {
+      return (
+        "Error: no diff lines found in patch. Every line inside a hunk must start with " +
+        "a space (unchanged), '+' (added) or '-' (removed) — e.g.\n" +
+        "@@\n-const a = 1;\n+const a = 2;"
+      );
     }
 
     const error = await postWidget(context, {
       id: widgetId(context, "diff"),
       type: "diff",
       operation: "create",
-      payload: { path, patch },
+      payload: { path, patch: normalized.patch },
     });
     if (error) return error;
-    return `Posted a diff card for ${path} to the thread. Do not repeat the patch in your reply — the user can already see it.`;
+    return `Posted a diff card for ${path} (+${normalized.added}/−${normalized.removed}) to the thread. Do not repeat the patch in your reply — the user can already see it.`;
   },
 };
 

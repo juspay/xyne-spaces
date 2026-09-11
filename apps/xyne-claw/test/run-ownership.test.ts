@@ -1,16 +1,26 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import {
   OWNERSHIP_TTL_SECONDS,
+  POD_ALIVE_TTL_SECONDS,
   __setOwnershipClientForTests,
   claimOwnership,
   createOwnerToken,
+  currentOwnerPod,
   fenceSession,
+  handleOwnershipLoss,
   isFencedSession,
   isOwnedByOther,
+  ownerPodFromToken,
+  ownerStatus,
+  podAliveKey,
+  podName,
   refreshOwnership,
+  registerOwnedSession,
   releaseOwnership,
+  setOwnershipRefreshPort,
   unfenceSession,
+  unregisterOwnedSession,
 } from "../src/run-ownership.js";
 
 interface Entry {
@@ -27,6 +37,9 @@ function memoryRedis(): { stub: Redis; store: Map<string, Entry> } {
     },
     async get(key: string) {
       return store.get(key)?.value ?? null;
+    },
+    async exists(key: string) {
+      return store.has(key) ? 1 : 0;
     },
     async eval(script: string, _n: number, key: string, token: string, ttl?: string) {
       const current = store.get(key)?.value ?? null;
@@ -49,7 +62,7 @@ function throwingRedis(): Redis {
   const boom = async () => {
     throw new Error("redis down");
   };
-  return { set: boom, get: boom, eval: boom, on() { return this; } } as unknown as Redis;
+  return { set: boom, get: boom, exists: boom, eval: boom, on() { return this; } } as unknown as Redis;
 }
 
 describe("run-ownership", () => {
@@ -118,5 +131,145 @@ describe("run-ownership", () => {
     expect(isFencedSession(undefined)).toBe(false);
     unfenceSession("s6");
     expect(isFencedSession("s6")).toBe(false);
+  });
+});
+
+describe("ownerPodFromToken", () => {
+  it("splits the single colon of a <pod>:<uuid> token", () => {
+    const token = createOwnerToken();
+    expect(token.split(":")).toHaveLength(2);
+    expect(token.slice(token.indexOf(":") + 1)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(ownerPodFromToken(token)).toBe(podName());
+  });
+
+  it("keeps hyphens in the pod name intact", () => {
+    expect(ownerPodFromToken("xyne-claw-7d9f-abc:0d1e2f34-5678-4abc-9def-0123456789ab")).toBe("xyne-claw-7d9f-abc");
+  });
+
+  it("returns null without a pod prefix", () => {
+    expect(ownerPodFromToken("no-colon-here")).toBeNull();
+    expect(ownerPodFromToken(":leading")).toBeNull();
+    expect(ownerPodFromToken("")).toBeNull();
+  });
+});
+
+describe("ownerStatus", () => {
+  const mine = "pod-a:11111111-1111-4111-8111-111111111111";
+  const theirs = "pod-b:22222222-2222-4222-8222-222222222222";
+
+  beforeEach(() => {
+    process.env["REDIS_HOST"] = "127.0.0.1";
+  });
+
+  it("is free when nobody holds the key", async () => {
+    const { stub } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    expect(await ownerStatus("s1", mine)).toBe("free");
+  });
+
+  it("is mine when the key holds my own token", async () => {
+    const { stub } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("s1", mine);
+    expect(await ownerStatus("s1", mine)).toBe("mine");
+  });
+
+  it("is alive-other while the holding pod still publishes its pod-alive key", async () => {
+    const { stub, store } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("s1", theirs);
+    store.set(podAliveKey("pod-b"), { value: String(Date.now()), ttl: POD_ALIVE_TTL_SECONDS });
+    expect(await ownerStatus("s1", mine)).toBe("alive-other");
+  });
+
+  it("is dead-other once the holding pod's alive key has lapsed", async () => {
+    const { stub } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("s1", theirs);
+    expect(await ownerStatus("s1", mine)).toBe("dead-other");
+  });
+
+  it("fails open to free when redis throws", async () => {
+    __setOwnershipClientForTests(throwingRedis());
+    expect(await ownerStatus("s1", mine)).toBe("free");
+  });
+
+  it("names the holding pod for the takeover log", async () => {
+    const { stub } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("s1", theirs);
+    expect(await currentOwnerPod("s1")).toBe("pod-b");
+    expect(await currentOwnerPod("absent")).toBeNull();
+  });
+});
+
+describe("refresh strategy switch", () => {
+  const token = "pod-a:33333333-3333-4333-8333-333333333333";
+
+  beforeEach(() => {
+    process.env["REDIS_HOST"] = "127.0.0.1";
+    __setOwnershipClientForTests(memoryRedis().stub);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    setOwnershipRefreshPort({ postMessage: () => {} });
+    unregisterOwnedSession("s1");
+    setOwnershipRefreshPort(null);
+    vi.useRealTimers();
+  });
+
+  it("posts own/release to the worker port instead of ticking on the main thread", () => {
+    const posted: unknown[] = [];
+    setOwnershipRefreshPort({ postMessage: (m) => posted.push(m) });
+
+    registerOwnedSession("s1", token, () => {});
+    expect(posted).toEqual([{ type: "own", sessionId: "s1", ownerToken: token }]);
+    expect(vi.getTimerCount()).toBe(0);
+
+    unregisterOwnedSession("s1");
+    expect(posted[1]).toEqual({ type: "release", sessionId: "s1" });
+  });
+
+  it("hands sessions registered before the worker was ready over to it", () => {
+    registerOwnedSession("s1", token, () => {});
+    expect(vi.getTimerCount()).toBe(1);
+
+    const posted: unknown[] = [];
+    setOwnershipRefreshPort({ postMessage: (m) => posted.push(m) });
+
+    expect(posted).toEqual([{ type: "own", sessionId: "s1", ownerToken: token }]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("falls back to the main-thread heartbeat when the worker goes away", () => {
+    setOwnershipRefreshPort({ postMessage: () => {} });
+    registerOwnedSession("s1", token, () => {});
+    expect(vi.getTimerCount()).toBe(0);
+
+    setOwnershipRefreshPort(null);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("runs onLost once, and only for the token still registered", () => {
+    const lost = vi.fn();
+    setOwnershipRefreshPort({ postMessage: () => {} });
+    registerOwnedSession("s1", token, lost);
+
+    handleOwnershipLoss("s1", "pod-b:44444444-4444-4444-8444-444444444444");
+    expect(lost).not.toHaveBeenCalled();
+
+    handleOwnershipLoss("s1", token);
+    handleOwnershipLoss("s1", token);
+    expect(lost).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("timing constants", () => {
+  it("keeps the owner TTL on the 180s lock and the pod-alive key short-lived", () => {
+    expect(OWNERSHIP_TTL_SECONDS).toBe(180);
+    expect(POD_ALIVE_TTL_SECONDS).toBe(120);
   });
 });

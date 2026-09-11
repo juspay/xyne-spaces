@@ -2,7 +2,7 @@ import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { isAgentInvocableBy } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -845,7 +845,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
       res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }

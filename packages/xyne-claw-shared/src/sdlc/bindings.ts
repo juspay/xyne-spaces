@@ -1,5 +1,6 @@
-import { SDLC_TOOL_CAPABILITIES, SDLC_TOOL_NAMES } from "xyne-claw-shared";
-import type { TrustedMcpToolBindings } from "./mcp.js";
+import { SDLC_TOOL_CAPABILITIES, SDLC_TOOL_NAMES } from "./registry.js";
+
+export type TrustedMcpToolBindings = Record<string, Record<string, unknown>>;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -7,15 +8,24 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Build server-owned argument bindings from trusted SDLC run context. */
 export function trustedSdlcToolBindings(
   sdlcContext: unknown,
+  runChannelId?: string,
 ): TrustedMcpToolBindings | undefined {
   const context = record(sdlcContext);
   const repository = record(context?.["repository"]);
   const repoId = repository?.["id"];
+  const contextChannelId = context?.["channelId"];
+  const channelId =
+    typeof contextChannelId === "string" && contextChannelId
+      ? contextChannelId
+      : runChannelId;
+  const channelBinding = channelId ? { channelId } : {};
+
   if (typeof context?.["operation"] !== "string" || typeof repoId !== "string") {
-    return undefined;
+    return channelId
+      ? { [SDLC_TOOL_NAMES.listRepositories]: { channelId } }
+      : undefined;
   }
 
   const execution = record(context["execution"]);
@@ -29,6 +39,7 @@ export function trustedSdlcToolBindings(
   const hasRepositoryIdentity =
     typeof workspaceId === "string" && typeof actorUserId === "string";
   const bindings: TrustedMcpToolBindings = {};
+  if (channelId) bindings[SDLC_TOOL_NAMES.listRepositories] = { channelId };
 
   for (const capability of SDLC_TOOL_CAPABILITIES) {
     if (capability.transport !== "direct" || capability.trustedBinding === "none") continue;
@@ -42,8 +53,13 @@ export function trustedSdlcToolBindings(
         executionId,
         sessionId,
         repoId,
+        ...channelBinding,
         ...(hasRepositoryIdentity ? { workspaceId, actorUserId } : {}),
       };
+      continue;
+    }
+    if (capability.trustedBinding === "hub" && hasRepositoryIdentity) {
+      bindings[capability.name] = { workspaceId, actorUserId, ...channelBinding };
       continue;
     }
     if (capability.trustedBinding === "repository" && hasRepositoryIdentity) {
@@ -51,6 +67,7 @@ export function trustedSdlcToolBindings(
         repoId,
         workspaceId,
         actorUserId,
+        ...channelBinding,
       };
       continue;
     }
@@ -74,16 +91,4 @@ export function trustedSdlcToolBindings(
   }
 
   return Object.keys(bindings).length > 0 ? bindings : undefined;
-}
-
-/** Wiki checkpoint projection retained for callers that only need Wiki bindings. */
-export function trustedSdlcWikiToolBindings(
-  sdlcContext: unknown,
-): TrustedMcpToolBindings | undefined {
-  const bindings = trustedSdlcToolBindings(sdlcContext);
-  if (!bindings) return undefined;
-  const wikiBindings = Object.fromEntries(
-    Object.entries(bindings).filter(([toolName]) => toolName.startsWith("spaces-sdlc-wiki-")),
-  );
-  return Object.keys(wikiBindings).length > 0 ? wikiBindings : undefined;
 }
