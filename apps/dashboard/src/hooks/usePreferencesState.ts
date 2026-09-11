@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
+import { useDisplayLanguage } from './useDisplayLanguage';
 import { useAILandingDefault } from './useAILandingDefault';
 import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
@@ -43,6 +44,7 @@ export function usePreferencesState(enabled: boolean) {
     serverCalendarVisibility,
   );
   const { theme, changeTheme } = useTheme();
+  const { displayLanguage, setDisplayLanguage } = useDisplayLanguage();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
@@ -138,6 +140,8 @@ export function usePreferencesState(enabled: boolean) {
     user,
     theme,
     changeTheme,
+    displayLanguage,
+    setDisplayLanguage,
     aiLandingDefault,
     appModeCollapseSidebar,
     setAppModeCollapseSidebar,

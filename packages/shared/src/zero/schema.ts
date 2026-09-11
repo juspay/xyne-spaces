@@ -620,6 +620,7 @@ export const userPreferenceTable = table('user_preferences')
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
+    displayLanguage: string(), // App UI locale (ISO 639-1) — distinct from any message-translation target language
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
     channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
     starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter

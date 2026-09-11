@@ -533,6 +533,7 @@ export const userPreferenceTable = table("user_preferences")
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(),
+    displayLanguage: string(),
     channelSortOrder: string(),
     channelFilterMode: string().optional(),
     starredFilterMode: string().optional(),
