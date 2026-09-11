@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.12](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.11...v1.295.0-release-20260909.12) (2026-09-11)
+
+
+### Bug Fixes
+
+* word split fix in subject contains and body contains … ([#1644](https://github.com/juspay/xyne-spaces/issues/1644)) ([#1789](https://github.com/juspay/xyne-spaces/issues/1789)) ([ace6816](https://github.com/juspay/xyne-spaces/commit/ace68165eb479cf740a62a7fe13e85a78c0c7ab4))
+
 ## [1.295.0-release-20260909.11](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.10...v1.295.0-release-20260909.11) (2026-09-11)
 
 
