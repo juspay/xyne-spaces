@@ -30,6 +30,7 @@
       "#zero-internal/schema": ["../node_modules/@rocicorp/zero/out/zero-server/src/schema"],
       "#zero-internal/compiler": ["../node_modules/@rocicorp/zero/out/z2s/src/compiler"],
       "#zero-internal/sql": ["../node_modules/@rocicorp/zero/out/z2s/src/sql"],
+      "@xyne/logger": ["../../../packages/logger/dist"],
       "@xyne/shared": ["../../../packages/shared/dist"],
       "@xyne/storage": ["../../../packages/storage/dist"],
       "@framework": ["../../../packages/framework/dist"],
