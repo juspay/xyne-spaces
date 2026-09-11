@@ -1,5 +1,5 @@
-fastapi==0.115.6
-starlette>=0.40.0
+fastapi==0.116.2
+starlette>=0.48.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.20
 python-dotenv>=1.0.0
