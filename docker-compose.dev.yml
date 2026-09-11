@@ -52,7 +52,7 @@ services:
 
   # Redis
   redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
+    image: mirror.gcr.io/library/redis:7-alpine
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-redis
     ports:
       - "${REDIS_BIND_PORT:-6379}:6379"
