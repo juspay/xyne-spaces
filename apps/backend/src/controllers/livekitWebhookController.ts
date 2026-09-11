@@ -24,6 +24,7 @@ import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trig
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { activityService } from '@/services/activity/activityService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -564,6 +565,9 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              if (existingConversationId) {
+                await activityService.fillSdlcOwner(conversationId, channelId);
+              }
               logger.info(
                 `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
