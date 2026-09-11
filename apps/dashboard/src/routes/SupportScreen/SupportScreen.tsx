@@ -73,6 +73,7 @@ import {
   UserPlus,
   InformationCircle as InfoIcon,
   FileText,
+  LightningThunderElectricOn as Zap,
 } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -84,6 +85,8 @@ import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useDebugAutomationsEnabled } from '../../hooks/useDebugSettings';
+import { openAutomationDebug } from '../../providers/AutomationDebugProvider';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
@@ -5871,6 +5874,7 @@ const EmailThreadItem = ({
 }): ReactElement => {
   const { channelId: channelIdParam } = useParams<{ channelId?: string }>();
   const navigate = useNavigate();
+  const debugAutomationsEnabled = useDebugAutomationsEnabled();
   const emailRouterState = useLocation().state as {
     shouldNavigateBack?: boolean;
     returnToUrl?: string | null;
@@ -5966,6 +5970,32 @@ const EmailThreadItem = ({
     </button>
   ) : null;
 
+  // Rendered per-email — every reply gets its own button, keyed on that email's id.
+  const debugAutomationsButton = debugAutomationsEnabled ? (
+    <button
+      onClick={e => {
+        e.stopPropagation();
+        openAutomationDebug({ type: 'EMAIL', id: email.id });
+      }}
+      className='flex items-center gap-1 px-2 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-full transition-colors cursor-pointer'
+      title='Debug automations for this email'
+      data-track-category='automation-run-debug'
+      data-track-name='open-from-mail'
+      data-track-metadata={JSON.stringify({ emailId: email.id })}
+    >
+      <Zap size={12} />
+      Debug
+    </button>
+  ) : null;
+
+  const headerExtras =
+    demergeButton || debugAutomationsButton ? (
+      <div className='flex items-center gap-2'>
+        {demergeButton}
+        {debugAutomationsButton}
+      </div>
+    ) : null;
+
   const headerClickable = canCollapse && !!onToggleCollapse;
   const preview = useMemo(
     () =>
@@ -6015,7 +6045,7 @@ const EmailThreadItem = ({
           isCollapsed={isCollapsed}
           previewText={preview}
           deskEmail={deskEmail}
-          extras={demergeButton}
+          extras={headerExtras}
           emailId={email.id}
         />
       </div>
