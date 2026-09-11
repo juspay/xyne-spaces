@@ -41,6 +41,7 @@
     "@opentelemetry/sdk-metrics": "^2.5.0",
     "@opentelemetry/semantic-conventions": "^1.39.0",
     "@types/node": "^24.3.1",
+    "@xyne/logger": "workspace:*",
     "archiver": "^7.0.0",
     "electron-log": "^5.4.3",
     "electron-store": "^8.2.0",

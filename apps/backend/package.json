@@ -91,6 +91,7 @@
     "@types/node-rsa": "^1.1.4",
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^2.10.3",
+    "@xyne/logger": "workspace:*",
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
