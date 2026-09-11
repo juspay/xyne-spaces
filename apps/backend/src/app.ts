@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -489,6 +489,7 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
     this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(

@@ -9,7 +9,7 @@ import {
   type ParserOpenItem,
   type ParserWindowMessage,
 } from '@/services/radar/radarParser';
-import { validateTransitions } from '@/services/radar/radarValidator';
+import { noOpReassignFeedback, validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
 import type { RadarScope } from '@/services/radar/radarScope';
 
@@ -263,18 +263,6 @@ class RadarExecutionService {
             new Set(openItems.map(i => i.conversationId)),
             scope.isDmChannel,
           );
-          const transitions = await radarParser.parseWindow(
-            openItems.map(({ conversationId, ...item }) =>
-              threadLabels.size > 0
-                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
-                : item,
-            ),
-            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
-            knownUsers,
-            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
-          );
-          run.proposedOps = transitions.operations;
-          run.assessment = transitions.assessment;
           const windowSenders = new Map(window.map(m => [m.messageId, m.senderId]));
           // Legal assignees: window mentions + senders, plus everyone already
           // involved in the thread's open items or the context tail — the
@@ -302,17 +290,44 @@ class RadarExecutionService {
             window[0].workspaceId,
             candidateUserIds,
           );
-          const { valid, dropped } = validateTransitions(transitions.operations, {
+          const validationCtx = {
             openItems,
             windowSenders,
             // Mention ids are regex-scraped out of message HTML, so they are
             // attacker-authored: narrow them to ids that are really users in
             // this workspace before they can land in the ledger.
             allowedUserIds,
-          });
+          };
+          const transitions = await radarParser.parseWindow(
+            openItems.map(({ conversationId, ...item }) =>
+              threadLabels.size > 0
+                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
+                : item,
+            ),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
+            knownUsers,
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
+            undefined,
+            // The validator doubles as the parser's semantic check: a reassign
+            // it would drop as a no-op goes back to the model once, because
+            // that drop nearly always means the wrong open item was matched.
+            ops => noOpReassignFeedback(validateTransitions(ops, validationCtx).dropped, openItems),
+          );
+          run.proposedOps = transitions.operations;
+          run.assessment = transitions.assessment;
+          const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
           await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
-          run.droppedOps = dropped;
+          // A repaired pass keeps its first attempt's rejects in the trail,
+          // flagged, so the debug panel shows what the model was corrected on.
+          run.droppedOps = transitions.repair
+            ? [
+                ...validateTransitions(transitions.repair.firstAttempt, validationCtx).dropped.map(
+                  d => ({ ...d, repaired: true }),
+                ),
+                ...dropped,
+              ]
+            : dropped;
           const last = window[window.length - 1];
           const applied = await radarApplier.apply({
             workspaceId: last.workspaceId,

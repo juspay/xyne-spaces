@@ -425,7 +425,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
 
   // ----- supportTickets -----
   'supportTickets.list': { kind: 'query', name: 'supportTicketsPageV4' },
-  'supportTickets.listFiltered': { kind: 'query', name: 'supportTicketsFilteredV3' },
+  'supportTickets.listFiltered': { kind: 'query', name: 'supportTicketsFilteredV4' },
   'supportTickets.get': { kind: 'query', name: 'supportTicketRowV3' },
   'supportTickets.getByKey': { kind: 'query', name: 'supportTicketByXyneIdV4' },
   'supportTickets.getDetail': { kind: 'query', name: 'supportTicketDetailV2' },

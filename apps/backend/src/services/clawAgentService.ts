@@ -21,12 +21,6 @@ import { Agent } from 'undici';
 // real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
-export interface ChannelClawAgent {
-  id: string;
-  name: string;
-  agentSlug: string;
-  description: string | null;
-}
 
 export interface ClawRunRequest {
   userId: string;
@@ -96,6 +90,11 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowContext?: {
+    workflowId?: string | null;
+    executionId?: string | null;
+    stepId?: string | null;
+  };
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
@@ -393,99 +392,6 @@ function extractUserIdHeader(userId: string, workspaceId?: string): Record<strin
 // Channel agent listing
 // ============================================================================
 
-/**
- * List claw agents installed in a channel by inspecting the
- * channel participants that have claw-app installations.
- */
-export async function listClawAgentsInChannel(channelId: string): Promise<ChannelClawAgent[]> {
-  const clawPrefix = `${getClawBaseUrl()}/claw/`;
-
-  // Find all installed apps with claw webhook URLs
-  const installedApps = await db.installedApps.findMany({
-    where: {
-      webhookUrl: { startsWith: clawPrefix },
-    },
-    select: {
-      userId: true,
-      webhookUrl: true,
-    },
-  });
-
-  if (!installedApps.length) return [];
-
-  // Check which of these users are participants in the channel
-  const channelParticipants = await db.channelParticipant.findMany({
-    where: {
-      channelId,
-      userId: { in: installedApps.map((app) => app.userId) },
-    },
-    select: {
-      userId: true,
-    },
-  });
-
-  const participantUserIds = new Set(channelParticipants.map((p) => p.userId));
-
-  // Get user details for participants
-  const users = await db.user.findMany({
-    where: {
-      id: { in: Array.from(participantUserIds) },
-    },
-    select: {
-      id: true,
-      name: true,
-    },
-  });
-
-  const userMap = new Map(users.map((u) => [u.id, u]));
-
-  // Extract agent slugs from webhook URLs
-  // Production URL format: https://spaces.xyne.juspay.net/claw/api/v1/webhook/{agent-slug}
-  // The agent slug is the last segment of the URL path after /webhook/
-  const agentSlugsFromApps: Array<{ userId: string; agentSlug: string }> = [];
-  for (const app of installedApps) {
-    if (!participantUserIds.has(app.userId)) continue;
-
-    const url = app.webhookUrl;
-    if (!url) continue;
-
-    // Extract agent slug from the webhook URL
-    // Try to match /webhook/{agent-slug} pattern first (production format)
-    // Fallback to extracting the last path segment
-    let agentSlug: string | null = null;
-
-    const webhookMatch = url.match(/\/webhook\/([^/?#]+)/);
-    if (webhookMatch) {
-      agentSlug = webhookMatch[1] ?? null;
-    } else {
-      // Fallback: extract the last path segment after /claw/
-      const pathAfterClaw = url.split('/claw/')[1];
-      if (pathAfterClaw) {
-        const segments = pathAfterClaw.split('/').filter((s) => s.length > 0);
-        agentSlug = segments[segments.length - 1] ?? null;
-      }
-    }
-
-    if (!agentSlug) continue;
-
-    agentSlugsFromApps.push({ userId: app.userId, agentSlug });
-  }
-
-  const result: ChannelClawAgent[] = [];
-  for (const { userId, agentSlug } of agentSlugsFromApps) {
-    const user = userMap.get(userId);
-    if (!user) continue;
-
-    result.push({
-      id: user.id,
-      name: user.name,
-      agentSlug,
-      description: null,
-    });
-  }
-
-  return result;
-}
 
 // ============================================================================
 // Run / stream
@@ -641,6 +547,15 @@ export async function runClawAgentStream(
       ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
       ...(request.focusedComponentId && {
         SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId,
+      }),
+      ...(request.workflowContext?.workflowId && {
+        SPACES_WORKFLOW_ID: request.workflowContext.workflowId,
+      }),
+      ...(request.workflowContext?.executionId && {
+        SPACES_WORKFLOW_EXECUTION_ID: request.workflowContext.executionId,
+      }),
+      ...(request.workflowContext?.stepId && {
+        SPACES_WORKFLOW_STEP_ID: request.workflowContext.stepId,
       }),
     },
     ...(additionalInstructions && { additionalInstructions }),
@@ -1452,6 +1367,24 @@ export async function downloadClawAttachment(
     contentDisposition: response.headers.get('content-disposition'),
     contentLength: response.headers.get('content-length'),
   };
+}
+
+/**
+ * Extract the agent slug from an installed Claw app's webhook URL. Modern URLs
+ * carry `/webhook/<slug>`; older installs only have the slug as the last
+ * `/claw/` path segment, so both forms must resolve or a legacy agent goes
+ * missing from whichever caller checks only one.
+ */
+export function agentSlugFromWebhookUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const webhookMatch = url.match(/\/webhook\/([^/?#]+)/);
+  if (webhookMatch) return webhookMatch[1] ?? null;
+  const pathAfterClaw = url.split('/claw/')[1];
+  if (pathAfterClaw) {
+    const segments = pathAfterClaw.split('/').filter((s) => s.length > 0);
+    return segments[segments.length - 1] ?? null;
+  }
+  return null;
 }
 
 /** List enabled Claw agents via S2S (used by email auto-draft agent picker). */

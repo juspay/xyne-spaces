@@ -143,6 +143,8 @@ export class ACLFactory {
       return new ActivitiesACL(ctx, prisma)
     case 'agent':
       return new AgentsACL(ctx, prisma)
+    case 'agentConversationShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'agentStep':
       return new AgentStepsACL(ctx, prisma)
     case 'agentToolsMapping':
@@ -293,6 +295,8 @@ export class ACLFactory {
     case 'sdlcArtifact':
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcTrack':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcFolder':
       return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)

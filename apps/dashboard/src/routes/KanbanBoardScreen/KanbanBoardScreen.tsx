@@ -35,6 +35,7 @@ import {
   SearchDefault as Search,
   KanbanBoard as SquareKanban,
   GridTable,
+  EyeOff,
 } from '@xyne/icons';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
@@ -72,8 +73,10 @@ import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
+import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
   useChannel,
@@ -1934,12 +1937,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return undefined;
   }, [myTicketBoardsQuery.data, viewMode]);
 
+  // Fetch board details for workspace views - used for source channels and tags
   const [workspaceSelectedBoards] = useCachedQuery(
     queries.boardsByIds({ boardIds: filters.boards ?? [] }),
     {
-      enabled: isWorkspaceView && isSourceChannelsOpen && (filters.boards?.length ?? 0) > 0,
+      enabled: isWorkspaceView && (filters.boards?.length ?? 0) > 0,
     },
   );
+
   const sourceChannelProjectIds = useMemo(() => {
     if (isMyTicketsView) {
       const selected = filters.boards ?? [];
@@ -1989,11 +1994,130 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
-  const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: tagsProjectId || '' }),
-    { enabled: !!tagsProjectId },
+  // Determine project IDs for tag search
+  // For my-tickets and workspace views, we may have multiple projects
+  const tagsProjectIds = useMemo(() => {
+    if (isMyTicketsView) {
+      const selected = filters.boards ?? [];
+      const details = availableBoardDetails ?? [];
+      // No board selected -> all projects; otherwise only selected boards' projects
+      return uniqueProjectIds(
+        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
+      );
+    }
+    if (isWorkspaceView) {
+      // Use workspaceSelectedBoards which is always enabled for workspace views
+      return uniqueProjectIds(workspaceSelectedBoards ?? []);
+    }
+    // Single project view
+    const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
+    return singleProjectId ? [singleProjectId] : [];
+  }, [
+    isMyTicketsView,
+    isWorkspaceView,
+    filters.boards,
+    availableBoardDetails,
+    workspaceSelectedBoards,
+    effectiveProjectId,
+  ]);
+
+  // For my-tickets and workspace views, always use multi-project query
+  // This ensures proper tag fetching across all selected boards/projects
+  const shouldUseMultiProjectQuery = isMyTicketsView || isWorkspaceView;
+  const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
+
+  // State for tag search query (debounced value passed to Vespa)
+  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
+
+  // Pagination state for Zero query tags
+  const TAGS_PAGE_SIZE = 20;
+  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
+  const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
+  const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
+
+  // Reset pagination when project IDs change or search starts
+  const tagsProjectIdsKey = tagsProjectIds.join(',');
+  useEffect(() => {
+    setTagsCursor(null);
+    setAccumulatedTags([]);
+    setHasMoreZeroTags(true);
+  }, [tagsProjectIdsKey, tagsSearchQuery]);
+
+  // Fetch tags via Zero query for single project (for initial load without search)
+  // Only used for regular board views (not my-tickets or workspace views)
+  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({
+      projectId: tagsProjectIds[0] || '',
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseSingleProjectQuery && !tagsSearchQuery.trim() },
   );
+
+  // Fetch tags via Zero query for multiple projects (for initial load without search)
+  // Used for my-tickets, workspace views, and any multi-project scenarios
+  const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectIds({
+      projectIds: tagsProjectIds,
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 && !tagsSearchQuery.trim() },
+  );
+
+  // Combine Zero query results
+  const currentPageTags = shouldUseSingleProjectQuery ? singleProjectTags : multiProjectTags;
+  const projectTagsDetails = shouldUseSingleProjectQuery
+    ? singleProjectTagsDetails
+    : multiProjectTagsDetails;
+
+  // Accumulate tags from pagination
+  useEffect(() => {
+    if (!currentPageTags || currentPageTags.length === 0) {
+      if (tagsCursor !== null) {
+        // No more results from this page
+        setHasMoreZeroTags(false);
+      }
+      return;
+    }
+
+    // Check if we got less than page size (no more pages)
+    if (currentPageTags.length < TAGS_PAGE_SIZE) {
+      setHasMoreZeroTags(false);
+    }
+
+    // Append new tags, avoiding duplicates
+    setAccumulatedTags(prev => {
+      const existingIds = new Set(prev.map(t => t.id));
+      const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
+      return [...prev, ...newTags];
+    });
+  }, [currentPageTags, tagsCursor]);
+
+  // Combine accumulated tags for display
+  const projectTags = accumulatedTags;
+
+  // Handle load more tags (pagination)
+  const handleLoadMoreTags = useCallback(() => {
+    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
+    const lastTag = accumulatedTags[accumulatedTags.length - 1];
+    if (lastTag) {
+      setTagsCursor({ name: lastTag.name, id: lastTag.id });
+    }
+  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
+
+  // Fetch tags via Vespa search (only when there's a search query)
+  const { tags: vespaTags } = useVespaTagSearch({
+    projectId: tagsProjectIds[0],
+    searchQuery: tagsSearchQuery,
+    enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
+    limit: 20,
+  });
+
+  // Handle tag search callback
+  const handleSearchTags = useCallback((query: string) => {
+    setTagsSearchQuery(query);
+  }, []);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -3207,11 +3331,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
+  // Compute availableTags: use Vespa when searching, Zero query otherwise
+  // Fallback to client-side filtering if Vespa returns no results
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+    const zeroTags =
+      projectTags && projectTags.length > 0
+        ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
+        : [];
+
+    // If there's a search query, prefer Vespa results
+    if (tagsSearchQuery.trim()) {
+      // If Vespa has results, use them
+      if (vespaTags && vespaTags.length > 0) {
+        return vespaTags;
+      }
+      // Fallback to client-side filtering on Zero tags
+      const lower = tagsSearchQuery.toLowerCase();
+      const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
+      return filtered.length > 0 ? filtered : undefined;
+    }
+
+    // No search - return Zero query results
+    return zeroTags.length > 0 ? zeroTags : undefined;
+  }, [tagsSearchQuery, vespaTags, projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3489,8 +3631,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!isKanbanLayout) return;
     if (hasSearchTerm) return;
+
+    // Don't reset lastKnownKanbanGroupsRef to null when query key changes.
+    // Keep the old groups visible until new ones load to prevent the view
+    // from disappearing when filters are applied in group-by mode.
+    // Only update the query key ref to track that we're waiting for new data.
     if (lastKnownKanbanGroupsQueryKeyRef.current !== kanbanColumnQueryKey) {
-      lastKnownKanbanGroupsRef.current = null;
       lastKnownKanbanGroupsQueryKeyRef.current = kanbanColumnQueryKey;
     }
 
@@ -3504,14 +3650,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout) return;
-
-    // On the pass where the query key changes, `localTickets` here still holds the previous
-    // query's rows: the reset above only queues setLocalTickets(null), which lands next render.
-    // Stamping the new key onto those rows would make the queryKey check below always pass, so
-    // drop the remembered rows instead and let a later pass re-record the new query's results.
     if (lastKnownKanbanTicketsQueryKeyRef.current !== kanbanColumnQueryKey) {
       lastKnownKanbanTicketsQueryKeyRef.current = kanbanColumnQueryKey;
-      lastKnownKanbanTicketsRef.current = null;
       return;
     }
 
@@ -3534,16 +3674,30 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
     const lastKnownKanbanTickets = lastKnownKanbanTicketsRef.current;
-    if (
-      hasSearchTerm &&
-      lastKnownKanbanTickets !== null &&
-      lastKnownKanbanTickets.queryKey === kanbanColumnQueryKey &&
-      lastKnownKanbanTickets.tickets.length > 0
-    ) {
-      return lastKnownKanbanTickets.tickets;
+    // Use last known tickets as fallback when localTickets is empty/null.
+    // This prevents the view from disappearing when filters are applied in group-by mode.
+    // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
+    if (lastKnownKanbanTickets !== null && lastKnownKanbanTickets.tickets.length > 0) {
+      // Apply current filters to the fallback tickets
+      const filteredFallback = applyTicketFilters(
+        lastKnownKanbanTickets.tickets,
+        deferredFilters,
+        tagsByTicketId,
+        formValuesByTicketId,
+        formFieldsById,
+        user?.id,
+      );
+      return filteredFallback;
     }
     return localTickets ?? [];
-  }, [hasSearchTerm, kanbanColumnQueryKey, localTickets]);
+  }, [
+    localTickets,
+    deferredFilters,
+    tagsByTicketId,
+    formValuesByTicketId,
+    formFieldsById,
+    user?.id,
+  ]);
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
@@ -3702,6 +3856,44 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     el.scrollIntoView({ block: 'start' });
   }, [expandedGroups, processedGroups]);
 
+  const kanbanLayoutScope = `${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`;
+  const { hiddenColumnIds, hideColumn, unhideColumn, showAllColumns } = useHiddenKanbanColumns(
+    [kanbanLayoutScope, ...stages.map(stage => stage.id).sort()].join('|'),
+  );
+  const hiddenStages = useMemo(
+    () => stages.filter(stage => hiddenColumnIds.includes(stage.id)),
+    [stages, hiddenColumnIds],
+  );
+  const allColumnsHidden = stages.length > 0 && hiddenStages.length === stages.length;
+  const kanbanGroups = allColumnsHidden ? [] : processedGroups;
+
+  // Mirrors what a column header shows: server counts, unless a search has left
+  // them stale, in which case only the rows actually loaded can be counted.
+  const columnCountsAreReliable = !(canUseKanbanColumnPagination && hasSearchTerm);
+  const countStageInGroup = useCallback(
+    (group: (typeof processedGroups)[number], stage: Stage): number => {
+      const loaded = group.columnData[stage.id]?.length ?? 0;
+      if (!columnCountsAreReliable) return loaded;
+      return group.stageCounts?.[stage.id] ?? group.stageCounts?.[stage.name] ?? loaded;
+    },
+    [columnCountsAreReliable],
+  );
+  const countHiddenInGroup = useCallback(
+    (group: (typeof processedGroups)[number]): number =>
+      hiddenStages.reduce((total, stage) => total + countStageInGroup(group, stage), 0),
+    [countStageInGroup, hiddenStages],
+  );
+  const handleHideColumn = useCallback(
+    (stageId: string) => {
+      const stageName = stages.find(stage => stage.id === stageId)?.name ?? 'Column';
+      hideColumn(stageId);
+      toast.success(`${stageName} hidden — its tickets left every count.`, {
+        action: { label: 'Undo', onClick: () => unhideColumn(stageId) },
+      });
+    },
+    [hideColumn, stages, unhideColumn],
+  );
+
   const filteredAvailableColumns = useMemo(() => {
     if (layoutView === 'table' || layoutView === 'flow') {
       // In table mode, hide TicketCard metadata columns
@@ -3760,6 +3952,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
+              onSearchTags={handleSearchTags}
+              onLoadMoreTags={handleLoadMoreTags}
+              hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
               availableStages={availableStages}
               hasPrReviewers={hasPrReviewers}
               hasQaAssigned={hasQaAssigned}
@@ -5246,14 +5441,36 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             sensors={sensors}
           >
             <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
-              {processedGroups.map(group => {
+              {allColumnsHidden && (
+                <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
+                  <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
+                    <EyeOff className='size-6' />
+                  </div>
+                  <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
+                  <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
+                    Hidden columns keep their tickets out of the board and out of every count.
+                    Unhide one from the panel on the right.
+                  </p>
+                  <button
+                    type='button'
+                    onClick={showAllColumns}
+                    className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground transition-colors hover:bg-blue-700'
+                    data-track-category='Tickets'
+                    data-track-name='ShowAllKanbanColumns'
+                  >
+                    Show all columns
+                  </button>
+                </div>
+              )}
+              {kanbanGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
                 const serverCountGroup = isKanbanLayout
                   ? kanbanCounts.groupsByKey.get(group.key)
                   : undefined;
                 const stageCounts = group.stageCounts ?? serverCountGroup?.stages;
-                const groupCount = group.count;
+                const hiddenInGroup = countHiddenInGroup(group);
+                const groupCount = Math.max(0, group.count - hiddenInGroup);
                 const paginatedColumnConfig = canUseKanbanColumnPagination
                   ? {
                       columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
@@ -5313,8 +5530,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               {group.displayName}
                             </h3>
                           </div>
-                          <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
+                          <span
+                            className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'
+                            title={
+                              hiddenInGroup > 0
+                                ? `${groupCount} of ${group.count} shown — ${hiddenInGroup} in hidden columns`
+                                : undefined
+                            }
+                          >
                             {groupCount}
+                            {hiddenInGroup > 0 && (
+                              <span className='text-muted-foreground/60'>{` / ${group.count}`}</span>
+                            )}
                           </span>
                         </div>
                       </button>
@@ -5329,13 +5556,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       >
                         <KanbanColumns
                           stages={stages}
+                          hiddenColumnIds={hiddenColumnIds}
+                          onHideColumn={handleHideColumn}
+                          onUnhideColumn={unhideColumn}
                           ticketsByStage={group.columnData}
                           {...(stageCounts ? { stageCounts } : {})}
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
+                          onLoadMoreTags={handleLoadMoreTags}
+                          hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                          onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
-                          layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
+                          layoutScope={kanbanLayoutScope}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={group.allTickets}
@@ -5380,6 +5613,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   tags={tagsByTicketId.get(activeTicket.id) || []}
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
+                  onLoadMoreTags={handleLoadMoreTags}
+                  hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                  onSearchTags={handleSearchTags}
                   slaPolicies={kanbanSlaPolicies}
                 />
               )}
