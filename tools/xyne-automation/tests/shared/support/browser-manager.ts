@@ -207,6 +207,11 @@ async function buildSession(
   await context.addInitScript(TEST_CLIPBOARD_SCRIPT);
   await context.addInitScript(DISABLE_ANIMATIONS_SCRIPT);
 
+  // Every context is a fresh profile, so the "open in desktop app" interstitial
+  // (openInDesktopApp.ts) would cover the page on each full load and intercept
+  // clicks. Opt out the way a user does: "Always continue in browser".
+  await context.addInitScript(`window.localStorage.setItem('xyne:openInBrowser', 'true');`);
+
   const page: Page = await context.newPage();
 
   return {
