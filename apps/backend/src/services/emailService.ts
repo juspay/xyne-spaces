@@ -63,6 +63,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
+import { parseDefaultCcEmails } from '@/utils/email';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
 import { eventRouter } from '@/automations/engine/event-router';
@@ -2009,8 +2010,15 @@ export class EmailService {
       : params.type === 'REPLY'
         ? [initialEmail.replyTo?.[0] ?? initialEmail.from]
         : [...new Set([initialEmail.replyTo?.[0] ?? initialEmail.from, ...initialEmail.to])];
-    const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
+    let cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
     const bcc = params.bcc ?? [];
+
+    // Merge the channel's configured default CC / "trail mail" list so that
+    // automation-driven replies (which bypass the composer) still honour it.
+    const defaultCcEmails = parseDefaultCcEmails(preference.defaultCc, [...to, ...cc]);
+    if (defaultCcEmails.length > 0) {
+      cc = [...cc, ...defaultCcEmails];
+    }
 
     const adapter = adapterRegistry.getAdapter(externalSource.name);
     if (!adapter.sendMailReply) {

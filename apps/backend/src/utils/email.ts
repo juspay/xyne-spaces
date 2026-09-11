@@ -32,3 +32,31 @@ export const findNewEmails = (
   const existingEmailSet = new Set(normalizeEmailList(existingEmails));
   return normalizeEmailList(nextEmails).filter(email => !existingEmailSet.has(email));
 };
+
+/**
+ * Parse a comma- or semicolon-separated list of email addresses (which may
+ * include display names such as "Name <user@domain>") and return the bare
+ * addresses that are not already present in `existingEmails`.
+ *
+ * Used to merge a channel's configured default CC / "trail mail" list into
+ * outbound replies without creating duplicates.
+ */
+export const parseDefaultCcEmails = (
+  raw: string | null | undefined,
+  existingEmails: readonly string[] | null | undefined,
+): string[] => {
+  if (!raw?.trim()) return [];
+
+  const existingSet = new Set(
+    (existingEmails ?? [])
+      .map(extractEmailAddress)
+      .filter((email): email is string => email !== null),
+  );
+
+  return [...new Set(
+    raw
+      .split(/[,;]+/)
+      .map(part => extractEmailAddress(part))
+      .filter((email): email is string => email !== null && !existingSet.has(email)),
+  )];
+};
