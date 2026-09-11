@@ -24,6 +24,7 @@ import {
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
+import { workflowSchemaUpsertFrom } from '@/database/workflowExecutionDualWrite';
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -39,7 +40,7 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   return `
     WITH claimed AS (
       SELECT "id"
-      FROM "workflow_executions"
+      FROM "public"."workflow_executions"
       WHERE "status" = 'PENDING'
       ${tagFilter}
       ${typeFilter}
@@ -48,11 +49,19 @@ function buildClaimQuery(workflowType?: string, tags?: string[]): string {
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    UPDATE "workflow_executions"
-    SET "status" = 'RUNNING', "updatedAt" = NOW()
-    FROM claimed
-    WHERE "workflow_executions"."id" = claimed."id"
-    RETURNING "workflow_executions"."id"
+    , updated AS (
+      UPDATE "public"."workflow_executions"
+      SET "status" = 'RUNNING', "updatedAt" = NOW()
+      FROM claimed
+      WHERE "workflow_executions"."id" = claimed."id"
+      RETURNING "workflow_executions".*
+    )
+    -- Raw SQL bypasses the dual-write extension, so copy the claimed row here.
+    -- A data-modifying CTE always runs, in the same statement as the claim.
+    , copied AS (
+      ${workflowSchemaUpsertFrom('updated')}
+    )
+    SELECT "id" FROM updated
   `
 }
 
