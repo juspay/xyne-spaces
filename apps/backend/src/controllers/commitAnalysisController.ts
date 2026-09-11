@@ -620,7 +620,7 @@ export class CommitAnalysisController {
       if (hotfixSync) {
         try {
           const canvasLink =
-            canvasId && config.slackFrontendUrl
+            canvasId && config.frontendUrl
               ? buildWorkspaceCanvasUrl(params.workspaceId, canvasId)
               : null;
           let content: string;

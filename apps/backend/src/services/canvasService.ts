@@ -313,12 +313,12 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
 }
 
 /**
- * Workspace-scoped canvas deep link on the Slack-facing frontend base URL. The
- * workspace prefix is required — the bare `/chat/canvas/:id` route 404s on a
- * hard load.
+ * Workspace-scoped canvas deep link on the app's own origin (FRONTEND_URL), so
+ * the dashboard's same-origin check can open it as an overlay. The workspace
+ * prefix is required — the bare `/chat/canvas/:id` route 404s on a hard load.
  */
 export function buildWorkspaceCanvasUrl(workspaceId: string, canvasId: string): string {
-  const frontendUrl = (config.slackFrontendUrl ?? '').replace(/\/+$/, '');
+  const frontendUrl = (config.frontendUrl ?? '').replace(/\/+$/, '');
   return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
 }
 
