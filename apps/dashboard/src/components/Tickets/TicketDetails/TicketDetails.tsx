@@ -582,6 +582,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [titleValue, setTitleValue] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionValue, setDescriptionValue] = useState('');
+  // Remember the last value we actually dispatched a save for, per field.
+  // Each auto-save mutation bumps the ticket's updatedAt (and description saves
+  // trigger further server-side ticket writes), which changes the `ticket`
+  // object this effect depends on and re-arms the debounce. Without this guard
+  // the re-armed timer re-sends the same edit before the written value has
+  // propagated back into `ticket`, emitting one activity per cycle.
+  const lastSavedTitleRef = useRef<string | null>(null);
+  const lastSavedDescriptionRef = useRef<string | null>(null);
   const [showTagDropdown, setShowTagDropdown] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -1868,6 +1876,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     [zero],
   );
 
+  // Reset the per-field save guards when the viewed ticket changes. The refs
+  // track the last value dispatched for THIS ticket; without this, saving "X" on
+  // ticket A would make the auto-save skip an identical "X" typed on ticket B,
+  // since TicketDetails is not keyed by ticket id at its call sites.
+  useEffect(() => {
+    lastSavedTitleRef.current = null;
+    lastSavedDescriptionRef.current = null;
+  }, [ticket?.id]);
+
   // Debounced auto-save while editing — persist the title as the user types
   // rather than only on blur/exit. The blur/Enter handler still flushes an
   // immediate save; leaving edit mode flips `editingTitle`, whose cleanup clears
@@ -1878,12 +1895,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket || !editingTitle || isEmailDeskTicket) return;
     const trimmed = titleValue.trim();
     if (!trimmed || trimmed === ticket.title) return;
+    if (trimmed === lastSavedTitleRef.current) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
+      // Optimistically mark this value as dispatched so the effect re-arming on
+      // the resulting `ticket.updatedAt` change doesn't re-send it. Clear the
+      // guard if the save is rejected so the exact same text can be retried.
+      lastSavedTitleRef.current = trimmed;
       void applyTicketUpdate(
         { id: ticketId, title: trimmed, updatedAt: Date.now() },
         'Failed to update title',
-      );
+      ).then((saved) => {
+        if (!saved && lastSavedTitleRef.current === trimmed) {
+          lastSavedTitleRef.current = null;
+        }
+      });
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [titleValue, editingTitle, isEmailDeskTicket, ticket, applyTicketUpdate]);
@@ -1894,12 +1920,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
     if (next === ticket.description) return;
+    if (next === lastSavedDescriptionRef.current) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
+      lastSavedDescriptionRef.current = next;
       void applyTicketUpdate(
         { id: ticketId, description: next, updatedAt: Date.now() },
         'Failed to update description',
-      );
+      ).then((saved) => {
+        if (!saved && lastSavedDescriptionRef.current === next) {
+          lastSavedDescriptionRef.current = null;
+        }
+      });
     }, FIELD_AUTOSAVE_DEBOUNCE_MS);
     return (): void => clearTimeout(timeoutId);
   }, [descriptionValue, editingDescription, ticket, applyTicketUpdate]);
