@@ -18,7 +18,7 @@ import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd,
+import { buildInitialMessageMd,
   isDeskChannelType,
   type InitialMessageSummary,
   ChannelScopeType,
@@ -70,26 +70,11 @@ async function fetchConversationForNotification(conversationId: string) {
         where: { messageId: conversation.initialMessageId },
       });
       if (message) {
-        const summary: InitialMessageSummary = {
-          messageId: message.messageId,
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          content: message.content,
+        initialMessageMd = buildInitialMessageMd({
+          ...message,
           msgType: message.msgType as InitialMessageSummary['msgType'],
-          hasAttachment: message.hasAttachment,
-          edited: message.edited,
-          isDeleted: message.isDeleted,
-          showInChannel: message.showInChannel,
-          visibleTo: message.visibleTo,
           createdAt: message.createdAt.getTime(),
-          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-          nudgeCount: message.nudgeCount,
-          isSent: message.isSent,
-          reactions_md: message.reactions_md,
-          link_preview_md: message.link_preview_md,
-          childConversationId: message.childConversationId,
-        };
-        initialMessageMd = serializeInitialMessageMd(summary);
+        });
       }
     }
 

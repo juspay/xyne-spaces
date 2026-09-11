@@ -261,7 +261,7 @@ export function SpotlightView({
       {showSidebar && (
         <aside
           className={cn(
-            'hidden sm:flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 overflow-y-auto bg-gray-950/50 backdrop-blur-sm',
+            'hidden sm:flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 overflow-y-auto bg-[#131314]',
             compact ? 'w-20' : 'w-56 md:w-64 lg:w-80',
           )}
         >

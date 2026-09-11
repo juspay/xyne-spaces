@@ -1,3 +1,67 @@
+## [1.315.0](https://github.com/juspay/xyne-spaces/compare/v1.314.0...v1.315.0) (2026-09-11)
+
+
+### Features
+
+* fix search in tag and usergroup filter ([#1800](https://github.com/juspay/xyne-spaces/issues/1800)) ([992408e](https://github.com/juspay/xyne-spaces/commit/992408e2296b591eac3992c38996f876716e5e06))
+
+## [1.314.0](https://github.com/juspay/xyne-spaces/compare/v1.313.0...v1.314.0) (2026-09-11)
+
+
+### Features
+
+* screen-recordings in scribe ([#1788](https://github.com/juspay/xyne-spaces/issues/1788)) ([e1eb5a0](https://github.com/juspay/xyne-spaces/commit/e1eb5a0c0358dc5a259994aba777a6dd8a6706b5))
+* xyne automatic tile hide by default ([#1793](https://github.com/juspay/xyne-spaces/issues/1793)) ([892176a](https://github.com/juspay/xyne-spaces/commit/892176a946e22d83bba384a2573959f240a34a6d))
+
+
+### Bug Fixes
+
+* Add tracking for calls & recordings ([#1798](https://github.com/juspay/xyne-spaces/issues/1798)) ([da5993b](https://github.com/juspay/xyne-spaces/commit/da5993b31c44dad33fea10c5f4d73b9069e80133))
+
+## [1.313.0](https://github.com/juspay/xyne-spaces/compare/v1.312.2...v1.313.0) (2026-09-11)
+
+
+### Features
+
+* retain only the last 1000 completed vespa jobs ([#1795](https://github.com/juspay/xyne-spaces/issues/1795)) ([1da6de6](https://github.com/juspay/xyne-spaces/commit/1da6de606b54cdea529a8813d01c8069b5bdef09))
+
+## [1.312.2](https://github.com/juspay/xyne-spaces/compare/v1.312.1...v1.312.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* keep SDLC frame route sync pointed at where each side really is ([#1727](https://github.com/juspay/xyne-spaces/issues/1727)) ([b46b6dc](https://github.com/juspay/xyne-spaces/commit/b46b6dccde27b3c858fed9d2e4e655215d66629e))
+
+## [1.312.1](https://github.com/juspay/xyne-spaces/compare/v1.312.0...v1.312.1) (2026-09-11)
+
+## [1.312.0](https://github.com/juspay/xyne-spaces/compare/v1.311.1...v1.312.0) (2026-09-11)
+
+
+### Features
+
+* add delete message app api ([#220](https://github.com/juspay/xyne-spaces/issues/220)) ([fc9d142](https://github.com/juspay/xyne-spaces/commit/fc9d1429264c2e6533c0a47ffa674c3b1929ab96))
+
+## [1.311.1](https://github.com/juspay/xyne-spaces/compare/v1.311.0...v1.311.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* moving labels from channel level to user level ([#1740](https://github.com/juspay/xyne-spaces/issues/1740)) ([65f6543](https://github.com/juspay/xyne-spaces/commit/65f6543191e9b2d44d76e3f9a132be9ab3e0e166))
+
+## [1.311.0](https://github.com/juspay/xyne-spaces/compare/v1.310.2...v1.311.0) (2026-09-11)
+
+
+### Features
+
+* ask ai event bus ([#1769](https://github.com/juspay/xyne-spaces/issues/1769)) ([26390c6](https://github.com/juspay/xyne-spaces/commit/26390c69fe77d949271075b3a7f094a6df43e7ab))
+
+
+### Bug Fixes
+
+* Kanban ticket scan ([#1750](https://github.com/juspay/xyne-spaces/issues/1750)) ([ede38fd](https://github.com/juspay/xyne-spaces/commit/ede38fd89ef3c00cb66ae3a731dd5d9a8dae5f6e))
+* make supportTicketsPageV4 a faithful V3 copy with IN filters and repoint callers ([#1774](https://github.com/juspay/xyne-spaces/issues/1774)) ([f56d5e1](https://github.com/juspay/xyne-spaces/commit/f56d5e1c4f35a0636bfdfbfacfb17cb3d77b2824))
+* stamp initial_message_md at write time so conversations cannot render empty ([#1749](https://github.com/juspay/xyne-spaces/issues/1749)) ([6374956](https://github.com/juspay/xyne-spaces/commit/637495648a1f877a22b812e56219175312d1216e))
+
 ## [1.310.2](https://github.com/juspay/xyne-spaces/compare/v1.310.1...v1.310.2) (2026-09-11)
 
 

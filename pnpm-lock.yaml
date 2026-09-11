@@ -283,8 +283,8 @@ importers:
         specifier: 1.6.0
         version: 1.6.0(typescript@5.9.3)
       '@xyne/workflow-sdk':
-        specifier: 3.2.36
-        version: 3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
+        specifier: 3.2.37
+        version: 3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)
       '@y-sweet/sdk':
         specifier: ^0.9.1
         version: 0.9.1
@@ -299,7 +299,7 @@ importers:
         version: 1.18.1(debug@4.4.3)
       blocknote-layout-server-utils:
         specifier: 4.2.0
-        version: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
+        version: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
       bull:
         specifier: ^4.16.5
         version: 4.16.5
@@ -949,11 +949,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@xyne/workflow-sdk':
-        specifier: 3.2.36
-        version: 3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
+        specifier: 3.2.37
+        version: 3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
       '@xyne/workflow-ui':
-        specifier: 1.3.35
-        version: 1.3.35(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)
+        specifier: 1.3.37
+        version: 1.3.37(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)
       '@y-sweet/client':
         specifier: ^0.9.1
         version: 0.9.1(yjs@13.6.31)
@@ -2099,13 +2099,13 @@ importers:
         version: 16.0.0
       jest:
         specifier: 29.7.0
-        version: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+        version: 29.7.0(@types/node@22.20.1)
       prettier:
         specifier: 3.5.3
         version: 3.5.3
       ts-jest:
         specifier: ^29.1.0
-        version: 29.4.12(@babel/core@7.29.7)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.29.7))(jest-util@29.7.0)(jest@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)))(typescript@5.8.3)
+        version: 29.4.12(@babel/core@7.29.7)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.29.7))(jest-util@29.7.0)(jest@29.7.0(@types/node@22.20.1))(typescript@5.8.3)
       tsx:
         specifier: ^4.20.4
         version: 4.23.1
@@ -10443,8 +10443,8 @@ packages:
     peerDependencies:
       typescript: ^5
 
-  '@xyne/workflow-sdk@3.2.36':
-    resolution: {integrity: sha512-theo8u9SJ7OT+MLfCM38yPvkGWxIePvMiXgcny7vBBXb1CfYjsQPSxmrcGgGsfb03DAMX4R7Px6bSuhrx6Fjxg==}
+  '@xyne/workflow-sdk@3.2.37':
+    resolution: {integrity: sha512-z9NslqRVEoL/SgJF/MgA9p2K4kMRe7xbLGvr+aAuKE+7tDkBM/m+h0lR5Fvb/AulLn++LNLxPhYif5Tdk74GQA==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@earendil-works/pi-agent-core': '>=0.79.0'
@@ -10461,8 +10461,8 @@ packages:
       typebox:
         optional: true
 
-  '@xyne/workflow-ui@1.3.35':
-    resolution: {integrity: sha512-7gGfbSm1ysHaD46flGPFN5392yizoHw3WgXFdQBnOzZyqiTve5g6AD3o6BgJfjXB7osBa3oh3zyZBL4oLx9QuQ==}
+  '@xyne/workflow-ui@1.3.37':
+    resolution: {integrity: sha512-btWgSwHN02K2nB6T3SwVQqYinyTr8gDtqUbve2OeQ2h1nse7Bi3iLqiZbN5KkUbIy3hfLQccYYYv8Hiv6Gvz7A==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       '@tanstack/react-query': '>=5.0.0'
@@ -23728,41 +23728,6 @@ snapshots:
       - supports-color
       - ts-node
 
-  '@jest/core@29.7.0(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))':
-    dependencies:
-      '@jest/console': 29.7.0
-      '@jest/reporters': 29.7.0
-      '@jest/test-result': 29.7.0
-      '@jest/transform': 29.7.0
-      '@jest/types': 29.6.3
-      '@types/node': 20.19.43
-      ansi-escapes: 4.3.2
-      chalk: 4.1.2
-      ci-info: 3.9.0
-      exit: 0.1.2
-      graceful-fs: 4.2.11
-      jest-changed-files: 29.7.0
-      jest-config: 29.7.0(@types/node@20.19.43)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
-      jest-haste-map: 29.7.0
-      jest-message-util: 29.7.0
-      jest-regex-util: 29.6.3
-      jest-resolve: 29.7.0
-      jest-resolve-dependencies: 29.7.0
-      jest-runner: 29.7.0
-      jest-runtime: 29.7.0
-      jest-snapshot: 29.7.0
-      jest-util: 29.7.0
-      jest-validate: 29.7.0
-      jest-watcher: 29.7.0
-      micromatch: 4.0.8
-      pretty-format: 29.7.0
-      slash: 3.0.0
-      strip-ansi: 6.0.1
-    transitivePeerDependencies:
-      - babel-plugin-macros
-      - supports-color
-      - ts-node
-
   '@jest/environment@29.7.0':
     dependencies:
       '@jest/fake-timers': 29.7.0
@@ -30781,7 +30746,7 @@ snapshots:
       typescript: 5.9.3
       zod: 4.3.6
 
-  '@xyne/workflow-sdk@3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)':
+  '@xyne/workflow-sdk@3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76))(typebox@1.3.8)':
     dependencies:
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
@@ -30791,7 +30756,7 @@ snapshots:
       '@earendil-works/pi-coding-agent': 0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76))(ws@8.21.1)(zod@3.25.76)
       typebox: 1.3.8
 
-  '@xyne/workflow-sdk@3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)':
+  '@xyne/workflow-sdk@3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)':
     dependencies:
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
@@ -30801,7 +30766,7 @@ snapshots:
       '@earendil-works/pi-coding-agent': 0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6)
       typebox: 1.3.8
 
-  '@xyne/workflow-ui@1.3.35(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)':
+  '@xyne/workflow-ui@1.3.37(@babel/runtime@7.29.7)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@tanstack/react-query@5.90.19(react@19.2.3))(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(@xyne/workflow-sdk@3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8))(codemirror@6.0.2)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react-is@18.3.1)(react@19.2.3)':
     dependencies:
       '@codemirror/autocomplete': 6.20.3
       '@codemirror/lang-javascript': 6.2.5
@@ -30815,7 +30780,7 @@ snapshots:
       '@tiptap/starter-kit': 2.27.2
       '@uiw/react-codemirror': 4.25.11(@babel/runtime@7.29.7)(@codemirror/autocomplete@6.20.3)(@codemirror/language@6.12.4)(@codemirror/lint@6.9.7)(@codemirror/search@6.7.1)(@codemirror/state@6.7.1)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.43.7)(codemirror@6.0.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@xyflow/react': 12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      '@xyne/workflow-sdk': 3.2.36(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
+      '@xyne/workflow-sdk': 3.2.37(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(ws@8.21.1)(zod@4.3.6))(typebox@1.3.8)
       clsx: 2.1.1
       docx-preview: 0.3.7
       lucide-react: 0.456.0(react@19.2.3)
@@ -31470,7 +31435,7 @@ snapshots:
   blocknote-layout-extensions@4.2.0(8fa8305b3dd8345bc9c24c360a72c350):
     dependencies:
       blocknote-layout-core: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))
-      blocknote-layout-mentions: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
+      blocknote-layout-mentions: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
       blocknote-layout-slideshow: 4.2.0(d43cf2b008f1e1ee63ed02488fb426b7)
       blocknote-layout-whiteboard: 4.2.0(2dfbe3058f1512013378b1a751b106b1)
     transitivePeerDependencies:
@@ -31487,17 +31452,17 @@ snapshots:
       - react-icons
       - supports-color
 
-  blocknote-layout-mentions@4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3):
+  blocknote-layout-mentions@4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3):
     dependencies:
       '@blocknote/core': 0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       '@blocknote/react': 0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       react: 19.2.3
       react-icons: 5.7.0(react@19.2.3)
 
-  blocknote-layout-server-utils@4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3):
+  blocknote-layout-server-utils@4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3):
     dependencies:
       '@blocknote/core': 0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
-      blocknote-layout-mentions: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
+      blocknote-layout-mentions: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
     transitivePeerDependencies:
       - '@blocknote/react'
       - react
@@ -31526,7 +31491,7 @@ snapshots:
       '@tiptap/core': 3.29.2(@tiptap/pm@3.29.2)
       '@tiptap/react': 3.29.2(@floating-ui/dom@1.8.0)(@tiptap/core@3.29.2(@tiptap/pm@3.29.2))(@tiptap/pm@3.29.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       blocknote-layout-core: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))
-      blocknote-layout-server-utils: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
+      blocknote-layout-server-utils: 4.2.0(@blocknote/core@0.54.0(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(highlight.js@11.11.1)(lowlight@3.3.0)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(@blocknote/react@0.54.0(@floating-ui/dom@1.8.0)(@lezer/common@1.5.2)(@lezer/highlight@1.2.3)(@types/hast@3.0.5)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(highlight.js@11.11.1)(lowlight@3.3.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(refractor@5.0.0)(y-prosemirror@1.3.7(prosemirror-model@1.25.11)(prosemirror-state@1.4.4)(prosemirror-view@1.42.2)(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31))(react-icons@5.7.0(react@19.2.3))(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       react-icons: 5.7.0(react@19.2.3)
@@ -32450,13 +32415,13 @@ snapshots:
       - supports-color
       - ts-node
 
-  create-jest@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)):
+  create-jest@29.7.0(@types/node@22.20.1):
     dependencies:
       '@jest/types': 29.6.3
       chalk: 4.1.2
       exit: 0.1.2
       graceful-fs: 4.2.11
-      jest-config: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      jest-config: 29.7.0(@types/node@22.20.1)
       jest-util: 29.7.0
       prompts: 2.4.2
     transitivePeerDependencies:
@@ -36414,16 +36379,16 @@ snapshots:
       - supports-color
       - ts-node
 
-  jest-cli@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)):
+  jest-cli@29.7.0(@types/node@22.20.1):
     dependencies:
-      '@jest/core': 29.7.0(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      '@jest/core': 29.7.0(ts-node@10.9.2(@types/node@20.19.43)(typescript@5.9.3))
       '@jest/test-result': 29.7.0
       '@jest/types': 29.6.3
       chalk: 4.1.2
-      create-jest: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      create-jest: 29.7.0(@types/node@22.20.1)
       exit: 0.1.2
       import-local: 3.2.0
-      jest-config: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      jest-config: 29.7.0(@types/node@22.20.1)
       jest-util: 29.7.0
       jest-validate: 29.7.0
       yargs: 17.7.3
@@ -36464,38 +36429,7 @@ snapshots:
       - babel-plugin-macros
       - supports-color
 
-  jest-config@29.7.0(@types/node@20.19.43)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)):
-    dependencies:
-      '@babel/core': 7.29.7
-      '@jest/test-sequencer': 29.7.0
-      '@jest/types': 29.6.3
-      babel-jest: 29.7.0(@babel/core@7.29.7)
-      chalk: 4.1.2
-      ci-info: 3.9.0
-      deepmerge: 4.3.1
-      glob: 7.2.3
-      graceful-fs: 4.2.11
-      jest-circus: 29.7.0
-      jest-environment-node: 29.7.0
-      jest-get-type: 29.6.3
-      jest-regex-util: 29.6.3
-      jest-resolve: 29.7.0
-      jest-runner: 29.7.0
-      jest-util: 29.7.0
-      jest-validate: 29.7.0
-      micromatch: 4.0.8
-      parse-json: 5.2.0
-      pretty-format: 29.7.0
-      slash: 3.0.0
-      strip-json-comments: 3.1.1
-    optionalDependencies:
-      '@types/node': 20.19.43
-      ts-node: 10.9.2(@types/node@22.20.1)(typescript@5.8.3)
-    transitivePeerDependencies:
-      - babel-plugin-macros
-      - supports-color
-
-  jest-config@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)):
+  jest-config@29.7.0(@types/node@22.20.1):
     dependencies:
       '@babel/core': 7.29.7
       '@jest/test-sequencer': 29.7.0
@@ -36521,7 +36455,6 @@ snapshots:
       strip-json-comments: 3.1.1
     optionalDependencies:
       '@types/node': 22.20.1
-      ts-node: 10.9.2(@types/node@22.20.1)(typescript@5.8.3)
     transitivePeerDependencies:
       - babel-plugin-macros
       - supports-color
@@ -36753,12 +36686,12 @@ snapshots:
       - supports-color
       - ts-node
 
-  jest@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)):
+  jest@29.7.0(@types/node@22.20.1):
     dependencies:
-      '@jest/core': 29.7.0(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      '@jest/core': 29.7.0(ts-node@10.9.2(@types/node@20.19.43)(typescript@5.9.3))
       '@jest/types': 29.6.3
       import-local: 3.2.0
-      jest-cli: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      jest-cli: 29.7.0(@types/node@22.20.1)
     transitivePeerDependencies:
       - '@types/node'
       - babel-plugin-macros
@@ -42347,12 +42280,12 @@ snapshots:
       babel-jest: 29.7.0(@babel/core@7.29.7)
       jest-util: 29.7.0
 
-  ts-jest@29.4.12(@babel/core@7.29.7)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.29.7))(jest-util@29.7.0)(jest@29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3)))(typescript@5.8.3):
+  ts-jest@29.4.12(@babel/core@7.29.7)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.29.7))(jest-util@29.7.0)(jest@29.7.0(@types/node@22.20.1))(typescript@5.8.3):
     dependencies:
       bs-logger: 0.2.6
       fast-json-stable-stringify: 2.1.0
       handlebars: 4.7.9
-      jest: 29.7.0(@types/node@22.20.1)(ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3))
+      jest: 29.7.0(@types/node@22.20.1)
       json5: 2.2.3
       lodash.memoize: 4.1.2
       make-error: 1.3.6
@@ -42407,25 +42340,6 @@ snapshots:
       typescript: 5.9.3
       v8-compile-cache-lib: 3.0.1
       yn: 3.1.1
-
-  ts-node@10.9.2(@types/node@22.20.1)(typescript@5.8.3):
-    dependencies:
-      '@cspotcode/source-map-support': 0.8.1
-      '@tsconfig/node10': 1.0.12
-      '@tsconfig/node12': 1.0.11
-      '@tsconfig/node14': 1.0.3
-      '@tsconfig/node16': 1.0.4
-      '@types/node': 22.20.1
-      acorn: 8.18.0
-      acorn-walk: 8.3.5
-      arg: 4.1.3
-      create-require: 1.1.1
-      diff: 4.0.4
-      make-error: 1.3.6
-      typescript: 5.8.3
-      v8-compile-cache-lib: 3.0.1
-      yn: 3.1.1
-    optional: true
 
   ts-node@10.9.2(@types/node@24.13.3)(typescript@5.9.3):
     dependencies:

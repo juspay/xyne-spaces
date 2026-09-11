@@ -2040,6 +2040,28 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 isSubmitting={isSubmitting}
                 label={submitLabel}
                 onCancel={handleClose}
+                trackMetadata={{
+                  // Everything worth knowing about a scheduled call is knowable
+                  // at this click and is otherwise discarded — the created call
+                  // itself is an async mutator result and never reaches the
+                  // activity table.
+                  leadTimeMinutes: startsAt
+                    ? Math.round((new Date(startsAt).getTime() - Date.now()) / 60000)
+                    : null,
+                  durationMinutes:
+                    startsAt && endsAt
+                      ? Math.round(
+                          (new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000,
+                        )
+                      : null,
+                  isRecurring,
+                  recurrenceFrequency: isRecurring ? recurrenceFrequency : null,
+                  recurrenceDayCount: isRecurring ? recurrenceDays.length : 0,
+                  internalInviteeCount: participants?.length ?? 0,
+                  externalInviteeCount: externalEmails.length,
+                  isEditMode,
+                  step,
+                }}
               />
             </div>
           </motion.form>
@@ -2055,7 +2077,9 @@ const SubmitFooter: React.FC<{
   isSubmitting: boolean;
   label: string;
   onCancel: () => void;
-}> = ({ missingRequirements, disabled, isSubmitting, label, onCancel }) => {
+  trackMetadata: Record<string, unknown>;
+}> = ({ missingRequirements, disabled, isSubmitting, label, onCancel, trackMetadata }) => {
+  const serialisedTrackMetadata = JSON.stringify(trackMetadata);
   // The <span> lets the Tooltip pick up pointer events even when the
   // wrapped Button is disabled.
   const submitButton = (
@@ -2066,6 +2090,7 @@ const SubmitFooter: React.FC<{
         disabled={disabled}
         data-track-category='CALLS'
         data-track-name='SUBMIT_SCHEDULE_CALL'
+        data-track-metadata={serialisedTrackMetadata}
         className='rounded-lg text-[13px] px-4 h-9 text-primary-foreground bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
       >
         {label}
@@ -2082,6 +2107,7 @@ const SubmitFooter: React.FC<{
         onClick={onCancel}
         data-track-category='CALLS'
         data-track-name='CANCEL_SCHEDULE_CALL'
+        data-track-metadata={serialisedTrackMetadata}
         disabled={isSubmitting}
         type='button'
       >
