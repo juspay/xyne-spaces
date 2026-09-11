@@ -472,4 +472,29 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
     return new Set(participants.map(p => p.channelId));
   }
+
+  /**
+   * Batch check which channels a user administrates
+   * Returns a Set of channel IDs where the user's participant role is ADMIN
+   */
+  async getAdminChannelIds(channelIds: string[], userId: string): Promise<Set<string>> {
+    if (channelIds.length === 0) {
+      return new Set<string>();
+    }
+
+    const participants = await this.db.channelParticipant.findMany({
+      where: {
+        channelId: {
+          in: channelIds
+        },
+        userId,
+        role: ChannelRole.ADMIN
+      },
+      select: {
+        channelId: true
+      }
+    });
+
+    return new Set(participants.map(p => p.channelId));
+  }
 }
