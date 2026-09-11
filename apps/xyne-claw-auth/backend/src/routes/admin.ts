@@ -594,13 +594,11 @@ router.delete("/provider-credentials/:id", requireClawAdmin, asyncHandler(async 
 
 // ── Agent Dashboard (single payload endpoint) ───────────────────────────────
 
-// Open to any authenticated user (not gated by requireClawAdmin) — DELIBERATE.
-// The org-wide agent dashboard is a core surface for everyone with a Spaces
-// login: /v3/home (insight strip, needs-attention, recent runs) and
-// /v3/dashboard are built on these endpoints for non-admins. Mount-level
-// requireAuth still applies. Restricting these to admins is a product
-// decision, not an auth fix — don't add requireClawAdmin here without also
-// reworking those frontend surfaces.
+// Admin-only: guarded by the router-level `requireClawAdmin` default-deny above
+// (WAPT PY-JP-004 — this org-wide dashboard exposed cross-user data to any
+// authenticated caller). The non-admin surfaces (/v3/home, /v3/dashboard) call
+// this too but degrade gracefully — the cards render "—" on the 403 (see
+// AgentsDashboardPageV3). Do NOT re-open this to non-admins.
 router.get("/dashboard", asyncHandler(async (req: Request, res: Response) => {
   const window = windowFromDays(req.query["days"] ?? "30");
   const cutoff = window?.start ?? null;
