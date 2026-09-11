@@ -5,8 +5,6 @@ import {
 } from '../core/types';
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
-import { assertWorkspaceMatch } from '../core/workspace-match';
-import { zql } from '../../queries';
 
 export class CommitsACL extends BaseACL<'commits'> {
 
@@ -20,13 +18,9 @@ export class CommitsACL extends BaseACL<'commits'> {
     throw new MutationACLError('Commit update failed: commits are synced from VCS and cannot be modified', 'commits');
   }
 
-  async canDelete(args: DeleteID<TableSchema<'commits'>>, tx: Transaction<Schema>): Promise<void> {
-    // Verify workspace access via pull_request relationship before allowing delete
-    const row = await tx.run(zql.commits.where('id', args.id).related('pullRequest').one());
-    if (!row || !row.pullRequest) {
-      throw new MutationACLError('Commit delete failed: commit does not exist', 'commits');
-    }
-    assertWorkspaceMatch(this.ctx, row.pullRequest.workspaceId, 'commits');
+  async canDelete(_args: DeleteID<TableSchema<'commits'>>, _tx: Transaction<Schema>): Promise<void> {
+    // Commits are immutable once synced - deny deletes
+    throw new MutationACLError('Commit delete failed: commits are synced from VCS and cannot be deleted', 'commits');
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'commits'>>, _tx: Transaction<Schema>): Promise<void> {
