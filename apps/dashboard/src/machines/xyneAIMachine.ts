@@ -80,6 +80,25 @@ export interface AskAIInitialContextSelections {
   }>;
 }
 
+export interface WorkflowContext {
+  workflowId?: string | null;
+  executionId?: string | null;
+  stepId?: string | null;
+}
+
+export interface WorkflowInfo extends WorkflowContext {
+  title?: string | null;
+}
+
+export const toWorkflowContext = (info: WorkflowInfo | null): WorkflowContext | null =>
+  info
+    ? {
+        ...(info.workflowId ? { workflowId: info.workflowId } : {}),
+        ...(info.executionId ? { executionId: info.executionId } : {}),
+        ...(info.stepId ? { stepId: info.stepId } : {}),
+      }
+    : null;
+
 // Context interface for the XyneAI machine
 export interface XyneAIContext {
   xyneAIState: XyneAIState;
@@ -112,6 +131,8 @@ export interface XyneAIContext {
   // Single-file scope when Ask AI is opened from a file viewer
   kbDocId: string | null;
   kbDocName: string | null;
+  workflowInfo: WorkflowInfo | null;
+  workflowDismissed: boolean;
   // Bumped on every OPEN dispatched with a kbCollectionId. Lets the input box
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
@@ -789,6 +810,8 @@ export const xyneAIMachine = setup({
     kbChannelId: null,
     kbDocId: null,
     kbDocName: null,
+    workflowInfo: null,
+    workflowDismissed: false,
     kbOpenNonce: 0,
   }),
   id: 'xyneAIMachine',
