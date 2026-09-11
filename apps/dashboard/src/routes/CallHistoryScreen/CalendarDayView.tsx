@@ -148,7 +148,7 @@ function DayViewCallCard({
           )}
           <div
             className={cn(
-              'px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden'
+              'px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden',
               isBeingResized && 'invisible',
             )}
           >
