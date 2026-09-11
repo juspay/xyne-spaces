@@ -2,17 +2,10 @@ import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
-import {
-  DndContext,
-  DragOverlay,
-  useDraggable,
-  useDroppable,
-  type DragStartEvent,
-} from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, type DragStartEvent } from '@dnd-kit/core';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
-import DragOverlayCard from './DragOverlayCard';
 import RecurringRescheduleDialog from './RecurringRescheduleDialog';
 import { useDragReschedule, type DragPreview } from './useDragReschedule';
 import { useResizeEndTime, type ResizePreview } from './useResizeEndTime';
@@ -153,7 +146,12 @@ function DayViewCallCard({
               />
             </div>
           )}
-          <div className='px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden'>
+          <div
+            className={cn(
+              'px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden'
+              isBeingResized && 'invisible',
+            )}
+          >
             <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
             <div className='flex flex-col flex-1 overflow-hidden'>
               <span
@@ -760,18 +758,6 @@ const CalendarDayView = ({
           </div>
         </div>
       </div>
-
-      {/* Floating clone that follows the cursor */}
-      <DragOverlay dropAnimation={null}>
-        {activeCall && dragPreview && (
-          <DragOverlayCard
-            call={activeCall}
-            formattedTime={dragPreview.formattedTime}
-            width={dragPreview.overlayWidth}
-            height={dragPreview.overlayHeight}
-          />
-        )}
-      </DragOverlay>
 
       <RecurringRescheduleDialog
         isOpen={recurringDialogOpen}

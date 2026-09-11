@@ -5,6 +5,7 @@ import {
   ChevronRight,
   MultipleCrossCancelDefault,
   PlusDefault,
+  Refresh,
   ThreeDotsMenuVertical,
 } from '@xyne/icons';
 import {
@@ -16,20 +17,20 @@ import {
   isSameMonth,
   isSameWeek,
   isToday,
-  isTomorrow,
   isWithinInterval,
-  isYesterday,
   startOfDay,
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
-import { CallStatus, MeetingStatus } from '@xyne/shared';
+import { CallStatus } from '@xyne/shared';
 import {
   xyneCalendarActor,
   globalXyneCalendarPanelRef,
   type CalendarViewMode,
 } from '../../../machines/xyneCalendarMachine';
 import {
+  getNearPeriodPhrase,
+  getPeriodCallCountLabel,
   getXyneCalendarChannelPresentation,
   XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
 } from './xyneCalendarSidebar.utils';
@@ -54,21 +55,24 @@ import {
   computeEventPositions,
   createSlotClickHandler,
   getCalendarCreateSlot,
+  getCallPillVariant,
   getCallsOverlappingDay,
-  getCurrentUserMeetingStatus,
+  hasCallEnded,
   isSameDay,
   minutesFromTopPx,
 } from '../../../routes/CallHistoryScreen/CalenderViewUtils';
 import { useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
-import { XyneCalendarCallPill, type XyneCalendarCallPillVariant } from './XyneCalendarCallPill';
+import { XyneCalendarCallPill } from './XyneCalendarCallPill';
 import CallDetailSidebarView from './CallDetailSidebarView';
 import CalendarWeekView from '../../../routes/CallHistoryScreen/CalendarWeekView';
 import CalendarMonthView from '../../../routes/CallHistoryScreen/CalenderMonthView';
+import { GoogleCalendarIcon, MicrosoftIcon } from '../../../routes/CallHistoryScreen/CalendarIcons';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { formatWeekRangeLabel } from '../../../utils/dateUtils';
 import { DeleteCallModal } from '../../Call/DeleteCallModal';
 import { roomActor } from '../../../machines/roomMachine';
+import { useCalendarSync } from '../../../hooks/useCalendarSync';
 
 const TIMELINE_HOUR_HEIGHT = 72;
 const TIMELINE_HOURS = Array.from({ length: 25 }, (_, hour) => hour);
@@ -86,6 +90,9 @@ const dateToIso = (date: Date): string => format(date, 'yyyy-MM-dd');
 const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
 
 const XyneCalendarSidebarComponent = (): ReactElement => {
+  const { user } = useAuth();
+  const { calendarProvider, isSyncing, syncMessage, reauthCountdown, syncCalendar } =
+    useCalendarSync(user?.id);
   const selectedDateIso = useSelector(xyneCalendarActor, state => state.context.selectedDate);
   const selectedCallId = useSelector(xyneCalendarActor, state => state.context.selectedCallId);
   const selectedCallFallback = useSelector(
@@ -181,6 +188,38 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
         onNextDay={handleNextDay}
         onToday={handleToday}
       />
+      {calendarProvider && (
+        <button
+          onClick={syncCalendar}
+          disabled={isSyncing}
+          data-track-category='Calendar'
+          data-track-name='CALENDAR_SYNC'
+          title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+          className={cn(
+            'flex shrink-0 items-center gap-2 border-t border-border px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-60',
+            syncMessage?.reauth
+              ? 'text-destructive hover:bg-destructive/10'
+              : 'text-muted-foreground hover:bg-muted',
+          )}
+        >
+          {isSyncing ? (
+            <Refresh className='size-3.5 shrink-0 animate-spin' aria-hidden='true' />
+          ) : calendarProvider === 'GOOGLE' ? (
+            <GoogleCalendarIcon size={14} />
+          ) : (
+            <MicrosoftIcon size={14} />
+          )}
+          <span className='truncate'>
+            {reauthCountdown
+              ? `Need calendar access, redirecting for authorization in ${reauthCountdown.count}s…`
+              : syncMessage
+                ? syncMessage.text
+                : isSyncing
+                  ? 'Syncing…'
+                  : `Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+          </span>
+        </button>
+      )}
     </aside>
   );
 };
@@ -246,45 +285,11 @@ const XyneCalendarSidebarHeader = memo(
           ? isSameMonth(selectedDate, new Date())
           : isToday(selectedDate);
 
-    const today = new Date();
-    const nearPeriodPhrase =
-      viewMode === 'week'
-        ? isSameWeek(selectedDate, today, { weekStartsOn: 0 })
-          ? 'this week'
-          : isSameWeek(selectedDate, addDays(today, -7), { weekStartsOn: 0 })
-            ? 'last week'
-            : isSameWeek(selectedDate, addDays(today, 7), { weekStartsOn: 0 })
-              ? 'next week'
-              : null
-        : viewMode === 'month'
-          ? isSameMonth(selectedDate, today)
-            ? 'this month'
-            : isSameMonth(selectedDate, addMonths(today, -1))
-              ? 'last month'
-              : isSameMonth(selectedDate, addMonths(today, 1))
-                ? 'next month'
-                : null
-          : isToday(selectedDate)
-            ? 'today'
-            : isYesterday(selectedDate)
-              ? 'yesterday'
-              : isTomorrow(selectedDate)
-                ? 'tomorrow'
-                : null;
-
-    const callWord = callCount === 1 ? 'call' : 'calls';
-    const callCountLabel =
-      callCount === 0
-        ? 'No calls scheduled'
-        : nearPeriodPhrase
-          ? `${callCount} ${callWord} ${nearPeriodPhrase}`
-          : liveCount > 0
-            ? `${callCount} ${callWord} · ${liveCount} live now`
-            : scheduledCount === callCount
-              ? `${callCount} ${callWord} scheduled`
-              : endedCount === callCount
-                ? `${callCount} ${callWord} ended`
-                : `${callCount} ${callWord}`;
+    const nearPeriodPhrase = getNearPeriodPhrase(viewMode, selectedDate, new Date());
+    const callCountLabel = getPeriodCallCountLabel(
+      { callCount, liveCount, scheduledCount, endedCount },
+      nearPeriodPhrase,
+    );
 
     return (
       <header className='shrink-0'>
@@ -485,32 +490,6 @@ const getBestTimelineWindowStart = (
 
   return bestStart;
 };
-
-const getCallPillVariant = (
-  call: Call,
-  currentUserId: string | undefined,
-  currentTime: Date,
-): XyneCalendarCallPillVariant => {
-  if (currentUserId && call.createdByUserId === currentUserId) {
-    return 'highlighted';
-  }
-
-  if (hasCallEnded(call, currentTime)) return 'past';
-
-  const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
-
-  if (meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN) {
-    return 'declined';
-  }
-
-  return isScheduledCallJoinable(call, currentTime.getTime()) ? 'joinable' : 'scheduled';
-};
-
-const hasCallEnded = (call: Call, currentTime: Date): boolean =>
-  call.status === CallStatus.ENDED ||
-  (call.endsAt !== null &&
-    call.endsAt !== undefined &&
-    new Date(call.endsAt).getTime() < currentTime.getTime());
 
 const XyneCalendarSidebarTimeline = memo(
   ({
@@ -884,6 +863,7 @@ const XyneCalendarSidebarTimeline = memo(
               onEditClick={handleEditClick}
               onDeleteClick={handleDeleteClick}
               onCreateCallAtSlot={handleCreateCallAtSlot}
+              channelPresentationsById={channelPresentationsById}
             />
           </div>
         </>

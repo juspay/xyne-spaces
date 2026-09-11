@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, JSX, cloneElement } from 'react';
+import { useState, useEffect, useRef, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -47,11 +47,9 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { CalendarEvent } from '@xyne/icons';
-import { getNextCalendarBadgeBoundary, getPendingCalendarCallCount } from '../XyneCalendarSidebar';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
-import { useNowWithBoundary } from '../../../hooks/useNowWithBoundary';
 import { isAIOnboardingActive } from '../../../contexts/AIOnboardingContext';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
@@ -95,23 +93,7 @@ const ConversationHeader = ({
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
-  const [scheduledCalendarCalls] = useCachedQuery(queries.userScheduledCallsV2());
   const allChannelsUserStatus = useUserChannelStatuses();
-
-  const nextCalendarBoundary = getNextCalendarBadgeBoundary(
-    scheduledCalendarCalls,
-    context.userID,
-    Date.now(),
-  );
-  const calendarNow = useNowWithBoundary(nextCalendarBoundary);
-  const pendingCalendarCallCount = useMemo(
-    () => getPendingCalendarCallCount(scheduledCalendarCalls, context.userID, calendarNow),
-    [calendarNow, context.userID, scheduledCalendarCalls],
-  );
-  const calendarTooltip =
-    pendingCalendarCallCount > 0
-      ? `${pendingCalendarCallCount} call${pendingCalendarCallCount === 1 ? '' : 's'} remaining today`
-      : 'Check Your Calendar';
 
   // Get user status for 1-on-1 DMs only (not group DMs)
   const isDM = channel && isOneToOneDMChannel(channel.scopeType);
@@ -381,7 +363,7 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
-          <Tooltip content={calendarTooltip} side='bottom'>
+          <Tooltip content='Check Your Calendar' side='bottom'>
             <Button
               variant='ghost'
               size='sm'
@@ -398,24 +380,12 @@ const ConversationHeader = ({
                   xyneCalendarActor.send({ type: 'OPEN' });
                 }
               }}
-              className={cn('relative h-7 w-7 overflow-visible rounded-lg', actionIconClass)}
-              aria-label={
-                pendingCalendarCallCount > 0
-                  ? `Toggle Calendar sidebar, ${calendarTooltip}`
-                  : 'Toggle Calendar sidebar'
-              }
+              className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+              aria-label='Toggle Calendar sidebar'
               data-track-category='CHANNELS'
               data-track-name='TOGGLE_CALENDAR_SIDEBAR'
             >
               <CalendarEvent size={16} />
-              {pendingCalendarCallCount > 0 && (
-                <span
-                  className='absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-0.5 text-[10px] font-bold leading-none text-primary-foreground ring-2 ring-background'
-                  aria-hidden='true'
-                >
-                  {pendingCalendarCallCount > 9 ? '9+' : pendingCalendarCallCount}
-                </span>
-              )}
             </Button>
           </Tooltip>
           <Tooltip

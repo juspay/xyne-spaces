@@ -1,80 +1,16 @@
+import { type Channel, type ChannelScopeType, type ChannelVisibility } from '@xyne/shared';
 import {
-  MeetingStatus,
-  type Call,
-  type CallParticipant,
-  type Channel,
-  type ChannelScopeType,
-  type ChannelVisibility,
-} from '@xyne/shared';
+  addDays,
+  addMonths,
+  isSameMonth,
+  isSameWeek,
+  isToday,
+  isTomorrow,
+  isYesterday,
+} from 'date-fns';
 import type { User } from '../../../machines/stateMachine';
-import {
-  isExternalCalendarEvent,
-  isExternalCalendarEventForUser,
-} from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import { isDMChannel, parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-
-type XyneCalendarBadgeCall = Pick<
-  Call,
-  'callOrigin' | 'createdByUserId' | 'externalId' | 'startsAt'
-> & {
-  participants?: readonly Pick<CallParticipant, 'meetingStatus' | 'userId'>[];
-};
-
-const getNextDayStart = (now: number): number => {
-  const nextDay = new Date(now);
-  nextDay.setHours(24, 0, 0, 0);
-  return nextDay.getTime();
-};
-
-/** Checks whether a call should be included in the user's Calendar badge. */
-const isCalendarBadgeCallForUser = (
-  call: XyneCalendarBadgeCall,
-  userId: string | undefined,
-): boolean => {
-  if (isExternalCalendarEvent(call)) {
-    return isExternalCalendarEventForUser(call, userId);
-  }
-
-  const participant = call.participants?.find(item => item.userId === userId);
-  return Boolean(
-    participant &&
-    participant.meetingStatus !== MeetingStatus.DECLINED &&
-    participant.meetingStatus !== MeetingStatus.HIDDEN,
-  );
-};
-
-/** Counts the calls of the user still has scheduled for today. */
-export const getPendingCalendarCallCount = (
-  calls: readonly XyneCalendarBadgeCall[] | undefined,
-  userId: string | undefined,
-  now: number,
-): number => {
-  const nextDayStart = getNextDayStart(now);
-
-  return (calls ?? []).reduce((count, call): number => {
-    if (!call.startsAt || !isCalendarBadgeCallForUser(call, userId)) return count;
-
-    const startsAt = new Date(call.startsAt).getTime();
-    return startsAt > now && startsAt < nextDayStart ? count + 1 : count;
-  }, 0);
-};
-
-/** Returns the next time the Calendar badge count needs to be refreshed. */
-export const getNextCalendarBadgeBoundary = (
-  calls: readonly XyneCalendarBadgeCall[] | undefined,
-  userId: string | undefined,
-  now: number,
-): number => {
-  const nextDayStart = getNextDayStart(now);
-
-  return (calls ?? []).reduce((boundary, call): number => {
-    if (!call.startsAt || !isCalendarBadgeCallForUser(call, userId)) return boundary;
-
-    const startsAt = new Date(call.startsAt).getTime();
-    return startsAt > now && startsAt < boundary ? startsAt : boundary;
-  }, nextDayStart);
-};
 
 export interface XyneCalendarChannelPresentation {
   label: string;
@@ -107,6 +43,51 @@ export const getXyneCalendarChannelPresentation = (
     scopeType: channel.scopeType,
     visibility: channel.visibility,
   };
+};
+
+/** "this/last/next week|month" or "today/yesterday/tomorrow" — null if the period is too far off. */
+export const getNearPeriodPhrase = (
+  viewMode: 'day' | 'week' | 'month',
+  selectedDate: Date,
+  today: Date,
+): string | null => {
+  if (viewMode === 'week') {
+    if (isSameWeek(selectedDate, today, { weekStartsOn: 0 })) return 'this week';
+    if (isSameWeek(selectedDate, addDays(today, -7), { weekStartsOn: 0 })) return 'last week';
+    if (isSameWeek(selectedDate, addDays(today, 7), { weekStartsOn: 0 })) return 'next week';
+    return null;
+  }
+  if (viewMode === 'month') {
+    if (isSameMonth(selectedDate, today)) return 'this month';
+    if (isSameMonth(selectedDate, addMonths(today, -1))) return 'last month';
+    if (isSameMonth(selectedDate, addMonths(today, 1))) return 'next month';
+    return null;
+  }
+  if (isToday(selectedDate)) return 'today';
+  if (isYesterday(selectedDate)) return 'yesterday';
+  if (isTomorrow(selectedDate)) return 'tomorrow';
+  return null;
+};
+
+export interface PeriodCallCounts {
+  callCount: number;
+  liveCount: number;
+  scheduledCount: number;
+  endedCount: number;
+}
+
+/** The Calendar header's call-count badge text, e.g. "3 calls this week" / "No calls scheduled". */
+export const getPeriodCallCountLabel = (
+  { callCount, liveCount, scheduledCount, endedCount }: PeriodCallCounts,
+  nearPeriodPhrase: string | null,
+): string => {
+  const callWord = callCount === 1 ? 'call' : 'calls';
+  if (callCount === 0) return 'No calls scheduled';
+  if (nearPeriodPhrase) return `${callCount} ${callWord} ${nearPeriodPhrase}`;
+  if (liveCount > 0) return `${callCount} ${callWord} · ${liveCount} live now`;
+  if (scheduledCount === callCount) return `${callCount} ${callWord} scheduled`;
+  if (endedCount === callCount) return `${callCount} ${callWord} ended`;
+  return `${callCount} ${callWord}`;
 };
 
 export const XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE = 25;

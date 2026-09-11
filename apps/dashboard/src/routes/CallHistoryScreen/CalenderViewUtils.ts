@@ -1,9 +1,10 @@
 import type React from 'react';
 import { RRule } from 'rrule';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import { Call } from './callHistoryItem.utils';
+import { Call, isScheduledCallJoinable } from './callHistoryItem.utils';
 import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
 import { formatDuration } from '../../utils/dateUtils';
+import type { XyneCalendarCallPillVariant } from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
 
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
@@ -124,6 +125,50 @@ export const HOUR_HEIGHT = 64; // px per hour
 export const MIN_EVENT_HEIGHT = 28; // px
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+// Pill sizing thresholds shared by Day (XyneCalendarCallPill) and Week (WeekViewCallCard) views.
+export const ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE = 75;
+export const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
+
+/** Diagonal hatch used on a call pill's clipped edge when it continues from/to an adjacent day. */
+export const HATCH_BACKGROUND =
+  'repeating-linear-gradient(135deg, color-mix(in hsl, currentColor 55%, transparent) 0, color-mix(in hsl, currentColor 55%, transparent) 1px, transparent 1px, transparent 6px)';
+
+/**
+ * Whether a call has ended — either its status says so, or its endsAt has passed.
+ */
+export function hasCallEnded(call: Call, currentTime: Date): boolean {
+  return (
+    call.status === CallStatus.ENDED ||
+    (call.endsAt !== null &&
+      call.endsAt !== undefined &&
+      new Date(call.endsAt).getTime() < currentTime.getTime())
+  );
+}
+
+/**
+ * Classifies a call into the pill variant that drives its color/emphasis —
+ * shared by the Day pill (XyneCalendarCallPill) and Week/Month call cards.
+ */
+export function getCallPillVariant(
+  call: Call,
+  currentUserId: string | undefined,
+  currentTime: Date,
+): XyneCalendarCallPillVariant {
+  if (currentUserId && call.createdByUserId === currentUserId) {
+    return 'highlighted';
+  }
+
+  if (hasCallEnded(call, currentTime)) return 'past';
+
+  const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
+
+  if (meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN) {
+    return 'declined';
+  }
+
+  return isScheduledCallJoinable(call, currentTime.getTime()) ? 'joinable' : 'scheduled';
+}
 
 export const MAX_AVATARS_TO_SHOW = 3;
 export const RSVP_BADGE_BASE_CLASS =
