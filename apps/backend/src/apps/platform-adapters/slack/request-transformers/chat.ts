@@ -7,6 +7,7 @@ import {
 import { config } from "@/config/env";
 import type { TransformContext } from "../../types";
 import type {
+	SlackChatDeleteRequest,
 	SlackChatPostMessageRequest,
 	SlackChatUpdateRequest,
 } from "../types";
@@ -23,6 +24,11 @@ export interface PostMessageArgs {
 export interface UpdateMessageArgs {
 	messageId: string;
 	content: string;
+}
+
+export interface DeleteMessageArgs {
+	messageId: string;
+	channelId: string;
 }
 
 const blockKitParser = new SlackBlockKitParser();
@@ -111,4 +117,10 @@ export async function transformUpdate(
 		messageId: slackReq.ts,
 		content,
 	};
+}
+
+export function transformDelete(
+	slackReq: SlackChatDeleteRequest,
+): DeleteMessageArgs {
+	return { messageId: slackReq.ts, channelId: slackReq.channel };
 }

@@ -44,6 +44,12 @@ export class CallShareService {
       userId,
     });
   }
+
+  /** Who may play or download a call's recording files. */
+  async canViewRecordings(call: Call, userId: string): Promise<boolean> {
+    if (isRecording(call) && (await this.canView(call, userId, call.workspaceId))) return true;
+    return this.isCallAudience(call, userId);
+  }
 }
 
 export const callShareService = new CallShareService();

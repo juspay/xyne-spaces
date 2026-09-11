@@ -1784,6 +1784,7 @@ export const callRecordingTable = table("call_recordings")
     storagePath: string().optional(),
     segmentPrefix: string().optional(),
     messageId: string().optional(),
+    attachmentId: string().optional(),
     startedAt: number(),
     endedAt: number().optional(),
     createdAt: number(),
