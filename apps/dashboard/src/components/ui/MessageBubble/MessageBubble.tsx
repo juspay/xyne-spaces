@@ -758,10 +758,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     [message.content],
   );
 
-  if (!message) {
-    return null;
-  }
-
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
 

@@ -483,14 +483,6 @@
     @apply border-border;
   }
 
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
-  }
-
   /* Custom scrollbars: transparent rails + subtle thumb, scoped to the actual
      scroll containers (document root + Tailwind overflow utilities) instead of a
      universal `*` rule. The old `* { scrollbar-color: hsl(var(--border)) ... }`
@@ -500,8 +492,9 @@
      Scoping to elements that can actually show a scrollbar removes that cost while
      keeping the same appearance. The ::-webkit-scrollbar* rules below stay global:
      they match scrollbar pseudo-elements (only rendered on scrollable elements),
-     not real elements, so they do not defeat style sharing. Opt-out utilities
-     (.no-scrollbar, .scrollbar-none) still win via higher class specificity. */
+     not real elements, so they do not defeat style sharing. The opt-out utilities
+     .no-scrollbar and .scrollbar-none live in @layer utilities, which overrides
+     @layer base regardless of source order, so they still win over this rule. */
   html,
   body,
   #root,
@@ -1320,6 +1313,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
     /* IE and Edge */
     scrollbar-width: none;
     /* Firefox */
+  }
+
+  /* Opt out of the app-wide thin scrollbar entirely (no visible scrollbar).
+     Lives in @layer utilities so it overrides the scoped scrollbar rule in
+     @layer base regardless of source order. */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   .thin-scrollbar {
