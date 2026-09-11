@@ -1196,6 +1196,9 @@ export class App {
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
 
+      const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
+      await shutdownWorkflows();
+
       // Shutdown notification service
       await notificationService.shutdown();
 

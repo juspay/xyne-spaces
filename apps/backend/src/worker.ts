@@ -516,6 +516,8 @@ class WorkerService {
 
       if (workflowsEnabled) {
         await workflowsWorker.stop()
+        const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
+        await shutdownWorkflows()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
