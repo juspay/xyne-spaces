@@ -21,13 +21,10 @@ import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  collectionIds?: string[];
+  /** Scoped KB files. Resolved server-side (UUID-or-cuid → cuid) — see
+   *  xyneAIControllerV2.ts. Collections/folders don't need this: they ride
+   *  as ordinary entries in `attachedContext` instead. */
   fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -70,13 +67,8 @@ interface UseXyneAIStreamParams {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  collectionIds?: string[];
+  /** See StreamOverrides.fileIds. */
   fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   createCanvasEnabled?: boolean;
   instant?: boolean;
   isV2?: boolean;
@@ -149,9 +141,7 @@ export const useXyneAIStream = ({
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  collectionIds,
   fileIds,
-  folderIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -334,9 +324,7 @@ export const useXyneAIStream = ({
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
       const eFileIds = ov?.fileIds ?? fileIds ?? [];
-      const eFolderIds = ov?.folderIds ?? folderIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -459,9 +447,7 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          collectionIds: eCollectionIds,
           fileIds: eFileIds,
-          folderIds: eFolderIds,
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -500,14 +486,12 @@ export const useXyneAIStream = ({
     [
       threadId,
       channelIds,
-      collectionIds,
       conversationId,
       threadConversationId,
       attachmentIds,
       canvasId,
       workflowContext,
       fileIds,
-      folderIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
