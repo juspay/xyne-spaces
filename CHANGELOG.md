@@ -1,3 +1,38 @@
+## [1.316.4](https://github.com/juspay/xyne-spaces/compare/v1.316.3...v1.316.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* multi bundle handling for dashboard ([#1790](https://github.com/juspay/xyne-spaces/issues/1790)) ([07824f2](https://github.com/juspay/xyne-spaces/commit/07824f264e94b0555e10a73bfce0874486c57288))
+
+## [1.316.3](https://github.com/juspay/xyne-spaces/compare/v1.316.2...v1.316.3) (2026-09-11)
+
+
+### Bug Fixes
+
+* save SDLC activity owner on updates, late links and folder discussions ([#1794](https://github.com/juspay/xyne-spaces/issues/1794)) ([c7512d5](https://github.com/juspay/xyne-spaces/commit/c7512d5e52fa184ae5966a50f66ffc0dc85524ae))
+
+## [1.316.2](https://github.com/juspay/xyne-spaces/compare/v1.316.1...v1.316.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* read MCP credential fields from the registry, not the DB column ([#1819](https://github.com/juspay/xyne-spaces/issues/1819)) ([26d7347](https://github.com/juspay/xyne-spaces/commit/26d73473ff45abf6e15586f8ca48058cc8e6b569))
+
+## [1.316.1](https://github.com/juspay/xyne-spaces/compare/v1.316.0...v1.316.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* workflow executions moved to workflow schema ([#1533](https://github.com/juspay/xyne-spaces/issues/1533)) ([b944f12](https://github.com/juspay/xyne-spaces/commit/b944f120d17d0f91bd3373b5e50114eb3d3ccd96))
+
+## [1.316.0](https://github.com/juspay/xyne-spaces/compare/v1.315.0...v1.316.0) (2026-09-11)
+
+
+### Features
+
+* keyboard navigation for the SDLC finder, tickets and sidebar ([#1804](https://github.com/juspay/xyne-spaces/issues/1804)) ([1baa3ae](https://github.com/juspay/xyne-spaces/commit/1baa3aea3b6bb99199b7b42250854f6f85a94a76))
+
 ## [1.315.0](https://github.com/juspay/xyne-spaces/compare/v1.314.0...v1.315.0) (2026-09-11)
 
 

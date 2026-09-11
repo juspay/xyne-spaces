@@ -121,6 +121,7 @@ import {
 import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
+import { useScope, useShortcutById } from '../../shortcuts';
 import {
   discussionConversationIds as discussionIdsForOwner,
   resolveSdlcDiscussionContext,
@@ -156,6 +157,7 @@ import {
   repoKnowledgeControl,
   repoKnowledgeState,
   type RepoKnowledgeControl,
+  type RepoSetupExecution,
 } from './repoKnowledgePolicy';
 
 type Section = 'overview' | 'wiki' | 'baseline' | 'tracks' | 'tickets' | 'artifacts';
@@ -304,6 +306,22 @@ export default function SdlcScreen(): ReactElement {
     [selectedRepo, channel],
   );
   const repoId = repo?.id;
+  const setupExecutionQuery = useQuery({
+    queryKey: ['sdlc-setup-execution', repoId, repo?.sdlcSetupExecutionId ?? null],
+    queryFn: async () => {
+      const response = await apiInstance.get<{
+        success: boolean;
+        execution: RepoSetupExecution | null;
+      }>(`/sdlc/repositories/${encodeURIComponent(repoId!)}/setup-execution`);
+      return response.data.execution;
+    },
+    enabled: Boolean(repoId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: query =>
+      isRepoKnowledgeRunning(repoKnowledgeState(query.state.data).phase) ? 2_000 : false,
+  });
+  const setupExecution = setupExecutionQuery.data ?? null;
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
@@ -333,6 +351,30 @@ export default function SdlcScreen(): ReactElement {
   const railCollapsed = useUserPreference('sdlcSidebarCollapsed');
   const storedRailWidth = useUserPreference('sdlcSidebarWidth');
   const [railHovered, setRailHovered] = useState(false);
+  const finderRef = useRef<HTMLDivElement | null>(null);
+  const ticketsRef = useRef<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+  const [ticketsFocused, setTicketsFocused] = useState(false);
+  const [focusedTicketId, setFocusedTicketId] = useState<string | null>(null);
+  const finderFocusReturn = useRef<string | null>(null);
+  const rememberFinderFocus = (): void => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !finderRef.current?.contains(active)) return;
+    const columns = finderRef.current.querySelectorAll<HTMLElement>('[data-finder-column]');
+    finderFocusReturn.current =
+      active.closest<HTMLElement>('[data-finder-column]')?.dataset['finderColumn'] ??
+      columns[columns.length - 1]?.dataset['finderColumn'] ??
+      null;
+  };
+  const returnFocusToFinder = (): void => {
+    const columnId = finderFocusReturn.current;
+    finderFocusReturn.current = null;
+    if (!columnId) return;
+    requestAnimationFrame(() => {
+      finderRef.current?.querySelector<HTMLElement>(`[data-finder-column="${columnId}"]`)?.focus();
+    });
+  };
   const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
   const railWidth =
     draggingWidth ?? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, storedRailWidth));
@@ -382,6 +424,50 @@ export default function SdlcScreen(): ReactElement {
     setUserPreference('sdlcSidebarCollapsed', next);
     if (next) setRailHovered(false);
   };
+  useShortcutById('sdlc.toggleSidebarDock', toggleRail);
+  const sidebarItems = (): HTMLElement[] =>
+    [...(sidebarRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? [])].filter(
+      item => item.offsetParent !== null,
+    );
+  const moveSidebarFocus = (delta: number): void => {
+    const items = sidebarItems();
+    if (items.length === 0) return;
+    const active = document.activeElement;
+    const from = items.findIndex(item => item === active);
+    const next = items[Math.min(items.length - 1, Math.max(0, (from === -1 ? -1 : from) + delta))];
+    next?.focus();
+    next?.scrollIntoView({ block: 'nearest' });
+  };
+  useShortcutById('sdlc.focusSidebar', () => {
+    if (railCollapsed) setRailHovered(true);
+    requestAnimationFrame(() => {
+      const current = sidebarRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+      const target = current ?? sidebarItems()[0];
+      target?.focus();
+      target?.scrollIntoView({ block: 'nearest' });
+    });
+  });
+  useScope('sdlc-sidebar', sidebarFocused);
+  useShortcutById('sdlc.sidebarDown', () => moveSidebarFocus(1), { enabled: sidebarFocused });
+  useShortcutById('sdlc.sidebarUp', () => moveSidebarFocus(-1), { enabled: sidebarFocused });
+  useShortcutById('sdlc.focusTickets', () => {
+    // The list, not a row: the cursor is state, so focusing a row would leave the
+    // two out of step and let Enter both fire the binding and click the button.
+    ticketsRef.current?.focus();
+    ticketsRef.current?.scrollIntoView({ block: 'nearest' });
+  });
+  useShortcutById('sdlc.focusFinder', () => {
+    const columns = [
+      ...(finderRef.current?.querySelectorAll<HTMLElement>('[data-finder-column]') ?? []),
+    ];
+    // An empty level has nothing to put a cursor on, so land on the deepest one
+    // that holds something — which puts the cursor on the folder itself.
+    const target =
+      [...columns].reverse().find(column => column.querySelector('[data-finder-row]')) ??
+      columns[columns.length - 1];
+    target?.focus();
+    target?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  });
   const [trackName, setTrackName] = useState('');
   const [trackDescription, setTrackDescription] = useState('');
   const [artifactTrack, setArtifactTrack] = useState<{ id: string; name: string } | null>(null);
@@ -406,8 +492,12 @@ export default function SdlcScreen(): ReactElement {
     window.setTimeout(() => {
       setReaderCanvasId(null);
       setReaderClosing(false);
+      returnFocusToFinder();
     }, READER_EXIT_MS);
   };
+  useShortcutById('finder.closePreview', () => closeReader(), {
+    enabled: readerCanvasId !== null && !readerClosing,
+  });
   const [folderDiscussion, setFolderDiscussion] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -787,6 +877,46 @@ export default function SdlcScreen(): ReactElement {
       Array.isArray(relatedTickets) ? (relatedTickets as unknown as readonly SdlcTicket[]) : [],
     [relatedTickets],
   );
+  const trackTicketList = useMemo<readonly SdlcTicket[]>(() => {
+    if (!selectedTrack) return [];
+    const ids = trackTicketIdsByTrack.get(selectedTrack.id) ?? new Set<string>();
+    return tickets.filter(ticket => ids.has(ticket.id));
+  }, [selectedTrack, trackTicketIdsByTrack, tickets]);
+  useScope('sdlc-tickets', ticketsFocused);
+  const focusedTicketIndex = trackTicketList.findIndex(ticket => ticket.id === focusedTicketId);
+  const moveTicketFocus = (delta: number): void => {
+    if (trackTicketList.length === 0) return;
+    const from =
+      focusedTicketIndex === -1 ? (delta > 0 ? -1 : trackTicketList.length) : focusedTicketIndex;
+    const next = trackTicketList[Math.min(trackTicketList.length - 1, Math.max(0, from + delta))];
+    if (!next) return;
+    setFocusedTicketId(next.id);
+    ticketsRef.current
+      ?.querySelector(`[data-ticket-row="${next.id}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  };
+  const ticketBind = { enabled: ticketsFocused };
+  useShortcutById('tickets.down', () => moveTicketFocus(1), ticketBind);
+  useShortcutById('tickets.up', () => moveTicketFocus(-1), ticketBind);
+  useShortcutById(
+    'tickets.open',
+    () => {
+      const ticket = trackTicketList[focusedTicketIndex];
+      if (!ticket) return;
+      setDiscussionUrl({
+        open: true,
+        conversationId: ticket.conversationId,
+        selectedTab: 'details',
+      });
+    },
+    ticketBind,
+  );
+  useEffect(() => {
+    if (!ticketsFocused || focusedTicketId !== null) return;
+    const first = trackTicketList[0];
+    if (first) setFocusedTicketId(first.id);
+  }, [ticketsFocused, focusedTicketId, trackTicketList]);
+
   const [channelTicketRows] = useCachedQuery(
     queries.sdlcTicketsByChannel({ channelId: channel?.id ?? '' }),
     { enabled: Boolean(channel?.id) },
@@ -885,12 +1015,12 @@ export default function SdlcScreen(): ReactElement {
     return null;
   }, [activeFolderDiscussion, discussionOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
-  const state = repoKnowledgeState(repo ? repo.setupExecution : null);
+  const state = repoKnowledgeState(repo ? setupExecution : null);
   const setupRunning = isRepoKnowledgeRunning(state.phase);
 
   useEffect(() => {
     if (!repoId || externalDebuggerTarget?.repoId !== repoId) return;
-    if (repo && externalDebuggerTarget.executionId === repo.setupExecution?.id) {
+    if (repo && externalDebuggerTarget.executionId === setupExecution?.id) {
       updateExternalDebugger(repoId, {
         conversationId: state.conversationId || externalDebuggerTarget.conversationId,
         sessionId: state.sessionId || externalDebuggerTarget.sessionId,
@@ -917,6 +1047,7 @@ export default function SdlcScreen(): ReactElement {
     externalDebuggerTarget,
     repo,
     repoId,
+    setupExecution?.id,
     setupRunning,
     state.conversationId,
     state.sessionId,
@@ -1015,7 +1146,10 @@ export default function SdlcScreen(): ReactElement {
     const action = repoKnowledgeAction(control);
     return call(
       action.key,
-      () => apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`),
+      async () => {
+        await apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`);
+        await setupExecutionQuery.refetch();
+      },
       action.success,
     );
   };
@@ -1053,7 +1187,7 @@ export default function SdlcScreen(): ReactElement {
   );
 
   interface OpenCanvasOptions {
-    event?: ReactMouseEvent | undefined;
+    event?: { metaKey: boolean; ctrlKey: boolean } | undefined;
     withDiscussion?: boolean;
   }
 
@@ -1281,7 +1415,7 @@ export default function SdlcScreen(): ReactElement {
     const Icon = controlPresentation.icon;
     const debugAvailable = canDebugRepoKnowledge({
       isAdmin,
-      executionId: repo.setupExecution?.id,
+      executionId: setupExecution?.id,
       conversationId: state.conversationId,
     });
     const requiresReadAccess =
@@ -1302,7 +1436,7 @@ export default function SdlcScreen(): ReactElement {
               openSdlcDebugger({
                 source: 'sdlc',
                 repoId: repo.id,
-                executionId: repo.setupExecution!.id,
+                executionId: setupExecution!.id,
                 conversationId: state.conversationId!,
                 sessionId: state.sessionId || null,
                 running: setupRunning,
@@ -1742,6 +1876,7 @@ export default function SdlcScreen(): ReactElement {
       ),
     );
     setNewFolderParent(null);
+    returnFocusToFinder();
     setNewFolderName('');
   };
 
@@ -1765,8 +1900,7 @@ export default function SdlcScreen(): ReactElement {
 
   const renderTrack = (): ReactElement | null => {
     if (!selectedTrack) return null;
-    const trackTicketIds = trackTicketIdsByTrack.get(selectedTrack.id) ?? new Set<string>();
-    const trackTickets = tickets.filter(ticket => trackTicketIds.has(ticket.id));
+    const trackTickets = trackTicketList;
     const openTicketCount = trackTickets.filter(
       ticket =>
         ticket.statusV2 !== TicketStatusV2.COMPLETED &&
@@ -2109,7 +2243,7 @@ export default function SdlcScreen(): ReactElement {
               took the whole card — and the page — with it. Each column scrolls
               inside this instead, so the page only scrolls when the pointer is
               somewhere that has nothing of its own to scroll. */}
-          <div className='scrollbar-none flex h-[520px] overflow-x-auto'>
+          <div ref={finderRef} className='scrollbar-none flex h-[520px] overflow-x-auto'>
             {(
               [
                 { type: 'TRACK', id: selectedTrack.id, name: selectedTrack.name },
@@ -2126,6 +2260,10 @@ export default function SdlcScreen(): ReactElement {
                 isLast={index === steps.length - 1}
                 onSelectFolder={folder => {
                   setPreviewCanvasId(null);
+                  // Re-selecting the folder that is already open below would
+                  // rebuild the path from here and throw away every level under
+                  // it, so the tree blinks shut and reopens one column deep.
+                  if (steps[index + 1]?.id === folder.id) return;
                   setFinderPath([
                     ...steps.slice(1, index + 1),
                     { type: 'FOLDER', id: folder.id, name: folder.name },
@@ -2139,9 +2277,20 @@ export default function SdlcScreen(): ReactElement {
                 onOpenCanvas={(canvasId, event) =>
                   openCanvas(canvasId, event ? { event } : undefined)
                 }
-                onNewFolder={parent => setNewFolderParent(parent)}
-                onNewArtifact={parent => setNewArtifactParent(parent)}
+                onNewFolder={parent => {
+                  finderFocusReturn.current = parent.id;
+                  setNewFolderParent(parent);
+                }}
+                onNewArtifact={parent => {
+                  finderFocusReturn.current = parent.id;
+                  setNewArtifactParent(parent);
+                }}
                 onDiscussFolder={openFolderConversations}
+                onDiscussTrack={() => openConversations()}
+                onPreviewCanvas={canvasId => {
+                  rememberFinderFocus();
+                  setReaderCanvasId(canvasId);
+                }}
                 folderById={folderById}
                 discussingFolderId={
                   chatPanelShowing && activeFolderDiscussion ? activeFolderDiscussion.id : null
@@ -2164,7 +2313,10 @@ export default function SdlcScreen(): ReactElement {
               <SdlcFinderPreview
                 canvas={finderCanvasById.get(previewCanvasId) as SdlcFinderCanvas}
                 onOpen={(canvasId, event) => openCanvas(canvasId, event ? { event } : undefined)}
-                onPreview={setReaderCanvasId}
+                onPreview={canvasId => {
+                  rememberFinderFocus();
+                  setReaderCanvasId(canvasId);
+                }}
               />
             )}
           </div>
@@ -2189,7 +2341,17 @@ export default function SdlcScreen(): ReactElement {
           </Button>
         </div>
 
-        <div className='mb-6 overflow-hidden rounded-xl border border-border'>
+        <div
+          ref={ticketsRef}
+          tabIndex={-1}
+          onFocusCapture={() => setTicketsFocused(true)}
+          onBlurCapture={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setTicketsFocused(false);
+            }
+          }}
+          className='mb-6 overflow-hidden rounded-xl border border-border outline-none'
+        >
           {trackTickets.length === 0 ? (
             <p className='px-4 py-8 text-center text-[12px] text-muted-foreground'>
               No tickets in this track yet.
@@ -2199,14 +2361,22 @@ export default function SdlcScreen(): ReactElement {
               <button
                 key={ticket.id}
                 type='button'
-                onClick={() =>
+                onClick={() => {
+                  setFocusedTicketId(ticket.id);
                   setDiscussionUrl({
                     open: true,
                     conversationId: ticket.conversationId,
                     selectedTab: 'details',
-                  })
-                }
-                className='flex w-full items-center gap-3 border-b border-border px-3.5 py-2 text-left transition-colors last:border-b-0 hover:bg-foreground/[0.04]'
+                  });
+                }}
+                tabIndex={-1}
+                data-ticket-row={ticket.id}
+                className={cn(
+                  'flex w-full items-center gap-3 border-b border-border px-3.5 py-2 text-left outline-none transition-colors last:border-b-0 hover:bg-foreground/[0.04]',
+                  ticketsFocused &&
+                    focusedTicketId === ticket.id &&
+                    'bg-foreground/[0.07] ring-2 ring-inset ring-foreground/40',
+                )}
                 data-track-category='SdlcHub'
                 data-track-name='TrackTicketOpened'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -2272,6 +2442,7 @@ export default function SdlcScreen(): ReactElement {
       <div key={item.id} className='mb-0.5'>
         <button
           onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`)}
+          {...(section === item.id && { 'aria-current': 'page' as const })}
           className={cn(
             'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
             section === item.id ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/[0.06]',
@@ -2308,6 +2479,13 @@ export default function SdlcScreen(): ReactElement {
         style={{ width: railCollapsed ? SIDEBAR_RAIL_WIDTH : railWidth }}
         onMouseEnter={() => railCollapsed && setRailHovered(true)}
         onMouseLeave={() => setRailHovered(false)}
+        onFocusCapture={() => setSidebarFocused(true)}
+        onBlurCapture={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setSidebarFocused(false);
+          }
+        }}
+        ref={sidebarRef}
       >
         <div
           className={cn(
@@ -2429,6 +2607,7 @@ export default function SdlcScreen(): ReactElement {
                     key={track.id}
                     type='button'
                     onClick={() => openTrack(track.id)}
+                    {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                     className={cn(
                       'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
                       selectedTrackId === track.id
@@ -2470,6 +2649,7 @@ export default function SdlcScreen(): ReactElement {
                           key={track.id}
                           type='button'
                           onClick={() => openTrack(track.id)}
+                          {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                           className={cn(
                             'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground/60 transition-colors',
                             selectedTrackId === track.id
@@ -3668,6 +3848,7 @@ export default function SdlcScreen(): ReactElement {
         onOpenChange={open => {
           if (!open) {
             setNewFolderParent(null);
+            returnFocusToFinder();
             setNewFolderName('');
           }
         }}
@@ -3704,6 +3885,7 @@ export default function SdlcScreen(): ReactElement {
               variant='outline'
               onClick={() => {
                 setNewFolderParent(null);
+                returnFocusToFinder();
                 setNewFolderName('');
               }}
               data-track-category='SdlcHub'
@@ -3827,6 +4009,7 @@ export default function SdlcScreen(): ReactElement {
                 onClick={() => {
                   const parent = newArtifactParent;
                   setNewArtifactParent(null);
+                  returnFocusToFinder();
                   setPendingArtifactFolder(parent?.type === 'FOLDER' ? parent.id : null);
                   if (selectedTrack) {
                     clearArtifactDialogFields({
