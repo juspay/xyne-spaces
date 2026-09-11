@@ -304,7 +304,7 @@ export default function SdlcScreen(): ReactElement {
       selectedRepo && channel ? { ...selectedRepo, channel, channelId: channel.id } : undefined,
     [selectedRepo, channel],
   );
-  const repoId = repo?.id;]
+  const repoId = repo?.id;
   const setupExecutionQuery = useQuery({
     queryKey: ['sdlc-setup-execution', repoId, repo?.sdlcSetupExecutionId ?? null],
     queryFn: async () => {
