@@ -74,6 +74,10 @@ export class GCSAdapter implements StorageService {
     return this.gcs.listFiles(prefix);
   }
 
+  async listPrefixes(prefix: string): Promise<string[]> {
+    return this.gcs.listPrefixes(prefix);
+  }
+
   async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
     return this.gcs.moveFile(sourcePath, destinationPath);
   }

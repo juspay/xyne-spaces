@@ -107,6 +107,7 @@ export interface StorageService {
   headObject(path: string): Promise<ObjectInfo | null>;
   getObject(path: string): Promise<ObjectRead | null>;
   listFiles(prefix: string): Promise<ListedFile[]>;
+  listPrefixes(prefix: string): Promise<string[]>;
   moveFile(sourcePath: string, destinationPath: string): Promise<void>;
   ensureBucketExists(): Promise<void>;
   checkBucketExists(): Promise<void>;
