@@ -30,6 +30,26 @@ libraries, generates local secrets, and generates both Prisma clients. Backend a
 dashboard recipes also run preparation before launching. After changing the Nix
 environment, exit and re-enter `nix develop` so commands inherit the new variables.
 
+## Automatic shell loading with direnv
+
+The repository already tracks an [`.envrc`](../../.envrc). With direnv,
+nix-direnv, and your shell's direnv hook configured, enable it from the repository
+root:
+
+```bash
+direnv allow
+```
+
+It loads the flake development shell and, when present,
+`apps/backend/.env.local`. You can then run `just prepare`, `just services`,
+`just backend`, and `just dashboard` without manually entering `nix develop` in
+each terminal. Keep services, backend, and dashboard in separate terminals as
+above.
+
+Run `direnv reload` after preparation creates local secrets or after changing
+your environment configuration. Review changes to `.envrc` before approving
+them again with `direnv allow`.
+
 ## Services and scope
 
 `just services` runs PostgreSQL on 5433, Redis on 6379, LiveKit on 7880, Zero on
