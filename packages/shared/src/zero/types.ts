@@ -687,6 +687,13 @@ export enum NotificationLevel {
   NONE = "NONE",
 }
 
+// Device-aware mobile routing: when should notifications reach mobile devices?
+// @ts-ignore TS1294
+export enum MobileRoutingMode {
+  WHEN_DESKTOP_INACTIVE = "WHEN_DESKTOP_INACTIVE",
+  ALWAYS = "ALWAYS",
+}
+
 // @ts-ignore TS1294
 export enum CanvasVisibility {
   PUBLIC = 'PUBLIC',

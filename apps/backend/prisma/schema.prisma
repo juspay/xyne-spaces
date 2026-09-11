@@ -931,6 +931,8 @@ model UserPreference {
   enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   allowThreadBroadcastMentions Boolean @default(false) // Allow @channel/@here in thread replies
   showThreadTags           Boolean  @default(false) // Render thread classification chips in chat; opt-in
+  mobileRoutingMode            String   @default("WHEN_DESKTOP_INACTIVE") // When to route notifications to mobile (WHEN_DESKTOP_INACTIVE | ALWAYS)
+  desktopInactivityThresholdMinutes Int  @default(5) // Minutes of desktop inactivity before mobile notifications resume
 
   // Global notification settings
   globalDesktopNotificationLevel  String?            // Default level for all channels (desktop)

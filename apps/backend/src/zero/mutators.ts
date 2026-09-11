@@ -12,6 +12,7 @@ import {
   CallOrigin,
   InvitationResponse,
   MeetingStatus,
+  MobileRoutingMode,
   NotificationLevel,
   Schema,
   ChannelScopeType,
@@ -15970,6 +15971,49 @@ export function createMutators(
               channelWideMentionsEnabled: true,
               notificationKeywords: '[]',
               showThreadTags: false,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setMobileRoutingPreference: defineMutator(
+        z.object({
+          id: z.string(),
+          mobileRoutingMode: z.nativeEnum(MobileRoutingMode).optional(),
+          desktopInactivityThresholdMinutes: z.number().int().min(1).max(120).optional(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, mobileRoutingMode, desktopInactivityThresholdMinutes, timestamp } }) => {
+          const fields = {
+            ...(mobileRoutingMode !== undefined && { mobileRoutingMode }),
+            ...(desktopInactivityThresholdMinutes !== undefined && { desktopInactivityThresholdMinutes }),
+          };
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              ...fields,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              workspaceId: authData.workspaceId,
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage: true,
+              allowThreadBroadcastMentions: false,
+              globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+              threadReplyNotificationsEnabled: true,
+              channelWideMentionsEnabled: true,
+              notificationKeywords: '[]',
+              showThreadTags: false,
+              mobileRoutingMode: mobileRoutingMode ?? MobileRoutingMode.WHEN_DESKTOP_INACTIVE,
+              desktopInactivityThresholdMinutes: desktopInactivityThresholdMinutes ?? 5,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
