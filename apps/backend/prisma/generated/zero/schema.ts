@@ -262,6 +262,8 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -296,6 +298,8 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
   })
   .primaryKey("id");
 
@@ -769,6 +773,7 @@ export const pullRequestsTable = table("pull_requests")
 export const commitTable = table("commits")
   .columns({
     id: string(),
+    workspaceId: string(),
     commitSha: string(),
     pullRequestId: string(),
     agentSlug: string().optional(),
