@@ -959,12 +959,16 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    // Commit analysis queue worker (enabled only on generic worker pods)
+    // Commit analysis queue (producer only — messages are enqueued from webhook handlers)
+    logger.info('Initializing commit analysis queue (producer)...');
+    await commitAnalysisQueue.initialize();
+
+    // Start worker/consumer only on worker pods
     if (config.enableCommitAnalysisWorker) {
-      logger.info('Initializing commit analysis queue worker...');
-      await commitAnalysisQueue.initialize();
+      logger.info('Starting commit analysis queue worker (consumer)...');
+      await commitAnalysisQueue.startWorker();
     } else {
-      logger.info('Commit analysis queue worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false)');
+      logger.info('Commit analysis worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false) - producer only');
     }
 
     logger.info('Initializing SDLC queue (producer)...');

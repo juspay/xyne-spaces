@@ -48,17 +48,28 @@ class CommitAnalysisQueue {
         },
       });
 
-      this.setupProcessor();
       this.setupEventListeners();
 
       this.isInitialized = true;
-      logger.info('[COMMIT-ANALYSIS] CommitAnalysisQueue initialized successfully');
+      logger.info('[COMMIT-ANALYSIS] CommitAnalysisQueue initialized successfully (producer)');
     } catch (error) {
       logger.error('[COMMIT-ANALYSIS] Failed to initialize commit analysis queue:', error);
       this.isInitialized = false;
     } finally {
       this.isInitializing = false;
     }
+  }
+
+  /**
+   * Start the worker/consumer (call only on worker pods)
+   */
+  async startWorker(): Promise<void> {
+    if (!this.queue) {
+      throw new Error('[COMMIT-ANALYSIS] Queue not initialized. Call initialize() first.');
+    }
+
+    this.setupProcessor();
+    logger.info('[COMMIT-ANALYSIS] Worker started (consumer)');
   }
 
   private setupProcessor(): void {
