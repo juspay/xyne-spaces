@@ -1,3 +1,10 @@
+## [1.316.4](https://github.com/juspay/xyne-spaces/compare/v1.316.3...v1.316.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* multi bundle handling for dashboard ([#1790](https://github.com/juspay/xyne-spaces/issues/1790)) ([07824f2](https://github.com/juspay/xyne-spaces/commit/07824f264e94b0555e10a73bfce0874486c57288))
+
 ## [1.316.3](https://github.com/juspay/xyne-spaces/compare/v1.316.2...v1.316.3) (2026-09-11)
 
 
