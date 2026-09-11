@@ -102,6 +102,11 @@ export const sdlcConversationOwner = memoize(
   (conversationId: string) => resolveInheritedOwner(db, conversationId),
 );
 
+export const sdlcFolderTrackId = memoize(
+  (folderId: string) => folderId,
+  (folderId: string) => resolveFolderTrackId(db, folderId),
+);
+
 export const sdlcConversationTicket = memoize(
   (conversationId: string) => conversationId,
   async (conversationId: string): Promise<string | null> =>
