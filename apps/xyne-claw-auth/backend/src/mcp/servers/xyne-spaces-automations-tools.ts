@@ -305,7 +305,7 @@ const automationsListRuns: ToolDef = {
       status: {
         type: ["string", "null"],
         description:
-          "Filter by run status, e.g. PENDING, RUNNING, SUCCESS, FAILED, CANCELLED, EXTERNAL_WAIT, SKIPPED.",
+          "Filter by run status, e.g. PENDING, RUNNING, COMPLETED, FAILED, CANCELLED, EXTERNAL_WAIT, SKIPPED.",
       },
       from: {
         type: ["integer", "null"],
