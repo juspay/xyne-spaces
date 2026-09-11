@@ -57,6 +57,38 @@ const ARTIFACT_TYPE_FOLDERS = {
 
 export type SdlcArtifactType = keyof typeof ARTIFACT_TYPE_FOLDERS;
 
+/**
+ * Repo Knowledge is standing context, not a report: `sdlcAskAiContext.ts` pastes
+ * every document into the prompt of every SDLC agent call for the hub. That is what
+ * makes durability and brevity the whole job, so the policy says it outright.
+ */
+const REPO_KNOWLEDGE_POLICY = `This document is standing context. The SDLC agent receives it verbatim, ahead of
+the user's question, on every request about this hub. Write for an agent that has
+not seen the code, is about to act on it, and pays for every token you spend.
+
+Prefer what stays true. Module boundaries, entry points, where a kind of thing
+lives, the conventions a change has to follow, the invariants that bite — those
+survive ordinary commits. Line numbers, file counts, version strings and "N of M
+done" do not; leave them out.
+
+Ground every claim in the repository and cite the path or symbol that proves it.
+Name the few files that orient someone rather than listing many: a reader should
+come away knowing where to look, not holding an inventory. Skip generated code,
+vendored dependencies and trivial helpers.
+
+Where a Wiki page already covers something, point at it and say how fresh it is
+instead of restating it. If something does not exist in this hub, say so in one
+line with the evidence rather than inventing a plausible section.`;
+
+/**
+ * Standing instructions per type, prepended to the step's own task. Here rather
+ * than baked into the seeded task so an admin cannot edit them away, and a step
+ * added by hand gets them too. A new type brings its own entry.
+ */
+const ARTIFACT_TYPE_POLICY: Record<SdlcArtifactType, string> = {
+  'Repo Knowledge': REPO_KNOWLEDGE_POLICY,
+};
+
 /** Tuple, not Object.keys: z.enum needs the literals to type the field. */
 const ARTIFACT_TYPES = ['Repo Knowledge'] as const satisfies readonly SdlcArtifactType[];
 
@@ -204,6 +236,8 @@ function buildArtifactTask(
   task: string,
 ): string {
   const parts = [
+    ARTIFACT_TYPE_POLICY[cfg.artifactType],
+    '',
     task,
     '',
     '---',

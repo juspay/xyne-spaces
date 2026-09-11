@@ -11,18 +11,6 @@ import type { SdlcActor } from './types';
 
 const WORKFLOW_NAME = 'Generate Repo Knowledge';
 
-// Inlined per step rather than a `{{vars.policy}}` variable: the builder's
-// isRefBroken only whitelists `trigger` and step ids, so `vars` shows as a broken
-// reference on every step.
-const WRITING_POLICY = `You are writing reference documentation for an SDLC hub.
-
-Ground every claim in the repository. Cite the paths and symbols a reader needs to
-verify it, and prefer naming the few files that orient someone over listing many.
-Skip generated code, vendored dependencies and trivial helpers. Where an existing
-Wiki page already covers something, point at it instead of restating it, and say
-how fresh that page is. If something does not exist in this hub, say so in one
-line with the evidence, rather than inventing a plausible section.`;
-
 /** Workspace-level parent every hub folder hangs under. */
 function sdlcRootFolderId(workspaceId: string): string {
   return `sdlc-${workspaceId}`;
@@ -43,7 +31,8 @@ function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
         title: section.title,
         instructions: section.instructions,
       })),
-      task: `${WRITING_POLICY}\n\n${definition.instructions}`,
+      // The type's standing policy is prepended by the step at dispatch.
+      task: definition.instructions,
       outputType: 'json',
       outputSchema: {
         type: 'object',
