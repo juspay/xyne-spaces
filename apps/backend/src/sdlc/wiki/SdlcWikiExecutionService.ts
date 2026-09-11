@@ -12,7 +12,7 @@ import {
 } from '@/services/clawAgentService';
 import { logger } from '@/utils/logger';
 import { resolveSdlcChannelId } from '../sdlcChannelMembership';
-import { SdlcBaselineReconciliationService } from '../SdlcBaselineReconciliationService';
+import { triggerHubKnowledgeRun } from '../triggerHubKnowledgeRun';
 import { sdlcAgentContext, type SdlcWikiAgentRole } from '../SdlcAgentContextService';
 import {
   newSdlcClawDeadline,
@@ -76,11 +76,10 @@ export class SdlcWikiExecutionService {
         this.prisma
       ).contentAudit(input);
     },
-    private readonly queueBaselineReconciliation: (
+    private readonly refreshHubKnowledge: (
       repoId: string,
-      wikiExecutionId: string
-    ) => Promise<string | null> = (repoId, wikiExecutionId) =>
-      new SdlcBaselineReconciliationService(this.prisma).queueAfterWiki(repoId, wikiExecutionId)
+      actorUserId: string
+    ) => Promise<string | null> = triggerHubKnowledgeRun
   ) {}
 
   async dispatch(executionId: string, admissionPermitId: string): Promise<boolean> {
@@ -976,14 +975,12 @@ export class SdlcWikiExecutionService {
       return true;
     });
     if (!completed) return;
-    try {
-      await this.queueBaselineReconciliation(context.repoId, executionId);
-    } catch (error) {
-      logger.error('[SDLC-WIKI] knowledge reconciliation dispatch failed', {
-        repoId: context.repoId,
-        wikiExecutionId: executionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    const execution = await this.prisma.workflowExecution.findUnique({
+      where: { id: executionId },
+      select: { createdBy: true },
+    });
+    if (execution?.createdBy) {
+      await this.refreshHubKnowledge(context.repoId, execution.createdBy);
     }
   }
 

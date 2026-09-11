@@ -1,6 +1,5 @@
 import { createHash } from 'crypto';
 import {
-  isBaselineCanvasType,
   parseSdlcSourcePaths,
   parseSdlcSourceReferences,
   sdlcRepoIds,
@@ -71,7 +70,7 @@ function artifactKindForCanvasType(
 ): ResolvedArtifact['artifactKind'] | null {
   if (!artifactType) return null;
   if (artifactType === 'WIKI') return 'WIKI';
-  return isBaselineCanvasType(artifactType) ? 'BASELINE' : 'ARTIFACT';
+  return 'ARTIFACT';
 }
 
 function shortCommitRef(commitSha: string): string {

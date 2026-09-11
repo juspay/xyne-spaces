@@ -5,10 +5,11 @@ import {
   GuestEntity,
   CanvasRole,
   ChannelRole,
+  ChannelType,
   WorkspaceRole,
   CanvasVisibility,
+  SDLC_REPO_KNOWLEDGE_FOLDER,
 } from '@xyne/shared';
-import { isBaselineCanvasType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -228,7 +229,22 @@ class CanvasAuthService {
 
       const isCreator = canvas.createdBy === userId;
       const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
-      const isSdlcBaseline = isBaselineCanvasType(canvas.sdlcArtifact?.artifactType);
+      // Repo Knowledge is identified by its folder, not by an artifact type — the
+      // documents are ordinary artifacts now. Legacy rows still carry the old
+      // baseline type and sit in the same folder, so both resolve here. The channel
+      // type is part of the test: the folder name alone is not owned by SDLC.
+      const isSdlcBaseline = canvas.folderId
+        ? Boolean(
+            await dbClient.canvasFolder.findFirst({
+              where: {
+                id: canvas.folderId,
+                name: SDLC_REPO_KNOWLEDGE_FOLDER,
+                channel: { type: ChannelType.SDLC },
+              },
+              select: { id: true },
+            })
+          )
+        : false;
       const isSdlcBaselineChannelAdmin = Boolean(
         isSdlcBaseline &&
         canvas.channelId &&

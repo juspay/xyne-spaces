@@ -12,13 +12,11 @@ import {
 } from 'react';
 import {
   ChannelRole,
-  isBaselineCanvasType,
-  SDLC_BASELINE_COUNT,
   SDLC_ENTITY_TYPES,
   SDLC_RELATION_TYPES,
+  SDLC_REPO_KNOWLEDGE_FOLDER,
   type SdlcEntityType,
   type SdlcRelationType,
-  type SdlcSetupStatus,
   type SdlcCallLink,
   SDLC_TRACK_FLAT_RELATION,
   TicketStatusV2,
@@ -30,7 +28,6 @@ import {
   ArrowRight,
   BookOpen,
   Boxes,
-  Bug,
   Check,
   ChevronDown,
   ChevronRight,
@@ -55,6 +52,7 @@ import {
   Sparkles,
   SquareArrowOutUpRight,
   Users,
+  Workflow,
   X,
 } from 'lucide-react';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
@@ -119,6 +117,7 @@ import {
   type SdlcWikiStartInput,
 } from './SdlcWikiSection';
 import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
+import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import {
@@ -150,15 +149,14 @@ import {
 import { type SdlcTicket } from './ticketPolicy';
 import { linkedTicketIds } from './artifactTicketPolicy';
 import {
-  canDebugRepoKnowledge,
-  isRepoKnowledgeRunning,
+  CANCEL_REPO_KNOWLEDGE,
+  type RepoKnowledgePhase,
+  RUN_REPO_KNOWLEDGE,
   repoKnowledgeAction,
-  repoKnowledgeControl,
   repoKnowledgeState,
-  type RepoKnowledgeControl,
 } from './repoKnowledgePolicy';
 
-type Section = 'overview' | 'wiki' | 'baseline' | 'tracks' | 'tickets' | 'artifacts';
+type Section = 'overview' | 'wiki' | 'baseline' | 'tracks' | 'tickets' | 'artifacts' | 'workflows';
 
 const StableCanvasScreen = memo(CanvasScreen);
 
@@ -174,6 +172,7 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'wiki', label: 'Wiki', icon: BookOpen },
   { id: 'baseline', label: 'Repo Knowledge', icon: ShieldCheck },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
+  { id: 'workflows', label: 'Workflows', icon: Workflow },
 ];
 
 function sizeNameFieldToText(input: HTMLInputElement): void {
@@ -219,16 +218,6 @@ const SECTION_IDS: ReadonlySet<string> = new Set<string>([
   'tracks',
 ]);
 
-const BASELINE_LABELS: Record<string, string> = {
-  CORE_CODE_MAP: 'Core Code Map',
-  FRONTEND_DESIGN_SYSTEM: 'Frontend Design System',
-  BACKEND_DESIGN_SYSTEM: 'Backend Design System',
-  CODE_LINT_STANDARDS: 'Code & Lint Standards',
-  COMMIT_STANDARDS: 'Commit Standards',
-  RUN_GUIDE: 'Run Guide',
-  TEST_GUIDE: 'Test Guide',
-};
-
 const EMPTY_CONTEXT_SELECTIONS: ContextSelections = {
   channels: [],
   tickets: [],
@@ -237,7 +226,7 @@ const EMPTY_CONTEXT_SELECTIONS: ContextSelections = {
   recordings: [],
 };
 
-function setupUpdatedAtLabel(value?: number): string {
+function updatedAtLabel(value?: number): string {
   if (typeof value !== 'number') return 'Not updated yet';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 'Update time unavailable' : date.toLocaleString();
@@ -256,16 +245,24 @@ export default function SdlcScreen(): ReactElement {
     workspaceId,
     channelId,
     section: routeSection,
+    '*': workflowsSplat,
   } = useParams<{
     workspaceId?: string;
     channelId?: string;
     section?: string;
+    '*'?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuthContextValues();
+  // The workflows route is a splat, which outranks `:section` and names its param
+  // `*`, so on /sdlc/:channelId/workflows there is no `section` param to read.
   const section: Section = (
-    routeSection && SECTION_IDS.has(routeSection) ? routeSection : 'overview'
+    routeSection && SECTION_IDS.has(routeSection)
+      ? routeSection
+      : workflowsSplat !== undefined
+        ? 'workflows'
+        : 'overview'
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const [channels] = useCachedQuery(queries.getSdlcChannels());
@@ -440,6 +437,14 @@ export default function SdlcScreen(): ReactElement {
     if (!channel) return [];
     return (channel.canvasFolders ?? []).flatMap(folder => folder.canvases ?? []);
   }, [channel]);
+  // The Repo Knowledge folder is the artifact type; documents in it are no longer
+  // distinguished by a baselineKind enum.
+  const knowledgeFolderId = useMemo(
+    () =>
+      (channel?.canvasFolders ?? []).find(folder => folder.name === SDLC_REPO_KNOWLEDGE_FOLDER)
+        ?.id ?? null,
+    [channel],
+  );
   const selectedCanvasId = routeSearchParams.get('canvas');
   const selectedCanvas = canvases.find(canvas => canvas.id === selectedCanvasId);
   const [trackRows] = useCachedQuery(queries.getSdlcTracks({ channelId: channelId || '' }), {
@@ -513,12 +518,10 @@ export default function SdlcScreen(): ReactElement {
     refetchOnMount: 'always',
     refetchInterval: query => {
       const phase = query.state.data?.phase;
-      const knowledgePhase = query.state.data?.knowledge?.phase;
-      return (phase &&
+      return phase &&
         ['QUEUED', 'PREPARING', 'BOOTSTRAPPING', 'PROCESSING', 'VALIDATING', 'CORRECTING'].includes(
           phase,
-        )) ||
-        (knowledgePhase && ['QUEUED', 'GENERATING'].includes(knowledgePhase))
+        )
         ? 2_000
         : false;
     },
@@ -542,17 +545,13 @@ export default function SdlcScreen(): ReactElement {
   );
   const baseline = useMemo(
     () =>
-      canvases.filter(
-        canvas =>
-          isBaselineCanvasType(canvas.sdlcArtifact?.artifactType) &&
-          canvas.sdlcArtifact?.artifactStatus !== 'REFRESH_CANDIDATE',
-      ),
-    [canvases],
+      knowledgeFolderId ? canvases.filter(canvas => canvas.folderId === knowledgeFolderId) : [],
+    [canvases, knowledgeFolderId],
   );
   const baselineSidebarPages = useMemo<SdlcWikiPage[]>(
     () =>
       baseline.map(canvas => {
-        const title = BASELINE_LABELS[canvas.sdlcArtifact?.artifactType ?? ''] || canvas.title;
+        const title = canvas.title;
         return {
           canvasId: canvas.id,
           title,
@@ -885,19 +884,18 @@ export default function SdlcScreen(): ReactElement {
     return null;
   }, [activeFolderDiscussion, discussionOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
-  const state = repoKnowledgeState(repo ? repo.setupExecution : null);
-  const setupRunning = isRepoKnowledgeRunning(state.phase);
+  const [hubWorkflowLink] = useCachedQuery(
+    queries.getSdlcHubWorkflow({ channelId: channelId || '' }),
+    { enabled: Boolean(channelId) },
+  );
+  const state = repoKnowledgeState({
+    workflowId: hubWorkflowLink?.workflow?.id ?? null,
+    runs: hubWorkflowLink?.workflow?.workflowExecutions ?? null,
+  });
+  const knowledgeRunning = state.phase === 'RUNNING';
 
   useEffect(() => {
     if (!repoId || externalDebuggerTarget?.repoId !== repoId) return;
-    if (repo && externalDebuggerTarget.executionId === repo.setupExecution?.id) {
-      updateExternalDebugger(repoId, {
-        conversationId: state.conversationId || externalDebuggerTarget.conversationId,
-        sessionId: state.sessionId || externalDebuggerTarget.sessionId,
-        running: setupRunning,
-      });
-      return;
-    }
     if (wikiRunQuery.data && externalDebuggerTarget.executionId === wikiRunQuery.data.executionId) {
       updateExternalDebugger(repoId, {
         conversationId: wikiRunQuery.data.conversationId || externalDebuggerTarget.conversationId,
@@ -913,16 +911,7 @@ export default function SdlcScreen(): ReactElement {
       });
       return;
     }
-  }, [
-    externalDebuggerTarget,
-    repo,
-    repoId,
-    setupRunning,
-    state.conversationId,
-    state.sessionId,
-    updateExternalDebugger,
-    wikiRunQuery.data,
-  ]);
+  }, [externalDebuggerTarget, repoId, updateExternalDebugger, wikiRunQuery.data]);
 
   const readyCount = new Set(
     baseline
@@ -1011,15 +1000,20 @@ export default function SdlcScreen(): ReactElement {
     callWikiAction('wiki-generate', 'generate', input, 'Wiki generation started');
   const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
     callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
-  const runKnowledgeControl = (control: RepoKnowledgeControl): Promise<void> => {
-    const action = repoKnowledgeAction(control);
-    return call(
-      action.key,
-      () => apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`),
-      action.success,
+  // The workflow surface owns run control, so these go straight to it rather than
+  // through an SDLC endpoint that would only forward them.
+  const runKnowledge = (): Promise<void> =>
+    call(
+      RUN_REPO_KNOWLEDGE.key,
+      () => apiInstance.post(`/workflows-v2/workflows/${state.workflowId!}/trigger`, {}),
+      RUN_REPO_KNOWLEDGE.success,
     );
-  };
-  const retryKnowledge = (): Promise<void> => runKnowledgeControl('RETRY');
+  const cancelKnowledge = (): Promise<void> =>
+    call(
+      CANCEL_REPO_KNOWLEDGE.key,
+      () => apiInstance.post(`/workflows-v2/executions/${state.runId!}/cancel`, {}),
+      CANCEL_REPO_KNOWLEDGE.success,
+    );
   const callWikiExecutionAction = (action: 'retry' | 'cancel', success: string): Promise<void> => {
     const executionId = wikiRunQuery.data?.executionId;
     if (!executionId) return Promise.resolve();
@@ -1039,7 +1033,6 @@ export default function SdlcScreen(): ReactElement {
   };
   const retryWiki = (): Promise<void> => callWikiExecutionAction('retry', 'Wiki run resumed');
   const cancelWiki = (): Promise<void> => callWikiExecutionAction('cancel', 'Wiki run cancelled');
-  const selectedKnowledgeControl = repoKnowledgeControl(state.phase);
 
   const navigateWithinSdlc = useCallback(
     (pathname: string, destinationSearch = ''): void => {
@@ -1259,67 +1252,23 @@ export default function SdlcScreen(): ReactElement {
 
   const renderRepoKnowledgeControls = (compact = false): ReactElement | undefined => {
     if (!isAdmin || !repo) return undefined;
-    const controlPresentation = {
-      GENERATE: {
-        icon: Rocket,
-        variant: 'default' as const,
-      },
-      CANCEL: {
-        icon: X,
-        variant: 'destructive' as const,
-      },
-      RETRY: {
-        icon: RefreshCw,
-        variant: 'default' as const,
-      },
-      REFRESH: {
-        icon: RefreshCw,
-        variant: 'default' as const,
-      },
-    }[selectedKnowledgeControl];
-    const action = repoKnowledgeAction(selectedKnowledgeControl);
-    const Icon = controlPresentation.icon;
-    const debugAvailable = canDebugRepoKnowledge({
-      isAdmin,
-      executionId: repo.setupExecution?.id,
-      conversationId: state.conversationId,
-    });
-    const requiresReadAccess =
-      selectedKnowledgeControl === 'GENERATE' || selectedKnowledgeControl === 'REFRESH';
+    // A hub whose workflow was never seeded has nothing to run. The backfill
+    // endpoint gives it one; showing a dead button would just fail on click.
+    if (state.phase === 'NOT_CONFIGURED') return undefined;
+
+    const action = repoKnowledgeAction(state.phase);
+    const Icon = knowledgeRunning ? X : state.phase === 'NOT_STARTED' ? Rocket : RefreshCw;
 
     return (
       <div className='flex items-center gap-2'>
-        {debugAvailable && (
-          <Button
-            variant='ghost'
-            size='iconSm'
-            className='text-muted-foreground'
-            title='Debug generation'
-            aria-label='Debug generation'
-            data-track-category='SdlcHub'
-            data-track-name='RepoKnowledgeDebuggerOpened'
-            onClick={() => {
-              openSdlcDebugger({
-                source: 'sdlc',
-                repoId: repo.id,
-                executionId: repo.setupExecution!.id,
-                conversationId: state.conversationId!,
-                sessionId: state.sessionId || null,
-                running: setupRunning,
-              });
-            }}
-          >
-            <Bug />
-          </Button>
-        )}
         <Button
           size={compact ? 'sm' : 'default'}
-          variant={controlPresentation.variant}
+          variant={knowledgeRunning ? 'destructive' : 'default'}
           loading={busy === action.key}
-          disabled={busy !== null || (requiresReadAccess && !readReady)}
-          onClick={() => void runKnowledgeControl(selectedKnowledgeControl)}
+          disabled={busy !== null || (!knowledgeRunning && !readReady)}
+          onClick={() => void (knowledgeRunning ? cancelKnowledge() : runKnowledge())}
           data-track-category='SdlcHub'
-          data-track-name={`RepoKnowledge${selectedKnowledgeControl}Clicked`}
+          data-track-name={`RepoKnowledge${knowledgeRunning ? 'Cancel' : 'Run'}Clicked`}
         >
           <Icon size={compact ? 14 : 16} />
           {action.label}
@@ -2881,17 +2830,18 @@ export default function SdlcScreen(): ReactElement {
                               Create and approve repository guides used by SDLC Assistant.
                             </p>
                             <p className='mt-2 text-xs text-muted-foreground'>
-                              {state.currentBaselineKind
-                                ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
-                                : 'No document currently running'}
+                              {state.phase === 'NOT_CONFIGURED'
+                                ? 'No workflow configured for this hub yet'
+                                : state.phase === 'RUNNING'
+                                  ? 'Generation in progress'
+                                  : `${readyCount} document${readyCount === 1 ? '' : 's'} ready`}
                               {' · '}
-                              {state.completedCount}/{SDLC_BASELINE_COUNT} generated
-                              {' · '}
-                              Updated {setupUpdatedAtLabel(state.updatedAt)}
+                              Updated {updatedAtLabel(state.updatedAt)}
                             </p>
-                            {state.error && (
+                            {state.phase === 'FAILED' && (
                               <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-                                {state.error}
+                                The last run did not finish. Open the Workflows tab for the failing
+                                step, or run it again.
                               </p>
                             )}
                           </div>
@@ -2909,7 +2859,7 @@ export default function SdlcScreen(): ReactElement {
                       <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
                         <Metric
                           label='Repo Knowledge ready'
-                          value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
+                          value={String(readyCount)}
                           icon={ShieldCheck}
                         />
                         <Metric
@@ -2968,13 +2918,9 @@ export default function SdlcScreen(): ReactElement {
                                   </span>
                                 )}
                               </div>
-                              <h3 className='mt-4 font-semibold'>
-                                {BASELINE_LABELS[canvas.sdlcArtifact?.artifactType ?? ''] ||
-                                  canvas.title}
-                              </h3>
+                              <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
                               <p className='mt-1 text-xs text-muted-foreground'>
-                                Updated{' '}
-                                {setupUpdatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
+                                Updated {updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
                                 {' · '}
                                 {typeof canvas.sdlcArtifact?.generationCommit === 'string'
                                   ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
@@ -2991,7 +2937,7 @@ export default function SdlcScreen(): ReactElement {
                         {baseline.length === 0 && (
                           <EmptyCard
                             text={
-                              setupRunning
+                              knowledgeRunning
                                 ? 'Repo Knowledge generation is in progress.'
                                 : 'Generate Repo Knowledge directly from the repository.'
                             }
@@ -3016,7 +2962,6 @@ export default function SdlcScreen(): ReactElement {
                       onGenerate={generateWiki}
                       onRefresh={refreshWiki}
                       onRetryRun={retryWiki}
-                      onRetryKnowledge={retryKnowledge}
                       onCancelRun={cancelWiki}
                       onDebugRun={() => {
                         const run = wikiRunQuery.data;
@@ -3049,6 +2994,11 @@ export default function SdlcScreen(): ReactElement {
                   {section === 'tickets' && repo.channelId && (
                     <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
                       <KanbanBoardScreen channelId={repo.channelId} />
+                    </div>
+                  )}
+                  {section === 'workflows' && (
+                    <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
+                      <SdlcWorkflowsSection />
                     </div>
                   )}
                 </div>
@@ -4007,20 +3957,13 @@ function Metric({
   );
 }
 
-function StatusPill({ phase }: { phase: SdlcSetupStatus }): ReactElement {
-  const running = [
-    'QUEUED',
-    'CLONING',
-    'GENERATING',
-    'RUNNING',
-    'IMPLEMENTING',
-    'PUSHING',
-  ].includes(phase);
+function StatusPill({ phase }: { phase: RepoKnowledgePhase }): ReactElement {
+  const running = phase === 'RUNNING';
   return (
     <span
       className={cn(
         'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium',
-        phase === 'PARTIALLY_FAILED' || phase === 'CANCELLED'
+        phase === 'FAILED'
           ? 'border-destructive/30 bg-destructive/10 text-destructive'
           : 'bg-background',
       )}

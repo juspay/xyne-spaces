@@ -1,5 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z } from 'zod';
 import {
+  AccessType,
   addSdlcChannelRepositoriesSchema,
   attachSdlcRepositorySchema,
   createSdlcChannelSchema,
@@ -10,7 +12,14 @@ import {
   startSdlcWikiRunSchema,
   refreshSdlcWikiRunSchema,
 } from '@xyne/shared';
+import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
+import { logger } from '@/utils/logger';
+import {
+  backfillHubWorkflows,
+  resetHubWorkflows,
+  seedHubWorkflow,
+} from '@/sdlc/seedHubWorkflow';
 import { sdlcQueue } from '@/queues/sdlcQueue';
 import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
@@ -34,6 +43,12 @@ function actorFromRequest(req: Request): SdlcActor {
   return { userId, workspaceId };
 }
 
+const hubWorkflowScopeSchema = z.object({ channelId: z.string().min(1).optional() });
+
+function channelIdFromBody(req: Request): string | undefined {
+  return hubWorkflowScopeSchema.parse(req.body ?? {}).channelId;
+}
+
 function route(
   handler: (req: Request, res: Response) => Promise<void>
 ): (req: Request, res: Response, next: NextFunction) => void {
@@ -55,8 +70,42 @@ router.post(
   '/channels',
   route(async (req, res) => {
     const input = createSdlcChannelSchema.parse(req.body);
-    const channel = await sdlcHub.createChannel(actorFromRequest(req), input);
+    const actor = actorFromRequest(req);
+    const channel = await sdlcHub.createChannel(actor, input);
+    // Outside the transaction: createWorkflow uses the SDK's own adapter. A failure
+    // here still leaves a usable hub — the backfill endpoint gives it a workflow later.
+    try {
+      await seedHubWorkflow(actor, channel.id);
+    } catch (error) {
+      logger.error(`[SDLC] failed to seed workflow for hub ${channel.id}`, error);
+    }
     res.status(201).json({ success: true, channel });
+  })
+);
+
+// Workspace-wide, so gated on SDLC admin rather than the per-hub requireChannelRole
+// used everywhere else here. Optional `channelId` narrows either to one hub.
+router.post(
+  '/admin/backfill-workflows',
+  authorize('SDLC', AccessType.ADMIN),
+  route(async (req, res) => {
+    res.status(200).json({
+      success: true,
+      ...(await backfillHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+    });
+  })
+);
+
+// Separate endpoint, not a flag: this overwrites an admin's builder edits, so it must
+// not be reachable by mistyping the safe call.
+router.post(
+  '/admin/reset-workflows',
+  authorize('SDLC', AccessType.ADMIN),
+  route(async (req, res) => {
+    res.status(200).json({
+      success: true,
+      ...(await resetHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+    });
   })
 );
 
@@ -149,8 +198,6 @@ router.get(
         canonicalUrl: true,
         baseBranch: true,
         accessCapabilities: true,
-        sdlcSetupExecutionId: true,
-        setupExecution: { select: { id: true, status: true, context: true, updatedAt: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -185,14 +232,6 @@ router.post(
       input
     );
     res.status(200).json({ success: true, ...result });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup',
-  route(async (req, res) => {
-    const execution = await sdlcHub.setupRepository(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
   })
 );
 
@@ -277,30 +316,6 @@ router.post(
       req.params.executionId
     );
     res.status(200).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/retry',
-  route(async (req, res) => {
-    const execution = await sdlcHub.retrySetup(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/refresh',
-  route(async (req, res) => {
-    const execution = await sdlcHub.refreshSetup(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/cancel',
-  route(async (req, res) => {
-    const execution = await sdlcHub.cancelSetup(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, execution });
   })
 );
 

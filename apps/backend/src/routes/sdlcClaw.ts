@@ -7,7 +7,6 @@ import {
   createSdlcTrackSchema,
   createSdlcArtifactTypeSchema,
   renameSdlcArtifactTypeSchema,
-  updateSdlcBaselineDraftSchema,
   updateSdlcClawArtifactSchema,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
@@ -164,18 +163,6 @@ router.post(
   route(async (req, res) => {
     const input = updateSdlcClawArtifactSchema.parse(req.body);
     const artifact = await sdlcHub.updateArtifactFromClaw(await actorFromRequest(req), input);
-    res.status(200).json({ success: true, artifact });
-  }),
-);
-
-router.post(
-  '/baseline-drafts',
-  route(async (req, res) => {
-    const input = updateSdlcBaselineDraftSchema.parse(req.body);
-    const artifact = await sdlcHub.updateBaselineDraftFromClaw(
-      await actorFromRequest(req),
-      input
-    );
     res.status(200).json({ success: true, artifact });
   }),
 );

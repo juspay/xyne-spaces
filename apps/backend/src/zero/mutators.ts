@@ -125,7 +125,7 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
-import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
+import { SDLC_REPO_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -9971,10 +9971,10 @@ export function createMutators(
               (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
             guestSharedRole === CanvasRole.EDITOR ||
             guestSharedRole === CanvasRole.OWNER;
-          const sdlcArtifact = await tx.run(
-            zql.sdlc_artifacts.where('artifactId', params.id).one(),
-          );
-          const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
+          const canvasFolder = canvas.folderId
+            ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
+            : null;
+          const isSdlcBaseline = canvasFolder?.name === SDLC_REPO_KNOWLEDGE_FOLDER;
 
           if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
             throw new Error('You do not have permission to edit this canvas');

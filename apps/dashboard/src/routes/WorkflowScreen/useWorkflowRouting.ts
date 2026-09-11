@@ -12,7 +12,7 @@ type WorkflowAppProps = Parameters<typeof WorkflowApp>[0];
  */
 type WorkflowSearch = NonNullable<Parameters<WorkflowAppProps['onNavigate']>[1]>;
 
-interface WorkflowRouting {
+export interface WorkflowRouting {
   /** Sub-path below the /workflows mount — '', 'w/<id>', 'runs/<id>', 'folder/<id>'… */
   path: string;
   search: WorkflowAppProps['search'];
@@ -28,8 +28,11 @@ interface WorkflowRouting {
  * `/:workspaceId`, so a bare `/workflows/w/123` is parsed with `workflows` as the
  * workspace segment and lands nowhere. Every path has to be re-prefixed, the same way
  * AppSidebar's `prefixWs` does.
+ *
+ * `base` overrides that prefix for a second mount of the same UI — see
+ * SdlcScreen/useSdlcWorkflowRouting.
  */
-export const useWorkflowRouting = (): WorkflowRouting => {
+export const useWorkflowRouting = (base?: string): WorkflowRouting => {
   const params = useParams<{ workspaceId?: string; '*'?: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -39,11 +42,11 @@ export const useWorkflowRouting = (): WorkflowRouting => {
 
   const go = useCallback(
     (path: string, search?: WorkflowSearch, replace?: boolean) => {
-      const base = workspaceId ? `/${workspaceId}/workflows` : '/workflows';
+      const prefix = base ?? (workspaceId ? `/${workspaceId}/workflows` : '/workflows');
       const query = search?.view ? `?view=${search.view}` : '';
-      void navigate(`${base}/${path}${query}`, { replace: replace ?? false });
+      void navigate(`${prefix}/${path}${query}`, { replace: replace ?? false });
     },
-    [navigate, workspaceId],
+    [navigate, workspaceId, base],
   );
 
   return {

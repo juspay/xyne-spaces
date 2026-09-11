@@ -1,8 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
-  SDLC_BASELINE_COUNT,
-  type SdlcBaselineKind,
-  type SdlcSetupStatus,
   type RefreshSdlcWikiRunInput,
   type SdlcWikiRunProgress,
   type StartSdlcWikiRunInput,
@@ -42,13 +39,6 @@ export interface SdlcWikiRunStatus extends SdlcWikiRunProgress {
   sessionId: string | null;
   createdAt: string;
   updatedAt: string;
-  knowledge: {
-    executionId: string;
-    phase: SdlcSetupStatus | string;
-    completedCount: number;
-    totalCount: number;
-    error: string | null;
-  } | null;
 }
 
 export interface SdlcWikiPipeline {
@@ -257,44 +247,13 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
     await this.requireRepository(actor, repoId, false);
     const latest = await this.latestRun(repoId);
     if (!latest) return null;
-    const status = this.statusFromExecution(
+    return this.statusFromExecution(
       latest.execution.id,
       latest.execution.createdAt,
       latest.execution.updatedAt,
       latest.context,
       latest.execution.status
     );
-    const repo = await this.prisma.repo.findUnique({
-      where: { id: repoId },
-      select: { sdlcSetupExecutionId: true },
-    });
-    if (!repo?.sdlcSetupExecutionId) return status;
-    const knowledgeExecution = await this.prisma.workflowExecution.findUnique({
-      where: { id: repo.sdlcSetupExecutionId },
-      select: { id: true, context: true },
-    });
-    if (!knowledgeExecution?.context) return status;
-    try {
-      const context = JSON.parse(knowledgeExecution.context) as Record<string, unknown>;
-      if (context.parentWikiExecutionId !== latest.execution.id) return status;
-      const completed = Array.isArray(context.completedBaselineKinds)
-        ? context.completedBaselineKinds.filter(
-            (value): value is SdlcBaselineKind => typeof value === 'string'
-          )
-        : [];
-      return {
-        ...status,
-        knowledge: {
-          executionId: knowledgeExecution.id,
-          phase: typeof context.phase === 'string' ? context.phase : 'QUEUED',
-          completedCount: new Set(completed).size,
-          totalCount: SDLC_BASELINE_COUNT,
-          error: typeof context.error === 'string' ? context.error : null,
-        },
-      };
-    } catch {
-      return status;
-    }
   }
 
   private async requireRepository(
@@ -620,7 +579,6 @@ export class SdlcWikiPipelineService implements SdlcWikiPipeline {
       sessionId: context.sessionId,
       createdAt: createdAt.toISOString(),
       updatedAt: updatedAt.toISOString(),
-      knowledge: null,
     };
   }
 }

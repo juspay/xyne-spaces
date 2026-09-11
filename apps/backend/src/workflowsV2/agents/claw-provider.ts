@@ -121,37 +121,51 @@ export class ClawAgentProvider
     _stepConfig: ClawAgentConfig,
     ctx: StepExecutionContext,
   ): Promise<AgentRunResult> {
-    const envelope = isRecord(payload.data) ? (payload.data as ClawCallbackEnvelope) : null;
-    if (!envelope) {
-      throw new Error(
-        `[workflows] claw callback for session ${record.externalRef} carried no envelope`,
-      );
-    }
-
-    if (envelope.status && envelope.status !== 'completed') {
-      const detail = envelope.error ?? `agent run ${String(envelope.status)}`;
-      throw new Error(
-        `[workflows] claw run ${record.externalRef} status=${String(envelope.status)}: ${String(detail)}`,
-      );
-    }
-
-    // A non-string result is not a failure in itself — hand it over as JSON and
-    // let the step's classifier and repair loop decide.
-    const text = typeof envelope.result === 'string'
-      ? envelope.result
-      : JSON.stringify(envelope.result ?? '');
-
-    return {
-      text,
-      // Claw runs its own tool loop and reports neither tool calls nor token
-      // accounting in the callback envelope, so this reports none rather than
-      // inventing numbers. Both are visible in claw's own run history.
-      toolCalls: [],
-      turnCount: 1,
-      usage: { inputTokens: 0, outputTokens: 0 },
-      attachments: await storeCallbackAttachments(envelope.attachments, ctx),
-    };
+    return collectClawResult(payload, record, ctx);
   }
+}
+
+/**
+ * Unwrap a claw callback envelope into a run result.
+ *
+ * Shared with the SDLC artifact provider, which dispatches differently but reads
+ * back the same envelope over the same callback route.
+ */
+export async function collectClawResult(
+  payload: ResumePayload,
+  record: AgentDispatchRecord,
+  ctx: StepExecutionContext,
+): Promise<AgentRunResult> {
+  const envelope = isRecord(payload.data) ? (payload.data as ClawCallbackEnvelope) : null;
+  if (!envelope) {
+    throw new Error(
+      `[workflows] claw callback for session ${record.externalRef} carried no envelope`,
+    );
+  }
+
+  if (envelope.status && envelope.status !== 'completed') {
+    const detail = envelope.error ?? `agent run ${String(envelope.status)}`;
+    throw new Error(
+      `[workflows] claw run ${record.externalRef} status=${String(envelope.status)}: ${String(detail)}`,
+    );
+  }
+
+  // A non-string result is not a failure in itself — hand it over as JSON and
+  // let the step's classifier and repair loop decide.
+  const text = typeof envelope.result === 'string'
+    ? envelope.result
+    : JSON.stringify(envelope.result ?? '');
+
+  return {
+    text,
+    // Claw runs its own tool loop and reports neither tool calls nor token
+    // accounting in the callback envelope, so this reports none rather than
+    // inventing numbers. Both are visible in claw's own run history.
+    toolCalls: [],
+    turnCount: 1,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    attachments: await storeCallbackAttachments(envelope.attachments, ctx),
+  };
 }
 
 // ─── Correlation ───
@@ -196,7 +210,7 @@ export function readAgentDispatch(data: string | null): AgentDispatchRecord | un
  * its own path segments. Claw passes the callback URL through verbatim
  * (`fetch(opts.callbackUrl, …)`), so the query string survives.
  */
-function buildCallbackUrl(executionId: string, nodePath: string, attempt: number): string {
+export function buildCallbackUrl(executionId: string, nodePath: string, attempt: number): string {
   const base = config.xyneClaw.callbackUrl.replace(/\/$/, '');
   return `${base}/api/internal/workflows-v2/claw-callback/${encodeURIComponent(executionId)}`
     + `?nodePath=${encodeURIComponent(nodePath)}&attempt=${String(attempt)}`;
@@ -209,7 +223,7 @@ function buildCallbackUrl(executionId: string, nodePath: string, attempt: number
  * parameter, so the output contract has to be stated in the task itself. Same
  * approach as automations' `buildRetryPrompt`.
  */
-function buildTask(input: AgentRunInput): string {
+export function buildTask(input: AgentRunInput): string {
   const parts = [input.task];
 
   if (input.expectJson) {

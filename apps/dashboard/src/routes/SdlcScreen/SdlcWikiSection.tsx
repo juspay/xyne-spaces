@@ -65,13 +65,6 @@ export interface SdlcWikiRun {
   conversationId: string | null;
   sessionId: string | null;
   updatedAt: string;
-  knowledge: {
-    executionId: string;
-    phase: string;
-    completedCount: number;
-    totalCount: number;
-    error: string | null;
-  } | null;
 }
 
 export interface SdlcWikiStartInput {
@@ -99,7 +92,6 @@ function WikiRunControls(props: {
   onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
   onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
   onRetry: () => Promise<void>;
-  onRetryKnowledge: () => Promise<void>;
   onCancel: () => Promise<void>;
   onDebug: () => void;
 }): ReactElement {
@@ -257,33 +249,6 @@ function WikiRunControls(props: {
         <p className='border-t px-4 py-2 text-[10px] text-muted-foreground'>
           Last durable update {new Date(props.run.updatedAt).toLocaleString()}
         </p>
-      ) : null}
-
-      {props.run?.knowledge ? (
-        <div
-          className={cn(
-            'flex items-center justify-between gap-3 border-t px-4 py-2 text-xs',
-            props.run.knowledge.error ? 'text-destructive' : 'text-muted-foreground',
-          )}
-        >
-          <span>
-            Repo Knowledge: {props.run.knowledge.phase.toLowerCase().replaceAll('_', ' ')} ·{' '}
-            {props.run.knowledge.completedCount}/{props.run.knowledge.totalCount}
-            {props.run.knowledge.error ? ` · ${props.run.knowledge.error}` : ''}
-          </span>
-          {props.isAdmin && props.run.knowledge.error ? (
-            <button
-              type='button'
-              disabled={props.actionPending}
-              onClick={() => void props.onRetryKnowledge()}
-              data-track-category='SdlcWiki'
-              data-track-name='RepoKnowledgeRetryClicked'
-              className='h-7 shrink-0 rounded-md border px-2 text-[11px] font-medium hover:bg-muted disabled:opacity-50'
-            >
-              Retry knowledge
-            </button>
-          ) : null}
-        </div>
       ) : null}
 
       {open ? (
@@ -447,8 +412,8 @@ function WikiRunControls(props: {
             <span>
               More history, smaller Wiki updates, and independent review increase runtime and model
               cost. Every window still saves its endpoint; meaningful intermediate checkpoints are
-              optional. Wiki and Repo Knowledge can run independently. After Wiki completion, a
-              reconciliation still updates only changed or missing Repo Knowledge documents.
+              optional. Wiki and Repo Knowledge can run independently. When the Wiki finishes, the
+              Repo Knowledge workflow for this hub runs and updates its documents in place.
             </span>
           </div>
           <div className='flex justify-end gap-2'>
@@ -852,7 +817,6 @@ export function SdlcWikiSection(props: {
   onGenerate: (input: SdlcWikiStartInput) => Promise<void>;
   onRefresh: (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>) => Promise<void>;
   onRetryRun: () => Promise<void>;
-  onRetryKnowledge: () => Promise<void>;
   onCancelRun: () => Promise<void>;
   onDebugRun: () => void;
 }): ReactElement {
@@ -906,7 +870,6 @@ export function SdlcWikiSection(props: {
         onGenerate={props.onGenerate}
         onRefresh={props.onRefresh}
         onRetry={props.onRetryRun}
-        onRetryKnowledge={props.onRetryKnowledge}
         onCancel={props.onCancelRun}
         onDebug={props.onDebugRun}
       />

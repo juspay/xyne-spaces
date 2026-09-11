@@ -114,7 +114,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
-import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
+import { SDLC_REPO_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 import {
   parseBoardEtaManagement,
@@ -5991,8 +5991,14 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
-        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
-        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
+        // Repo Knowledge is identified by its folder now, not by an artifact type.
+        // The channel type is part of the test: the folder name alone is not SDLC's.
+        const currentChannel = currentChannelId
+          ? await tx.run(zql.channels.where('id', currentChannelId).one())
+          : null;
+        const isSdlcBaseline =
+          currentFolder?.name === SDLC_REPO_KNOWLEDGE_FOLDER
+          && currentChannel?.type === ChannelType.SDLC;
 
         if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
           throw new Error('You do not have permission to edit this canvas');

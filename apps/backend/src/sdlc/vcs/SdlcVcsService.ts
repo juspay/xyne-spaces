@@ -24,7 +24,7 @@ import type {
   VcsProviderAdapter,
 } from './types';
 import { VcsProviderError } from './types';
-import { verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
+import { sdlcGrantCoversRepo, verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
 import { findSdlcMembershipForActor } from '../sdlcChannelMembership';
 import { requireSdlcProjectAccess } from '../sdlcProjectAccess';
 
@@ -487,7 +487,7 @@ export class SdlcVcsService implements SdlcVcs {
       if (
         binding.agentSlug !== SDLC_AGENT_SLUG ||
         binding.operation !== 'INTERACTIVE' ||
-        grant.repoId !== repo.id ||
+        !sdlcGrantCoversRepo(grant, repo.id) ||
         grant.workspaceId !== repo.workspaceId ||
         grant.conversationId !== binding.conversationId
       ) {
@@ -581,6 +581,8 @@ export class SdlcVcsService implements SdlcVcs {
       } catch {
         throw new AppError('Invalid or expired SDLC interactive grant', 403);
       }
+      // Single-repo claim only: `repoIds` is for read-only clones and must never
+      // authorize a write across a whole hub.
       if (
         grant.repoId !== repo.id ||
         grant.workspaceId !== repo.workspaceId ||

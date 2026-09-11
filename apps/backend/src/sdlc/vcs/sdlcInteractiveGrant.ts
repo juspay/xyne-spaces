@@ -8,11 +8,22 @@ export interface SdlcInteractiveGrantClaims {
   version: typeof GRANT_VERSION;
   agentSlug: typeof SDLC_AGENT_SLUG;
   workspaceId: string;
-  repoId: string;
+  /** Single-repository grant. A hub-scoped run carries `repoIds` instead. */
+  repoId?: string;
+  /** Hub-scoped grant: every repository this run may clone. */
+  repoIds?: string[];
   actorUserId: string;
   conversationId: string;
   issuedAt: string;
   expiresAt: string;
+}
+
+/** A grant authorizes a repository through either claim; neither widens the other. */
+export function sdlcGrantCoversRepo(
+  claims: SdlcInteractiveGrantClaims,
+  repoId: string,
+): boolean {
+  return claims.repoId === repoId || (claims.repoIds?.includes(repoId) ?? false);
 }
 
 function requireSecret(secret: string): string {
@@ -58,11 +69,17 @@ export function verifySdlcInteractiveGrant(
     throw new Error('Invalid SDLC interactive grant');
   }
   const value = claims as Partial<SdlcInteractiveGrantClaims>;
+  const repoIds = value.repoIds;
+  const scopesAnyRepo =
+    Boolean(value.repoId) ||
+    (Array.isArray(repoIds) &&
+      repoIds.length > 0 &&
+      repoIds.every((id) => typeof id === 'string' && id.length > 0));
   if (
     value.version !== GRANT_VERSION ||
     value.agentSlug !== SDLC_AGENT_SLUG ||
     !value.workspaceId ||
-    !value.repoId ||
+    !scopesAnyRepo ||
     !value.actorUserId ||
     !value.conversationId ||
     !value.issuedAt ||

@@ -25,6 +25,7 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
+import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
@@ -78,6 +79,19 @@ if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
     }),
   );
   logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
+
+  // Same transport, but the dispatch carries the SDLC profile and hub context that
+  // unlock claw's SDLC tool palette. Its agent is pinned, so it is a separate step
+  // rather than a mode of RUN_AGENT.
+  steps.register(
+    new HostAgentStep(new SdlcArtifactAgentProvider(), {
+      type: 'CREATE_SDLC_ARTIFACT',
+      name: 'Create SDLC artifact',
+      description: "Generate or refresh one document in an SDLC hub's artifact type",
+      category: 'ai',
+    }),
+  );
+  logger.info('[workflows] CREATE_SDLC_ARTIFACT registered (sdlc-agent, S2S dispatch)');
 } else {
   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }

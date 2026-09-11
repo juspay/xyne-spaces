@@ -5,7 +5,7 @@ import { logger } from '@/utils/logger';
 import { sdlcAdmission } from './sdlcAdmission';
 
 export type SdlcJobData = {
-  type: 'SETUP' | 'WORK' | 'WIKI';
+  type: 'WORK' | 'WIKI';
   repoId: string;
   executionId: string;
   capacityBlockedAt?: number;
@@ -60,10 +60,6 @@ class SdlcQueue {
       await sdlcAdmission.unregisterPending(data.repoId, jobId);
       throw error;
     }
-  }
-
-  async enqueueSetup(executionId: string, repoId: string): Promise<void> {
-    await this.enqueue({ type: 'SETUP', executionId, repoId });
   }
 
   async enqueueWork(executionId: string, repoId: string): Promise<void> {

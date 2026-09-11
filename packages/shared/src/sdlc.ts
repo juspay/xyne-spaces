@@ -116,6 +116,7 @@ export const SDLC_ENTITY_TYPES = [
   "PULL_REQUEST",
   "REPOSITORY",
   "WORKFLOW_EXECUTION",
+  "WORKFLOW",
   "TRACK",
   "FOLDER",
 ] as const;
@@ -137,6 +138,40 @@ export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
 export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
 export const SDLC_ARTIFACT_REPOSITORY_RELATION = "CONTEXT";
+
+/**
+ * The Repo Knowledge artifact type, as its canvas folder is named. Still "Baseline"
+ * on disk — renaming it needs a migration across every hub.
+ */
+export const SDLC_REPO_KNOWLEDGE_FOLDER = "Baseline";
+
+/**
+ * A CHANNEL -> WORKFLOW edge, and the "seeded once" marker. `targetId` is polymorphic
+ * so nothing cascades: a dangling edge means the workflow was deleted on purpose.
+ */
+export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
+
+/**
+ * Run statuses the workflow engine still counts as in flight. Shared so the SDLC
+ * page's status line and the backend's "one run at a time" guard cannot drift.
+ */
+export const SDLC_ACTIVE_RUN_STATUSES = [
+  "NEW",
+  "PENDING",
+  "SCHEDULED",
+  "RUNNING",
+  "EXTERNAL_WAIT",
+  "WAITING_FOR_CHILD_EXECUTIONS",
+  "PAUSED",
+] as const;
+
+/**
+ * The hub's workflow folder, under a workspace-level `SDLC` root. Derived, not
+ * generated, so the backend can upsert it and the SDLC page can link straight to it.
+ */
+export function sdlcHubWorkflowFolderId(channelId: string): string {
+  return `sdlc-hub-${channelId}`;
+}
 
 /**
  * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
@@ -168,6 +203,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_TRACK_FLAT_RELATION,
+  SDLC_WORKFLOW_RELATION,
 ] as const;
 
 /**
@@ -181,6 +217,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
 export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_WORKFLOW_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */
@@ -704,12 +741,15 @@ export const sdlcAgentContextSchema = z
     projectId: z.string().min(1),
     channelId: z.string().min(1),
     actorUserId: z.string().min(1),
-    repository: z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      url: z.string().min(1),
-      baseBranch: z.string().min(1),
-    }),
+    /** Absent on a hub-scoped run, which names its repositories per tool call. */
+    repository: z
+      .object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        url: z.string().min(1),
+        baseBranch: z.string().min(1),
+      })
+      .optional(),
     permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
     gates: z.object({
       capabilities: z.array(z.unknown()),
@@ -841,20 +881,14 @@ export const createSdlcClawArtifactSchema = z
       });
     }
     const isArtifact = value.kind !== "BASELINE";
-    if (isArtifact) {
-      if (!value.folderId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Artifact creation requires a folderId (the artifact type)",
-        });
-      }
-      if (!value.trackId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Artifacts require a track",
-        });
-      }
+    if (isArtifact && !value.folderId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Artifact creation requires a folderId (the artifact type)",
+      });
     }
+    // "Artifacts require a track" lives in SdlcHubService now: it has the folder row
+    // and can exempt Repo Knowledge.
   });
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema

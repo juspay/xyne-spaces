@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { allBaselinesReady } from './sdlcProgressiveGate';
-import { findSdlcMembershipForActor } from './sdlcChannelMembership';
+import { findSdlcMembershipForActor, repoIdsForChannel } from './sdlcChannelMembership';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
@@ -45,7 +45,8 @@ export interface SdlcAgentContext {
   projectId: string;
   channelId: string;
   actorUserId: string;
-  repository: { id: string; name: string; url: string; baseBranch: string };
+  /** Absent on a hub-scoped run, which names its repositories per tool call. */
+  repository?: { id: string; name: string; url: string; baseBranch: string };
   permissions: { repositoryRole: 'ADMIN' | 'MEMBER' };
   gates: {
     capabilities: unknown[];
@@ -173,6 +174,75 @@ export class SdlcAgentContextService {
         assignedCommitShas: input.wikiAssignedCommitShas ?? [],
         bootstrapRef: input.wikiBootstrapRef ?? null,
         targetHeadSha: input.wikiTargetHeadSha ?? null,
+      },
+    };
+  }
+
+  /**
+   * Context for a run spanning a whole hub. A hub run has no execution row for
+   * `bootstrapSandboxCredential` to check, so the grant carries the scope instead:
+   * every repository in the hub, read-only.
+   */
+  async buildForHub(
+    actor: SdlcActor,
+    channelId: string,
+    input: SdlcAgentContextInput
+  ): Promise<SdlcAgentContext> {
+    const channel = await this.prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: actor.workspaceId },
+      select: {
+        projectId: true,
+        participants: { where: { userId: actor.userId }, select: { role: true }, take: 1 },
+      },
+    });
+    if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
+    const role = channel.participants[0]?.role;
+    if (!role) throw new AppError('You are not a member of this SDLC hub', 403);
+
+    const repoIds = await repoIdsForChannel(this.prisma, channelId);
+    if (repoIds.length === 0) throw new AppError('This SDLC hub has no repositories', 409);
+
+    return {
+      version: 1,
+      operation: input.operation,
+      workspaceId: actor.workspaceId,
+      projectId: channel.projectId,
+      channelId,
+      actorUserId: actor.userId,
+      permissions: { repositoryRole: role === 'ADMIN' ? 'ADMIN' : 'MEMBER' },
+      gates: { capabilities: [], allBaselinesApproved: false },
+      execution: {
+        workflowExecutionId: input.workflowExecutionId ?? null,
+        sessionId: input.sessionId ?? null,
+        conversationId: input.conversationId ?? null,
+      },
+      interactiveGrant: input.conversationId
+        ? issueSdlcInteractiveGrant(
+            {
+              agentSlug: SDLC_AGENT_SLUG,
+              workspaceId: actor.workspaceId,
+              repoIds,
+              actorUserId: actor.userId,
+              conversationId: input.conversationId,
+            },
+            process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || ''
+          )
+        : null,
+      artifact: {
+        kind: null,
+        id: input.artifactId ?? null,
+        sourceType: input.sourceType ?? null,
+        sourceId: input.sourceId ?? null,
+      },
+      ticketId: input.ticketId ?? null,
+      setupExecutionId: null,
+      baselineKind: null,
+      generationCommit: input.generationCommit ?? null,
+      wiki: {
+        role: null,
+        assignedCommitShas: [],
+        bootstrapRef: null,
+        targetHeadSha: null,
       },
     };
   }

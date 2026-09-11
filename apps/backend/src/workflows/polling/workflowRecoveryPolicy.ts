@@ -1,6 +1,5 @@
 export const GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES = [
   'Automations',
-  'SDLC_SETUP',
   'SDLC_WORK',
   'SDLC_WIKI',
   'Workflow',

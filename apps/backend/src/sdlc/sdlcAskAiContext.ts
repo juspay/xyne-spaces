@@ -1,4 +1,3 @@
-import { isBaselineCanvasType } from '@xyne/shared';
 import type { WikiFreshnessContext } from './wiki/wikiFreshness';
 import { wikiAskAiFreshnessInstruction } from './wiki/wikiFreshness';
 import {
@@ -17,7 +16,7 @@ export function resolveSdlcAskAiArtifactKind(
 ): SdlcAskAiSelectedArtifact['artifactKind'] | undefined {
   if (!artifactType) return undefined;
   if (artifactType === 'WIKI') return 'WIKI';
-  return isBaselineCanvasType(artifactType) ? 'BASELINE' : 'ARTIFACT';
+  return 'ARTIFACT';
 }
 
 export function resolveSdlcAskAiSelectedArtifact(

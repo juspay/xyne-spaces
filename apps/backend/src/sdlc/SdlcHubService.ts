@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
   SDLC_ARTIFACT_REPOSITORY_RELATION,
   SDLC_CONTAINMENT_RELATION,
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_REPO_KNOWLEDGE_FOLDER,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
@@ -23,34 +24,21 @@ import {
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
   type CreateSdlcTrackInput,
-  type UpdateSdlcBaselineDraftInput,
   type UpdateSdlcClawArtifactInput,
   SDLC_AGENT_SLUG,
 } from '@xyne/shared';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcQueue } from '@/queues/sdlcQueue';
-import { sdlcAdmission } from '@/queues/sdlcAdmission';
-import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
 import {
-  cancelS2SClawRun,
   getClawDebugArtifacts,
   type ClawDebugArtifactBundle,
 } from '@/services/clawAgentService';
+import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { syncToYSweet } from '@/utils/ysweetUtils';
-import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { BASELINE_DEFINITIONS } from './baselineDefinitions';
-import {
-  applyBaselineDraftSection,
-  baselineDraftMissingSections,
-  buildBaselineDraftMarkdown,
-  baselineRefreshChanged,
-  finalizeBaselineDraft,
-} from './sdlcBaselineDraft';
 import { commitAndSyncCanvasArtifact } from './sdlcBaselineCanvasSync';
 import { requireSdlcProjectAccess } from './sdlcProjectAccess';
 import {
@@ -69,14 +57,13 @@ import type {
   SdlcChannel,
   SdlcRepository,
   SdlcRepositoryRunContext,
-  SdlcSetupExecution,
 } from './types';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { resolveSdlcSourceReferenceTokens, type SdlcSourceReference } from './sdlcSourceReferences';
 import { sdlcVcs } from './vcs';
 
-const SDLC_FOLDERS = ['Baseline', 'PRDs', 'Tech Docs'] as const;
+const SDLC_FOLDERS = [SDLC_REPO_KNOWLEDGE_FOLDER, 'PRDs', 'Tech Docs'] as const;
 const channelRepository = new ChannelRepository();
 type TransactionClient = Prisma.TransactionClient;
 
@@ -370,248 +357,6 @@ export class SdlcHubService implements SdlcHub {
     return repos.map((repo) => repo.id);
   }
 
-  async setupRepository(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution> {
-    const repo = await this.requireRepositoryRole(actor, repoId, true);
-    await sdlcVcs.requireCapabilities(actor, repoId, [...BASELINE_CAPABILITIES]);
-    if (repo.sdlcSetupExecutionId) {
-      const existing = await this.prisma.workflowExecution.findUnique({
-        where: { id: repo.sdlcSetupExecutionId },
-        select: { id: true, status: true },
-      });
-      if (existing) {
-        if (['NEW', 'PENDING', 'RUNNING', 'SCHEDULED'].includes(existing.status)) {
-          throw new AppError('SDLC setup is already running', 409);
-        }
-        if (existing.status === 'SUCCESS') {
-          return { executionId: existing.id, status: existing.status };
-        }
-        throw new AppError('Retry the failed SDLC setup execution', 409);
-      }
-    }
-
-    const initialContext = JSON.stringify({
-      repoId,
-      // The hub this run was started from; a repository can be in several.
-      channelId: repo.channelId,
-      phase: 'QUEUED',
-      completedBaselineKinds: [],
-    });
-    const execution = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "public"."repos" WHERE "id" = ${repoId} FOR UPDATE`;
-      const lockedRepo = await tx.repo.findUnique({
-        where: { id: repoId },
-        select: { sdlcSetupExecutionId: true },
-      });
-      if (
-        lockedRepo?.sdlcSetupExecutionId &&
-        lockedRepo.sdlcSetupExecutionId !== repo.sdlcSetupExecutionId
-      ) {
-        throw new AppError('SDLC setup is already configured for this repository', 409);
-      }
-      const workflow = await tx.workflow.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          workflowName: `SDLC baseline: ${repo.name}`,
-          workflowType: 'SDLC_SETUP',
-          status: 'PENDING',
-          context: initialContext,
-          metadata: JSON.stringify({ repoId, projectId: repo.projectId }),
-        },
-      });
-      const created = await tx.workflowExecution.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          workflowId: workflow.id,
-          workflowType: 'SDLC_SETUP',
-          status: 'PENDING',
-          context: initialContext,
-          createdBy: actor.userId,
-        },
-      });
-      await tx.repo.update({
-        where: { id: repoId },
-        data: { sdlcSetupExecutionId: created.id },
-      });
-      return created;
-    });
-
-    try {
-      await sdlcQueue.enqueueSetup(execution.id, repoId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.prisma.$transaction([
-        this.prisma.workflowExecution.update({
-          where: { id: execution.id },
-          data: {
-            status: 'FAILURE',
-            context: JSON.stringify({
-              repoId,
-              phase: 'PARTIALLY_FAILED',
-              completedBaselineKinds: [],
-              error: `Failed to queue setup: ${message}`,
-            }),
-          },
-        }),
-        this.prisma.workflow.update({
-          where: { id: execution.workflowId },
-          data: { status: 'FAILURE' },
-        }),
-      ]);
-      throw new AppError('Failed to queue SDLC setup', 503);
-    }
-    return { executionId: execution.id, status: execution.status };
-  }
-
-  async retrySetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution> {
-    const repo = await this.requireRepositoryRole(actor, repoId, true);
-    await sdlcVcs.requireCapabilities(actor, repoId, [...BASELINE_CAPABILITIES]);
-    if (!repo.sdlcSetupExecutionId) {
-      return this.setupRepository(actor, repoId);
-    }
-    const execution = await this.prisma.workflowExecution.findUnique({
-      where: { id: repo.sdlcSetupExecutionId },
-      include: { workflow: { select: { id: true, status: true } } },
-    });
-    if (!execution) {
-      return this.setupRepository(actor, repoId);
-    }
-    if (['NEW', 'PENDING', 'RUNNING', 'SCHEDULED'].includes(execution.status)) {
-      throw new AppError('SDLC setup is already running', 409);
-    }
-    if (execution.status === 'SUCCESS') {
-      return { executionId: execution.id, status: execution.status };
-    }
-
-    let context: Record<string, unknown> = {};
-    try {
-      context = execution.context ? (JSON.parse(execution.context) as Record<string, unknown>) : {};
-    } catch {
-      context = {};
-    }
-    delete context.error;
-    delete context.currentBaselineKind;
-    delete context.sessionId;
-    delete context.admissionPermitId;
-    context.phase = 'QUEUED';
-    context.repoId = repoId;
-    context.channelId = repo.channelId;
-    await this.prisma.$transaction([
-      this.prisma.workflowExecution.update({
-        where: { id: execution.id },
-        data: { status: 'PENDING', context: JSON.stringify(context), output: null },
-      }),
-      this.prisma.workflow.update({
-        where: { id: execution.workflow.id },
-        data: { status: 'PENDING' },
-      }),
-    ]);
-    try {
-      await sdlcQueue.enqueueSetup(execution.id, repoId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const failureContext = {
-        ...context,
-        phase: 'PARTIALLY_FAILED',
-        error: `Failed to queue setup retry: ${message}`,
-      };
-      await this.prisma.$transaction([
-        this.prisma.workflowExecution.update({
-          where: { id: execution.id },
-          data: {
-            status: 'FAILURE',
-            context: JSON.stringify(failureContext),
-            output: JSON.stringify({ error: failureContext.error }),
-          },
-        }),
-        this.prisma.workflow.update({
-          where: { id: execution.workflow.id },
-          data: { status: 'FAILURE' },
-        }),
-      ]);
-      throw new AppError('Failed to queue SDLC setup retry', 503);
-    }
-    return { executionId: execution.id, status: 'PENDING' };
-  }
-
-  async refreshSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution> {
-    const repo = await this.requireRepositoryRole(actor, repoId, true);
-    await sdlcVcs.requireCapabilities(actor, repoId, [...BASELINE_CAPABILITIES]);
-    const context = JSON.stringify({
-      repoId,
-      channelId: repo.channelId,
-      phase: 'QUEUED',
-      refreshExisting: true,
-      completedBaselineKinds: [],
-      reconciledBaselineKinds: [],
-    });
-    const execution = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "public"."repos" WHERE "id" = ${repoId} FOR UPDATE`;
-      const lockedRepo = await tx.repo.findUnique({
-        where: { id: repoId },
-        select: { sdlcSetupExecutionId: true },
-      });
-      if (lockedRepo?.sdlcSetupExecutionId) {
-        const active = await tx.workflowExecution.findFirst({
-          where: {
-            id: lockedRepo.sdlcSetupExecutionId,
-            status: { in: ['NEW', 'PENDING', 'SCHEDULED', 'RUNNING'] },
-          },
-          select: { id: true },
-        });
-        if (active) throw new AppError('Repo Knowledge generation is already running', 409);
-      }
-      const workflow = await tx.workflow.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          workflowName: `SDLC knowledge refresh: ${repo.name}`,
-          workflowType: 'SDLC_SETUP',
-          status: 'PENDING',
-          context,
-          metadata: JSON.stringify({ repoId, projectId: repo.projectId, refreshExisting: true }),
-        },
-      });
-      const created = await tx.workflowExecution.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          workflowId: workflow.id,
-          workflowType: 'SDLC_SETUP',
-          status: 'PENDING',
-          context,
-          createdBy: actor.userId,
-        },
-      });
-      await tx.repo.update({
-        where: { id: repoId },
-        data: { sdlcSetupExecutionId: created.id },
-      });
-      return created;
-    });
-    try {
-      await sdlcQueue.enqueueSetup(execution.id, repoId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.prisma.$transaction([
-        this.prisma.workflowExecution.update({
-          where: { id: execution.id },
-          data: {
-            status: 'FAILURE',
-            context: JSON.stringify({
-              ...JSON.parse(context),
-              phase: 'PARTIALLY_FAILED',
-              error: `Failed to queue Repo Knowledge refresh: ${message}`,
-            }),
-          },
-        }),
-        this.prisma.workflow.update({
-          where: { id: execution.workflowId },
-          data: { status: 'FAILURE' },
-        }),
-      ]);
-      throw new AppError('Failed to queue Repo Knowledge refresh', 503);
-    }
-    return { executionId: execution.id, status: execution.status };
-  }
-
   async getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
@@ -699,97 +444,7 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  async cancelSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution> {
-    const repo = await this.requireRepositoryRole(actor, repoId, true);
-    if (!repo.sdlcSetupExecutionId) {
-      throw new AppError('SDLC setup has not started', 409);
-    }
-    const execution = await this.prisma.workflowExecution.findUnique({
-      where: { id: repo.sdlcSetupExecutionId },
-      include: { workflow: { select: { id: true, status: true } } },
-    });
-    if (!execution) throw new AppError('SDLC setup execution not found', 404);
-    if (execution.status === 'SUCCESS') {
-      throw new AppError('Completed SDLC setup cannot be cancelled', 409);
-    }
-    if (execution.status === 'FAILURE' || execution.status === 'CANCELLED') {
-      return { executionId: execution.id, status: execution.status };
-    }
-
-    const context = this.parseJsonRecord(execution.context);
-    const sessionId = typeof context.sessionId === 'string' ? context.sessionId : undefined;
-    const cancelledContext = {
-      ...context,
-      phase: 'CANCELLED',
-      error: sessionId
-        ? 'Setup cancelled by user.'
-        : 'Setup cancelled locally before a Claw session became available.',
-    };
-    const cancelled = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.workflowExecution.updateMany({
-        where: {
-          id: execution.id,
-          status: { in: ['NEW', 'PENDING', 'RUNNING', 'SCHEDULED'] },
-        },
-        data: {
-          status: 'CANCELLED',
-          context: JSON.stringify(cancelledContext),
-          output: JSON.stringify({ error: cancelledContext.error }),
-        },
-      });
-      if (updated.count === 0) return false;
-      await tx.workflow.update({
-        where: { id: execution.workflow.id },
-        data: { status: 'CANCELLED' },
-      });
-      return true;
-    });
-    if (!cancelled) {
-      const latest = await this.prisma.workflowExecution.findUnique({
-        where: { id: execution.id },
-        select: { status: true },
-      });
-      if (latest?.status === 'SUCCESS') {
-        throw new AppError('Completed SDLC setup cannot be cancelled', 409);
-      }
-      return { executionId: execution.id, status: latest?.status || execution.status };
-    }
-
-    const admissionPermitId =
-      typeof context.admissionPermitId === 'string' ? context.admissionPermitId : undefined;
-
-    if (sessionId) {
-      const cancellation = await cancelS2SClawRun(sessionId, execution.createdBy || actor.userId);
-      if (!cancellation.success) {
-        const error = cancellation.error || 'Failed to cancel Claw run';
-        const failureContext = {
-          ...context,
-          phase: 'PARTIALLY_FAILED',
-          error: `Cloud cancellation failed: ${error}`,
-        };
-        await this.prisma.$transaction(async (tx) => {
-          const updated = await tx.workflowExecution.updateMany({
-            where: { id: execution.id, status: 'CANCELLED' },
-            data: {
-              status: 'FAILURE',
-              context: JSON.stringify(failureContext),
-              output: JSON.stringify({ error: failureContext.error }),
-            },
-          });
-          if (updated.count > 0) {
-            await tx.workflow.update({
-              where: { id: execution.workflow.id },
-              data: { status: 'FAILURE' },
-            });
-          }
-        });
-        throw new AppError(error, 502);
-      }
-    }
-    await sdlcAdmission.release(admissionPermitId);
-    return { executionId: execution.id, status: 'CANCELLED' };
-  }
-
+  /** Claw transcript for any SDLC execution — used by the wiki run debugger. */
   async getExecutionDebug(
     actor: SdlcActor,
     repoId: string,
@@ -845,13 +500,19 @@ export class SdlcHubService implements SdlcHub {
     const folder = input.folderId
       ? await this.prisma.canvasFolder.findFirst({
           where: { id: input.folderId, channelId },
-          select: { id: true },
+          select: { id: true, name: true },
         })
       : await this.prisma.canvasFolder.findFirst({
-          where: { channelId, name: 'Baseline' },
-          select: { id: true },
+          where: { channelId, name: SDLC_REPO_KNOWLEDGE_FOLDER },
+          select: { id: true, name: true },
         });
     if (!folder) throw new AppError('Artifact type folder not found', 409);
+
+    // Every artifact type needs a track except Repo Knowledge, which describes the
+    // hub itself. Here, not in the shared schema, because only here is the folder known.
+    if (input.kind !== 'BASELINE' && !input.trackId && folder.name !== SDLC_REPO_KNOWLEDGE_FOLDER) {
+      throw new AppError('Artifacts require a track', 400);
+    }
 
     let baselineGenerationCommit: string | null = null;
     if (input.kind === 'BASELINE') {
@@ -1076,422 +737,6 @@ export class SdlcHubService implements SdlcHub {
           error: err instanceof Error ? err.message : String(err),
         });
       });
-  }
-
-  async updateBaselineDraftFromClaw(
-    actor: SdlcActor,
-    input: UpdateSdlcBaselineDraftInput
-  ): Promise<SdlcArtifact> {
-    const repo = await this.requireRepositoryRole(
-      actor,
-      input.repoId,
-      false,
-      await this.hubOfExecution(input.setupExecutionId)
-    );
-    if (!repo?.channelId || !repo.projectId) {
-      throw new AppError('SDLC repository not found', 404);
-    }
-    await sdlcVcs.requireCapabilities(actor, input.repoId, [...BASELINE_CAPABILITIES]);
-    if (input.workflowExecutionId !== input.setupExecutionId) {
-      throw new AppError('Baseline workflow execution binding does not match setup execution', 403);
-    }
-    const definition = BASELINE_DEFINITIONS.find((item) => item.kind === input.baselineKind);
-    if (!definition) throw new AppError('Unsupported SDLC baseline kind', 400);
-    const folder = await this.prisma.canvasFolder.findFirst({
-      where: { channelId: repo.channelId, name: 'Baseline' },
-      select: { id: true },
-    });
-    if (!folder) throw new AppError('Baseline folder not found', 409);
-
-    const setupExecution = await this.prisma.workflowExecution.findFirst({
-      where: {
-        id: input.setupExecutionId,
-        workspaceId: actor.workspaceId,
-        workflowType: 'SDLC_SETUP',
-        status: 'RUNNING',
-        createdBy: actor.userId,
-      },
-      select: { context: true },
-    });
-    if (!setupExecution) throw new AppError('Active SDLC setup execution not found', 409);
-    const setupContext = this.parseJsonRecord(setupExecution.context);
-    if (setupContext.repoId !== repo.id) {
-      throw new AppError('SDLC setup execution does not belong to this repository', 403);
-    }
-    const generationCommit =
-      typeof setupContext.generationCommit === 'string' ? setupContext.generationCommit : null;
-    if (!generationCommit) {
-      throw new AppError('SDLC setup generation commit is unavailable', 409);
-    }
-    let canonicalSourceReferences: SdlcSourceReference[] = [];
-    if (input.action === 'upsert_section' && input.markdown) {
-      const resolved = await this.resolveSourceReferences({
-        repoId: repo.id,
-        repositoryUrl: repo.canonicalUrl || repo.url,
-        generationCommit,
-        markdown: input.markdown,
-        sourceReferences: input.sourceReferences,
-      });
-      input = { ...input, markdown: resolved.markdown };
-      canonicalSourceReferences = resolved.sourceReferences;
-    }
-
-    return commitAndSyncCanvasArtifact(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT "id" FROM "public"."workflow_executions" WHERE "id" = ${input.setupExecutionId} FOR UPDATE`;
-          const execution = await tx.workflowExecution.findFirst({
-            where: {
-              id: input.setupExecutionId,
-              workspaceId: actor.workspaceId,
-              workflowType: 'SDLC_SETUP',
-              status: 'RUNNING',
-              createdBy: actor.userId,
-            },
-            select: { context: true },
-          });
-          if (!execution) throw new AppError('Active SDLC setup execution not found', 409);
-          const executionContext = this.parseJsonRecord(execution.context);
-          if (executionContext.repoId !== repo.id) {
-            throw new AppError('SDLC setup execution does not belong to this repository', 403);
-          }
-
-          const candidates = await tx.canvas.findMany({
-            where: {
-              channelId: repo.channelId,
-              sdlcArtifact: { is: { artifactType: input.baselineKind, repoId: repo.id } },
-            },
-            select: {
-              id: true,
-              title: true,
-              viewAccessId: true,
-              sdlcArtifact: { select: { artifactStatus: true } },
-              metadata: true,
-              content: true,
-            },
-          });
-          const candidateEntities = candidates.length
-            ? await tx.sdlcArtifact.findMany({
-                where: {
-                  artifactId: { in: candidates.map((candidate) => candidate.id) },
-                },
-                select: { artifactId: true, workflowExecutionId: true },
-              })
-            : [];
-          const executionIdByCanvasId = new Map(
-            candidateEntities.map((entity) => [entity.artifactId, entity.workflowExecutionId])
-          );
-          let canvas = candidates.find(
-            (candidate) => executionIdByCanvasId.get(candidate.id) === input.setupExecutionId
-          );
-
-          if (!canvas) {
-            if (input.action === 'finalize') {
-              throw new AppError('Begin the baseline draft before finalizing it', 409);
-            }
-            const metadata: Record<string, unknown> = {
-              draftSections: {},
-            };
-            const nextMetadata =
-              input.action === 'upsert_section'
-                ? this.applyValidatedDraftSection(
-                    definition,
-                    metadata,
-                    input,
-                    canonicalSourceReferences
-                  )
-                : metadata;
-            const markdown = buildBaselineDraftMarkdown(
-              input.title,
-              input.baselineKind,
-              nextMetadata
-            );
-            const content = await convertMarkdownToBlockNote(markdown);
-            const created = await tx.canvas.create({
-              data: {
-                workspaceId: actor.workspaceId,
-                title: input.title,
-                content: content as unknown as Prisma.InputJsonValue,
-                channelId: repo.channelId,
-                folderId: folder.id,
-                projectId: repo.projectId,
-                createdBy: actor.userId,
-                lastEditedBy: actor.userId,
-                lastEditedAt: new Date(),
-                viewAccessId: randomUUID(),
-                visibility: CanvasVisibility.PRIVATE,
-                isCollaborative: true,
-                metadata: nextMetadata as Prisma.InputJsonValue,
-                ...(executionContext.refreshExisting === true
-                  ? {}
-                  : {
-                      participants: {
-                        create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
-                      },
-                    }),
-              },
-              select: {
-                id: true,
-                title: true,
-                viewAccessId: true,
-                sdlcArtifact: { select: { artifactStatus: true } },
-                metadata: true,
-                content: true,
-              },
-            });
-            await tx.sdlcArtifact.create({
-              data: {
-                workspaceId: actor.workspaceId,
-                repoId: repo.id,
-                artifactId: created.id,
-                artifactType: input.baselineKind,
-                artifactStatus:
-                  executionContext.refreshExisting === true ? 'REFRESH_CANDIDATE' : 'DRAFT',
-                workflowExecutionId: input.workflowExecutionId,
-                generationCommit,
-                createdBy: actor.userId,
-              },
-            });
-            canvas = created;
-          } else if (canvas.sdlcArtifact?.artifactStatus !== 'ACTIVE') {
-            const metadata = canvas.metadata as Record<string, unknown>;
-            if (input.action === 'upsert_section') {
-              const nextMetadata = this.applyValidatedDraftSection(
-                definition,
-                metadata,
-                input,
-                canonicalSourceReferences
-              );
-              const markdown = buildBaselineDraftMarkdown(
-                input.title,
-                input.baselineKind,
-                nextMetadata
-              );
-              const content = await convertMarkdownToBlockNote(markdown);
-              canvas = await tx.canvas.update({
-                where: { id: canvas.id },
-                data: {
-                  title: input.title,
-                  content: content as unknown as Prisma.InputJsonValue,
-                  metadata: nextMetadata as Prisma.InputJsonValue,
-                  lastEditedBy: actor.userId,
-                  lastEditedAt: new Date(),
-                },
-                select: {
-                  id: true,
-                  title: true,
-                  viewAccessId: true,
-                  sdlcArtifact: { select: { artifactStatus: true } },
-                  metadata: true,
-                  content: true,
-                },
-              });
-            } else if (input.action === 'finalize') {
-              const missing = baselineDraftMissingSections(input.baselineKind, metadata);
-              if (missing.length > 0) {
-                throw new AppError(
-                  `Cannot finalize baseline; missing sections: ${missing.join(', ')}`,
-                  409
-                );
-              }
-              const markdown = buildBaselineDraftMarkdown(
-                input.title,
-                input.baselineKind,
-                metadata,
-                true
-              );
-              const content = await convertMarkdownToBlockNote(markdown);
-              const finalSourceReferences = finalizeBaselineDraft(input.baselineKind, metadata);
-              const finalizedCandidate = await tx.canvas.update({
-                where: { id: canvas.id },
-                data: {
-                  title: input.title,
-                  content: content as unknown as Prisma.InputJsonValue,
-                  metadata: {} as Prisma.InputJsonValue,
-                  lastEditedBy: actor.userId,
-                  lastEditedAt: new Date(),
-                },
-                select: {
-                  id: true,
-                  title: true,
-                  viewAccessId: true,
-                  sdlcArtifact: { select: { artifactStatus: true } },
-                  metadata: true,
-                  content: true,
-                },
-              });
-              canvas = finalizedCandidate;
-              await tx.sdlcArtifact.updateMany({
-                where: { artifactId: finalizedCandidate.id },
-                data: {
-                  sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
-                },
-              });
-
-              if (executionContext.refreshExisting === true) {
-                const stagedCanvasId = finalizedCandidate.id;
-                let canonical = candidates.find(
-                  (candidate) =>
-                    candidate.id !== finalizedCandidate.id &&
-                    candidate.sdlcArtifact?.artifactStatus === 'ACTIVE'
-                );
-
-                if (canonical) {
-                  await tx.$queryRaw`SELECT "id" FROM "public"."canvases" WHERE "id" = ${canonical.id} FOR UPDATE`;
-                  canonical = await tx.canvas.findUniqueOrThrow({
-                    where: { id: canonical.id },
-                    select: {
-                      id: true,
-                      title: true,
-                      viewAccessId: true,
-                      sdlcArtifact: { select: { artifactStatus: true } },
-                      metadata: true,
-                      content: true,
-                    },
-                  });
-                  const currentMarkdown = (
-                    await convertBlockNoteToMarkdown(canonical.content as unknown[])
-                  ).trim();
-                  if (!baselineRefreshChanged(currentMarkdown, markdown)) {
-                    await tx.sdlcArtifact.deleteMany({
-                      where: { artifactId: finalizedCandidate.id },
-                    });
-                    await tx.canvas.delete({ where: { id: finalizedCandidate.id } });
-                    canvas = canonical;
-                  } else {
-                    const now = new Date();
-                    const oldHash = createHash('sha256').update(currentMarkdown).digest('hex');
-                    const newHash = createHash('sha256').update(markdown.trim()).digest('hex');
-                    await tx.canvasVersion.upsert({
-                      where: {
-                        canvasId_contentHash: { canvasId: canonical.id, contentHash: oldHash },
-                      },
-                      create: {
-                        workspaceId: actor.workspaceId,
-                        canvasId: canonical.id,
-                        name: 'Before SDLC knowledge refresh',
-                        content: canonical.content as Prisma.InputJsonValue,
-                        contentHash: oldHash,
-                        createdBy: actor.userId,
-                      },
-                      update: { updatedAt: now },
-                    });
-                    await tx.canvasVersion.upsert({
-                      where: {
-                        canvasId_contentHash: { canvasId: canonical.id, contentHash: newHash },
-                      },
-                      create: {
-                        workspaceId: actor.workspaceId,
-                        canvasId: canonical.id,
-                        name: 'SDLC knowledge refresh',
-                        content: content as unknown as Prisma.InputJsonValue,
-                        contentHash: newHash,
-                        createdBy: actor.userId,
-                      },
-                      update: { updatedAt: now },
-                    });
-                    canvas = await tx.canvas.update({
-                      where: { id: canonical.id },
-                      data: {
-                        title: input.title,
-                        content: content as unknown as Prisma.InputJsonValue,
-                        metadata: {} as Prisma.InputJsonValue,
-                        lastEditedBy: actor.userId,
-                        lastEditedAt: now,
-                      },
-                      select: {
-                        id: true,
-                        title: true,
-                        viewAccessId: true,
-                        sdlcArtifact: { select: { artifactStatus: true } },
-                        metadata: true,
-                        content: true,
-                      },
-                    });
-                    await tx.sdlcArtifact.upsert({
-                      where: {
-                        artifactId: canonical.id,
-                      },
-                      create: {
-                        workspaceId: actor.workspaceId,
-                        repoId: repo.id,
-                        artifactId: canonical.id,
-                        artifactType: input.baselineKind,
-                        artifactStatus: 'ACTIVE',
-                        workflowExecutionId: input.workflowExecutionId,
-                        generationCommit,
-                        sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
-                        createdBy: actor.userId,
-                      },
-                      update: {
-                        artifactStatus: 'ACTIVE',
-                        workflowExecutionId: input.workflowExecutionId,
-                        generationCommit,
-                        sourceReferences: stringifySdlcSourceReferences(finalSourceReferences),
-                      },
-                    });
-                    await tx.sdlcArtifact.deleteMany({
-                      where: { artifactId: stagedCanvasId },
-                    });
-                    await tx.canvas.delete({ where: { id: stagedCanvasId } });
-                  }
-                } else {
-                  await tx.sdlcArtifact.update({
-                    where: { artifactId: finalizedCandidate.id },
-                    data: { artifactStatus: 'ACTIVE' },
-                  });
-                  canvas = await tx.canvas.findUniqueOrThrow({
-                    where: { id: finalizedCandidate.id },
-                    select: {
-                      id: true,
-                      title: true,
-                      viewAccessId: true,
-                      sdlcArtifact: { select: { artifactStatus: true } },
-                      metadata: true,
-                      content: true,
-                    },
-                  });
-                  await tx.canvasParticipant.create({
-                    data: {
-                      canvasId: canvas.id,
-                      ...sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
-                    },
-                  });
-                }
-
-                const reconciled = Array.isArray(executionContext.reconciledBaselineKinds)
-                  ? executionContext.reconciledBaselineKinds.filter(
-                      (value): value is string => typeof value === 'string'
-                    )
-                  : [];
-                await tx.workflowExecution.update({
-                  where: { id: input.setupExecutionId },
-                  data: {
-                    context: JSON.stringify({
-                      ...executionContext,
-                      reconciledBaselineKinds: [...new Set([...reconciled, input.baselineKind])],
-                    }),
-                  },
-                });
-              }
-            }
-          }
-
-          if (!canvas) throw new AppError('Baseline draft is unavailable', 409);
-          return {
-            artifact: {
-              canvasId: canvas.id,
-              viewAccessId: canvas.viewAccessId ?? undefined,
-              url: `/chat/canvas/${canvas.viewAccessId ?? canvas.id}`,
-              kind: 'BASELINE' as const,
-            },
-            canvasId: canvas.id,
-            content: canvas.content as unknown as BlockNoteBlock[],
-          };
-        }),
-      syncToYSweet,
-      actor.userId
-    );
   }
 
   async updateArtifactFromClaw(
@@ -1747,7 +992,7 @@ export class SdlcHubService implements SdlcHub {
       select: { id: true, name: true },
     });
     if (!folder) throw new AppError('Artifact type not found', 404);
-    if (folder.name === 'Baseline') {
+    if (folder.name === SDLC_REPO_KNOWLEDGE_FOLDER) {
       throw new AppError('Repo Knowledge cannot be renamed', 400);
     }
     const clash = await this.prisma.canvasFolder.findFirst({
@@ -1803,36 +1048,13 @@ export class SdlcHubService implements SdlcHub {
     );
   }
 
-  private applyValidatedDraftSection(
-    definition: (typeof BASELINE_DEFINITIONS)[number],
-    metadata: Record<string, unknown>,
-    input: UpdateSdlcBaselineDraftInput,
-    sourceReferences: SdlcSourceReference[] = []
-  ): Record<string, unknown> {
-    const section = definition.sections.find((item) => item.key === input.sectionKey);
-    if (!section) {
-      throw new AppError(
-        `Unknown ${definition.kind} section ${input.sectionKey || '(missing)'}`,
-        400
-      );
-    }
-    if (!input.markdown) {
-      throw new AppError('Baseline section markdown is required', 400);
-    }
-    return applyBaselineDraftSection(metadata, {
-      sectionKey: section.key,
-      sectionTitle: section.title,
-      markdown: input.markdown,
-      sourceReferences,
-    });
-  }
 
   private async resolveSourceReferences(input: {
     repoId: string;
     repositoryUrl: string;
     generationCommit: string;
     markdown: string;
-    sourceReferences?: UpdateSdlcBaselineDraftInput['sourceReferences'];
+    sourceReferences?: CreateSdlcClawArtifactInput['sourceReferences'];
   }): Promise<{ markdown: string; sourceReferences: SdlcSourceReference[] }> {
     const requested = input.sourceReferences ?? [];
     await Promise.all([
