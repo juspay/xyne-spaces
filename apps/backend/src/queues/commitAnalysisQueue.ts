@@ -44,7 +44,7 @@ class CommitAnalysisQueue {
           },
           removeOnComplete: true,
           removeOnFail: false,
-          timeout: 60000, // 60 seconds max per job
+          timeout: 180000, // 3 minutes - allows for ~6 paginated VCS fetches at 30s each
         },
       });
 
