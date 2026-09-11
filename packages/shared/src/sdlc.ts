@@ -650,12 +650,15 @@ export const sdlcAgentContextSchema = z
     projectId: z.string().min(1),
     channelId: z.string().min(1),
     actorUserId: z.string().min(1),
-    repository: z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      url: z.string().min(1),
-      baseBranch: z.string().min(1),
-    }),
+    /** Absent on a hub-scoped run, which names its repositories per tool call. */
+    repository: z
+      .object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        url: z.string().min(1),
+        baseBranch: z.string().min(1),
+      })
+      .optional(),
     permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
     gates: z.object({
       capabilities: z.array(z.unknown()),
