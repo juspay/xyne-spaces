@@ -71,6 +71,15 @@ export function fetchRadarWaitingOn(): Promise<RadarThreadCard[]> {
   ).then(d => d.threads);
 }
 
+/** Open items held by anyone but the viewer, whoever asked — the "All" half of
+ *  the Others filter. Waiting On is the same feed narrowed to the viewer's own
+ *  asks, so the two are never fetched together. */
+export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-others'),
+  ).then(d => d.threads);
+}
+
 export interface RadarItemMutation {
   id: string;
   itemId: string;

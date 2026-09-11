@@ -26,6 +26,8 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -52,8 +54,8 @@ const ChatView = (): ReactElement => {
   const outletContext = useOutletContext<ChatScreenContext>();
   const shouldStackThreadFromParent = outletContext?.shouldStackThread || false;
 
-  // Track previous channelId to detect navigation changes
-  const prevChannelIdRef = useRef<string | undefined>(undefined);
+  // Last channel for which CHANNEL_VIEWED was recorded this mount.
+  const viewedChannelIdRef = useRef<string | undefined>(undefined);
 
   // Track previous channelId for navigation back on leave
   const previousChannelId = usePreviousChannelId(channelId);
@@ -89,13 +91,20 @@ const ChatView = (): ReactElement => {
   const { groupId } = useParams<{ groupId?: string }>();
   const isGroupPanelOpen = !!groupId;
 
-  // Track conversation-opened once per navigation (gated on the channelId change ref).
+  // CHANNEL_VIEWED: one event per channel entry, whichever way the user got here
+  // (sidebar, search, mention, notification, deep link). Waits for the channel
+  // row so the name/scope can ride along, then latches on channelId so
+  // re-renders and thread navigation inside the same channel don't refire.
   useEffect(() => {
-    if (prevChannelIdRef.current === channelId) return;
-    prevChannelIdRef.current = channelId;
-
     if (!channel || !channelId) return;
-  }, [channel, channelId, context.userID, zero]);
+    if (viewedChannelIdRef.current === channelId) return;
+    viewedChannelIdRef.current = channelId;
+
+    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', channelDisplayName, {
+      ...channelTrackingMetadata(channel),
+      openedInThread: !!conversationId,
+    });
+  }, [channel, channelId, channelDisplayName, conversationId]);
 
   // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
   const reopenAttemptedForRef = useRef<string | undefined>(undefined);

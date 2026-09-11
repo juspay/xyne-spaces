@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, DragableSixDots, PlusDefault as Plus } from '@xyne/icons';
+import { DragableSixDots, EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -20,32 +20,36 @@ import {
   useKanbanTicketsPage,
 } from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
 import { TicketCard } from '../TicketCard/TicketCard';
-import Button from '../../ui/Button';
-import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
-import { ExpandIcon } from '../../../assets/icons/ExpandIcon';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { cn } from '../../../utils/classNames';
-import { StatusOptions } from '../TicketTable/TicketTableHelper';
+import { KanbanIcon } from './KanbanIcon';
+import { HiddenColumnsPanel } from '../HiddenColumnsPanel/HiddenColumnsPanel';
+
+// Re-exported for the many call sites that already import it from here.
+export { KanbanIcon };
 
 const VIRTUAL_ROW_HEIGHT = 130;
 const VIRTUAL_OVERSCAN = 25;
 
 /**
- * Column order and hand-collapsed columns, per device. Keyed by the stage ids
- * themselves, so every board keeps its own order without the caller passing an
- * identity in, and a board whose stages changed falls back to its natural order.
+ * Column order, per device. Keyed by the stage ids themselves, so every board
+ * keeps its own order without the caller passing an identity in, and a board
+ * whose stages changed falls back to its natural order.
  */
 const COLUMN_LAYOUT_PREFIX = 'xyne:kanban-column-layout:';
 const COLUMN_LAYOUT_CHANGE_EVENT = 'xyne:kanban-column-layout-change';
 
 interface ColumnLayout {
   order: string[];
-  collapsed: string[];
-  /** Collapsed or expanded by hand — exempt from the auto-collapse below. */
-  userToggled: string[];
 }
 
 /** A factory, not a constant: callers keep these arrays in state. */
-const emptyColumnLayout = (): ColumnLayout => ({ order: [], collapsed: [], userToggled: [] });
+const emptyColumnLayout = (): ColumnLayout => ({ order: [] });
 
 const readColumnLayout = (key: string): ColumnLayout => {
   try {
@@ -92,6 +96,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   tags,
   onClick,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -124,6 +131,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         tags={tags}
         onClick={onClick}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -145,14 +155,17 @@ const VirtualizedStageList: React.FC<{
   stageTickets: Ticket[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
-  onLoadMore?: () => void;
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onLoadMore?: (() => void) | undefined;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stageId,
@@ -164,6 +177,9 @@ const VirtualizedStageList: React.FC<{
   onTicketsChange,
   onAddTicket,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -245,6 +261,9 @@ const VirtualizedStageList: React.FC<{
                   ticketId: m.ticketId,
                 }))}
                 availableTags={availableTags}
+                onLoadMoreTags={onLoadMoreTags}
+                hasMoreTags={hasMoreTags}
+                onSearchTags={onSearchTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
                 {...(activeTicketId !== undefined && { activeTicketId })}
@@ -280,13 +299,16 @@ const PaginatedStageList: React.FC<{
   paginationArgs: KanbanTicketsPageBaseArgs;
   columnType: 'stage' | 'status';
   allKnownTickets: Ticket[];
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stage,
@@ -296,6 +318,9 @@ const PaginatedStageList: React.FC<{
   allKnownTickets,
   onTicketsChange,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -318,11 +343,29 @@ const PaginatedStageList: React.FC<{
     // When using direct Vespa rows, trust the results - they're already filtered
     // by group-specific Vespa filters (dynamic field tokens, assignee, priority, etc.)
     if (isUsingDirectVespaRows) {
-      // Merge with cached tickets for optimistic updates if available
-      if (allKnownTickets.length > 0) {
-        const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
-        return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+      // If Vespa returned tickets, merge with cached tickets for optimistic updates
+      if (tickets.length > 0) {
+        if (allKnownTickets.length > 0) {
+          const knownTicketsById = new Map(allKnownTickets.map(t => [t.id, t]));
+          return tickets.map(ticket => knownTicketsById.get(ticket.id) ?? ticket);
+        }
+        return tickets;
       }
+      // Vespa returned 0 tickets. This could be:
+      // 1. A valid empty result (filters matched nothing) - respect it
+      // 2. Vespa segregation filtered out tickets due to stage mismatch - use allKnownTickets
+      //
+      // To distinguish: if allKnownTickets has tickets that belong to this column,
+      // use them (case 2). Otherwise, trust the empty result (case 1).
+      if (allKnownTickets.length > 0) {
+        const columnTickets = allKnownTickets.filter(ticket =>
+          ticketBelongsToColumn(ticket, columnType, columnValue, columnStatus),
+        );
+        if (columnTickets.length > 0) {
+          return columnTickets;
+        }
+      }
+      // No tickets match - return empty (this is a valid filtered result)
       return tickets;
     }
 
@@ -345,7 +388,15 @@ const PaginatedStageList: React.FC<{
     // In group by mode without direct Vespa rows, use allKnownTickets as source of truth.
     // This path is used when Zero query provides the tickets.
     if (allKnownTickets.length === 0) {
-      // Grouping not ready yet - return empty to prevent showing wrong tickets
+      // When allKnownTickets is empty but we have tickets from the hook, use them directly.
+      // This prevents the view from being empty when filtering in group-by mode,
+      // especially for priority grouping where the chicken-and-egg problem can occur:
+      // - allKnownTickets comes from kanbanTicketsForGrouping
+      // - kanbanTicketsForGrouping is built from tickets reported by columns
+      // - But columns can't report tickets if they don't render any
+      if (tickets.length > 0) {
+        return tickets;
+      }
       return [];
     }
 
@@ -423,6 +474,9 @@ const PaginatedStageList: React.FC<{
         isLoadingMore={isLoadingMore}
         onLoadMore={loadMore}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -449,6 +503,11 @@ const ticketBelongsToColumn = (
 
 interface KanbanColumnsProps {
   stages: Stage[];
+  /** Columns parked in the hidden-columns panel — dropped from the strip entirely. */
+  hiddenColumnIds?: string[];
+  /** Omitted when the board has no hidden-columns panel to park a column in. */
+  onHideColumn?: (stageId: string) => void;
+  onUnhideColumn?: (stageId: string) => void;
   ticketsByStage: Record<string, Ticket[]>;
   stageCounts?: Record<string, number>;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
@@ -456,6 +515,12 @@ interface KanbanColumnsProps {
   /** Scopes the saved layout: status columns carry the same ids on every board. */
   layoutScope?: string;
   availableTags?: string[];
+  /** Callback to load more tags */
+  onLoadMoreTags?: () => void;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean;
+  /** Callback for server-side tag search */
+  onSearchTags?: (query: string) => void;
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
   paginatedColumnConfig?: {
@@ -464,9 +529,8 @@ interface KanbanColumnsProps {
   };
   /**
    * A search is active. Server counts are not refetched for the search term, so
-   * they are either stale or absent — and a collapsed column unmounts its query,
-   * so it can never report a match again. Both count display and auto-collapse
-   * have to stop trusting `stageCounts` while this is true.
+   * they are either stale or absent, and the count display has to stop trusting
+   * `stageCounts` while this is true.
    */
   searchActive?: boolean;
   allKnownTickets?: Ticket[];
@@ -492,19 +556,11 @@ interface KanbanColumnsProps {
   userNamesById?: Map<string, string>;
 }
 
-export const KanbanIcon = ({ status }: { status?: TicketStatusV2 | undefined }) => {
-  if (!status) {
-    return <Circle className='w-4 h-4 text-muted-foreground' />;
-  }
-  const statusOption = StatusOptions.find(opt => (opt.value as TicketStatusV2) === status);
-  if (statusOption) {
-    return <>{statusOption.icon}</>;
-  }
-  return <Circle className='w-4 h-4 text-muted-foreground' />;
-};
-
 export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   stages,
+  hiddenColumnIds,
+  onHideColumn,
+  onUnhideColumn,
   ticketsByStage,
   stageCounts,
   onTicketClick,
@@ -512,6 +568,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   layoutScope = '',
   containerClassName,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -551,12 +610,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
 
     return counts;
   }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
-  const stageCollapseSignature = React.useMemo(
-    () => stages.map(stage => `${stage.id}:${stageCountById[stage.id] ?? 0}`).join('|'),
-    [stages, stageCountById],
-  );
-  const userToggledCollapsedStageIdsRef = React.useRef<Set<string>>(new Set());
-  const [collapsedStageIds, setCollapsedStageIds] = React.useState<string[]>([]);
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
   const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
@@ -564,33 +617,35 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   const seededLayoutKeyRef = React.useRef('');
   if (seededLayoutKeyRef.current !== layoutKey) {
     // First render, or the board switched to a different set of stages.
-    const saved = readColumnLayout(layoutKey);
     seededLayoutKeyRef.current = layoutKey;
-    setColumnOrder(saved.order);
-    setCollapsedStageIds(saved.collapsed);
-    userToggledCollapsedStageIdsRef.current = new Set(saved.userToggled);
+    setColumnOrder(readColumnLayout(layoutKey).order);
   }
 
   React.useEffect(() => {
-    // Only the order follows other instances: re-seeding collapse on every write
-    // would throw away what auto-collapse has worked out since.
+    // Grouped boards render one instance per group off the same layout key.
     const syncOrder = (): void => setColumnOrder(readColumnLayout(layoutKey).order);
     window.addEventListener(COLUMN_LAYOUT_CHANGE_EVENT, syncOrder);
     return (): void => window.removeEventListener(COLUMN_LAYOUT_CHANGE_EVENT, syncOrder);
   }, [layoutKey]);
 
   const orderPositionById = new Map(columnOrder.map((stageId, index) => [stageId, index]));
-  const orderedStages = columnOrder.length
-    ? [...stages].sort(
-        (a, b) => (orderPositionById.get(a.id) ?? 0) - (orderPositionById.get(b.id) ?? 0),
-      )
+  const bySavedOrder = (a: Stage, b: Stage): number =>
+    (orderPositionById.get(a.id) ?? 0) - (orderPositionById.get(b.id) ?? 0);
+  const visibleStages = hiddenColumnIds?.length
+    ? stages.filter(stage => !hiddenColumnIds.includes(stage.id))
     : stages;
+  const hiddenStages = hiddenColumnIds?.length
+    ? stages.filter(stage => hiddenColumnIds.includes(stage.id))
+    : [];
+  const orderedStages = columnOrder.length ? [...visibleStages].sort(bySavedOrder) : visibleStages;
 
   const moveColumnTo = (targetStageId: string): void => {
     setDraggedStageId(null);
     if (!draggedStageId || draggedStageId === targetStageId) return;
 
-    const stageIds = orderedStages.map(stage => stage.id);
+    // Ordered over every stage, hidden ones included, so unhiding a column
+    // restores it where it was rather than at the head of the strip.
+    const stageIds = [...stages].sort(bySavedOrder).map(stage => stage.id);
     // Target index taken before the removal, so the column lands after the target
     // when dragged rightwards and before it when dragged leftwards.
     const fromIndex = stageIds.indexOf(draggedStageId);
@@ -600,53 +655,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     stageIds.splice(toIndex, 0, draggedStageId);
     setColumnOrder(stageIds);
     writeColumnLayout(layoutKey, { order: stageIds });
-  };
-
-  React.useEffect(() => {
-    // While counts cannot be trusted, release everything the user did not collapse
-    // by hand. Collapsing here would unmount the column's query and hide matches
-    // that can then never be fetched back.
-    if (!countsAreReliable) {
-      setCollapsedStageIds(prev => {
-        const next = prev.filter(id => userToggledCollapsedStageIdsRef.current.has(id));
-        return next.length === prev.length ? prev : next;
-      });
-      return;
-    }
-
-    if (!stages.some(stage => (stageCountById[stage.id] ?? 0) > 0)) {
-      return;
-    }
-
-    setCollapsedStageIds(prev => {
-      const next = new Set(prev);
-
-      for (const stage of stages) {
-        if (userToggledCollapsedStageIdsRef.current.has(stage.id)) {
-          continue;
-        }
-
-        if ((stageCountById[stage.id] ?? 0) > 0) {
-          next.delete(stage.id);
-        } else {
-          next.add(stage.id);
-        }
-      }
-
-      return next.size === prev.length && prev.every(id => next.has(id)) ? prev : [...next];
-    });
-  }, [stageCollapseSignature, stages, stageCountById, countsAreReliable]);
-
-  const toggleCollapse = (stageId: string): void => {
-    userToggledCollapsedStageIdsRef.current.add(stageId);
-    const next = collapsedStageIds.includes(stageId)
-      ? collapsedStageIds.filter(id => id !== stageId)
-      : [...collapsedStageIds, stageId];
-    setCollapsedStageIds(next);
-    writeColumnLayout(layoutKey, {
-      collapsed: next,
-      userToggled: [...userToggledCollapsedStageIdsRef.current],
-    });
   };
 
   return (
@@ -660,7 +668,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
-        const isCollapsed = collapsedStageIds.includes(stage.id);
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>
@@ -676,158 +683,116 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
               onDragOver={event => event.preventDefault()}
               onDrop={() => moveColumnTo(stage.id)}
               className={cn(
-                'group/kanbancol flex flex-col rounded-lg transition-all duration-300 ease-in-out bg-muted h-full',
-                isCollapsed ? 'w-12 sm:w-14' : 'w-72 sm:w-96',
+                'group/kanbancol flex flex-col rounded-lg bg-muted h-full w-72 sm:w-96',
                 draggedStageId === stage.id && 'opacity-40',
               )}
             >
-              <div
-                className={cn(
-                  'flex items-center justify-between px-4 pt-3 pb-1 w-full',
-                  isCollapsed && 'h-full min-h-[236px] flex-col gap-2',
-                )}
-              >
-                {!isCollapsed ? (
-                  /* EXPANDED HEADER */
-                  <>
-                    <div className='flex items-center gap-2 min-w-0'>
-                      <KanbanIcon status={stage.defaultTicketStatusV2} />
-                      <h3 className='text-xs font-medium truncate uppercase text-foreground'>
-                        {stage.name}
-                      </h3>
-                      <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
-                        {stageCount}
-                      </span>
-                    </div>
+              <div className='flex items-center justify-between px-4 pt-3 pb-1 w-full'>
+                <div className='flex items-center gap-2 min-w-0'>
+                  <KanbanIcon status={stage.defaultTicketStatusV2} />
+                  <h3 className='text-xs font-medium truncate uppercase text-foreground'>
+                    {stage.name}
+                  </h3>
+                  <span className='text-xs px-2 py-0.5 rounded-full text-muted-foreground bg-muted-foreground/10'>
+                    {stageCount}
+                  </span>
+                </div>
 
-                    <div className='flex items-center gap-1'>
-                      <ColumnDragHandle
-                        stageId={stage.id}
-                        onDraggedStageChange={setDraggedStageId}
-                      />
-                      <Button
-                        variant='ghost'
-                        onClick={() => toggleCollapse(stage.id)}
-                        className='!p-0 !bg-transparent'
-                        data-track-category='Tickets'
-                        data-track-name='CollapseKanbanColumn'
-                        data-track-metadata={JSON.stringify({
-                          stageId: stage.id,
-                          stageName: stage.name,
-                        })}
-                      >
-                        <CollapseIcon />
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  /* COLLAPSED HEADER */
-                  <div
-                    className='flex flex-col items-center justify-between w-full h-full min-h-[236px] cursor-pointer'
-                    onClick={() => toggleCollapse(stage.id)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        toggleCollapse(stage.id);
-                      }
-                    }}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='Tickets'
-                    data-track-name='ExpandKanbanColumn'
-                    data-track-metadata={JSON.stringify({
-                      stageId: stage.id,
-                      stageName: stage.name,
-                    })}
-                  >
-                    <div className='flex flex-col items-center gap-2 w-full h-full'>
-                      <ColumnDragHandle
-                        stageId={stage.id}
-                        onDraggedStageChange={setDraggedStageId}
-                      />
-                      <KanbanIcon status={stage.defaultTicketStatusV2} />
-                      <h3
-                        className={cn(
-                          'text-sm font-medium whitespace-nowrap w-fit text-foreground',
-                          '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
-                        )}
-                      >
-                        {stage.name}
-                      </h3>
-                      <span
-                        className={cn(
-                          'text-sm py-2 px-0.5 rounded-full text-muted-foreground bg-muted-foreground/10',
-                          '[transform-origin:center] [writing-mode:vertical-rl] [text-orientation:mixed]',
-                        )}
-                      >
-                        {stageCount}
-                      </span>
-                    </div>
-
-                    <Button
-                      variant='ghost'
-                      onClick={e => {
-                        e.stopPropagation();
-                        toggleCollapse(stage.id);
-                      }}
-                      className='!p-0 !bg-transparent'
-                      data-track-category='Tickets'
-                      data-track-name='CollapseKanbanColumn'
-                      data-track-metadata={JSON.stringify({
-                        stageId: stage.id,
-                        stageName: stage.name,
-                      })}
-                    >
-                      <ExpandIcon />
-                    </Button>
-                  </div>
-                )}
+                <div className='flex items-center gap-1'>
+                  <ColumnDragHandle stageId={stage.id} onDraggedStageChange={setDraggedStageId} />
+                  {onHideColumn && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type='button'
+                          aria-label={`${stage.name} column options`}
+                          className='flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+                          data-track-category='Tickets'
+                          data-track-name='OpenKanbanColumnMenu'
+                          data-track-metadata={JSON.stringify({
+                            stageId: stage.id,
+                            stageName: stage.name,
+                          })}
+                        >
+                          <ThreeDotsMenuHorizontal className='size-4' />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align='end' className='w-[214px] rounded-xl p-[5px]'>
+                        <DropdownMenuItem
+                          className='h-[34px] gap-2.5 rounded-lg px-2.5 text-[13.5px]'
+                          onSelect={() => onHideColumn(stage.id)}
+                          data-track-category='Tickets'
+                          data-track-name='HideKanbanColumn'
+                          data-track-metadata={JSON.stringify({
+                            stageId: stage.id,
+                            stageName: stage.name,
+                          })}
+                        >
+                          <EyeOff className='size-4 shrink-0' />
+                          <span>Hide column</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
               </div>
 
-              {!isCollapsed && (
-                <div className='flex-1 min-h-0'>
-                  {paginatedColumnConfig ? (
-                    <PaginatedStageList
-                      key={columnKey}
-                      stage={stage}
+              <div className='flex-1 min-h-0'>
+                {paginatedColumnConfig ? (
+                  <PaginatedStageList
+                    key={columnKey}
+                    stage={stage}
+                    columnKey={columnKey}
+                    paginationArgs={paginatedColumnConfig.baseArgs}
+                    columnType={paginatedColumnConfig.columnType}
+                    allKnownTickets={knownTicketsForOptimisticMerge}
+                    {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
+                    availableTags={availableTags}
+                    onLoadMoreTags={onLoadMoreTags}
+                    hasMoreTags={hasMoreTags}
+                    onSearchTags={onSearchTags}
+                    visibleColumns={visibleColumns}
+                    {...(activeTicketId !== undefined && { activeTicketId })}
+                    {...(showEmailReads !== undefined && { showEmailReads })}
+                    onTicketClick={onTicketClick}
+                    {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
+                    {...(slaPolicies !== undefined && { slaPolicies })}
+                    {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
+                    {...(userNamesById !== undefined && { userNamesById })}
+                  />
+                ) : (
+                  <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
+                    <VirtualizedStageList
+                      stageId={stage.id}
                       columnKey={columnKey}
-                      paginationArgs={paginatedColumnConfig.baseArgs}
-                      columnType={paginatedColumnConfig.columnType}
-                      allKnownTickets={knownTicketsForOptimisticMerge}
+                      stageTickets={stageTickets}
                       {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
+                      onLoadMoreTags={onLoadMoreTags}
+                      hasMoreTags={hasMoreTags}
+                      onSearchTags={onSearchTags}
                       visibleColumns={visibleColumns}
                       {...(activeTicketId !== undefined && { activeTicketId })}
                       {...(showEmailReads !== undefined && { showEmailReads })}
                       onTicketClick={onTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
-                      {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
-                      {...(userNamesById !== undefined && { userNamesById })}
                     />
-                  ) : (
-                    <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
-                      <VirtualizedStageList
-                        stageId={stage.id}
-                        columnKey={columnKey}
-                        stageTickets={stageTickets}
-                        {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
-                        availableTags={availableTags}
-                        visibleColumns={visibleColumns}
-                        {...(activeTicketId !== undefined && { activeTicketId })}
-                        {...(showEmailReads !== undefined && { showEmailReads })}
-                        onTicketClick={onTicketClick}
-                        {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
-                        {...(slaPolicies !== undefined && { slaPolicies })}
-                      />
-                    </SortableContext>
-                  )}
-                </div>
-              )}
+                  </SortableContext>
+                )}
+              </div>
             </div>
           </DroppableStage>
         );
       })}
+
+      {onUnhideColumn && (
+        <HiddenColumnsPanel
+          stages={hiddenStages}
+          getCount={stage => stageCountById[stage.id] ?? 0}
+          onUnhide={onUnhideColumn}
+        />
+      )}
     </div>
   );
 };
