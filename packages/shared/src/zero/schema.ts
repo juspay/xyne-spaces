@@ -679,6 +679,12 @@ export const pullRequestsTable = table('pull_requests')
     prUrl: string(),
     updatedAt: number(),
     status: enumeration<PRStatus>(),
+    botCommitCount: number().optional(),
+    humanCommitCount: number().optional(),
+    unknownCommitCount: number().optional(),
+    commitAnalysisStatus: string().optional(),
+    commitAnalysisError: string().optional(),
+    commitAnalyzedAt: number().optional(),
   })
   .primaryKey('id');
 
