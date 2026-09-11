@@ -201,6 +201,7 @@ import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/Auto
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
+import { valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -882,7 +883,13 @@ const SupportScreen = (): ReactElement => {
   // Desk ticket saved views
   const ticketViewsChannelId =
     selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
-  const [activeTicketViewId, setActiveTicketViewId] = useState<string | null>(null);
+  const activeTicketViewId = filtersState.context.activeViewId;
+  const setActiveTicketViewId = useCallback(
+    (id: string | null) => {
+      sendFilters({ type: 'SET_ACTIVE_VIEW_ID', activeViewId: id });
+    },
+    [sendFilters],
+  );
   const {
     savedViews: deskSavedViews,
     saveView: saveDeskView,
@@ -907,6 +914,26 @@ const SupportScreen = (): ReactElement => {
   const handleUpdateDeskView = async (viewId: string): Promise<void> => {
     await updateDeskView(viewId, filters);
   };
+
+  const isDeskViewDirty = useMemo(() => {
+    if (!activeTicketViewId) return false;
+    const activeView = deskSavedViews.find(v => v.id === activeTicketViewId);
+    if (!activeView?.values) return false;
+    const viewFilters = valuesToFilters(activeView.values);
+    const sortDeep = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(sortDeep);
+      if (v !== null && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        return Object.fromEntries(
+          Object.keys(rec)
+            .sort()
+            .map(k => [k, sortDeep(rec[k])]),
+        );
+      }
+      return v;
+    };
+    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
+  }, [activeTicketViewId, deskSavedViews, filters]);
 
   const {
     rowRef: filterRowRef,
@@ -3370,18 +3397,29 @@ const SupportScreen = (): ReactElement => {
                             )}
                           </Popover.Root>
 
-                          {hasAnyFilterActive && (
+                          {(isDeskViewDirty || (!activeTicketViewId && hasAnyFilterActive)) && (
                             <Button
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
-                              onClick={() => setFilters({})}
+                              onClick={() => {
+                                const activeView = deskSavedViews.find(
+                                  v => v.id === activeTicketViewId,
+                                );
+                                if (activeView) {
+                                  applyDeskSavedView(activeView);
+                                } else {
+                                  setFilters({});
+                                }
+                              }}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
-                                <span className='font-medium'>Clear</span>
+                                <span className='font-medium'>
+                                  {activeTicketViewId ? 'Reset view' : 'Clear'}
+                                </span>
                               </div>
                             </Button>
                           )}
@@ -3498,7 +3536,8 @@ const SupportScreen = (): ReactElement => {
                             onSave={handleSaveDeskView}
                             onUpdate={handleUpdateDeskView}
                             onDelete={deleteDeskView}
-                            hasActiveFilters={hasAnyFilterActive}
+                            currentFilters={filters}
+                            dynamicFieldDefs={deskDynamicFields}
                             trackCategory='Support'
                           />
                         )}
