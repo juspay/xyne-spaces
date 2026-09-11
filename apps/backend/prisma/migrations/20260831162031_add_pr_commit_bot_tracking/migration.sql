@@ -1,6 +1,7 @@
 -- CreateTable: Commit table for bot attribution tracking
 CREATE TABLE "public"."commits" (
     "id" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
     "commitSha" TEXT NOT NULL,
     "pullRequestId" TEXT NOT NULL,
     "agentSlug" TEXT,
