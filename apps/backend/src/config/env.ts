@@ -70,7 +70,7 @@ const envSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
-  SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
+  SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // AWS S3 Configuration
