@@ -1,3 +1,10 @@
+## [1.313.0](https://github.com/juspay/xyne-spaces/compare/v1.312.2...v1.313.0) (2026-09-11)
+
+
+### Features
+
+* retain only the last 1000 completed vespa jobs ([#1795](https://github.com/juspay/xyne-spaces/issues/1795)) ([1da6de6](https://github.com/juspay/xyne-spaces/commit/1da6de606b54cdea529a8813d01c8069b5bdef09))
+
 ## [1.312.2](https://github.com/juspay/xyne-spaces/compare/v1.312.1...v1.312.2) (2026-09-11)
 
 
