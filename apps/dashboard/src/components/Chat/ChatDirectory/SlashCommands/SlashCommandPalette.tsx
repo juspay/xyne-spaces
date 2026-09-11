@@ -1,16 +1,9 @@
 import { ReactElement, type MouseEventHandler } from 'react';
 import { Command } from 'cmdk';
-import { UserTwo } from '@xyne/icons';
 import { COMMAND_KINDS, getCommand } from './commands';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
-import Avatar from '../../../ui/Avatar/Avatar';
-import ChannelIcon from '../../ChannelIcon/ChannelIcon';
+import { UserRow, ChannelRow, CommandSection } from '../CommandRows';
 import type { UseSlashCommandsReturn, GotoExtra } from './useSlashCommands';
-
-// cmdk group-heading style (uppercase mono muted) so the palette matches the menu's
-// other sections.
-const COMMAND_GROUP_HEADING_CLASS =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono';
 
 // The whole slash-command controller is handed in as one prop. The palette reads the slice it needs
 // (below); the parent no longer forwards a prop per field, so a new command that adds palette data
@@ -69,7 +62,7 @@ export function SlashCommandPalette({
     }
     const shown = matches.length ? matches : COMMAND_KINDS;
     return (
-      <Command.Group heading='Commands' className={COMMAND_GROUP_HEADING_CLASS}>
+      <CommandSection heading='Commands'>
         {shown.map(kind => {
           const def = getCommand(kind);
           return (
@@ -90,7 +83,7 @@ export function SlashCommandPalette({
             </Command.Item>
           );
         })}
-      </Command.Group>
+      </CommandSection>
     );
   }
 
@@ -98,7 +91,7 @@ export function SlashCommandPalette({
   const activeDef = getCommand(commandKind);
   if (activeDef.type === 'action') {
     return (
-      <Command.Group heading={activeDef.heading} className={COMMAND_GROUP_HEADING_CLASS}>
+      <CommandSection heading={activeDef.heading}>
         <Command.Item
           value={`command-${commandKind}`}
           data-item-label={activeDef.title}
@@ -112,7 +105,7 @@ export function SlashCommandPalette({
             <span className='min-w-0 truncate text-muted-foreground'>{activeDef.description}</span>
           </div>
         </Command.Item>
-      </Command.Group>
+      </CommandSection>
     );
   }
 
@@ -147,7 +140,7 @@ export function SlashCommandPalette({
     return (
       <>
         {(pinnedExtras.length > 0 || commandNavResults.length > 0) && (
-          <Command.Group heading={activeDef.heading} className={COMMAND_GROUP_HEADING_CLASS}>
+          <CommandSection heading={activeDef.heading}>
             {pinnedExtras.map(renderExtra)}
             {commandNavResults.map(item => (
               <Command.Item
@@ -164,12 +157,10 @@ export function SlashCommandPalette({
                 </div>
               </Command.Item>
             ))}
-          </Command.Group>
+          </CommandSection>
         )}
         {settingsExtras.length > 0 && (
-          <Command.Group heading='Settings' className={COMMAND_GROUP_HEADING_CLASS}>
-            {settingsExtras.map(renderExtra)}
-          </Command.Group>
+          <CommandSection heading='Settings'>{settingsExtras.map(renderExtra)}</CommandSection>
         )}
       </>
     );
@@ -183,87 +174,56 @@ export function SlashCommandPalette({
   ) {
     return <div className='py-6 text-center text-sm text-muted-foreground'>No matches</div>;
   }
+  // Primes the parent's selection-gesture ref on mouse pick; omitted when the parent didn't supply it.
+  const mouseDownProps = onItemMouseDown ? { onMouseDownCapture: onItemMouseDown } : {};
   return (
     <>
       {commandUserResults.length > 0 && (
-        <Command.Group heading='Users' className={COMMAND_GROUP_HEADING_CLASS}>
+        <CommandSection heading='Users'>
           {commandUserResults.map(user => (
-            <Command.Item
+            <UserRow
               key={user.id}
+              user={user}
               value={`command-user-${user.id}`}
-              data-item-label={getUserDisplayName(user)}
+              dataItemLabel={getUserDisplayName(user)}
+              isCurrentUser={user.id === currentUserID}
               onSelect={() => onRunTarget({ type: 'user', user })}
-              onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-            >
-              <Avatar userId={user.id} size='xs' />
-              <div className='flex-1 min-w-0 flex items-center gap-2'>
-                <span className='min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
-                  {getUserDisplayName(user)}
-                  {user.id === currentUserID && (
-                    <span className='text-muted-foreground'> (you)</span>
-                  )}
-                </span>
-                <span className='min-w-0 truncate text-xs text-muted-foreground'>{user.email}</span>
-              </div>
-            </Command.Item>
+              {...mouseDownProps}
+            />
           ))}
-        </Command.Group>
+        </CommandSection>
       )}
       {commandChannelResults.length > 0 && (
-        <Command.Group heading='Channels' className={COMMAND_GROUP_HEADING_CLASS}>
+        <CommandSection heading='Channels'>
           {commandChannelResults.map(channel => (
-            <Command.Item
+            <ChannelRow
               key={channel.id}
               value={`command-channel-${channel.id}`}
-              data-item-label={channel.name}
+              dataItemLabel={channel.name}
+              label={channel.name}
+              channel={channel}
               onSelect={() => onRunTarget({ type: 'channel', channel })}
-              onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-            >
-              <span className='shrink-0 text-muted-foreground'>
-                <ChannelIcon
-                  channel={channel}
-                  glyphClassName='text-muted-foreground'
-                  avatarSize='xs'
-                />
-              </span>
-              <div className='flex-1 min-w-0'>
-                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] truncate text-foreground'>
-                  {channel.name}
-                </div>
-                {channel.description && (
-                  <div className='text-xs text-muted-foreground truncate'>
-                    {channel.description}
-                  </div>
-                )}
-              </div>
-            </Command.Item>
+              {...mouseDownProps}
+            />
           ))}
-        </Command.Group>
+        </CommandSection>
       )}
       {commandGroupDmResults.length > 0 && (
-        <Command.Group heading='Group DMs' className={COMMAND_GROUP_HEADING_CLASS}>
+        <CommandSection heading='Group DMs'>
           {commandGroupDmResults.map(({ channel, label }) => (
-            <Command.Item
+            <ChannelRow
               key={channel.id}
               value={`command-group-dm-${channel.id}`}
-              data-item-label={label}
+              dataItemLabel={label}
+              label={label}
+              channel={channel}
               onSelect={() =>
                 onRunTarget({ type: 'channel', channel, displayName: label, isDm: true })
               }
-              onMouseDownCapture={onItemMouseDown}
-              className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-            >
-              <UserTwo size={16} className='shrink-0 text-muted-foreground' />
-              <div className='flex-1 min-w-0'>
-                <div className='text-[15px] leading-[1.2] tracking-[-0.1px] truncate text-foreground'>
-                  {label}
-                </div>
-              </div>
-            </Command.Item>
+              {...mouseDownProps}
+            />
           ))}
-        </Command.Group>
+        </CommandSection>
       )}
     </>
   );
