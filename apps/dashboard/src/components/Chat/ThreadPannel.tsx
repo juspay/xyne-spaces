@@ -261,10 +261,6 @@ export const ThreadMessages = ({
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
-  const [threadTicket] = useCachedQuery(queries.ticketRowById({ ticketId: derivedTicketId }), {
-    enabled: !!derivedTicketId,
-  });
-  const isFlowStep = !!threadTicket?.rootId;
 
   const [threadSubTicketMappings] = useCachedQuery(
     queries.subTicketsForTicket({ ticketId: derivedTicketId }),
@@ -1656,7 +1652,6 @@ export const ThreadMessages = ({
                     initialScrollOffset={0}
                     isTicketThread={true}
                     spawnedTicketMessageIds={spawnedTicketMessageIds}
-                    isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
                     enableCollapsing={previewCardMode}
