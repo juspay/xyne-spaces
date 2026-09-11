@@ -8,7 +8,6 @@ import { encryptionExtension } from '@/database/prisma-encryption-extension';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
-import { withWorkflowExecutionDualWrite } from './workflowExecutionDualWrite';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
@@ -90,11 +89,7 @@ export class DatabaseClient {
 
       // Apply zero field encryption extension (no-op when encryptedFieldsConfig is empty)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
-      // Dual write sits below the ACL layer: $transaction runs on that layer, so its
-      // transaction clients must already carry the extension.
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(
-        withAclExtension(withWorkflowExecutionDualWrite(DatabaseClient.instance))
-      );
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
