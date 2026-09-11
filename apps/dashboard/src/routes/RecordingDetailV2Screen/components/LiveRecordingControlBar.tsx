@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
+import { StopSmall, Spinner, PauseBig, PlayBig, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
@@ -28,7 +28,13 @@ import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/r
 import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPlayback';
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
 import type { MarkedMoment } from '../../../stores/recordingStore';
-import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './markedItems';
+import { parseMarkedItems, type MarkedItem } from '../../../components/CallTimeline/markedItems';
+import {
+  MARKER_NOUN,
+  MarkerDot,
+  MarkerLegend,
+  MomentFlag,
+} from '../../../components/CallTimeline/TimelineMarkers';
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
@@ -211,99 +217,6 @@ export const LiveRecordingControlBar = ({
 };
 
 /* -------------------------------------------------------------------------- */
-/* Timeline markers                                                           */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Decisions and actions the summary pipeline extracted, as dots sitting on the track
- * itself — moments get a flag above it instead
- */
-const MARKER_DOT_COLOR: Record<Exclude<MarkedItemType, 'moment'>, string> = {
-  decision: 'bg-yellow-500',
-  action: 'bg-orange-500',
-};
-
-/** Names the marker in its tooltip, so the three kinds read apart without the legend. */
-const MARKER_NOUN: Record<MarkedItemType, string> = {
-  decision: 'Decision',
-  action: 'Action',
-  moment: 'Marked moment',
-};
-
-const MARKER_INTERACTIVE =
-  "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
-
-interface MomentFlagProps {
-  percent: number;
-  title: string;
-  onSelect?: () => void;
-}
-
-/** Flag pinned to a point on either timeline — a button only when it can be acted on. */
-const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement => {
-  const className = cn(
-    'absolute bottom-1.5 z-10 flex -translate-x-0.5',
-    onSelect && MARKER_INTERACTIVE,
-  );
-  const glyph = <Flag size={14} variant='Solid' className='text-primary' aria-hidden='true' />;
-
-  if (!onSelect) {
-    return (
-      <span className={className} style={{ left: `${percent}%` }} title={title}>
-        {glyph}
-      </span>
-    );
-  }
-
-  return (
-    <button
-      type='button'
-      onClick={onSelect}
-      data-track-category='RecordingDetailV2'
-      data-track-name='marker_open_transcript_moment'
-      className={className}
-      style={{ left: `${percent}%` }}
-      title={title}
-      aria-label={title}
-    >
-      {glyph}
-    </button>
-  );
-};
-
-interface MarkerDotProps {
-  percent: number;
-  type: Exclude<MarkedItemType, 'moment'>;
-  title: string;
-  onSelect?: () => void;
-}
-
-const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactElement => {
-  const className = cn(
-    'absolute top-1/2 z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background',
-    MARKER_DOT_COLOR[type],
-    onSelect && MARKER_INTERACTIVE,
-  );
-
-  if (!onSelect) {
-    return <span className={className} style={{ left: `${percent}%` }} title={title} />;
-  }
-
-  return (
-    <button
-      type='button'
-      onClick={onSelect}
-      data-track-category='RecordingDetailV2'
-      data-track-name='marker_open_transcript_item'
-      className={className}
-      style={{ left: `${percent}%` }}
-      title={title}
-      aria-label={title}
-    />
-  );
-};
-
-/* -------------------------------------------------------------------------- */
 /* Timeline                                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -336,6 +249,7 @@ const LiveRecordingTimeline = ({
             key={index}
             percent={Math.min((moment.elapsedMs / TIMELINE_WINDOW_MS) * 100, 100)}
             title={`Marked moment at ${formatElapsedTime(moment.elapsedMs)}`}
+            trackCategory='RecordingDetailV2'
           />
         ))}
 
@@ -513,6 +427,7 @@ const RecordedTimelineBar = ({
                 key={index}
                 percent={percent}
                 title={title}
+                trackCategory='RecordingDetailV2'
                 {...(onSelect ? { onSelect } : {})}
               />
             ) : (
@@ -521,6 +436,7 @@ const RecordedTimelineBar = ({
                 percent={percent}
                 type={item.type}
                 title={title}
+                trackCategory='RecordingDetailV2'
                 {...(onSelect ? { onSelect } : {})}
               />
             );
@@ -563,7 +479,7 @@ const RecordedTimelineBar = ({
 
       {/* Legend only when there's something to explain; speed only once audio can load. */}
       {(markedTypes.size > 0 || onLoadAudio) && (
-        <div className='mt-3 flex items-center gap-4 pl-1'>
+        <div className='mt-3 flex items-center gap-4'>
           {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
           {onLoadAudio && (
             <div className='ml-auto'>
@@ -578,30 +494,6 @@ const RecordedTimelineBar = ({
     </div>
   );
 };
-
-/** Reads the marker vocabulary of the track above it — only the kinds actually on it. */
-const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactElement => (
-  <div className='flex items-center gap-5 text-xs text-muted-foreground'>
-    {types.has('decision') && (
-      <span className='flex items-center gap-1.5'>
-        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
-        Decisions
-      </span>
-    )}
-    {types.has('action') && (
-      <span className='flex items-center gap-1.5'>
-        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.action)} aria-hidden='true' />
-        Actions
-      </span>
-    )}
-    {types.has('moment') && (
-      <span className='flex items-center gap-1.5'>
-        <Flag size={12} variant='Solid' className='text-primary' aria-hidden='true' />
-        Marked moments
-      </span>
-    )}
-  </div>
-);
 
 interface PlaybackSpeedControlProps {
   rate: number;

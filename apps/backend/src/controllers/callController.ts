@@ -2721,6 +2721,53 @@ export class CallController {
   }
 
   /**
+   * GET /api/calls/:callId/recordings
+   * The call's recording sessions, newest first, minus soft-deleted ones. Same
+   * audience as the recording itself. `startedAt`/`endedAt` are wall-clock, which is
+   * what lets the call timeline draw when recording was running.
+   */
+  listCallRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const recordings = await repositories.callRecordings.listByCallId(call.id);
+      res.json({
+        success: true,
+        recordings: recordings.map((recording) => ({
+          id: recording.id,
+          name: recording.name,
+          recordingType: recording.recordingType,
+          status: recording.status,
+          startedAt: recording.startedAt,
+          endedAt: recording.endedAt,
+          durationMs: recording.endedAt
+            ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+            : null,
+        })),
+      });
+    } catch (error) {
+      logger.error(`[CallController] listCallRecordings failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to list recordings' });
+    }
+  };
+
+  /**
    * POST /api/calls/:callId/recording/start
    * Any participant may start a recording. The DB partial unique index enforces a
    * single ACTIVE recording per call, so concurrent starts collapse to one egress.
