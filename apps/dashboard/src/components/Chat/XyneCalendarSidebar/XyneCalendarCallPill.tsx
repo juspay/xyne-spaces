@@ -4,6 +4,10 @@ import { ChatDefault, Hashtag, Lock02Close } from '@xyne/icons';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
+import {
+  getCallPillVariantClasses,
+  HATCH_BACKGROUND,
+} from '../../../routes/CallHistoryScreen/CalenderViewUtils';
 import type { XyneCalendarChannelPresentation } from './xyneCalendarSidebar.utils';
 
 export type XyneCalendarCallPillVariant =
@@ -22,7 +26,6 @@ export interface XyneCalendarCallPillProps {
   startsAt?: CalendarCallTime | null;
   endsAt?: CalendarCallTime | null;
   channel?: XyneCalendarChannelPresentation;
-  metadata?: string;
   onSelect: (callId: string) => void;
   onJoin?: (callId: string) => void;
   joinable?: boolean;
@@ -37,9 +40,6 @@ export interface XyneCalendarCallPillProps {
   continuesToNextDay?: boolean;
   className?: string;
 }
-
-const HATCH_BACKGROUND =
-  'repeating-linear-gradient(135deg, color-mix(in hsl, currentColor 55%, transparent) 0, color-mix(in hsl, currentColor 55%, transparent) 1px, transparent 1px, transparent 6px)';
 
 const formatTime = (value: CalendarCallTime | null | undefined): string => {
   if (value === null || value === undefined) return '';
@@ -58,6 +58,24 @@ const getTimeRange = (
   return startTime || endTime;
 };
 
+/** Chat/lock/hashtag icon for a call pill's channel chip, by scope + visibility. */
+export const ChannelScopeIcon = ({
+  channel,
+}: {
+  channel: Pick<XyneCalendarChannelPresentation, 'scopeType' | 'visibility'>;
+}): ReactElement => {
+  if (
+    channel.scopeType === ChannelScopeType.DM ||
+    channel.scopeType === ChannelScopeType.GROUP_DM
+  ) {
+    return <ChatDefault className='size-3 shrink-0' aria-hidden='true' />;
+  }
+  if (channel.visibility === ChannelVisibility.PRIVATE) {
+    return <Lock02Close className='size-3 shrink-0' aria-hidden='true' />;
+  }
+  return <Hashtag className='size-3 shrink-0' aria-hidden='true' />;
+};
+
 const XyneCalendarCallPillComponent = ({
   callId,
   title,
@@ -65,7 +83,6 @@ const XyneCalendarCallPillComponent = ({
   startsAt,
   endsAt,
   channel,
-  metadata,
   onSelect,
   onJoin,
   joinable = false,
@@ -79,16 +96,13 @@ const XyneCalendarCallPillComponent = ({
   className,
 }: XyneCalendarCallPillProps): ReactElement => {
   const timeRange = getTimeRange(startsAt, endsAt);
-  const accessibleMetadata = [timeRange, channel?.label ?? '', metadata]
-    .filter(Boolean)
-    .join(' · ');
+  const accessibleMetadata = [timeRange, channel?.label ?? ''].filter(Boolean).join(' · ');
   const isPast = past || variant === 'past';
   const accessibleLabel = [joinable ? 'Active call' : '', title, accessibleMetadata]
     .filter(Boolean)
     .join(', ');
   const showSecondaryInformation = !compact || showCompactMetadata;
-  const hasSecondaryInformation =
-    (showSecondaryInformation && Boolean(timeRange || channel)) || (!compact && Boolean(metadata));
+  const hasSecondaryInformation = showSecondaryInformation && Boolean(timeRange || channel);
   const secondaryTextClass =
     variant === 'highlighted' ? 'text-primary-foreground/90' : 'text-muted-foreground';
 
@@ -96,13 +110,7 @@ const XyneCalendarCallPillComponent = ({
     <div
       className={cn(
         'group relative flex w-full cursor-pointer items-center overflow-hidden rounded-xl border transition-all',
-        variant === 'past'
-          ? 'border-border bg-muted/60 text-muted-foreground'
-          : variant === 'highlighted'
-            ? 'border-primary bg-primary text-primary-foreground'
-            : variant === 'declined'
-              ? 'border-border bg-background text-muted-foreground'
-              : 'border-primary bg-background text-foreground',
+        getCallPillVariantClasses(variant),
         isPast && variant !== 'past' && 'opacity-60 hover:opacity-90',
         'hover:shadow-sm',
         continuesFromPreviousDay && 'rounded-t-none border-t-0',
@@ -193,26 +201,8 @@ const XyneCalendarCallPillComponent = ({
                     secondaryTextClass,
                   )}
                 >
-                  {channel.scopeType === ChannelScopeType.DM ||
-                  channel.scopeType === ChannelScopeType.GROUP_DM ? (
-                    <ChatDefault className='size-3 shrink-0' aria-hidden='true' />
-                  ) : channel.visibility === ChannelVisibility.PRIVATE ? (
-                    <Lock02Close className='size-3 shrink-0' aria-hidden='true' />
-                  ) : (
-                    <Hashtag className='size-3 shrink-0' aria-hidden='true' />
-                  )}
+                  <ChannelScopeIcon channel={channel} />
                   <span className='truncate'>{channel.label}</span>
-                </span>
-              )}
-
-              {!compact && metadata && (
-                <span
-                  className={cn(
-                    'min-w-0 shrink truncate text-xs font-normal leading-tight',
-                    secondaryTextClass,
-                  )}
-                >
-                  {metadata}
                 </span>
               )}
             </span>
@@ -229,11 +219,16 @@ const XyneCalendarCallPillComponent = ({
           data-track-category='Calendar'
           data-track-name='JOIN_CALL_PILL'
           className={cn(
-            'mr-2 h-6 rounded-full bg-foreground px-3 text-xs text-background hover:bg-foreground/90',
-            !showJoinByDefault && 'hidden group-hover:inline-flex group-focus-within:inline-flex',
+            'mr-2 h-6 rounded-full px-3 text-xs',
+            joinDisabled
+              ? 'bg-muted text-muted-foreground cursor-not-allowed'
+              : 'bg-foreground text-background hover:bg-foreground/90',
+            !showJoinByDefault &&
+              !joinDisabled &&
+              'hidden group-hover:inline-flex group-focus-within:inline-flex',
           )}
         >
-          Join
+          {joinDisabled ? 'Joined' : 'Join'}
         </Button>
       )}
     </div>

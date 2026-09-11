@@ -2,12 +2,7 @@ import { ReactElement, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { X } from 'lucide-react';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import {
-  Call,
-  isGoogleCalendarCall,
-  isMicrosoftCalendarCall,
-  isScheduledCallJoinable,
-} from './callHistoryItem.utils';
+import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
@@ -18,7 +13,7 @@ import {
   formatTime,
   getCurrentUserMeetingStatus,
   getCallPillVariant,
-  hasCallEnded,
+  isCallJoinableNow,
   HATCH_BACKGROUND,
 } from './CalenderViewUtils';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -256,11 +251,7 @@ const CalendarMonthView = ({
                           const isMaybe =
                             getCurrentUserMeetingStatus(call, currentUserId) ===
                             MeetingStatus.MAYBE;
-                          const joinable =
-                            !hasCallEnded(call, today) &&
-                            (variant === 'joinable' ||
-                              (variant === 'highlighted' &&
-                                isScheduledCallJoinable(call, today.getTime())));
+                          const joinable = isCallJoinableNow(call, variant, today);
 
                           return (
                             <PopoverPrimitive.Root

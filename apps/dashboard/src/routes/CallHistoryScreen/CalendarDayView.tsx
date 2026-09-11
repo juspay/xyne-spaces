@@ -303,17 +303,14 @@ function DroppableDayColumn({
 
 // ── Drop-zone ghost (move drag) ───────────────────────────────────────────────
 
-function DropGhost({
-  dragPreview,
-  durationMins,
-}: {
-  dragPreview: DragPreview;
-  durationMins: number;
-}): ReactElement {
+function DropGhost({ dragPreview }: { dragPreview: DragPreview }): ReactElement {
   return (
     <CalendarEventGhost
       top={topPxForMinutes(dragPreview.newStartMins)}
-      height={Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins))}
+      height={Math.max(
+        MIN_EVENT_HEIGHT,
+        topPxForMinutes((dragPreview.newEndsAt - dragPreview.newStartsAt) / 60_000),
+      )}
       formattedTime={dragPreview.formattedTime}
     />
   );
@@ -358,29 +355,24 @@ const CalendarDayView = ({
   const {
     sensors,
     dragPreview,
-    activeCall,
     onDragStart,
     onDragMove,
     onDragEnd,
     onDragCancel,
-    recurringDialogOpen,
-    confirmReschedule,
-    cancelReschedule,
-    singleDialogOpen,
-    confirmSingleReschedule,
-    cancelSingleReschedule,
+    dialogOpen: rescheduleDialogOpen,
+    confirm: confirmReschedule,
+    cancel: cancelReschedule,
+    pendingChange: pendingRescheduleChange,
   } = useDragReschedule(calls);
 
   const {
     resizePreview,
     activeResizeCallId,
     onResizePointerDown,
-    recurringResizeDialogOpen,
-    confirmResize,
-    cancelResize,
-    singleResizeDialogOpen,
-    confirmSingleResize,
-    cancelSingleResize,
+    dialogOpen: resizeDialogOpen,
+    confirm: confirmResize,
+    cancel: cancelResize,
+    pendingChange: pendingResizeChange,
   } = useResizeEndTime(scrollRef);
 
   const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
@@ -413,15 +405,6 @@ const CalendarDayView = ({
   const dayCalls = calls
     .filter(call => call.startsAt && isSameDay(new Date(call.startsAt), currentDay))
     .sort((a, b) => new Date(a.startsAt ?? 0).getTime() - new Date(b.startsAt ?? 0).getTime());
-
-  const activeDurationMins =
-    activeCall?.startsAt && activeCall?.endsAt
-      ? Math.max(
-          15,
-          minutesSinceMidnight(new Date(activeCall.endsAt)) -
-            minutesSinceMidnight(new Date(activeCall.startsAt)),
-        )
-      : 60;
 
   const currentUserDisplayName = getUserDisplayName(currentUser);
   const currentUserFirstName =
@@ -560,9 +543,7 @@ const CalendarDayView = ({
                 )}
 
                 {/* Move-drag ghost */}
-                {dragPreview && (
-                  <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
-                )}
+                {dragPreview && <DropGhost dragPreview={dragPreview} />}
 
                 {/* Resize ghost */}
                 {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
@@ -670,9 +651,7 @@ const CalendarDayView = ({
                   onDragCreatePointerDown={onDragCreatePointerDown}
                   consumeDragEnd={consumeDragEnd}
                 >
-                  {dragPreview && (
-                    <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
-                  )}
+                  {dragPreview && <DropGhost dragPreview={dragPreview} />}
                   {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
                   {(() => {
                     const positions = computeEventPositions(dayCalls, currentDay);
@@ -760,28 +739,20 @@ const CalendarDayView = ({
       </div>
 
       <RecurringRescheduleDialog
-        isOpen={recurringDialogOpen}
+        isOpen={rescheduleDialogOpen}
         onConfirm={confirmReschedule}
         onCancel={cancelReschedule}
+        pendingChange={pendingRescheduleChange}
+        isRecurring={Boolean(pendingRescheduleChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm move'
       />
       <RecurringRescheduleDialog
-        isOpen={recurringResizeDialogOpen}
+        isOpen={resizeDialogOpen}
         onConfirm={confirmResize}
         onCancel={cancelResize}
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleDialogOpen}
-        onConfirm={confirmSingleReschedule}
-        onCancel={cancelSingleReschedule}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleResizeDialogOpen}
-        onConfirm={confirmSingleResize}
-        onCancel={cancelSingleResize}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
+        pendingChange={pendingResizeChange}
+        isRecurring={Boolean(pendingResizeChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm resize'
       />
     </DndContext>
   );

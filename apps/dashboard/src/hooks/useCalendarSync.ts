@@ -111,7 +111,7 @@ export function useCalendarSync(userId?: string): UseCalendarSyncResult {
     void getCalendarProvider()
       .then(provider => {
         if (!cancelled) {
-          setCalendarProvider(provider === 'GOOGLE' || provider === 'MICROSOFT' ? provider : null);
+          setCalendarProvider(provider);
         }
       })
       .catch((error: unknown) => {

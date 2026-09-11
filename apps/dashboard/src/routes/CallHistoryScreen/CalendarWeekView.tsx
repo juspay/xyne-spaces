@@ -1,15 +1,10 @@
 import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
+import { format } from 'date-fns';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
 import { DndContext, useDraggable, useDroppable, type DragStartEvent } from '@dnd-kit/core';
-import { ChannelScopeType, ChannelVisibility, MeetingStatus } from '@xyne/shared';
-import { ChatDefault, Hashtag, Lock02Close } from '@xyne/icons';
-import {
-  Call,
-  isGoogleCalendarCall,
-  isMicrosoftCalendarCall,
-  isScheduledCallJoinable,
-} from './callHistoryItem.utils';
+import { MeetingStatus } from '@xyne/shared';
+import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
@@ -33,7 +28,8 @@ import {
   formatCurrentTime,
   getCurrentUserMeetingStatus,
   getCallPillVariant,
-  hasCallEnded,
+  getCallPillVariantClasses,
+  isCallJoinableNow,
   dayKey,
   computeEventPositions,
   isCallDraggable,
@@ -46,7 +42,10 @@ import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
 import { usePlatform } from '../../hooks/usePlatform';
 import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { OtherUserEventBlock } from './OtherUserEventBlock';
-import type { XyneCalendarCallPillVariant } from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
+import {
+  ChannelScopeIcon,
+  type XyneCalendarCallPillVariant,
+} from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
 import type { XyneCalendarChannelPresentation } from '../../components/Chat/XyneCalendarSidebar/xyneCalendarSidebar.utils';
 
 interface CalendarWeekViewProps {
@@ -67,16 +66,6 @@ interface CalendarWeekViewProps {
 }
 
 const TIME_GUTTER_WIDTH = 80;
-const FULL_DAY_NAMES = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
 // ── Per-call card: drag handle IS the popover trigger button ─────────────────
 // Radix's Slot (asChild) composes refs, so setNodeRef + Radix's internal ref both work.
 
@@ -162,13 +151,7 @@ function WeekViewCallCard({
           data-track-name='calendar-week-call-card'
           className={cn(
             'group absolute right-1 overflow-hidden rounded-lg border text-left z-[5] transition-colors focus:outline-none',
-            variant === 'past'
-              ? 'border-border bg-muted/60 text-muted-foreground'
-              : variant === 'highlighted'
-                ? 'border-primary bg-primary text-primary-foreground'
-                : variant === 'declined'
-                  ? 'border-border bg-background text-muted-foreground'
-                  : 'border-primary bg-background text-foreground',
+            getCallPillVariantClasses(variant),
           )}
           style={{
             top,
@@ -247,14 +230,7 @@ function WeekViewCallCard({
                         secondaryTextClass,
                       )}
                     >
-                      {channel.scopeType === ChannelScopeType.DM ||
-                      channel.scopeType === ChannelScopeType.GROUP_DM ? (
-                        <ChatDefault className='size-3 shrink-0' aria-hidden='true' />
-                      ) : channel.visibility === ChannelVisibility.PRIVATE ? (
-                        <Lock02Close className='size-3 shrink-0' aria-hidden='true' />
-                      ) : (
-                        <Hashtag className='size-3 shrink-0' aria-hidden='true' />
-                      )}
+                      <ChannelScopeIcon channel={channel} />
                       <span className='truncate'>{channel.label}</span>
                     </span>
                   )}
@@ -386,18 +362,19 @@ function DroppableDayColumn({
 function DropGhost({
   dragPreview,
   columnDateKey,
-  durationMins,
 }: {
   dragPreview: DragPreview;
   columnDateKey: string;
-  durationMins: number;
 }): ReactElement | null {
   if (dragPreview.targetDateKey !== columnDateKey) return null;
   return (
     <CalendarEventGhost
       compact
       top={topPxForMinutes(dragPreview.newStartMins)}
-      height={Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins))}
+      height={Math.max(
+        MIN_EVENT_HEIGHT,
+        topPxForMinutes((dragPreview.newEndsAt - dragPreview.newStartsAt) / 60_000),
+      )}
       formattedTime={dragPreview.formattedTime}
     />
   );
@@ -452,29 +429,24 @@ const CalendarWeekView = ({
   const {
     sensors,
     dragPreview,
-    activeCall,
     onDragStart,
     onDragMove,
     onDragEnd,
     onDragCancel,
-    recurringDialogOpen,
-    confirmReschedule,
-    cancelReschedule,
-    singleDialogOpen,
-    confirmSingleReschedule,
-    cancelSingleReschedule,
+    dialogOpen: rescheduleDialogOpen,
+    confirm: confirmReschedule,
+    cancel: cancelReschedule,
+    pendingChange: pendingRescheduleChange,
   } = useDragReschedule(calls);
 
   const {
     resizePreview,
     activeResizeCallId,
     onResizePointerDown,
-    recurringResizeDialogOpen,
-    confirmResize,
-    cancelResize,
-    singleResizeDialogOpen,
-    confirmSingleResize,
-    cancelSingleResize,
+    dialogOpen: resizeDialogOpen,
+    confirm: confirmResize,
+    cancel: cancelResize,
+    pendingChange: pendingResizeChange,
   } = useResizeEndTime(scrollRef);
 
   const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
@@ -518,15 +490,6 @@ const CalendarWeekView = ({
   const currentTimePx = topPxForMinutes(minutesSinceMidnight(now));
   const todayColIndex = weekDays.findIndex(d => isSameDay(d, today));
 
-  const activeDurationMins =
-    activeCall?.startsAt && activeCall?.endsAt
-      ? Math.max(
-          15,
-          minutesSinceMidnight(new Date(activeCall.endsAt)) -
-            minutesSinceMidnight(new Date(activeCall.startsAt)),
-        )
-      : 60;
-
   return (
     <DndContext
       sensors={sensors}
@@ -542,7 +505,7 @@ const CalendarWeekView = ({
           {weekDays.map((day, i) => {
             const isToday = isSameDay(day, today);
             const dayCallCount = callsByDay.get(dayKey(day))?.length ?? 0;
-            const title = `${FULL_DAY_NAMES[day.getDay()]} ${day.getDate()} · ${
+            const title = `${format(day, 'EEEE')} ${day.getDate()} · ${
               dayCallCount === 0
                 ? 'no calls'
                 : `${dayCallCount} call${dayCallCount === 1 ? '' : 's'}`
@@ -673,11 +636,7 @@ const CalendarWeekView = ({
                     >
                       {/* Move-drag ghost */}
                       {dragPreview && (
-                        <DropGhost
-                          dragPreview={dragPreview}
-                          columnDateKey={colDateKey}
-                          durationMins={activeDurationMins}
-                        />
+                        <DropGhost dragPreview={dragPreview} columnDateKey={colDateKey} />
                       )}
 
                       {/* Resize ghost */}
@@ -754,11 +713,7 @@ const CalendarWeekView = ({
                         if (!call) return null;
                         const draggable = isCallDraggable(call, currentUserId);
                         const variant = getCallPillVariant(call, currentUserId, now);
-                        const joinable =
-                          !hasCallEnded(call, now) &&
-                          (variant === 'joinable' ||
-                            (variant === 'highlighted' &&
-                              isScheduledCallJoinable(call, now.getTime())));
+                        const joinable = isCallJoinableNow(call, variant, now);
                         const channel = call.channelId
                           ? channelPresentationsById?.get(call.channelId)
                           : undefined;
@@ -799,28 +754,20 @@ const CalendarWeekView = ({
       </div>
 
       <RecurringRescheduleDialog
-        isOpen={recurringDialogOpen}
+        isOpen={rescheduleDialogOpen}
         onConfirm={confirmReschedule}
         onCancel={cancelReschedule}
+        pendingChange={pendingRescheduleChange}
+        isRecurring={Boolean(pendingRescheduleChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm move'
       />
       <RecurringRescheduleDialog
-        isOpen={recurringResizeDialogOpen}
+        isOpen={resizeDialogOpen}
         onConfirm={confirmResize}
         onCancel={cancelResize}
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleDialogOpen}
-        onConfirm={confirmSingleReschedule}
-        onCancel={cancelSingleReschedule}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleResizeDialogOpen}
-        onConfirm={confirmSingleResize}
-        onCancel={cancelSingleResize}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
+        pendingChange={pendingResizeChange}
+        isRecurring={Boolean(pendingResizeChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm resize'
       />
     </DndContext>
   );

@@ -1,9 +1,9 @@
 import { ReactElement } from 'react';
-import { format } from 'date-fns';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import { dateToIso } from '../../utils/dateUtils';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { CalendarTimer, NotificationBellOn, CalendarCheck, CalendarCancel } from '@xyne/icons';
@@ -27,10 +27,7 @@ export const ScheduledCallActivity = ({
   const isMeetingDeclined = activity.actorAction === 'meeting_declined';
 
   const dateParam = activity.call
-    ? format(
-        new Date(activity.call.startsAt ?? activity.call.startedAt ?? Date.now()),
-        'yyyy-MM-dd',
-      )
+    ? dateToIso(new Date(activity.call.startsAt ?? activity.call.startedAt))
     : null;
   const targetPath =
     !isMobile && activity.callId

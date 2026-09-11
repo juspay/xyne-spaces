@@ -34,9 +34,8 @@ export interface UseDragCreateOptions {
   snapIntervalMins?: number;
 }
 
-const DAY_MINUTES = 24 * 60;
+export const DAY_MINUTES = 24 * 60;
 
-// Calculates the start and end minutes of a drag selection, ensuring that the selection is at least `minimumDurationMins` long. If the user drags in the opposite direction, the selection will expand to meet the minimum duration requirement.
 const getDragCreateRange = (
   anchorMins: number,
   currentMins: number,

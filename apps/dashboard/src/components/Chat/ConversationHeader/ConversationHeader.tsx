@@ -369,16 +369,9 @@ const ConversationHeader = ({
               size='sm'
               onClick={() => {
                 if (isAIOnboardingActive()) return;
-                if (xyneAIActor.getSnapshot().matches('open')) {
-                  xyneAIActor.send({ type: 'CLOSE' });
-                  xyneCalendarActor.send({ type: 'OPEN' });
-                  return;
-                }
-                if (xyneCalendarActor.getSnapshot().matches('open')) {
-                  xyneCalendarActor.send({ type: 'CLOSE' });
-                } else {
-                  xyneCalendarActor.send({ type: 'OPEN' });
-                }
+                xyneCalendarActor.send({
+                  type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
+                });
               }}
               className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               aria-label='Toggle Calendar sidebar'
@@ -401,7 +394,6 @@ const ConversationHeader = ({
                 trackAskAIOpened(channel.scopeType);
 
                 // Trigger xstate machine to open XyneAI
-                xyneCalendarActor.send({ type: 'CLOSE' });
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}
               className='h-7 w-7 rounded-lg'

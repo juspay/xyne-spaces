@@ -491,7 +491,6 @@ export const xyneAIMachine = setup({
     events: {} as XyneAIEvent,
   },
   actions: {
-    // Close the calendar actor when the XyneAI machine is closed
     closeCalendar: () => {
       xyneCalendarActor.send({ type: 'CLOSE' });
     },
