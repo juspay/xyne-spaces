@@ -127,6 +127,12 @@ const Spark = ({ className }: { className?: string }): ReactElement => (
 interface XyneAIEmptyStateProps {
   // TODO: wire to input populate
   onSelect?: (prompt: string) => void;
+  /**
+   * Hide the tilted suggestion cards, keeping just the heading. The cards are a
+   * fixed 382px composition that only scales down to fit; in a narrow Streams
+   * column they dominate a panel meant to sit quietly beside five others.
+   */
+  hideSuggestions?: boolean;
 }
 
 /**
@@ -134,7 +140,23 @@ interface XyneAIEmptyStateProps {
  * tilted suggestion cards sitting under a heading. Cards are clickable and will
  * later populate the chat input (onSelect is stubbed for now).
  */
-export const XyneAIEmptyState = ({ onSelect = () => {} }: XyneAIEmptyStateProps): ReactElement => {
+export const XyneAIEmptyState = ({
+  onSelect = () => {},
+  hideSuggestions = false,
+}: XyneAIEmptyStateProps): ReactElement => {
+  if (hideSuggestions) {
+    return (
+      <div className='flex h-full w-full select-none items-center justify-center px-4'>
+        <div className='flex flex-col items-center gap-4'>
+          <Spark className='size-12' />
+          <h2 className='text-center text-[15px] font-semibold leading-[24px] tracking-[-0.3px] text-muted-foreground'>
+            What can Xyne help you with?
+          </h2>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className='flex h-full w-full select-none items-center justify-center px-4'>
       <div className='flex w-full flex-col items-center gap-[24px]'>

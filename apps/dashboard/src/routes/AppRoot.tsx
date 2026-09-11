@@ -235,6 +235,7 @@ import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
+import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
@@ -543,6 +544,10 @@ const AppRoot = (): ReactElement => {
   // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
   const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
   const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
+  // Streams turns Ask AI into a column in the stream, so the floating drawer must
+  // not also appear — otherwise one trigger produces two chats. Same suppression
+  // shape as the /ai page, which has the same "already showing this" problem.
+  const isOnStreamsPage = /^\/[^/]+\/streams(\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -581,6 +586,7 @@ const AppRoot = (): ReactElement => {
     isXyneAIDrawerOpen &&
     !isMobile &&
     !isOnAIChatExperiencePage &&
+    !isOnStreamsPage &&
     !isSdlcRoute &&
     !showSdlcDebuggerPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
@@ -1036,40 +1042,43 @@ const AppRoot = (): ReactElement => {
                         </div>
                       )}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile && !isInPanelWebview && !isOnAIChatExperiencePage && (
-                        <Drawer
-                          open={isXyneAIDrawerOpen}
-                          onOpenChange={open => {
-                            // Don't allow closing during AI onboarding
-                            if (!open && isAIOnboardingActive()) return;
-                            xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
-                          }}
-                          title='Xyne AI'
-                          description='Ask questions about your channel'
-                        >
-                          <XyneAISidebar
-                            channelId={xyneAIChannelId}
-                            threadInfo={xyneAIThreadInfo}
-                            startFreshChat={xyneAIStartFreshChat}
-                            canvasInfo={xyneAICanvasInfo}
-                            initialContextSelections={xyneAIInitialContextSelections}
-                            contextOpenNonce={xyneAIContextOpenNonce}
-                            kbCollectionId={xyneAIKbCollectionId ?? ''}
-                            kbChannelId={xyneAIKbChannelId ?? ''}
-                            kbDocId={xyneAIKbDocId ?? ''}
-                            workflowInfo={xyneAIWorkflowInfo}
-                            workflowDismissed={xyneAIWorkflowDismissed}
-                            kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
-                            kbOpenNonce={xyneAIKbOpenNonce}
-                            researchContext={xyneAIResearchContext}
-                            initialQuery={xyneAIInitialQuery ?? undefined}
-                            autoSendNonce={xyneAIAutoSendNonce}
-                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                          />
-                        </Drawer>
-                      )}
+                      {isMobile &&
+                        !isInPanelWebview &&
+                        !isOnAIChatExperiencePage &&
+                        !isOnStreamsPage && (
+                          <Drawer
+                            open={isXyneAIDrawerOpen}
+                            onOpenChange={open => {
+                              // Don't allow closing during AI onboarding
+                              if (!open && isAIOnboardingActive()) return;
+                              xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                            }}
+                            title='Xyne AI'
+                            description='Ask questions about your channel'
+                          >
+                            <XyneAISidebar
+                              channelId={xyneAIChannelId}
+                              threadInfo={xyneAIThreadInfo}
+                              startFreshChat={xyneAIStartFreshChat}
+                              canvasInfo={xyneAICanvasInfo}
+                              initialContextSelections={xyneAIInitialContextSelections}
+                              contextOpenNonce={xyneAIContextOpenNonce}
+                              kbCollectionId={xyneAIKbCollectionId ?? ''}
+                              kbChannelId={xyneAIKbChannelId ?? ''}
+                              kbDocId={xyneAIKbDocId ?? ''}
+                              workflowInfo={xyneAIWorkflowInfo}
+                              workflowDismissed={xyneAIWorkflowDismissed}
+                              kbDocName={xyneAIKbDocName ?? ''}
+                              kbFolderId={xyneAIKbFolderId ?? ''}
+                              kbFolderName={xyneAIKbFolderName ?? ''}
+                              kbOpenNonce={xyneAIKbOpenNonce}
+                              researchContext={xyneAIResearchContext}
+                              initialQuery={xyneAIInitialQuery ?? undefined}
+                              autoSendNonce={xyneAIAutoSendNonce}
+                              onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                            />
+                          </Drawer>
+                        )}
                       {isMobile && !isInPanelWebview && (
                         <Drawer
                           open={isSdlcDebuggerOpen}
@@ -1231,6 +1240,10 @@ export const router = createBrowserRouter(
                 {
                   path: 'rca/:rcaId',
                   element: <RCADetailScreen />,
+                },
+                {
+                  path: 'streams',
+                  element: <StreamsScreen />,
                 },
                 {
                   path: 'chat',

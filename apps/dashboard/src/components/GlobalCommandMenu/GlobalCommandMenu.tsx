@@ -37,6 +37,8 @@ interface GlobalCommandMenuProps {
   onOpenChange?: (open: boolean) => void;
   contextSelectionMode?: boolean;
   contextItems?: ContextItem[];
+  selectionVariant?: 'filled' | 'outline';
+  compactTabs?: boolean;
   onContextItemToggle?: (item: ContextItem) => void;
   onContextSelectionConfirm?: () => void;
   enabledTabs?: TabType[];
@@ -56,6 +58,8 @@ const GlobalCommandMenu = ({
   onOpenChange: controlledOnOpenChange,
   contextSelectionMode,
   contextItems,
+  selectionVariant,
+  compactTabs,
   onContextItemToggle,
   onContextSelectionConfirm,
   enabledTabs,
@@ -360,6 +364,8 @@ const GlobalCommandMenu = ({
       restoreFromLastSearch={restoreFromLastSearch}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
+      {...(selectionVariant !== undefined ? { selectionVariant } : {})}
+      {...(compactTabs !== undefined ? { compactTabs } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
       {...(onContextSelectionConfirm !== undefined ? { onContextSelectionConfirm } : {})}
       {...(effectiveEnabledTabs !== undefined ? { enabledTabs: effectiveEnabledTabs } : {})}
