@@ -26,6 +26,17 @@ async function unwrap<T>(promise: Promise<{ data: SuccessEnvelope<T> }>): Promis
   return res.data.data;
 }
 
+export async function fetchConversationLabelUnreadCounts(
+  channelId: string,
+): Promise<Record<string, number>> {
+  const data = await unwrap(
+    apiInstance.get<SuccessEnvelope<{ counts: Record<string, number> }>>(
+      `/conversation-labels/unread-counts?channelId=${encodeURIComponent(channelId)}`,
+    ),
+  );
+  return data.counts;
+}
+
 export function fetchConversationLabelDeleteImpact(
   labelId: string,
 ): Promise<ConversationLabelDeleteImpact> {

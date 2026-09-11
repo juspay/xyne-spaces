@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { Loader2, Tag, Plus, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,6 +13,7 @@ import { cn } from '../../../utils/classNames';
 import {
   deleteConversationLabel,
   fetchConversationLabelDeleteImpact,
+  fetchConversationLabelUnreadCounts,
   type ConversationLabelDeleteImpact,
 } from '../../../api/conversationLabelsApi';
 import { deskLabelRulesQueryKey } from '../AutoLabelWizard/AutoLabelRules';
@@ -62,6 +63,14 @@ export const DeskLabelsSidebar = ({
     queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
     { enabled: !!channelId },
   );
+  const { data: unreadCounts } = useQuery({
+    queryKey: ['conversation-label-unread-counts', channelId],
+    queryFn: () => fetchConversationLabelUnreadCounts(channelId),
+    enabled: !!channelId && isMember,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [deleteImpact, setDeleteImpact] = useState<ConversationLabelDeleteImpact | null>(null);
@@ -164,6 +173,8 @@ export const DeskLabelsSidebar = ({
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
             const active = activeLabelId === label.id;
+            const count = unreadCounts?.[label.id] ?? 0;
+            const showUnread = count > 0 && !active;
             return (
               <div
                 key={label.id}
@@ -184,7 +195,19 @@ export const DeskLabelsSidebar = ({
                   <span className='size-4 flex items-center justify-center shrink-0'>
                     <Tag size={14} style={{ color }} fill={color} />
                   </span>
-                  <span className='flex-1 truncate min-w-0'>{label.name}</span>
+                  <span
+                    className={cn(
+                      'flex-1 truncate min-w-0',
+                      showUnread && 'font-semibold text-sidebar-unread-foreground',
+                    )}
+                  >
+                    {label.name}
+                  </span>
+                  {showUnread && (
+                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 bg-sidebar-accent-foreground/10 text-sidebar-accent-foreground'>
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
                 </button>
                 <button
                   type='button'
