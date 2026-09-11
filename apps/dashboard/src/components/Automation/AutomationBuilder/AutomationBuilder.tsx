@@ -9,6 +9,8 @@ import {
   Copy,
   GitBranch,
   History,
+  LayoutGrid,
+  List,
   Pencil,
   Power,
   Save as SaveIcon,
@@ -70,6 +72,7 @@ import {
 } from './AutomationBuilder.utils';
 import type { AutomationBuilderProps } from './AutomationBuilder.types';
 import type { StepSchema } from '../Automation.types';
+import { FlowAutomationView } from './FlowAutomationView/FlowAutomationView';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -178,6 +181,14 @@ export function AutomationBuilder({
   const [stepSchemaTypes, setStepSchemaTypes] = useState<string[]>(() =>
     collectStepTypes(automation?.config?.steps ?? config.steps),
   );
+
+  const [builderView, setBuilderView] = useState<'list' | 'flow'>(() => {
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('automation-builder-view') : null;
+    return stored === 'flow' ? 'flow' : 'list';
+  });
+  useEffect(() => {
+    localStorage.setItem('automation-builder-view', builderView);
+  }, [builderView]);
 
   const [savedId, setSavedId] = useState<string | null>(automation?.id ?? null);
   const [savedStatus, setSavedStatus] = useState<string>(
@@ -1126,11 +1137,67 @@ export function AutomationBuilder({
         </div>
       </div>
 
-      <div
-        className={cn(
-          'flex-1 overflow-y-auto bg-muted/30',
-          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
-        )}
+      <div className='flex items-center justify-end gap-2 border-b border-border bg-background px-6 py-2'>
+        <span className='text-xs text-muted-foreground'>View</span>
+        <div className='flex items-center rounded-md border border-border p-0.5'>
+          <button
+            type='button'
+            aria-label='List view'
+            data-track-category='automation-builder'
+            data-track-name='switch-to-list-view'
+            onClick={() => setBuilderView('list')}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+              builderView === 'list' && 'bg-accent text-foreground',
+              'hover:text-foreground',
+            )}
+          >
+            <List className='size-4' />
+          </button>
+          <button
+            type='button'
+            aria-label='Flow view'
+            data-track-category='automation-builder'
+            data-track-name='switch-to-flow-view'
+            onClick={() => setBuilderView('flow')}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+              builderView === 'flow' && 'bg-accent text-foreground',
+              'hover:text-foreground',
+            )}
+          >
+            <LayoutGrid className='size-4' />
+          </button>
+        </div>
+      </div>
+
+      {builderView === 'flow' ? (
+        <FlowAutomationView
+          config={config}
+          onConfigChange={next => {
+            setConfig(next);
+            setStepSchemaTypes(collectStepTypes(next.steps));
+          }}
+          triggerCatalog={triggerCatalog}
+          triggerSchema={triggerSchema}
+          stepCatalog={stepCatalog}
+          stepSchemaCache={stepSchemaCache}
+          schemaLoadingFor={stepSchemaLoadingFor}
+          ensureSchema={ensureSchema}
+          operators={operators}
+          validation={validation}
+          readOnly={!editMode || readOnlyPreview}
+          editMode={editMode}
+          onAddStep={handleAddStep}
+          formFieldNameMap={formFieldNameMap}
+          onFormFieldNamesResolved={handleFormFieldNamesResolved}
+        />
+      ) : (
+        <div
+          className={cn(
+            'flex-1 overflow-y-auto bg-muted/30',
+            !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
+          )}
         {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
@@ -1316,6 +1383,7 @@ export function AutomationBuilder({
           </BuilderSection>
         </div>
       </div>
+      )}
 
       <div className='border-t border-border bg-background px-6 py-3'>
         <ValidationBanner
