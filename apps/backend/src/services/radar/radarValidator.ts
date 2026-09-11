@@ -35,6 +35,41 @@ export interface ValidationResult {
   dropped: DroppedOperation[];
 }
 
+/** Matched by noOpReassignFeedback below; keep the two together. */
+const NO_OP_REASSIGN = 'no-op reassign (pendingOn unchanged)';
+
+/**
+ * Turns this pass's no-op reassigns into one message for the parser's
+ * semantic repair. A reassign that changes nothing almost always means the
+ * model matched the wrong open item — it can see every item's pending_on, so
+ * the fix is to make it look again, with "nothing moves" as a legal answer.
+ * Null when there is nothing to send back.
+ */
+export function noOpReassignFeedback(
+  dropped: DroppedOperation[],
+  openItems: ParserOpenItem[],
+): string | null {
+  const noOps = dropped.filter(d => d.reason === NO_OP_REASSIGN);
+  if (noOps.length === 0) return null;
+  const byId = new Map(openItems.map(i => [i.id, i]));
+  const lines = noOps.map(({ op }) => {
+    const title = byId.get(op.itemId as string)?.title ?? '?';
+    return (
+      `- reassign of item ${op.itemId} ("${title}") to [${(op.pendingOn ?? []).join(', ')}] ` +
+      'changed nothing: that item is already pending on exactly those users.'
+    );
+  });
+  return [
+    'Your response was structurally valid but these operations were rejected:',
+    ...lines,
+    'A reassign to whoever already holds the ball means you matched the wrong item. ' +
+      'Re-read open_items and their pending_on. If a DIFFERENT open item is what this ' +
+      'message actually moves — the one the author holds or is waiting on — target that ' +
+      'one. If nothing in the message truly changes who holds the ball, return an empty ' +
+      'operations array. Never reassign an item to its current pending_on.',
+  ].join('\n');
+}
+
 /** Hard caps on model output: transaction budget and feed layout both bound. */
 const MAX_OPERATIONS = 50;
 const MAX_TITLE_CHARS = 300;
@@ -45,6 +80,15 @@ export function validateTransitions(
   ctx: ValidationContext,
 ): ValidationResult {
   const openById = new Map(ctx.openItems.map(i => [i.id, i]));
+  // A create may declare a handle so a resolve in the same response can cite the
+  // item it is creating. Real ids are minted by the database, so without this
+  // the model has no legal way to say "the thing I just created" — and what it
+  // did instead was redirect the resolve onto the nearest plausible open item.
+  // Only handles actually declared here are accepted, so an invented id is
+  // still rejected exactly as before.
+  const batchTempIds = new Set(
+    operations.filter(op => op.op === 'create' && op.tempId).map(op => op.tempId as string),
+  );
   const valid: ParserOperation[] = [];
   const dropped: DroppedOperation[] = [];
   const resolvedThisPass = new Set<string>();
@@ -97,7 +141,8 @@ export function validateTransitions(
       }
 
       case 'resolve': {
-        if (!op.itemId || !openById.has(op.itemId)) {
+        const isTempRef = !!op.itemId && batchTempIds.has(op.itemId);
+        if (!op.itemId || (!openById.has(op.itemId) && !isTempRef)) {
           dropped.push({ op, reason: 'resolve of unknown or non-open item' });
           continue;
         }
@@ -111,6 +156,12 @@ export function validateTransitions(
       }
 
       case 'reassign': {
+        if (op.itemId && batchTempIds.has(op.itemId)) {
+          // A create already states who holds the ball; reassigning it in the
+          // same breath is a contradiction, not a transition.
+          dropped.push({ op, reason: 'reassign of an item created in the same pass' });
+          continue;
+        }
         const item = op.itemId ? openById.get(op.itemId) : undefined;
         if (!item) {
           dropped.push({ op, reason: 'reassign of unknown or non-open item' });
@@ -130,7 +181,7 @@ export function validateTransitions(
         }
         const current = [...item.pending_on].sort().join(',');
         if (pendingOn.slice().sort().join(',') === current) {
-          dropped.push({ op, reason: 'no-op reassign (pendingOn unchanged)' });
+          dropped.push({ op, reason: NO_OP_REASSIGN });
           continue;
         }
         valid.push({ ...op, pendingOn });

@@ -192,21 +192,27 @@ const AssigneeEditor: React.FC<{
 
 interface TicketCardProps {
   ticket: Ticket;
-  tags?: TicketTag[];
-  availableTags?: string[];
-  onClick?: (e: React.MouseEvent | KeyboardEvent) => void;
-  width?: string;
-  isCompact?: boolean;
+  tags?: TicketTag[] | undefined;
+  availableTags?: string[] | undefined;
+  /** Callback to load more tags */
+  onLoadMoreTags?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean | undefined;
+  /** Callback for server-side tag search */
+  onSearchTags?: ((query: string) => void) | undefined;
+  onClick?: ((e: React.MouseEvent | KeyboardEvent) => void) | undefined;
+  width?: string | undefined;
+  isCompact?: boolean | undefined;
   visibleColumns?: Set<string> | undefined;
-  isConversation?: boolean;
-  activeTicketId?: string;
+  isConversation?: boolean | undefined;
+  activeTicketId?: string | undefined;
   /** Only true for email-type desks; hides the email unread indicator everywhere else. */
-  showEmailReads?: boolean;
+  showEmailReads?: boolean | undefined;
   /**
    * SLA policies pre-fetched by the parent for the whole board.
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
-  slaPolicies?: BoardSlaPolicy[];
+  slaPolicies?: BoardSlaPolicy[] | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -215,6 +221,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   width = 'w-full',
   tags,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
@@ -605,6 +614,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
+              statusV2={ticket.statusV2}
               showLeadingDot={false}
               labelClassName='max-w-[120px] truncate'
             />
@@ -653,12 +663,18 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 <span className='text-xs font-medium text-muted-foreground font-mono'>
                   {ticket.xyneId}
                 </span>
-                {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
+                {!isCompact && (
+                  <TicketStatusWithStages
+                    currentStageName={ticket.stageName}
+                    statusV2={ticket.statusV2}
+                  />
+                )}
                 {isCompact && (
                   <StagePicker
                     ticketId={ticket.id}
                     stageName={ticket.stageName}
                     stageLabel={ticket.stageName || 'To Do'}
+                    statusV2={ticket.statusV2}
                     boardId={ticket.boardId}
                   />
                 )}
@@ -858,6 +874,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           selectedTags={selectedTagNames}
                           onTagsChange={handleTagsChange}
                           stopEditing={() => setIsEditingTags(false)}
+                          onLoadMore={onLoadMoreTags}
+                          hasMore={hasMoreTags}
+                          onSearch={onSearchTags}
                         />
                       </div>
                     ) : hasTags ? (
@@ -945,6 +964,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     <div className='flex items-center gap-2'>
                       <TicketStatusWithStages
                         currentStageName={ticket.stageName}
+                        statusV2={ticket.statusV2}
                         showLeadingDot={false}
                         iconOnly
                       />

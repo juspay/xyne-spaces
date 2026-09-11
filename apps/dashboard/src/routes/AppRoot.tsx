@@ -496,6 +496,11 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  const xyneAIWorkflowDismissed = useSelector(
+    xyneAIActor,
+    state => state.context.workflowDismissed,
+  );
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -775,6 +780,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -884,6 +891,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1012,6 +1021,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1046,6 +1057,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}

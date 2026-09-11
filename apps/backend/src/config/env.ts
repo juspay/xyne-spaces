@@ -70,7 +70,7 @@ const envSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
-  SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
+  SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // AWS S3 Configuration
@@ -126,6 +126,10 @@ const envSchema = Joi.object({
   RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
   RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
   RADAR_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(30_000),
+  // Longer than a thread's. A DM has no threading convention, so once its gate
+  // opens every message reaches the parser — the debounce is the only thing
+  // bounding that, and one job per minute per active DM is the ceiling.
+  RADAR_DM_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(60_000),
   RADAR_MAX_CONSECUTIVE_FAILURES: Joi.number().integer().min(1).max(20).default(3),
   RADAR_MAX_MESSAGE_TEXT_CHARS: Joi.number().integer().min(100).max(20_000).default(5_000),
   RADAR_RATE_LIMIT_MAX_RETRIES: Joi.number().integer().min(0).max(3).default(3),
@@ -764,6 +768,7 @@ export const config = {
     // forever.
     maxOpenItems: envVars.RADAR_MAX_OPEN_ITEMS as number,
     debounceMs: envVars.RADAR_DEBOUNCE_MS as number,
+    dmDebounceMs: envVars.RADAR_DM_DEBOUNCE_MS as number,
     maxConsecutiveFailures: envVars.RADAR_MAX_CONSECUTIVE_FAILURES as number,
     maxMessageTextChars: envVars.RADAR_MAX_MESSAGE_TEXT_CHARS as number,
     rateLimitMaxRetries: envVars.RADAR_RATE_LIMIT_MAX_RETRIES as number,

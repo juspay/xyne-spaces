@@ -272,6 +272,7 @@ const TEXT_FILTER_HINTS: Record<string, string> = {
   range: 'last 7 days',
   board: 'board name',
   tags: 'tag1, tag2',
+  entity: 'Big Basket, Swiggy',
   // Board stages are per-board, so there's no workspace-wide candidate list to offer —
   // both of these stay typed-only, hinted rather than picked.
   stage: 'stage name',
@@ -279,7 +280,8 @@ const TEXT_FILTER_HINTS: Record<string, string> = {
   // `type:` with no value - hint the value set; `typeAutocomplete` completes it once you type.
   type: 'messages, files, tickets…',
 };
-const TEXT_FILTER_HINT_REGEX = /\b(before|after|on|range|board|tags|stage|status|type):\s*$/i;
+const TEXT_FILTER_HINT_REGEX =
+  /\b(before|after|on|range|board|tags|entity|stage|status|type):\s*$/i;
 
 /**
  * The `mentions:` result sections, in the same order `availableMentionTargets` concatenates
@@ -743,6 +745,7 @@ const ChannelCommandMenu = ({
     ((item: { id: string; name: string; email?: string; type?: ChipType }) => void) | null
   >(null);
 
+  const commitEntityRef = useRef<(() => boolean) | null>(null);
   const insertTextRef = useRef<((text: string) => void) | null>(null);
   const toggleQuotesRef = useRef<(() => void) | null>(null);
 
@@ -1399,6 +1402,10 @@ const ChannelCommandMenu = ({
   );
 
   // Store the insertMention function when it's ready
+  const handleCommitEntityReady = useCallback((commitEntity: () => boolean) => {
+    commitEntityRef.current = commitEntity;
+  }, []);
+
   const handleInsertMentionReady = useCallback(
     (
       insertMention: (item: { id: string; name: string; email?: string; type?: ChipType }) => void,
@@ -3686,6 +3693,15 @@ const ChannelCommandMenu = ({
       }
     }
 
+    // An uncommitted `entity:<value>` becomes its chip instead of running the search.
+    // This handler is on an ancestor's onKeyDownCapture, so it sees Enter before Lexical
+    // does — the editor can't claim this key itself (see EntityChipPlugin).
+    if (commitEntityRef.current?.()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     // If mention search is active, let the mention selection handle Enter
     if (mentionSearchType !== null) {
       e.preventDefault();
@@ -3876,6 +3892,7 @@ const ChannelCommandMenu = ({
             setSelectedMentionIndex={setSelectedMentionIndex}
             onNavigate={markNavigated}
             hasNavigated={hasNavigated}
+            onCommitEntityReady={handleCommitEntityReady}
             onInsertMentionReady={handleInsertMentionReady}
             onReplaceTriggerChipsReady={fn => {
               replaceTriggerChipsRef.current = fn;

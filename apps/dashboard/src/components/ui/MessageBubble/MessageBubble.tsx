@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -59,6 +60,7 @@ import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes'
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
+import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
@@ -494,6 +496,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelId,
   conversation,
   contentOnly = false,
+  disableLinks = false,
   onClick,
   threadInfo,
   channelScopeType,
@@ -506,6 +509,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   headerContent,
   onUserClick,
 }) => {
+  const renderConversationBadge = useContext(ConversationBadgeContext);
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
@@ -751,7 +755,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
 
-  if (isMobile && isMe && !isSlashCommandArtifact) {
+  const isSharedAgentTranscript = metadata?.['sharedAgentTranscript'] === true;
+
+  if (isMobile && isMe && !isSlashCommandArtifact && !isSharedAgentTranscript) {
     return (
       <MobileMessageMyBubble
         message={message}
@@ -1170,6 +1176,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {metadata?.['clawRunOrigin'] ? (
                 <RunOriginChip origin={metadata['clawRunOrigin']} />
               ) : null}
+              {/* Host-supplied mark for where this conversation belongs. Null in
+                  every surface that does not provide one. */}
+              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
               {headerContent}
             </div>
           )}
@@ -1259,6 +1268,50 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
+              ) : isSharedAgentTranscript ? (
+                <div className='flex flex-col gap-2'>
+                  {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={metadata['shareNote']}
+                          showEdited={message.edited}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={DOMPurify.sanitize(metadata['shareNote'])}
+                            showEdited={message.edited}
+                            preserveThreadRoute={context === 'thread'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <SharedTranscriptCard
+                    content={citationContent}
+                    agentName={
+                      typeof metadata?.['agentName'] === 'string'
+                        ? metadata['agentName']
+                        : typeof metadata?.['agentSlug'] === 'string'
+                          ? metadata['agentSlug']
+                          : 'agent'
+                    }
+                    {...(typeof metadata?.['messageCount'] === 'number'
+                      ? { messageCount: metadata['messageCount'] }
+                      : {})}
+                    defaultCollapsed
+                    renderBody={content => (
+                      <MarkdownMessageRenderer
+                        content={content}
+                        markdownComponents={markdownComponents}
+                      />
+                    )}
+                  />
+                </div>
               ) : recordingShare && !isForwardedMessage ? (
                 <RecordingShareContent
                   recordingShare={recordingShare}
@@ -1267,6 +1320,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <RenderMessageWithHTML
+                        disableLinks={disableLinks}
                         message={noteHtml}
                         showEdited={message.edited}
                         messageId={message.messageId}
@@ -1350,6 +1404,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
                             preserveThreadRoute={context === 'thread'}
@@ -1412,6 +1467,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               />
                             ) : (
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1452,6 +1508,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={resolvedForwardedContent}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1511,6 +1568,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}

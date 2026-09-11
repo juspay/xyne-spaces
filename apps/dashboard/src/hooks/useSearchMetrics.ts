@@ -124,15 +124,21 @@ export const CMDK_USER_LIMIT = 25;
  * (`status:todo`, `board:…`) keeps working; an explicit pick from the results page's
  * Filters popover wins for that field.
  */
+type ResolvedTextFilters = ReturnType<typeof parseSearchFilters> & {
+  /** Chip-only — never parsed from the query. See parseSearchFilters. */
+  entity: string | undefined;
+};
+
 function resolveTextFilters(
   query: string,
   overrides: StructuredSearchFilters,
-): ReturnType<typeof parseSearchFilters> {
+): ResolvedTextFilters {
   const parsed = parseSearchFilters(query);
   return {
     ...parsed,
     board: overrides.board || parsed.board,
     tags: overrides.tags || parsed.tags,
+    entity: overrides.entity,
     status: overrides.status || parsed.status,
     before: overrides.before || parsed.before,
     after: overrides.after || parsed.after,
@@ -149,6 +155,12 @@ function resolveTextFilters(
 function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
   const boards = mentions.filter(m => m.type === ChipType.BOARD).map(m => m.id);
   return boards.length > 0 ? { board: boards.join(',') } : {};
+}
+
+/** Entity chips carry the name the backend matches, so they travel as-is. */
+function entityFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const entities = mentions.filter(m => m.type === ChipType.ENTITY).map(m => m.id);
+  return entities.length > 0 ? { entity: entities.join(',') } : {};
 }
 
 function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
@@ -531,6 +543,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (selectedMentions.some(m => m.type === ChipType.PRIORITY)) {
         sessionFiltersRef.current.add('priority');
       }
+      if (selectedMentions.some(m => m.type === ChipType.ENTITY)) {
+        sessionFiltersRef.current.add('entity');
+      }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
       if (parsedFiltersForImpression.tags) sessionFiltersRef.current.add('tags');
       if (parsedFiltersForImpression.before) sessionFiltersRef.current.add('before');
@@ -806,6 +821,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         searchText,
         board: boardFilter,
         tags: tagsFilter,
+        entity: entityFilter,
         before: beforeFilter,
         after: afterFilter,
         on: onFilter,
@@ -817,6 +833,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...structuredFilters,
         ...dateFiltersFromChips(selectedMentions),
         ...boardFilterFromChips(selectedMentions),
+        ...entityFilterFromChips(selectedMentions),
       });
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
@@ -841,6 +858,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         priorityFilter ||
         boardFilter ||
         tagsFilter ||
+        entityFilter ||
         beforeFilter ||
         afterFilter ||
         onFilter ||
@@ -947,6 +965,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
               ...(tagsFilter && { tags: tagsFilter }),
+              ...(entityFilter && { entity: entityFilter }),
               ...(beforeFilter && { before: beforeFilter }),
               ...(afterFilter && { after: afterFilter }),
               ...(onFilter && { on: onFilter }),
@@ -1394,6 +1413,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchText,
       board: boardFilter,
       tags: tagsFilter,
+      entity: entityFilter,
       before: beforeFilter,
       after: afterFilter,
       on: onFilter,
@@ -1405,6 +1425,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       ...structuredFilters,
       ...dateFiltersFromChips(selectedMentions),
       ...boardFilterFromChips(selectedMentions),
+      ...entityFilterFromChips(selectedMentions),
     });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
@@ -1414,6 +1435,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       priorityFilter ||
       boardFilter ||
       tagsFilter ||
+      entityFilter ||
       beforeFilter ||
       afterFilter ||
       onFilter ||
@@ -1463,6 +1485,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
           ...(tagsFilter && { tags: tagsFilter }),
+          ...(entityFilter && { entity: entityFilter }),
           ...(beforeFilter && { before: beforeFilter }),
           ...(afterFilter && { after: afterFilter }),
           ...(onFilter && { on: onFilter }),

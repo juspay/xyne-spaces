@@ -30,7 +30,11 @@ export interface ParsedRepository {
 
 export interface ValidatedCredential {
   identityLogin: string;
-  resourceOwner: string;
+}
+
+export interface RepositoryReach {
+  repositoryOwner: string | null;
+  repositoryCount: number | null;
 }
 
 export interface RepositoryInspection {
@@ -93,7 +97,8 @@ export interface SourceLineRange {
 export interface VcsProviderAdapter {
   readonly provider: VcsProvider;
   parseRepositoryUrl(url: string): ParsedRepository;
-  validateCredential(token: string, resourceOwner: string): Promise<ValidatedCredential>;
+  validateCredential(token: string): Promise<ValidatedCredential>;
+  repositoryReach(token: string): Promise<RepositoryReach>;
   inspectRepository(input: {
     repository: ParsedRepository;
     baseBranch?: string;
@@ -153,7 +158,7 @@ export interface SdlcVcs {
   configureCredential(
     actor: SdlcActor,
     provider: VcsProvider,
-    input: { token: string; resourceOwner: string }
+    input: { token: string }
   ): Promise<unknown>;
   revalidateCredential(actor: SdlcActor, provider: VcsProvider): Promise<unknown>;
   disconnectCredential(actor: SdlcActor, provider: VcsProvider): Promise<void>;

@@ -262,6 +262,8 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -296,6 +298,8 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
   })
   .primaryKey("id");
 
@@ -1607,8 +1611,6 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string().optional(),
-    message: string().optional(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
@@ -1870,6 +1872,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1886,6 +1889,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2033,6 +2037,17 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
     updatedAt: number(),
   })
   .primaryKey("artifactId");
+
+export const sdlcFolderTable = table("sdlc_folders")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
@@ -2637,6 +2652,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
   })
   .primaryKey("id");
 
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const delayedMessageTable = table("delayed_messages")
   .columns({
     workspaceId: string(),
@@ -3018,18 +3045,6 @@ export const executionRunLogTable = table("execution_run_logs")
     error: string().optional(),
     durationMs: number().optional(),
     createdAt: number(),
-  })
-  .primaryKey("id");
-
-export const radarTeamTable = table("radar_teams")
-  .columns({
-    workspaceId: string(),
-    id: string(),
-    ownerId: string(),
-    name: string(),
-    memberIds: json<string[]>(),
-    createdAt: number(),
-    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -4853,12 +4868,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5163,6 +5191,7 @@ export const schema = createSchema(
       repoTable,
       sdlcEntityLinkTable,
       sdlcArtifactTable,
+      sdlcFolderTable,
       sdlcTrackTable,
       lookupValueTable,
       formTable,
@@ -5204,6 +5233,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5228,7 +5258,6 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
-      radarTeamTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5327,6 +5356,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5467,6 +5497,7 @@ export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
@@ -5508,6 +5539,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;
@@ -5532,4 +5564,3 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
-export type RadarTeam = Row<typeof schema.tables.radar_teams>;
