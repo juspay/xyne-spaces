@@ -1,3 +1,10 @@
+## [1.316.3](https://github.com/juspay/xyne-spaces/compare/v1.316.2...v1.316.3) (2026-09-11)
+
+
+### Bug Fixes
+
+* save SDLC activity owner on updates, late links and folder discussions ([#1794](https://github.com/juspay/xyne-spaces/issues/1794)) ([c7512d5](https://github.com/juspay/xyne-spaces/commit/c7512d5e52fa184ae5966a50f66ffc0dc85524ae))
+
 ## [1.316.2](https://github.com/juspay/xyne-spaces/compare/v1.316.1...v1.316.2) (2026-09-11)
 
 
