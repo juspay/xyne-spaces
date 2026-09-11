@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Zap,
   Tag as TagIcon,
+  Languages,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -85,6 +86,9 @@ export interface HoverActionsToolbarProps {
   isBookmarked?: boolean;
   onRemindMeOption?: (option: ReminderMenuOption) => void;
   onAskAI?: () => void;
+  /** Present only until the viewer clicks it once — the message's own footer takes
+   * over toggling after that (see ChatBubble's `translationActivated`). */
+  onTranslate?: () => void;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
@@ -143,6 +147,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   isBookmarked = false,
   onRemindMeOption,
   onAskAI,
+  onTranslate,
   isPinned = false,
   onMarkAsUnread,
   onInitiateCall,
@@ -358,6 +363,24 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-track-metadata={JSON.stringify({ messageId })}
           >
             <XyneAIStar size={16} />
+          </Button>
+        </Tooltip>
+      )}
+
+      {/* Translate */}
+      {onTranslate && (
+        <Tooltip content='Translate' side='top'>
+          <Button
+            variant='ghost'
+            className='size-7 text-muted-foreground'
+            onClick={onTranslate}
+            title='Translate'
+            data-testid='hover-action-translate'
+            data-track-category='HOVER_ACTIONS_TOOLBAR'
+            data-track-name='TRANSLATE_MESSAGE'
+            data-track-metadata={JSON.stringify({ messageId })}
+          >
+            <Languages className='w-4 h-4' />
           </Button>
         </Tooltip>
       )}

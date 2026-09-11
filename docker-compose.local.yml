@@ -175,6 +175,38 @@ services:
         max-size: "50m"
         max-file: "6"
 
+  # ---- Self-hosted translation engine (profile: translation) ----------------
+  # Backs apps/backend/src/services/translation/libreTranslator.ts — the only message
+  # translation backend; ENABLE_MESSAGE_TRANSLATION requires LIBRETRANSLATE_URL pointing
+  # here. ~3.4s for a 14-block real message vs. ~51s for a prior in-process NLLB
+  # approach that was replaced entirely (measured, not estimated).
+  #
+  # Language list matches SUPPORTED_LANGUAGES in languageCodes.ts — LibreTranslate's
+  # full 46-language set (docs.libretranslate.com/guides/supported_languages), not an
+  # arbitrary subset. Keep the two in sync; a language listed in one but not the other
+  # either can't be picked in the UI or fails at translate time.
+  translation:
+    profiles: ["translation"]
+    image: libretranslate/libretranslate
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-translation
+    command:
+      - --load-only
+      - en,es,fr,de,it,pt,ru,zh,ja,ko,ar,hi,tr,vi,id,nl,pl,sv,th,he,sq,az,eu,bn,bg,ca,cs,da,eo,et,fi,gl,el,hu,ga,ky,lv,lt,ms,nb,fa,ro,sk,sl,tl,uk,ur
+      - --threads
+      - "1"
+      - --disable-web-ui
+    ports:
+      - "${LIBRETRANSLATE_PORT:-5001}:5000"
+    volumes:
+      - libretranslate_data:/home/libretranslate/.local/share/argos-translate
+    mem_limit: ${LIBRETRANSLATE_MEM_LIMIT:-3g}
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
 volumes:
   postgres_data:
     driver: local
@@ -195,4 +227,6 @@ volumes:
   transcription-agent-cache:
     driver: local
   vespa_data:
+    driver: local
+  libretranslate_data:
     driver: local

@@ -620,6 +620,7 @@ export const userPreferenceTable = table('user_preferences')
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
+    preferredLanguage: string(), // App-wide message translation target (ISO 639-1)
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
     channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
     starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
@@ -940,6 +941,7 @@ export const messageTable = table('messages')
     reactions_md: string().optional(), // Markdown format reactions data
     link_preview_md: string().optional(), // Markdown format internal link preview data
     messageActs: string().optional(),
+    sourceLang: string().optional(), // Detected language of `content` (ISO 639-1), set once by the translation worker
   })
   .primaryKey('messageId');
 
@@ -992,6 +994,22 @@ export const messageAttachmentTable = table('message_attachments')
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
     position: number().optional(),
+  })
+  .primaryKey('id');
+
+// Write-only: populated by the backend translation worker off the send path, never
+// computed at read time. One row per (message, target language) that actually needed
+// translating — never for the message's own sourceLang, since that reader just reads
+// messages.content directly.
+export const messageTranslationTable = table('message_translations')
+  .columns({
+    workspaceId: string(), // denormalized from the parent message, for ACL/workspace filtering
+    id: string(),
+    messageId: string(),
+    targetLang: string(), // ISO 639-1 code, matches user_preferences.preferredLanguage
+    translatedText: string(),
+    feedback: string().optional(), // 'up' | 'down' — thumbs given on this translation, null = none yet
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -3501,6 +3519,11 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destField: ['entityId'],
     destSchema: messageAttachmentTable,
   }),
+  translations: many({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTranslationTable,
+  }),
   reactions: many({
     sourceField: ['messageId'],
     destField: ['messageId'],
@@ -4829,6 +4852,7 @@ export const schema = createSchema({
     messageTable,
     messageArtifactTable,
     messageAttachmentTable,
+    messageTranslationTable,
     draftMessageTable,
     delayedMessageTable,
     reactionTable,
@@ -5100,6 +5124,7 @@ export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
+export type MessageTranslation = Row<typeof schema.tables.message_translations>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type Reaction = Row<typeof schema.tables.reactions>;

@@ -1,6 +1,9 @@
 import { parseInitialMessageMd, parseParentMessageMd } from '@xyne/shared';
 import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
-import type { MessageWithOptionalNudgeCounts } from '../components/ui/MessageBubble/MessageBubble.types';
+import type {
+  MessageWithOptionalNudgeCounts,
+  MessageTranslationRow,
+} from '../components/ui/MessageBubble/MessageBubble.types';
 
 /**
  * Convert a parsed InitialMessageSummary to a MessageWithOptionalNudgeCounts
@@ -33,6 +36,14 @@ export function initialMessageSummaryToMessage(
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,
     workspaceId,
+    sourceLang: summary.sourceLang ?? null,
+    // `translations` is genuinely optional (readonly MessageTranslationRow[] | undefined
+    // isn't valid under exactOptionalPropertyTypes) — omit the key entirely rather than
+    // set it to `undefined` when there's no snapshot to parse.
+    ...(summary.translations && {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      translations: JSON.parse(summary.translations) as MessageTranslationRow[],
+    }),
   };
 }
 

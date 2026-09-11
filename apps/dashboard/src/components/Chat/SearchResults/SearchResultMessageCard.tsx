@@ -162,6 +162,9 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
         nudgeCount: null,
         reactions_md: null,
         link_preview_md: null,
+        // Search results carry no detected source language; the translate toggle
+        // doesn't render on this card.
+        sourceLang: null,
       }
     : null;
 

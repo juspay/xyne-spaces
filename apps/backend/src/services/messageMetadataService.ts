@@ -166,6 +166,11 @@ export class MessageMetadataService {
 
     if (!message) return;
 
+    const translationRows = await this.prisma.messageTranslation.findMany({
+      where: { messageId: message.messageId },
+      select: { targetLang: true, translatedText: true, feedback: true },
+    });
+
     const summary: InitialMessageSummary = {
       messageId: message.messageId,
       conversationId: message.conversationId,
@@ -184,6 +189,8 @@ export class MessageMetadataService {
       reactions_md: message.reactions_md,
       link_preview_md: message.link_preview_md,
       childConversationId: message.childConversationId,
+      sourceLang: message.sourceLang,
+      translations: translationRows.length > 0 ? JSON.stringify(translationRows) : null,
     };
 
     const md = serializeInitialMessageMd(summary);

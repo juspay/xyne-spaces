@@ -6,6 +6,7 @@ import type { QueryContext } from '../../acl/core/types';
 import { messageSchema } from '@/vespa/src/types';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
+import { messageTranslationQueue } from '@/queues/translationQueue';
 
 type MessagesSchema = Schema['tables']['messages'];
 
@@ -20,9 +21,10 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
   }
 
   onInsert(args: InsertValue<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    // Fire-and-forget: both are guarded internally and must never affect ingestion.
+    // Fire-and-forget: all three are guarded internally and must never affect ingestion.
     void entityExtractionQueue.enqueueForMessage(args.conversationId);
     void messageClassificationQueue.enqueueForMessage(args.conversationId);
+    void messageTranslationQueue.enqueueDetection(args.messageId);
     return [{
       schema: messageSchema,
       jobType: 'feed',

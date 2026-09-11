@@ -278,6 +278,12 @@ const envSchema = Joi.object({
   ENABLE_MESSAGE_CLASSIFICATION: Joi.boolean().default(false),
   // What the dedicated classification key serves.
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
+  ENABLE_MESSAGE_TRANSLATION: Joi.boolean().default(false),
+  // Self-hosted LibreTranslate instance (see the `translation` profile in
+  // docker-compose.local.yml locally). Required for message translation — empty means
+  // translateMessageOnDemand skips with `libretranslate-not-configured` rather than
+  // translating.
+  LIBRETRANSLATE_URL: Joi.string().allow('').default(''),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
 
@@ -1023,6 +1029,8 @@ export const config = {
   messageClassification: {
     model: envVars.MESSAGE_CLASSIFIER_MODEL,
   },
+  messageTranslationEnabled: envVars.ENABLE_MESSAGE_TRANSLATION,
+  libretranslateUrl: envVars.LIBRETRANSLATE_URL,
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
     enabled: envVars.ENABLE_RECAP_SCHEDULER,

@@ -689,6 +689,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .where(({ or, cmp }) => or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)))
         .orderBy('createdAt', 'asc')
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery
             .where(helpers =>
@@ -785,6 +786,7 @@ export const queries: AnyQueryRegistry = defineQueries({
           )
           .orderBy('createdAt', 'asc')
           .related('attachments')
+          .related('translations')
           .related('nudgeCounts', nc =>
             nc.where(helpers =>
               helpers.or(
@@ -819,6 +821,7 @@ export const queries: AnyQueryRegistry = defineQueries({
           )
           .orderBy('createdAt', 'asc')
           .related('attachments')
+          .related('translations')
           .related('nudgeCounts', nc =>
             nc.where(helpers =>
               helpers.or(
@@ -3438,6 +3441,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('reactionCounts')
         .related('reactions')
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery
             .where(helpers =>
@@ -3464,6 +3468,7 @@ export const queries: AnyQueryRegistry = defineQueries({
           )
         )
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery
             .where(helpers =>

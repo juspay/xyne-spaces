@@ -262,6 +262,8 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -296,6 +298,8 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
   })
   .primaryKey("id");
 
@@ -529,6 +533,7 @@ export const userPreferenceTable = table("user_preferences")
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(),
+    preferredLanguage: string(),
     channelSortOrder: string(),
     channelFilterMode: string().optional(),
     starredFilterMode: string().optional(),
@@ -1407,8 +1412,21 @@ export const messageTable = table("messages")
     reactions_md: string().optional(),
     link_preview_md: string().optional(),
     messageActs: string().optional(),
+    sourceLang: string().optional(),
   })
   .primaryKey("messageId");
+
+export const messageTranslationTable = table("message_translations")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    messageId: string(),
+    targetLang: string(),
+    translatedText: string(),
+    feedback: string().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
 
 export const messageArtifactTable = table("message_artifacts")
   .columns({
@@ -1870,6 +1888,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1886,6 +1905,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2634,6 +2654,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
     fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -4853,12 +4885,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5128,6 +5173,7 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
+      messageTranslationTable,
       messageArtifactTable,
       messageAttachmentTable,
       reactionTable,
@@ -5204,6 +5250,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5327,6 +5374,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5432,6 +5480,7 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
+export type MessageTranslation = Row<typeof schema.tables.message_translations>;
 export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;
@@ -5508,6 +5557,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;

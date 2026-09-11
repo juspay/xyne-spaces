@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { usePreferredLanguage } from '../../../hooks/usePreferredLanguage';
+import { apiInstance } from '../../../services/clients/apiClient';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
@@ -343,6 +345,29 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const handleCreateSubTicket = (): void => {
     setIsSubTicketModalOpen(true);
+  };
+
+  // Slack model: the toolbar Translate click is the ONLY trigger. Nothing shows
+  // under the message — no footer, no "Translated" label — until that click
+  // happens, for old and newly-arrived messages alike. `translationActivated`
+  // stays true afterward so the footer's own See original/See translation link
+  // can keep toggling `showTranslated` without needing the toolbar again.
+  const { preferredLanguage } = usePreferredLanguage();
+  const [showTranslated, setShowTranslated] = useState(false);
+  const [translationActivated, setTranslationActivated] = useState(false);
+  const canTranslate = Boolean(message.sourceLang) && message.sourceLang !== preferredLanguage;
+  const cachedTranslation = message.translations?.find(t => t.targetLang === preferredLanguage);
+
+  const handleTranslate = (): void => {
+    setTranslationActivated(true);
+    setShowTranslated(true);
+    if (cachedTranslation) return;
+    void apiInstance
+      .post(`/messages/${message.messageId}/translate`, { targetLang: preferredLanguage })
+      .catch(() => {
+        // Reactive query just won't ever pick up a translation — the footer stays
+        // showing the original as a harmless no-op rather than an error state.
+      });
   };
 
   const handleAskAI = (): void => {
@@ -1093,6 +1118,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
         (!isSystemMessage || isCallMessage) &&
         !isMessageDeleted && { onAskAI: handleAskAI }),
+      // Hides once activated: the footer's own See original/See translation link
+      // takes over toggling from here.
+      ...(canTranslate &&
+        !translationActivated &&
+        !isMessageDeleted && { onTranslate: handleTranslate }),
       ...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {}),
       ...(messageShortcuts.length > 0 &&
         !isSystemMessage &&
@@ -1298,6 +1328,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             isFirstInThread={isFirstInThread}
             showLinkPreview={false}
             searchItemView={searchItemView}
+            showTranslated={showTranslated}
+            translationActivated={translationActivated}
+            onToggleTranslation={() => setShowTranslated(prev => !prev)}
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}

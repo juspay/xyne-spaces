@@ -922,6 +922,7 @@ model UserPreference {
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
+  preferredLanguage        String   @default("en") // App-wide message translation target (ISO 639-1)
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
   channelFilterMode        String?          // Channels group filter (null = app default)
   starredFilterMode        String?          // Starred group filter (null = app default)
@@ -2333,6 +2334,7 @@ model Message {
   reactions_md      String?
   link_preview_md   String?
   messageActs       String?
+  sourceLang        String?     // Detected language of `content` (ISO 639-1), set once by the translation worker
 
   // Relations
   conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
@@ -2351,6 +2353,26 @@ model Message {
 
   @@index([conversationId, createdAt, messageId])
   @@map("messages")
+  @@schema("public")
+}
+
+// One row per (message, target language) that actually needed translating — never for
+// the message's own sourceLang, since a reader in that language just reads `content`.
+// Write-only: populated by the translation worker off the send path, never computed at
+// read time. See docs/ON_DEVICE_INTENT.md-style doctrine — this one runs server-side.
+model MessageTranslation {
+  workspaceId    String   // denormalized from the parent message, for ACL/workspace filtering
+  id             String   @id @default(cuid())
+  messageId      String   // no FK constraint, consistent with other message-adjacent tables
+  targetLang     String   // ISO 639-1 code, e.g. "es", "fr" — matches UserPreference.preferredLanguage
+  translatedText String   @db.Text
+  feedback       String?  // 'up' | 'down' — thumbs given on this cached translation; null = none given yet
+  createdAt      DateTime @default(now())
+
+  @@unique([messageId, targetLang])
+  @@index([messageId])
+  @@index([workspaceId])
+  @@map("message_translations")
   @@schema("public")
 }
 

@@ -15,6 +15,7 @@ import {
   closeDriveImportQueue,
 } from '@/services/driveImport/driveImportWorker'
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
+import { messageTranslationQueue } from '@/queues/translationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -104,6 +105,7 @@ class WorkerService {
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
+      const messageTranslationEnabled = appConfig.messageTranslationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
     const workflowType = process.env.WORKFLOW_TYPE
@@ -209,6 +211,12 @@ class WorkerService {
         logger.info('Starting message classification worker service...')
         await messageClassificationQueue.initialize()
         messageClassificationQueue.startProcessing()
+      }
+
+      if (messageTranslationEnabled) {
+        logger.info('Starting message translation worker service...')
+        await messageTranslationQueue.initialize()
+        messageTranslationQueue.startProcessing()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -460,6 +468,7 @@ class WorkerService {
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
+      const messageTranslationEnabled = appConfig.messageTranslationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
       if (enableRecovery) {
@@ -518,6 +527,10 @@ class WorkerService {
       }
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
+      }
+
+      if (messageTranslationEnabled) {
+        await messageTranslationQueue.shutdown()
       }
 
       if (workflowsEnabled) {

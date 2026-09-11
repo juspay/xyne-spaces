@@ -106,6 +106,7 @@ export { ImpactsACL } from './impacts-acl';
 export { InvitationsACL } from './invitations-acl';
 export { LinkAccessACL } from './link-access-acl';
 export { LinksACL } from './links-acl';
+export { MessageTranslationsACL } from './message-translations-acl';
 export { LookupValuesACL } from './lookup-values-acl';
 export { MerchantsACL } from './merchants-acl';
 export { ModelsACL } from './models-acl';

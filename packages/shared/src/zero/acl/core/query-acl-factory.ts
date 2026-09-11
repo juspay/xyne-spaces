@@ -111,6 +111,7 @@ import {
   LinkAccessACL,
   LinksACL,
   LookupValuesACL,
+  MessageTranslationsACL,
   MerchantsACL,
   ModelsACL,
   ProactiveNudgesACL,
@@ -293,6 +294,8 @@ export class QueryACLFactory {
         return new ViewAccessACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
+      case 'message_translations':
+        return new MessageTranslationsACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':
         return new CollectionsACL(ctx) as BaseQueryACL<TTable>;
       case 'collection_items':

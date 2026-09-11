@@ -248,6 +248,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'messageAttachment':
       return new MessageAttachmentsACL(ctx, prisma)
+    case 'messageTranslation':
+      return new BaseQueryACL(ctx, prisma)
     case 'model':
       return new ModelsACL(ctx, prisma)
     case 'notification':

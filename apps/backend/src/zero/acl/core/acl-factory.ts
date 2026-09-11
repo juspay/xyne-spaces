@@ -238,6 +238,11 @@ export class ACLFactory {
         return new MessagesACL(ctx);
       case 'message_artifacts':
         return new MessageArtifactsACL(ctx, table);
+      case 'message_translations':
+        // Written only by the translation worker's own Prisma client (see
+        // translateMessage.ts), never through a Zero mutation — BaseACL's
+        // deny-all default is correct here, not an oversight.
+        return new BaseACL(ctx, table);
       case 'models':
         return new ModelsACL(ctx);
       case 'notification_preferences':

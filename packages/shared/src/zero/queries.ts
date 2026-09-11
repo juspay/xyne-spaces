@@ -671,6 +671,7 @@ export const queries = defineQueries({
         })
         .orderBy('createdAt', 'asc')
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
             helpers.or(
@@ -838,6 +839,7 @@ export const queries = defineQueries({
           )
           .orderBy('createdAt', 'asc')
           .related('attachments')
+          .related('translations')
           .related('nudgeCounts', nc =>
             nc.where(helpers =>
               helpers.or(
@@ -2682,6 +2684,7 @@ export const queries = defineQueries({
         .related('reactionCounts')
         .related('reactions')
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
             helpers.or(
@@ -2710,6 +2713,7 @@ export const queries = defineQueries({
           ),
         )
         .related('attachments')
+        .related('translations')
         .related('nudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
             helpers.or(

@@ -72,6 +72,7 @@ import {
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
+import { PREFERRED_LANGUAGE_OPTIONS } from '../../../hooks/usePreferredLanguage';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
@@ -191,6 +192,48 @@ const QualitySelect: FC<{
         </DropdownMenu>
       </div>
     </div>
+  );
+};
+
+const LanguageSelect: FC<{
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+}> = ({ id, value, onChange }) => {
+  const selected =
+    PREFERRED_LANGUAGE_OPTIONS.find(option => option.value === value) ??
+    PREFERRED_LANGUAGE_OPTIONS[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          id={id}
+          type='button'
+          className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+          data-track-category='PREFERENCES'
+          data-track-name={id}
+        >
+          <span className='truncate'>{selected?.label}</span>
+          <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='min-w-40 max-h-72 overflow-y-auto'>
+        {PREFERRED_LANGUAGE_OPTIONS.map(option => (
+          <DropdownMenuItem
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            className='flex items-center justify-between gap-3'
+            data-track-category='PREFERENCES'
+            data-track-name={`${id}-${option.value}`}
+          >
+            <span>{option.label}</span>
+            {option.value === value && (
+              <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 
@@ -755,6 +798,20 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         id='allow-thread-broadcast-mentions'
         checked={state.allowThreadBroadcastMentions}
         onCheckedChange={state.setAllowThreadBroadcastMentions}
+      />
+    </div>
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Default translation language</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Choose the default language that you&apos;d like to translate into. Messages in another
+          language show a Translate button in their hover menu.
+        </p>
+      </div>
+      <LanguageSelect
+        id='preferred-language'
+        value={state.preferredLanguage}
+        onChange={state.setPreferredLanguage}
       />
     </div>
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>

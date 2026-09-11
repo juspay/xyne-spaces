@@ -57,6 +57,7 @@ export async function resolveMessage(
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,
     childConversationId: summary.childConversationId ?? null,
+    sourceLang: null,
   };
 }
 

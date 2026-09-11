@@ -43,6 +43,7 @@ import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import communityRoutes from '@/routes/community';
 import reactionRoutes from '@/routes/reactionRoutes';
+import translationRoutes from '@/routes/translationRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
@@ -520,6 +521,7 @@ export class App {
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
+    this.app.use('/api/messages', authMiddleware.authenticate, translationRoutes);
 
     // Claw MCP route (user + app auth) — must be before /api/calls
     this.app.use('/api/calls/claw', authenticateUserOrApp, callRoutes);
@@ -1119,6 +1121,10 @@ export class App {
     logger.info('Initializing message classification queue (producer)...');
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
+
+    logger.info('Initializing message translation queue (producer)...');
+    const { messageTranslationQueue } = await import('@/queues/translationQueue');
+    await messageTranslationQueue.initialize();
 
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');

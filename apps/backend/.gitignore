@@ -67,3 +67,6 @@ package.json
 
 # Generated Prisma client for common DB
 prisma-common/generated/
+
+# Vendored translation model weights (fetched by scripts/fetch-translation-model.mjs)
+models/

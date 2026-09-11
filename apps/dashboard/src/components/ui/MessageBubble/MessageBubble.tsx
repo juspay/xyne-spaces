@@ -38,7 +38,29 @@ import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import {
+  usePreferredLanguage,
+  PREFERRED_LANGUAGE_OPTIONS,
+} from '../../../hooks/usePreferredLanguage';
+import {
+  Bookmark,
+  ChevronDown,
+  ChevronRight,
+  Hash,
+  Trash2,
+  Sparkles,
+  ThumbsUp,
+  ThumbsDown,
+} from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '../dropdown-menu';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { TranslationLanguageModal } from './TranslationLanguageModal';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -506,6 +528,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   afterTextContent,
   headerContent,
   onUserClick,
+  showTranslated = false,
+  translationActivated = false,
+  onToggleTranslation,
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
@@ -606,6 +631,43 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
+  // Slack model: the footer below the message (rendered further down, next to the
+  // plain-content branch) only appears once `translationActivated` — set by
+  // ChatBubble the first time the hover-toolbar Translate button is clicked, never
+  // automatically. `showTranslated` only swaps the default text-content path,
+  // never the markdown/forwarded/app-action paths, which parse embedded syntax out
+  // of `message.content` that a translation would corrupt.
+  const { preferredLanguage } = usePreferredLanguage();
+  // Set by "Change translation language" (the footer's dropdown menu) when the viewer
+  // picks a one-off language for just this message without checking "set as default"
+  // — falls back to the workspace-wide preferredLanguage otherwise. Session-local: a
+  // refresh reverts to preferredLanguage unless the viewer did check "set as default".
+  const [translationLangOverride, setTranslationLangOverride] = useState<string | null>(null);
+  const [languageModalOpen, setLanguageModalOpen] = useState(false);
+  const effectiveTargetLang = translationLangOverride ?? preferredLanguage;
+  const cachedTranslation = message.translations?.find(t => t.targetLang === effectiveTargetLang);
+
+  const displayContent = useMemo(() => {
+    if (!showTranslated) return message.content;
+    return cachedTranslation?.translatedText ?? message.content;
+  }, [message.content, cachedTranslation, showTranslated]);
+
+  // `message_translations` is a shared cache keyed by (messageId, targetLang), not
+  // per-viewer, so this is last-write-wins across everyone who sees this cached
+  // translation — same sharing model as the translated text itself.
+  const handleTranslationFeedback = (value: 'up' | 'down'): void => {
+    if (!cachedTranslation) return;
+    const next = cachedTranslation.feedback === value ? null : value;
+    void apiInstance
+      .post(`/messages/${message.messageId}/translation-feedback`, {
+        targetLang: cachedTranslation.targetLang,
+        feedback: next,
+      })
+      .catch(() => {
+        // Best-effort — the reactive query just won't reflect it if this fails.
+      });
+  };
+
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
@@ -1493,14 +1555,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               ) : (
                 <>
-                  {hasMessageContent(message.content) && (
+                  {hasMessageContent(displayContent) && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(displayContent)}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
                       {isMobile ? (
                         <ExpandableMessage
-                          message={isWorkflowMessage ? 'Workflow created' : message.content}
+                          message={isWorkflowMessage ? 'Workflow created' : displayContent}
                           showEdited={message.edited}
                           maxHeight={500}
                           isSystemMessage={isSystemMessage}
@@ -1517,7 +1579,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
                             disableLinks={disableLinks}
-                            message={isWorkflowMessage ? 'Workflow created' : message.content}
+                            message={isWorkflowMessage ? 'Workflow created' : displayContent}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}
                             messageId={message.messageId}
@@ -1537,6 +1599,97 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   )}
                 </>
               )}
+
+              {translationActivated && !message.isDeleted && (
+                <div className='flex items-center gap-1.5 mt-1 text-xs text-muted-foreground'>
+                  <Sparkles className='w-3 h-3' />
+                  <span>{cachedTranslation ? 'Translated' : 'Translating…'}</span>
+                  {cachedTranslation && (
+                    <>
+                      <span aria-hidden className='text-muted-foreground/25'>
+                        |
+                      </span>
+                      <button
+                        type='button'
+                        onClick={onToggleTranslation}
+                        className='text-primary hover:underline'
+                        data-testid='message-translate-toggle'
+                        data-track-category='MESSAGE'
+                        data-track-name='TOGGLE_TRANSLATION'
+                        data-track-metadata={JSON.stringify({ messageId: message.messageId })}
+                      >
+                        {showTranslated ? 'See original' : 'See translation'}
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className='text-muted-foreground hover:text-foreground'
+                          aria-label='Translation options'
+                          data-testid='message-translate-menu'
+                        >
+                          <ChevronDown className='w-3.5 h-3.5' />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='start'>
+                          <div className='px-2 py-1.5 text-xs text-muted-foreground'>
+                            Translated from{' '}
+                            {PREFERRED_LANGUAGE_OPTIONS.find(o => o.value === message.sourceLang)
+                              ?.label ?? message.sourceLang}
+                          </div>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setLanguageModalOpen(true)}>
+                            Change translation language
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              window.dispatchEvent(
+                                new CustomEvent('xyne-open-preferences', {
+                                  detail: { section: 'messaging' },
+                                }),
+                              )
+                            }
+                          >
+                            Translation settings
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <span aria-hidden className='text-muted-foreground/25'>
+                        |
+                      </span>
+                      <button
+                        type='button'
+                        onClick={() => handleTranslationFeedback('up')}
+                        aria-label='Good translation'
+                        aria-pressed={cachedTranslation.feedback === 'up'}
+                        className={
+                          cachedTranslation.feedback === 'up'
+                            ? 'text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }
+                      >
+                        <ThumbsUp className='w-3.5 h-3.5' />
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => handleTranslationFeedback('down')}
+                        aria-label='Bad translation'
+                        aria-pressed={cachedTranslation.feedback === 'down'}
+                        className={
+                          cachedTranslation.feedback === 'down'
+                            ? 'text-primary'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }
+                      >
+                        <ThumbsDown className='w-3.5 h-3.5' />
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <TranslationLanguageModal
+                open={languageModalOpen}
+                onOpenChange={setLanguageModalOpen}
+                messageId={message.messageId}
+                onTranslateRequested={targetLang => setTranslationLangOverride(targetLang)}
+              />
 
               {isTicketCardMessage && ticketAttachments && ticketAttachments.length > 0 && (
                 <div className='mb-2 flex flex-wrap gap-2'>

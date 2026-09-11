@@ -1,6 +1,7 @@
 import {
   Message,
   MessageAttachment,
+  MessageTranslation,
   Reaction,
   ReactionCount,
   ChannelScopeType,
@@ -15,11 +16,21 @@ export type MessageNudgeCountRow = {
   nudgeCount: number;
 };
 
+// A message rebuilt from conversation.initial_message_md (see
+// conversationMessageHelpers.ts) only carries targetLang/translatedText/feedback — the
+// JSON snapshot doesn't store the other MessageTranslation columns. Only these fields
+// are ever read for rendering, so the type reflects what's actually always available.
+export type MessageTranslationRow = Pick<
+  MessageTranslation,
+  'targetLang' | 'translatedText' | 'feedback'
+>;
+
 export type MessageWithOptionalNudgeCounts = Message & {
   attachments?: readonly MessageAttachment[];
   reactions?: readonly Reaction[];
   reactionCounts?: readonly ReactionCount[];
   nudgeCounts?: readonly MessageNudgeCountRow[];
+  translations?: readonly MessageTranslationRow[];
 };
 
 export interface ThreadInfo {
@@ -82,4 +93,14 @@ export interface MessageBubbleProps {
   afterTextContent?: React.ReactNode;
   /** Rendered on the sender/timestamp line, after the timestamp. */
   headerContent?: React.ReactNode;
+  /**
+   * Slack model, all owned by ChatBubble (which also holds the hover-toolbar
+   * Translate handler): `translationActivated` gates whether the footer renders at
+   * all — false until the toolbar button is clicked once, for old and new messages
+   * alike. `showTranslated` is which text is currently displayed once activated,
+   * flipped by the footer's own See original/See translation link.
+   */
+  showTranslated?: boolean;
+  translationActivated?: boolean;
+  onToggleTranslation?: () => void;
 }

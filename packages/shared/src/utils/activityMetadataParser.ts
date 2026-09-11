@@ -505,6 +505,9 @@ export interface InitialMessageSummary {
   reactions_md?: string | null;
   link_preview_md?: string | null;
   childConversationId?: string | null;
+  sourceLang?: string | null;
+  /** JSON-stringified array of `{ targetLang, translatedText }` — see MessageTranslation. */
+  translations?: string | null;
 }
 
 const INITIAL_MESSAGE_BLOCK_START = ':::initialMessage';
@@ -574,6 +577,8 @@ export function parseInitialMessageMd(md: string | null | undefined): InitialMes
     reactions_md: summary['reactions_md'] || null,
     link_preview_md: summary['link_preview_md'] || null,
     childConversationId: summary['childConversationId'] || null,
+    sourceLang: summary['sourceLang'] || null,
+    translations: summary['translations'] || null,
   };
 }
 
@@ -602,6 +607,8 @@ export function serializeInitialMessageMd(
     ['reactions_md', summary.reactions_md],
     ['link_preview_md', summary.link_preview_md],
     ['childConversationId', summary.childConversationId],
+    ['sourceLang', summary.sourceLang],
+    ['translations', summary.translations],
   ];
 
   for (const [key, value] of entries) {
