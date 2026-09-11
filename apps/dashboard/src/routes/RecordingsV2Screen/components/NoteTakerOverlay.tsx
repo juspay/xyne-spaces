@@ -283,6 +283,7 @@ const MarkMomentButton = ({
         title={justMarked ? 'Moment marked' : 'Mark moment'}
         data-track-category={TRACK_CATEGORY}
         data-track-name='mark_moment'
+        data-track-metadata={JSON.stringify({ markedCount })}
       >
         {justMarked && (
           <span
@@ -392,6 +393,7 @@ const RecordingControlBar = ({
         title='Open recording details'
         data-track-category={TRACK_CATEGORY}
         data-track-name='open_recording_details'
+        data-track-metadata={JSON.stringify({ recordingId })}
       >
         <Maximize2 strokeWidth={2.8} className='size-3' />
         <span>Full screen</span>
@@ -430,6 +432,7 @@ const RecordingControlBar = ({
           title={isPaused ? 'Resume recording' : 'Pause recording'}
           data-track-category={TRACK_CATEGORY}
           data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+          data-track-metadata={JSON.stringify({ recordingId, source: 'note_taker_overlay' })}
         >
           {isPaused ? (
             <PlayBig size={17} variant='Solid' />
@@ -447,6 +450,11 @@ const RecordingControlBar = ({
           title='Stop recording'
           data-track-category={TRACK_CATEGORY}
           data-track-name='stop_recording'
+          data-track-metadata={JSON.stringify({
+            recordingId,
+            markedCount,
+            source: 'note_taker_overlay',
+          })}
         >
           <StopBig size={16} variant='Solid' />
         </Button>

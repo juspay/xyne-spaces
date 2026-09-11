@@ -23,6 +23,12 @@ interface CallTriggerProps {
   conversationId?: string; // Optional: for thread-initiated calls
   sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
   isMember: boolean; // Whether the current user is a member of the channel
+  /**
+   * Which surface rendered this trigger, for analytics. The same component backs
+   * the chat header, the mobile header and the SDLC repo header, so without this
+   * every start-call click arrives as one indistinguishable `Call_Trigger` row.
+   */
+  trackSource?: string;
 }
 
 /**
@@ -48,6 +54,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   conversationId,
   sdlcLink,
   isMember,
+  trackSource = 'chat_header',
 }) => {
   const {
     handleCallClick,
@@ -131,6 +138,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             isInCall,
             channelId: channelId,
             targetUserIds,
+            source: trackSource,
+            scopeType,
+            participantCount,
           })}
           className={cn(
             'flex items-center justify-center transition-colors',

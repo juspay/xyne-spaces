@@ -2761,6 +2761,7 @@ export default function SdlcScreen(): ReactElement {
                   channelName={repo.name}
                   participantCount={repo.channel?.channelStats?.participantCount ?? 0}
                   callDisplayName={repo.name}
+                  trackSource='sdlc_repo_header'
                   isMember={Boolean(
                     repo.channel?.participants?.some(
                       participant => participant.userId === auth.userID,

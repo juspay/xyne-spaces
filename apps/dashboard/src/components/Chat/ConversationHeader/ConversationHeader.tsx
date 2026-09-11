@@ -413,6 +413,7 @@ const ConversationHeader = ({
             callDisplayName={displayName}
             isMember={!!channelUserStatus}
             disabled={channel.isArchived}
+            trackSource='chat_header'
           />
           {!isCompact && (
             <DropdownMenu>
