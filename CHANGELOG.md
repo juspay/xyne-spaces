@@ -1,3 +1,10 @@
+## [1.312.2](https://github.com/juspay/xyne-spaces/compare/v1.312.1...v1.312.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* keep SDLC frame route sync pointed at where each side really is ([#1727](https://github.com/juspay/xyne-spaces/issues/1727)) ([b46b6dc](https://github.com/juspay/xyne-spaces/commit/b46b6dccde27b3c858fed9d2e4e655215d66629e))
+
 ## [1.312.1](https://github.com/juspay/xyne-spaces/compare/v1.312.0...v1.312.1) (2026-09-11)
 
 ## [1.312.0](https://github.com/juspay/xyne-spaces/compare/v1.311.1...v1.312.0) (2026-09-11)
