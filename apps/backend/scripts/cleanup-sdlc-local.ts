@@ -410,6 +410,7 @@ async function main(): Promise<void> {
       ['public', 'canvas_folders', 'id', folders],
       ['public', 'repos', 'id', repoIds],
       ['public', 'workflow_executions', 'id', executionIds],
+      ['workflow', 'workflow_executions', 'id', executionIds],
       ['public', 'workflows', 'id', workflowIds],
       ['public', 'channels', 'id', channelIds],
     ];
