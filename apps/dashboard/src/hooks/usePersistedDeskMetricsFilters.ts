@@ -99,11 +99,20 @@ const isTicketPriorityArray = (v: unknown): v is TicketPriority[] =>
 const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every(isStringArray);
 
-const CHART_VIEWS = ['priority', 'trend', 'assignee', 'tags'] as const;
-export type ChartView = (typeof CHART_VIEWS)[number];
+export const CHART_VIEW_LABELS = {
+  priority: 'Priority',
+  trend: 'Created vs Resolved',
+  assignee: 'Assignee',
+  tags: 'Tags',
+  csat: 'CSAT',
+  stage: 'Stage',
+  status: 'Status',
+  desk: 'Desk',
+};
+export type ChartView = keyof typeof CHART_VIEW_LABELS | `field:${string}` | `tag:${string}`;
 
 const isChartView = (value: unknown): value is ChartView =>
-  CHART_VIEWS.includes(value as ChartView);
+  typeof value === 'string' && (value in CHART_VIEW_LABELS || /^(field|tag):/.test(value));
 
 const ACTIVE_TABS = ['overview', 'agents', 'desks'] as const;
 export type ActiveTab = (typeof ACTIVE_TABS)[number];
