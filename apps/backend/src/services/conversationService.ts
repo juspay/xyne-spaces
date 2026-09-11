@@ -87,6 +87,8 @@ export interface CreateConversationWithMessageParams {
   pinned?: boolean;
   /** Migration import: skip live-only side effects (MESSAGE_RECEIVED automations, meet-link extraction) so bulk-imported history never fires workflows. */
   suppressAutomations?: boolean;
+  /** Slack migration import: with FILE_CONTENT_ENABLED=false, attachment Vespa feeds are downgraded to metadata-only. */
+  isMigrationImport?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -107,6 +109,8 @@ export interface AddMessageToConversationParams {
   markParticipantsRead?: boolean;
   /** Migration import: skip live-only side effects (TICKET_COMMENTED automations, meet-link extraction) so bulk-imported history never fires workflows. */
   suppressAutomations?: boolean;
+  /** Slack migration import: with FILE_CONTENT_ENABLED=false, attachment Vespa feeds are downgraded to metadata-only. */
+  isMigrationImport?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -272,12 +276,24 @@ export class ConversationService {
     attachments: Array<{ id: string; mimetype: string }>,
     userId: string,
     workspaceId?: string,
-    createdAt?: Date
+    createdAt?: Date,
+    // Slack migration import. With FILE_CONTENT_ENABLED=false such attachments get a
+    // single metadata-only feed (nameOnly) instead of the full-content one: the worker
+    // then skips the GCS download + parse (mapper) and never routes the file to the OCR
+    // scheduler, so the file is searchable by name with none of the parse cost.
+    isMigrationImport = false,
   ): Promise<void> {
     if (attachments.length === 0) return;
 
     // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
     const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    const metadataOnly = isMigrationImport && !config.fileContentFeed.enabled;
+    if (metadataOnly) {
+      logger.info(
+        `[ConversationService] FILE_CONTENT_ENABLED=false — feeding ${supportedAttachments.length} migrated attachment(s) metadata-only (no content)`
+      );
+    }
 
     const queue = this.pickVespaQueue(createdAt);
     for (const attachment of supportedAttachments) {
@@ -287,6 +303,7 @@ export class ConversationService {
         docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT,
         ...(workspaceId ? { workspaceId } : {}),
+        ...(metadataOnly ? { nameOnly: true } : {}),
       }).catch(async (error) => {
         logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
@@ -340,6 +357,7 @@ export class ConversationService {
       isAddingParticipant = true,
       pinned,
       suppressAutomations = false,
+      isMigrationImport = false,
     } = params;
 
     // Check if channel exists
@@ -469,7 +487,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt, isMigrationImport).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
         });
       }
@@ -581,6 +599,7 @@ export class ConversationService {
       isAddingParticipant = true,
       markParticipantsRead = false,
       suppressAutomations = false,
+      isMigrationImport = false,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -708,7 +727,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt, isMigrationImport).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
