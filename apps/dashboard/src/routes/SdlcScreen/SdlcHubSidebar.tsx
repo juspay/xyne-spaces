@@ -25,7 +25,10 @@ const DEFAULT_SECTION_HEIGHT = 170;
 const MIN_OPEN_SECTION_HEIGHT = 150;
 const SECTION_SEPARATOR_HEIGHT = 7;
 export const SDLC_SECTIONS: ReadonlyArray<{ id: string; defaultHeight: number }> = [
-  { id: 'sdlc-sidebar-hub', defaultHeight: 180 },
+  // Sized to show every Hub row without scrolling: SECTION_HEADER_HEIGHT + one
+  // 34px row (h-[32px] + mb-0.5) per entry in SdlcScreen's SECTIONS + 8px pb-2.
+  // Add a section there and this has to grow with it, or the last row hides.
+  { id: 'sdlc-sidebar-hub', defaultHeight: 206 },
   { id: 'sdlc-sidebar-tracks', defaultHeight: 200 },
   { id: 'sdlc-sidebar-artifacts', defaultHeight: 180 },
   { id: 'sdlc-sidebar-repositories', defaultHeight: 180 },
