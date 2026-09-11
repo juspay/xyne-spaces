@@ -499,6 +499,7 @@ export async function ingestConversationSlack(
           isAddingParticipant: false,
           pinned: isPinned || false,
           suppressAutomations: true, // migrated history must never fire workflows/automations
+          isMigrationImport: true, // FILE_CONTENT_ENABLED=false ⇒ attachments feed metadata-only
         });
 
         message = result.message;
@@ -521,6 +522,7 @@ export async function ingestConversationSlack(
           isAddingParticipant: false,
           markParticipantsRead: true,
           suppressAutomations: true, // migrated history must never fire workflows/automations
+          isMigrationImport: true, // FILE_CONTENT_ENABLED=false ⇒ attachments feed metadata-only
         });
 
         message = result.message;
