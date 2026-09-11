@@ -126,7 +126,7 @@ export class CommunityWorkspaceController {
       });
       res.cookie('xyne_last_workspace', workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
@@ -366,7 +366,7 @@ export class CommunityWorkspaceController {
 
     try {
       const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
       const session = await this.userSessionService.createSession({
         userId,

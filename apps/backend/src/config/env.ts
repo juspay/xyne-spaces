@@ -70,7 +70,7 @@ const envSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
-  SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
+  SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // AWS S3 Configuration
@@ -232,7 +232,8 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  // OFF by default — entity extraction is an opt-in LLM cost per thread.
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(false),
   ENTITY_EXTRACTION_MODEL: Joi.string().default('open-fast'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
   // How long a thread's job sits delayed before it runs. This is the debounce
@@ -535,6 +536,12 @@ const envSchema = Joi.object({
   // (lower = higher; delete=1, so 1 puts it at the top).
   FILE_NAME_ONLY_FEED_ENABLED: Joi.boolean().default(true),
   FILE_NAME_ONLY_FEED_PRIORITY: Joi.number().default(1),
+  // Slack-migration attachment content. OFF by default: migrated attachments are fed
+  // METADATA-ONLY (name/mime/size/permissions with empty chunks), so a bulk import skips
+  // the GCS download + parse/OCR/embed entirely and files are still searchable by name.
+  // Set to true to restore full-content feeds for migrated attachments. Only consulted on
+  // the Slack migration paths — live uploads and KB/collections are unaffected.
+  FILE_CONTENT_ENABLED: Joi.boolean().default(false),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
@@ -1175,6 +1182,9 @@ export const config = {
   fileNameOnlyFeed: {
     enabled: envVars.FILE_NAME_ONLY_FEED_ENABLED as boolean,
     queuePriority: envVars.FILE_NAME_ONLY_FEED_PRIORITY as number,
+  },
+  fileContentFeed: {
+    enabled: envVars.FILE_CONTENT_ENABLED as boolean,
   },
   doclingScheduler: {
     enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,

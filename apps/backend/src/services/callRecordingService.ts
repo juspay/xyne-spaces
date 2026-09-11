@@ -10,10 +10,20 @@ import { getStorageService } from '@/services/storage';
 import { livekitService } from '@/services/liveKitService';
 import { stitchHlsToMp4 } from '@/utils/ffmpeg';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, AttachmentEntityType, CallType, RecordingType } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, RecordingType } from '@xyne/shared';
+import { isRecording } from '@/utils/callTypeUtils';
+import type { CreateMessageAttachmentInput } from '@/database/repositories/messageAttachmentRepository';
 
 /** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
 const SEGMENT_DURATION_SECONDS = 6;
+
+const recordingMimetype = (recordingType: string): string =>
+  recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
+
+type RecordingAttachmentTarget = Pick<
+  CreateMessageAttachmentInput,
+  'entityType' | 'entityId' | 'conversationId' | 'workspaceId' | 'url' | 'size'
+>;
 
 export interface StartRecordingResult {
   recording: CallRecording;
@@ -314,24 +324,24 @@ class CallRecordingService {
       const localOut = path.join(workDir, 'out.mp4');
       await stitchHlsToMp4(path.join(workDir, path.basename(paths.playlistPath)), localOut);
 
-      const mimetype = recording.recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
+      const mimetype = recordingMimetype(recording.recordingType);
       const buffer = await fs.readFile(localOut);
       await this.storageService.uploadFileV2(buffer, { path: paths.mp4Path, contentType: mimetype });
       if (!(await this.waitForFileExists(paths.mp4Path))) {
         throw new Error(`stitched MP4 not found at ${paths.mp4Path}`);
       }
 
+      // Before markUploaded, so a recording is never reported playable without its attachment.
+      if (isRecording(call)) {
+        await this.attachNoteTakerRecording(call, recording, paths.mp4Path, buffer.length);
+      }
+
       await repositories.callRecordings.markUploaded(recordingId, { storagePath: paths.mp4Path });
       logger.info(`[CallRecording] recording ${recordingId} UPLOADED (stitched), path=${paths.mp4Path}`);
       await this.deleteSegments(recording.segmentPrefix);
 
-      // NOTE_TAKER (headless) calls never create messages/attachments — the
-      // call_recordings row (storagePath, status=UPLOADED) is the only record
-      // of the file; getRecordingDetail/download-recording already read from
-      // this table directly, so there's nothing further to post.
-      if (call.callType === CallType.HEADLESS) {
-        logger.info(`[CallRecording] Skipping message/attachment post for HEADLESS call ${call.externalId} (recording ${recordingId})`);
-      } else {
+      // NOTE_TAKER (headless) calls have no thread to post into.
+      if (!isRecording(call)) {
         try {
           await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path });
         } catch (err) {
@@ -402,10 +412,7 @@ class CallRecordingService {
     const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
     const senderId = bot?.id ?? call.createdByUserId;
 
-    const isAudio = recording.recordingType === RecordingType.AUDIO_ONLY;
-    const mimetype = isAudio ? 'audio/mp4' : 'video/mp4';
     const recordingName = recording.name?.trim() || 'Recording';
-    const displayFilename = call.title ? `${call.title} - ${recordingName}.mp4` : `${recordingName}.mp4`;
 
     // Post the per-recording thread message first so the attachment hangs off it.
     const message = await repositories.messages.create({
@@ -433,27 +440,74 @@ class CallRecordingService {
       logger.warn(`[CallRecording] Could not get file size for ${recording.storagePath}: ${err}`);
     }
 
-    await repositories.messageAttachments.create({
-      entityId: message.messageId,
-      entityType: AttachmentEntityType.CHAT,
-      workspaceId,
-      originalFilename: displayFilename,
-      size: fileSize,
-      mimetype,
-      url: recording.storagePath!,
-      uploadedByUserId: recording.startedBy ?? call.createdByUserId,
-      createdBy: recording.startedBy ?? call.createdByUserId,
-      storageProvider: config.fileStorage.provider,
-      conversationId: headMessage.conversationId,
-      metadata: {
-        callId: call.externalId,
-        recordingId: recording.id,
-        type: 'recording',
-      },
-    });
+    await repositories.messageAttachments.create(
+      this.buildRecordingAttachment(call, recording, {
+        entityType: AttachmentEntityType.CHAT,
+        entityId: message.messageId,
+        conversationId: headMessage.conversationId,
+        workspaceId,
+        url: recording.storagePath!,
+        size: fileSize,
+      }),
+    );
 
     await repositories.conversations.incrementReplyCount(headMessage.conversationId);
     logger.info(`[CallRecording] Posted recording message ${message.messageId} + attachment for recording ${recording.id}`);
+  }
+
+  /**
+   * Note-taker recordings have no thread message, so their attachment belongs to the
+   * recording itself and lets the player stream the file. Best-effort and retry-safe.
+   */
+  private async attachNoteTakerRecording(
+    call: Call,
+    recording: CallRecording,
+    storagePath: string,
+    size: number,
+  ): Promise<void> {
+    try {
+      const [existing] = await repositories.messageAttachments.findByEntityIdAndType(
+        recording.id,
+        AttachmentEntityType.RECORDING,
+      );
+      const attachment =
+        existing ??
+        (await repositories.messageAttachments.create(
+          this.buildRecordingAttachment(call, recording, {
+            entityType: AttachmentEntityType.RECORDING,
+            entityId: recording.id,
+            conversationId: null,
+            workspaceId: recording.workspaceId,
+            url: storagePath,
+            size,
+          }),
+        ));
+
+      if (recording.attachmentId !== attachment.id) {
+        await repositories.callRecordings.setAttachmentId(recording.id, attachment.id);
+      }
+    } catch (err) {
+      logger.error(`[CallRecording] Failed to attach note-taker recording ${recording.id}:`, err);
+    }
+  }
+
+  private buildRecordingAttachment(
+    call: Call,
+    recording: CallRecording,
+    target: RecordingAttachmentTarget,
+  ): CreateMessageAttachmentInput {
+    const recordingName = recording.name?.trim() || 'Recording';
+    const uploader = recording.startedBy ?? call.createdByUserId;
+
+    return {
+      ...target,
+      originalFilename: call.title ? `${call.title} - ${recordingName}.mp4` : `${recordingName}.mp4`,
+      mimetype: recordingMimetype(recording.recordingType),
+      uploadedByUserId: uploader,
+      createdBy: uploader,
+      storageProvider: config.fileStorage.provider,
+      metadata: { callId: call.externalId, recordingId: recording.id, type: 'recording' },
+    };
   }
 
   /**
@@ -502,6 +556,8 @@ class CallRecordingService {
     if (recording.segmentPrefix) {
       await this.deleteSegments(recording.segmentPrefix);
     }
+    await repositories.messageAttachments.deleteByRecordingIds([recording.id]).catch((err) =>
+      logger.warn(`[CallRecording] Could not delete attachment for recording ${recording.id}: ${err}`));
     if (recording.messageId) {
       try {
         await repositories.messageAttachments.deleteByMessageId(recording.messageId);
@@ -582,6 +638,7 @@ class CallRecordingService {
               await this.storageService.deleteFile(recording.storagePath);
             }
             await repositories.callRecordings.markExpired(recording.id);
+            await repositories.messageAttachments.deleteByRecordingIds([recording.id]);
             if (recording.messageId) {
               await repositories.messageAttachments.deleteByMessageId(recording.messageId);
               await repositories.messages.update(recording.messageId, {

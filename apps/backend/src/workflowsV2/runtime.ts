@@ -1,7 +1,7 @@
 /**
  * The `@xyne/workflow-sdk` runtime, assembled.
  *
- * Everything the engine needs, wired once: the five adapters, the three registries, the
+ * Everything the engine needs, wired once: the six adapters, the three registries, the
  * executor and the event bus. Nothing here is xyne-specific logic — the decisions all live
  * in the adapters. This file is the composition root, and the only place that knows they
  * belong together.
@@ -11,7 +11,6 @@
  * `initWorkflows()` is called explicitly from each entry point.
  */
 import {
-  ExecutionEventBus,
   ServiceRegistry,
   StepRegistry,
   TriggerRegistry,
@@ -25,6 +24,7 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
+import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
@@ -43,7 +43,7 @@ const sdkLogger: ExecutorLogger = {
 const BASE_URL = config.workflows.baseUrl;
 
 export const persistence = new PrismaPersistenceAdapter();
-export const eventBus = new ExecutionEventBus();
+export const eventBus = new RedisEventBus();
 
 const storage = new WorkflowStorageAdapter();
 const services = new ServiceRegistry();
@@ -111,4 +111,9 @@ export const initWorkflows = async (): Promise<void> => {
   await workflowsQueue.initialize();
   await workflowsCronQueue.initialize();
   logger.info('[workflows] runtime ready');
+};
+
+export const shutdownWorkflows = async (): Promise<void> => {
+  await eventBus.close();
+  logger.info('[workflows] runtime closed');
 };

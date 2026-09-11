@@ -39,6 +39,11 @@ export interface SlackChatUpdateRequest {
 	attachments?: SlackAttachment[];
 }
 
+export interface SlackChatDeleteRequest {
+	channel: string;
+	ts: string;
+}
+
 export interface SlackConversationsHistoryRequest {
 	channel: string;
 	limit?: number;
@@ -132,6 +137,12 @@ export interface SlackChatUpdateResponse {
 		text: string;
 		user: string;
 	};
+}
+
+export interface SlackChatDeleteResponse {
+	ok: true;
+	channel: string;
+	ts: string;
 }
 
 export interface SlackConversationsHistoryResponse {

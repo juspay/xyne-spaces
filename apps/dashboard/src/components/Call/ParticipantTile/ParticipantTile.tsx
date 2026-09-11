@@ -202,16 +202,17 @@ export function ParticipantTile({
   };
 
   // Outer glow. Lives on the tile itself (a non-inset box-shadow paints outside
-  // the element, so nothing can cover it) and reinforces the overlay border.
+  // the element, so nothing can cover it). Kept faint — the overlay border is the
+  // real state signal; a strong glow bleeds onto neighbouring tiles.
   const getGlowClass = (): string => {
     if (hideSpeakingIndicator) {
       return '';
     }
     if (isHandRaised) {
-      return 'shadow-[0_0_0_1px_rgba(251,191,36,0.5),0_0_22px_rgba(251,191,36,0.55)]';
+      return 'shadow-[0_0_8px_rgba(251,191,36,0.2)]';
     }
     if (isSpeaking && participant.isMicrophoneEnabled) {
-      return 'shadow-[0_0_0_1px_rgba(74,222,128,0.5),0_0_22px_rgba(74,222,128,0.55)]';
+      return 'shadow-[0_0_8px_rgba(74,222,128,0.2)]';
     }
     return compact ? 'shadow-lg' : 'shadow-[0_4px_24px_rgba(0,0,0,0.45)]';
   };
@@ -342,7 +343,7 @@ export function ParticipantTile({
                   // identity colour behind the avatar — rather than that colour
                   // filling the whole cell as a flat saturated slab.
                   backgroundColor: '#1e1f20',
-                  backgroundImage: `radial-gradient(115% 95% at 50% 45%, ${colors.background} 0%, rgba(30,31,32,0) 72%)`,
+                  backgroundImage: `radial-gradient(115% 95% at 50% 45%, ${colors.background} 0%, rgba(30,31,32,0) 60%)`,
                 }
           }
         >
@@ -366,12 +367,13 @@ export function ParticipantTile({
               <div aria-hidden className='pointer-events-none absolute inset-0 bg-black/55' />
             </>
           ) : (
-            /* Halo so the avatar sits *in* the wash instead of floating on top of it. */
+            /* Faint halo so the avatar sits *in* the wash instead of floating on top
+               of it — kept low-opacity so it doesn't read as a glow. */
             <div
               aria-hidden
               className={cn(
-                'pointer-events-none absolute rounded-full blur-2xl opacity-40',
-                compact ? 'h-20 w-20' : 'h-32 w-32 sm:h-44 sm:w-44',
+                'pointer-events-none absolute rounded-full blur-2xl opacity-[0.08]',
+                compact ? 'h-16 w-16' : 'h-28 w-28 sm:h-36 sm:w-36',
               )}
               style={{ backgroundColor: colors.avatar }}
             />

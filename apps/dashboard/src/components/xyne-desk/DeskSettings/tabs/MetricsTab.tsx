@@ -32,7 +32,7 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
     let cancelled = false;
     void zero
       .run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember: true,
           limit: 1,

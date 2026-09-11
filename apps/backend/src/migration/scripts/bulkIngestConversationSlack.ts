@@ -24,7 +24,7 @@
  */
 import { logger } from '../../utils/logger';
 import { ExternalEntityType, MessageDirection, MessageType } from '@xyne/shared';
-import { serializeInitialMessageMd, serializeRepliesMd, serializeParentMessageMd, type InitialMessageSummary } from '@xyne/shared';
+import { buildInitialMessageMd, serializeRepliesMd, serializeParentMessageMd, type InitialMessageSummary } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
@@ -54,13 +54,16 @@ function enqueueMessageVespa(messageId: string, workspaceId: string | undefined,
     .catch((e) => logger.warn('[BulkIngest] vespa enqueue failed (non-fatal)', { messageId, error: e instanceof Error ? e.message : String(e) }));
 }
 
-/** Attachment full-text feed job (fileSchema) — mirrors conversationService.pushVespaJobForAttachments: supported MIME
- *  types only, backfill-routed by age, so migrated files (PDF/DOCX/TXT…) become searchable like the per-message path. */
+/** Attachment feed job (fileSchema) — mirrors conversationService.pushVespaJobForAttachments: supported MIME
+ *  types only, backfill-routed by age, so migrated files (PDF/DOCX/TXT…) become searchable like the per-message path.
+ *  FILE_CONTENT_ENABLED=false downgrades this to a single metadata-only (nameOnly) feed: the worker then skips the
+ *  GCS download + parse and never routes the file to the OCR scheduler — searchable by name, no content. */
 function enqueueAttachmentVespa(attachmentId: string, mimeType: string, workspaceId: string | undefined, createdAt: Date): void {
   if (!isSupportedMimeType(mimeType)) return;
   const historical = Date.now() - createdAt.getTime() > VESPA_BACKFILL_AGE_DAYS * 86_400_000;
   const q = historical ? vespaBackfillQueue : vespaQueue;
-  void q.addJob({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...(workspaceId ? { workspaceId } : {}) })
+  const metadataOnly = !config.fileContentFeed.enabled;
+  void q.addJob({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...(workspaceId ? { workspaceId } : {}), ...(metadataOnly ? { nameOnly: true } : {}) })
     .catch((e) => logger.warn('[BulkIngest] attachment vespa enqueue failed (non-fatal)', { attachmentId, error: e instanceof Error ? e.message : String(e) }));
 }
 
@@ -276,16 +279,16 @@ export async function bulkIngestConversationSlack(input: IngestConversationSlack
         }
         content = await applyCustomEmojis(content);
         parentRef = { messageId: parentMsgId, senderId, content, createdAt };
-        const summary: InitialMessageSummary = {
-          messageId: parentMsgId, conversationId: convId, senderId, content, msgType: MessageType.USER as InitialMessageSummary['msgType'],
-          hasAttachment: parentFiles.length > 0, edited: false, isDeleted: false, showInChannel: false, visibleTo: null,
-          createdAt: createdAt.getTime(), metadata: JSON.stringify({ contentFormat: 'html' }), nudgeCount: 0, isSent: true,
-          reactions_md: null, link_preview_md: null, childConversationId: null,
-        };
+        const initialMessageMd = buildInitialMessageMd({
+          messageId: parentMsgId, conversationId: convId, senderId, content,
+          msgType: MessageType.USER as InitialMessageSummary['msgType'],
+          hasAttachment: parentFiles.length > 0, nudgeCount: 0, isSent: true,
+          createdAt: createdAt.getTime(), metadata: { contentFormat: 'html' },
+        });
         convRows.push({
           conversationId: convId, channelId, workspaceId, createdBy: senderId, initialMessageId: parentMsgId,
           pinned: !!m.isPinned, createdAt, lastActivityAt, replyCount,
-          initial_message_md: serializeInitialMessageMd(summary), replies_md: repliesMd,
+          initial_message_md: initialMessageMd, replies_md: repliesMd,
         }); pending++;
         msgRows.push({
           messageId: parentMsgId, conversationId: convId, senderId, workspaceId, content, msgType: 'USER',
@@ -330,17 +333,18 @@ export async function bulkIngestConversationSlack(input: IngestConversationSlack
             entityId: replyMsgId, messageId: replyMsgId, direction: MessageDirection.INCOMING, entityType: 'MESSAGE',
           }); pending++;
           if (childConvId) {
-            const childSummary: InitialMessageSummary = {
-              messageId: replyMsgId, conversationId: childConvId, senderId: replySender, content, msgType: MessageType.USER as InitialMessageSummary['msgType'],
-              hasAttachment: replyFiles.length > 0, edited: false, isDeleted: false, showInChannel: true, visibleTo: null,
-              createdAt: replyCreatedAt.getTime(), metadata: JSON.stringify({ contentFormat: 'html' }), nudgeCount: 0, isSent: true,
-              reactions_md: null, link_preview_md: null, childConversationId: childConvId,
-            };
+            const childInitialMessageMd = buildInitialMessageMd({
+              messageId: replyMsgId, conversationId: childConvId, senderId: replySender, content,
+              msgType: MessageType.USER as InitialMessageSummary['msgType'],
+              hasAttachment: replyFiles.length > 0, showInChannel: true, nudgeCount: 0, isSent: true,
+              createdAt: replyCreatedAt.getTime(), metadata: { contentFormat: 'html' },
+              childConversationId: childConvId,
+            });
             convRows.push({
               conversationId: childConvId, channelId, workspaceId, createdBy: replySender, initialMessageId: replyMsgId,
               parentMessageId: parentRef.messageId, pinned: false, createdAt: replyCreatedAt, lastActivityAt: replyCreatedAt,
               replyCount: r.externalThreadId === lastReplyExternalId ? 0 : 1,
-              initial_message_md: serializeInitialMessageMd(childSummary),
+              initial_message_md: childInitialMessageMd,
               parent_message_md: serializeParentMessageMd({
                 messageId: parentRef.messageId, conversationId: convId, senderId: parentRef.senderId,
                 content: parentRef.content, msgType: MessageType.USER, createdAt: parentRef.createdAt.getTime(),

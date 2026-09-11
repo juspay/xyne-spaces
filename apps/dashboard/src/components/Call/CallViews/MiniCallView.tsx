@@ -530,7 +530,7 @@ export function MiniCallView({
 
                 {/* Video Grid */}
                 <div
-                  className='flex-1 bg-gray-950/50 p-3 overflow-auto'
+                  className='flex-1 bg-[#131314] p-3 overflow-auto'
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
                   {isWhiteboardOpen ? (

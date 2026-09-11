@@ -260,6 +260,10 @@ export class SearchService {
       params['assignee'] = filters.assignee;
     }
 
+    if (filters.userGroup) {
+      params['userGroup'] = filters.userGroup;
+    }
+
     if (filters.dynamicFieldValues) {
       params['dynamicFieldValues'] = Array.isArray(filters.dynamicFieldValues)
         ? filters.dynamicFieldValues.join(',')

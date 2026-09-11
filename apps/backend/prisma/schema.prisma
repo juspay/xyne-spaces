@@ -199,6 +199,8 @@ model Ticket {
   @@index([projectId, createdAt(sort: Desc), id])
   @@index([projectId, isArchived, statusV2, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, statusV2, isArchived, rootId, createdAt(sort: Desc), id])
+  @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
@@ -2930,6 +2932,7 @@ model CallRecording {
   storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
+  attachmentId  String?                          // RECORDING message_attachments row (note-taker recordings)
   startedAt     DateTime                         // Set explicitly in code (no DB default — team convention)
   endedAt       DateTime?
   createdAt     DateTime                         // Set explicitly in code (no DB default — team convention)
