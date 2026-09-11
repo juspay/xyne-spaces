@@ -1,8 +1,4 @@
-import {
-  SDLC_REPO_KNOWLEDGE_FOLDER,
-  SDLC_WORKFLOW_RELATION,
-  sdlcHubWorkflowFolderId,
-} from '@xyne/shared';
+import { SDLC_WORKFLOW_RELATION, sdlcHubWorkflowFolderId } from '@xyne/shared';
 import type { WorkflowConfig, WorkflowStepConfig } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -39,9 +35,9 @@ function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
     title: definition.title,
     config: {
       channelId: input.channelId,
-      folderId: input.folderId,
       // Snapshot: a repository added to the hub later needs a reset to appear here.
       repoIds: input.repoIds,
+      artifactType: 'Repo Knowledge',
       artifactTitle: definition.title,
       sections: definition.sections.map((section) => ({
         title: section.title,
@@ -64,8 +60,6 @@ function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
 
 interface RepoKnowledgeInput {
   channelId: string;
-  /** Canvas folder the documents are written into. */
-  folderId: string;
   /** Empty means the whole hub at run time. */
   repoIds: string[];
 }
@@ -139,20 +133,13 @@ async function ensureHubFolder(
 /** Everything about the hub that gets baked into its workflow definition. */
 async function hubTargets(
   channelId: string,
-): Promise<{ hubName: string; knowledgeFolderId: string; repoIds: string[] }> {
-  const [channel, knowledgeFolder, repoIds] = await Promise.all([
+): Promise<{ hubName: string; repoIds: string[] }> {
+  const [channel, repoIds] = await Promise.all([
     db.channel.findUnique({ where: { id: channelId }, select: { name: true } }),
-    db.canvasFolder.findFirst({
-      where: { channelId, name: SDLC_REPO_KNOWLEDGE_FOLDER },
-      select: { id: true },
-    }),
     repoIdsForChannel(db, channelId),
   ]);
   if (!channel) throw new AppError('SDLC hub not found', 404);
-  if (!knowledgeFolder) {
-    throw new AppError('SDLC hub has no Repo Knowledge folder to write into', 409);
-  }
-  return { hubName: channel.name, knowledgeFolderId: knowledgeFolder.id, repoIds };
+  return { hubName: channel.name, repoIds };
 }
 
 export interface SeedHubWorkflowResult {
@@ -170,13 +157,13 @@ export async function seedHubWorkflow(
 ): Promise<SeedHubWorkflowResult> {
   if (await findHubWorkflowLink(channelId)) return { status: 'skipped' };
 
-  const { hubName, knowledgeFolderId, repoIds } = await hubTargets(channelId);
+  const { hubName, repoIds } = await hubTargets(channelId);
   const folderId = await ensureHubFolder(actor, channelId, hubName);
   const workflowId = await workflowRuntime.createWorkflow(
     { userId: actor.userId, workspaceId: actor.workspaceId },
     {
       name: WORKFLOW_NAME,
-      config: buildRepoKnowledgeConfig({ channelId, folderId: knowledgeFolderId, repoIds }),
+      config: buildRepoKnowledgeConfig({ channelId, repoIds }),
       folderId,
       // Metadata, not attributes: `createdByUserId` is consumed at create, never stored.
       metadata: { [SDLC_AUTHOR_METADATA_KEY]: actor.userId },
@@ -226,7 +213,7 @@ export async function resetHubWorkflow(
     return seedHubWorkflow(actor, channelId);
   }
 
-  const { hubName, knowledgeFolderId, repoIds } = await hubTargets(channelId);
+  const { hubName, repoIds } = await hubTargets(channelId);
   const folderId = await ensureHubFolder(actor, channelId, hubName);
 
   await workflowRuntime.updateWorkflow(
@@ -234,7 +221,7 @@ export async function resetHubWorkflow(
     link.targetId,
     {
       name: WORKFLOW_NAME,
-      config: buildRepoKnowledgeConfig({ channelId, folderId: knowledgeFolderId, repoIds }),
+      config: buildRepoKnowledgeConfig({ channelId, repoIds }),
       folderId,
       metadata: { [SDLC_AUTHOR_METADATA_KEY]: actor.userId },
     },

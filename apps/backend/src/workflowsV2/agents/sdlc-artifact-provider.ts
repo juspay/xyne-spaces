@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SDLC_AGENT_SLUG } from '@xyne/shared';
+import { SDLC_AGENT_SLUG, SDLC_REPO_KNOWLEDGE_FOLDER } from '@xyne/shared';
 import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
 import type {
   AgentDispatchRecord,
@@ -46,13 +46,28 @@ const SectionSchema = z.object({
   instructions: z.string().min(1),
 });
 
+/**
+ * Artifact types this step can write, each mapped to the canvas folder it lands in.
+ * One for now. Adding a type is an entry here — the folder is resolved per hub at
+ * dispatch, so nothing else has to know about it.
+ */
+const ARTIFACT_TYPE_FOLDERS = {
+  'Repo Knowledge': SDLC_REPO_KNOWLEDGE_FOLDER,
+} as const;
+
+export type SdlcArtifactType = keyof typeof ARTIFACT_TYPE_FOLDERS;
+
+/** Tuple, not Object.keys: z.enum needs the literals to type the field. */
+const ARTIFACT_TYPES = ['Repo Knowledge'] as const satisfies readonly SdlcArtifactType[];
+
+/** Key order is form order: the builder renders properties as they are declared. */
 export const SdlcArtifactConfigSchema = z.object({
   channelId: z.string().min(1)
     .describe('SDLC hub this artifact belongs to'),
-  folderId: z.string().min(1)
-    .describe('Artifact type — the canvas folder id the document is written into'),
   repoIds: z.array(z.string().min(1)).max(50).default([])
     .describe('Repositories this document covers. Empty means every repository in the hub.'),
+  artifactType: z.enum(ARTIFACT_TYPES).default('Repo Knowledge')
+    .describe('What kind of document this step writes'),
   artifactTitle: z.string().min(1).max(255)
     .describe('Document title. It is also the key used to find and update it on a re-run.'),
   sections: z.array(SectionSchema).optional()
@@ -90,6 +105,11 @@ export class SdlcArtifactAgentProvider
       throw new Error(`[workflows] workflow author ${actorUserId} is unavailable`);
     }
 
+    const folderId = await resolveArtifactFolderId(
+      stepConfig.channelId,
+      stepConfig.artifactType,
+    );
+
     // Per attempt, so a repair re-run is its own run in claw's history.
     const attempt = input.repair?.attempt ?? 0;
     const sessionId = safeClawId(
@@ -112,13 +132,14 @@ export class SdlcArtifactAgentProvider
     logger.info(
       `[workflows] dispatching SDLC artifact — execution=${ctx.runtime.executionId} `
       + `node=${ctx.runtime.stepName} channel=${stepConfig.channelId} `
-      + `title="${stepConfig.artifactTitle}" session=${sessionId}`,
+      + `type="${stepConfig.artifactType}" title="${stepConfig.artifactTitle}" `
+      + `session=${sessionId}`,
     );
 
     const response = await runS2SClawAgent({
       sessionId,
       agentSlug: SDLC_AGENT_SLUG,
-      task: buildTask({ ...input, task: buildArtifactTask(stepConfig, input.task) }),
+      task: buildTask({ ...input, task: buildArtifactTask(stepConfig, folderId, input.task) }),
       workspaceId: attrs.workspaceId,
       userId: user.id,
       userName: user.name || user.email,
@@ -152,21 +173,51 @@ export class SdlcArtifactAgentProvider
 }
 
 /**
+ * An artifact type names a canvas folder; each hub has its own row for it. Resolved
+ * here rather than stored in the step so a workflow survives the folder being
+ * recreated, and so the builder never asks an admin for a raw id.
+ */
+async function resolveArtifactFolderId(
+  channelId: string,
+  artifactType: SdlcArtifactType,
+): Promise<string> {
+  const name = ARTIFACT_TYPE_FOLDERS[artifactType];
+  const folder = await db.canvasFolder.findFirst({
+    where: { channelId, name },
+    select: { id: true },
+  });
+  if (!folder) {
+    throw new Error(
+      `[workflows] SDLC hub ${channelId} has no "${name}" folder to write ${artifactType} into`,
+    );
+  }
+  return folder.id;
+}
+
+/**
  * Idempotency is prompt-driven by design: the agent already has list/read/mutate, and
  * title-within-folder is the only thing telling two generic artifacts apart.
  */
-function buildArtifactTask(cfg: SdlcArtifactConfig, task: string): string {
+function buildArtifactTask(
+  cfg: SdlcArtifactConfig,
+  folderId: string,
+  task: string,
+): string {
   const parts = [
     task,
     '',
     '---',
     '',
-    `Write the SDLC artifact titled "${cfg.artifactTitle}".`,
+    `Write the ${cfg.artifactType} document titled "${cfg.artifactTitle}".`,
     `Hub (channelId): ${cfg.channelId}`,
-    `Artifact type (folderId): ${cfg.folderId}`,
+    `Artifact type (folderId): ${folderId}`,
     cfg.repoIds.length > 0
       ? `Cover only these repositories: ${cfg.repoIds.join(', ')}`
       : 'Cover every repository in this hub. List them with spaces-sdlc-list-repositories first.',
+    // spaces-sdlc-list-tracks tells the agent to create a track when none fits, and
+    // mutate-artifact's exemption is a trailing parenthetical. Say it plainly here.
+    'This artifact type belongs to no track: it describes the hub itself. Pass no '
+    + 'trackId, and do not call spaces-sdlc-list-tracks or spaces-sdlc-create-track.',
   ];
 
   if (cfg.sections?.length) {
