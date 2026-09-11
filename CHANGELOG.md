@@ -1,3 +1,11 @@
+## [1.310.2-release-20260911.2](https://github.com/juspay/xyne-spaces/compare/v1.310.2-release-20260911.1...v1.310.2-release-20260911.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* Kanban ticket scan (release-20260911) ([#1783](https://github.com/juspay/xyne-spaces/issues/1783)) ([c0dfd24](https://github.com/juspay/xyne-spaces/commit/c0dfd2444c83cd6f162bd8dab0e4eb924756e49e))
+* stamp initial_message_md at write time so conversations cannot render empty [release-20260911] ([#1778](https://github.com/juspay/xyne-spaces/issues/1778)) ([3253afe](https://github.com/juspay/xyne-spaces/commit/3253afe3488cc7f1253b71fe37811d5b0663cf50))
+
 ## [1.310.2-release-20260911.1](https://github.com/juspay/xyne-spaces/compare/v1.310.1...v1.310.2-release-20260911.1) (2026-09-11)
 
 
