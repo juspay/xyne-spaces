@@ -1480,7 +1480,14 @@ export class SdlcHubService implements SdlcHub {
     const renderer = await createBlockRenderer([...live, ...nextBlocks]);
     const entries = parseLabelledMarkdown(resolved.markdown);
     const receipt = await getReadReceipt(existing.id, actor.userId);
-    const ops = entries.some(e => e.handle !== null || e.isNew)
+    const labelled = entries.some(e => e.handle !== null || e.isNew);
+    if (labelled && !receipt && live.length > 0) {
+      throw new AppError(
+        'No read receipt for this artifact: read it again with spaces-read-canvas, then resend the whole document with its labels.',
+        409
+      );
+    }
+    const ops = labelled
       ? deriveOps({
           current: live,
           entries,

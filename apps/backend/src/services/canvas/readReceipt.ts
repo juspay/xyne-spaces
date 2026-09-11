@@ -7,8 +7,9 @@
  * wants deleted. Deleting it would destroy work the agent never had an
  * opinion on.
  *
- * Short-lived by nature (an agent reads then writes within one turn), so this
- * lives in Redis rather than a table.
+ * Short-lived by nature, so this lives in Redis rather than a table. A day
+ * covers long SDLC runs and same-day follow-up turns; a write that arrives
+ * with no receipt is refused, never silently stripped of its deletes.
  */
 
 import { redisService } from '@/services/redisService';
@@ -18,7 +19,7 @@ export interface ReadReceipt {
   blockIds: string[];
 }
 
-const TTL_SECONDS = 60 * 60;
+const TTL_SECONDS = 24 * 60 * 60;
 
 const key = (canvasId: string, userId: string): string =>
   `canvas-read-receipt:${canvasId}:${userId}`;

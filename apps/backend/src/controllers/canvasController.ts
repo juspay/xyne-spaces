@@ -1132,6 +1132,13 @@ export class CanvasController {
       const handleMap = buildHandleMap(current);
 
       const receipt = await getReadReceipt(canvas.id, userId);
+      if (!receipt && current.length > 0) {
+        res.status(409).json({
+          error:
+            'No read receipt for this canvas: read it again with spaces-read-canvas, then resend the whole document with its labels.',
+        });
+        return;
+      }
       const ops = deriveOps({
         current,
         entries,
