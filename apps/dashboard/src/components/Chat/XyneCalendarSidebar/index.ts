@@ -10,6 +10,4 @@ export {
   XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE,
   XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
   XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
-  getNextCalendarBadgeBoundary,
-  getPendingCalendarCallCount,
 } from './xyneCalendarSidebar.utils';

@@ -113,6 +113,7 @@ import { xyneAIActor, setXyneAIPanelRefs, globalXyneAIPanelRefs } from '../machi
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/ActivitySupportTicket';
+import { ActivityCalendarWeekView } from '../components/Activity/ActivityCalendarWeekView';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
@@ -1430,6 +1431,7 @@ export const router = createBrowserRouter(
                           path: 'recording/:recordingId',
                           element: <RecordingDetailRoute embedded />,
                         },
+                        { path: 'calendar', element: <ActivityCalendarWeekView /> },
                         ...sharedChatRoutes,
                       ],
                     },
