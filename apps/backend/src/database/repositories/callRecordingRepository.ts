@@ -121,6 +121,10 @@ export class CallRecordingRepository {
     await this.db.callRecording.update({ where: { id }, data: { messageId } });
   }
 
+  async setAttachmentId(id: string, attachmentId: string): Promise<void> {
+    await this.db.callRecording.update({ where: { id }, data: { attachmentId } });
+  }
+
   async rename(id: string, name: string): Promise<CallRecording> {
     return this.db.callRecording.update({ where: { id }, data: { name } });
   }
