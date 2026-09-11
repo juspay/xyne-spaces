@@ -374,7 +374,6 @@ function useFlowGraph(
           labelBgStyle: { fill: 'hsl(var(--background))' },
           markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10 },
           style: { stroke: 'hsl(var(--border))', strokeWidth: 1.5 },
-          selectable: false,
         });
       }
     }
@@ -486,9 +485,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           onFormFieldNamesResolved={map => onFormFieldNamesResolved?.(map)}
         />
         <ScheduleCard
-          schedule={config.schedule}
+          schedule={config.schedule ?? { type: 'IMMEDIATE' }}
           triggerSchema={triggerSchema}
-          onChange={next => onConfigChange({ ...config, schedule: next })}
+          onChange={next => onConfigChange({ ...config, schedule: next ?? { type: 'IMMEDIATE' } })}
         />
       </div>
     );
