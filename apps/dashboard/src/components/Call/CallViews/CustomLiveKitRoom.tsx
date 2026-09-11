@@ -566,6 +566,7 @@ export function CustomLiveKitRoom({
           onDeleteTranscriptChange={setDeleteTranscript}
           submitting={dispositionSubmitting}
           error={dispositionError}
+          trackMetadata={{ callId, participantCount: participants.length, isHost }}
         />
         <TranscriptDispositionModal
           isOpen={showDispositionModal}
@@ -663,6 +664,7 @@ export function CustomLiveKitRoom({
         onDeleteTranscriptChange={setDeleteTranscript}
         submitting={dispositionSubmitting}
         error={dispositionError}
+        trackMetadata={{ callId, participantCount: participants.length, isHost }}
       />
       <TranscriptDispositionModal
         isOpen={showDispositionModal}

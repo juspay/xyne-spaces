@@ -107,6 +107,10 @@ export function RecordingControlBar({
               title={isPaused ? 'Resume recording' : 'Pause recording'}
               data-track-category='RecordingControlBar'
               data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+              data-track-metadata={JSON.stringify({
+                source: 'recording_control_bar',
+                elapsedMs: startTime ? Date.now() - startTime - accumulatedPausedMs : null,
+              })}
             >
               {isPaused ? (
                 <Play className='w-5 h-5 text-foreground' />
@@ -121,6 +125,11 @@ export function RecordingControlBar({
               title='Stop recording'
               data-track-category='RecordingControlBar'
               data-track-name='stop_recording'
+              data-track-metadata={JSON.stringify({
+                source: 'recording_control_bar',
+                durationMs: startTime ? Date.now() - startTime - accumulatedPausedMs : null,
+                wasPaused: accumulatedPausedMs > 0,
+              })}
             >
               {/* Square stop icon */}
               <div className='w-5 h-5 rounded-sm bg-destructive' />

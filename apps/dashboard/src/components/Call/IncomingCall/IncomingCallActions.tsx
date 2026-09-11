@@ -41,7 +41,14 @@ export function IncomingCallActions({
   onAccept,
   onReject,
 }: IncomingCallActionsProps): ReactElement {
-  const trackMetadata = JSON.stringify({ isInActiveCall, callId });
+  // `source` marks this as the in-app ringing card specifically. Accepts that
+  // arrive from the Electron or mobile notification never reach a DOM click, so
+  // this surface is the only one of the three that can be counted here.
+  const trackMetadata = JSON.stringify({
+    isInActiveCall,
+    callId,
+    source: 'incoming_call_modal',
+  });
 
   return (
     <div className='flex items-start justify-center gap-6'>
