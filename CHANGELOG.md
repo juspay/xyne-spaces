@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.10](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.9...v1.295.0-release-20260909.10) (2026-09-11)
+
+
+### Bug Fixes
+
+* make supportTicketsPageV4 a faithful V3 copy with IN filters and repoint callers ([#1776](https://github.com/juspay/xyne-spaces/issues/1776)) ([04aeece](https://github.com/juspay/xyne-spaces/commit/04aeeced132891ecf936b8a1baae88632dfe2d42))
+
 ## [1.295.0-release-20260909.9](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.8...v1.295.0-release-20260909.9) (2026-09-10)
 
 
