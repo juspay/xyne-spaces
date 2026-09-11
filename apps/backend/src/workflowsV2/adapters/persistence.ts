@@ -9,7 +9,7 @@
  *
  * Storage map:
  *   workflows        -> public.workflows              (config in `context`, NOT `configuration`)
- *   executions       -> public.workflow_executions
+ *   executions       -> public.workflow_executions  (copied to workflow.workflow_executions)
  *   execution_states -> workflow.workflow_execution_states
  *   step_records     -> workflow.workflow_steps       (node-paths in `stepName`)
  *   folders          -> workflow.workflow_folders
