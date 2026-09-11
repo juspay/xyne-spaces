@@ -149,13 +149,16 @@ export class SdlcArtifactAgentProvider
       + (attempt > 0 ? `-retry-${String(attempt)}` : ''),
     );
 
+    // `interactive`, not `baseline`, and deliberately without the execution ids:
+    // claw only mints a sandbox credential from an execution when that row is an
+    // SDLC one carrying agentSlug/repoId/sessionId in its context. A workflows-v2
+    // execution carries none of that, so the signed hub grant is the only path
+    // that works. Correlation still rides on the callback URL, not on this.
     const agentContext = await sdlcAgentContext.buildForHub(
       { userId: user.id, workspaceId: attrs.workspaceId },
       stepConfig.channelId,
       {
-        operation: 'baseline',
-        workflowExecutionId: ctx.runtime.executionId,
-        sessionId,
+        operation: 'interactive',
         // Must equal sessionId: the grant is bound to it and the sandbox reads it back.
         conversationId: sessionId,
       },

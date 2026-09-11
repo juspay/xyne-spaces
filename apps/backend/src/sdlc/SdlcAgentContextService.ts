@@ -45,7 +45,11 @@ export interface SdlcAgentContext {
   projectId: string;
   channelId: string;
   actorUserId: string;
-  /** Absent on a hub-scoped run, which names its repositories per tool call. */
+  /**
+   * The repository claw clones and binds its SDLC tools to. Claw drops every
+   * trusted tool binding and refuses `sandbox-repo-setup` without it, so a hub
+   * run names one even though the grant covers the whole hub.
+   */
   repository?: { id: string; name: string; url: string; baseBranch: string };
   permissions: { repositoryRole: 'ADMIN' | 'MEMBER' };
   gates: {
@@ -182,6 +186,9 @@ export class SdlcAgentContextService {
    * Context for a run spanning a whole hub. A hub run has no execution row for
    * `bootstrapSandboxCredential` to check, so the grant carries the scope instead:
    * every repository in the hub, read-only.
+   *
+   * One repository is still named: a sandbox clones exactly one, and claw binds
+   * its SDLC tools to `repository.id` rather than to anything the agent passes.
    */
   async buildForHub(
     actor: SdlcActor,
@@ -202,6 +209,13 @@ export class SdlcAgentContextService {
     const repoIds = await repoIdsForChannel(this.prisma, channelId);
     if (repoIds.length === 0) throw new AppError('This SDLC hub has no repositories', 409);
 
+    const repo = await this.prisma.repo.findFirst({
+      where: { id: repoIds[0]!, workspaceId: actor.workspaceId },
+      select: { id: true, name: true, url: true, canonicalUrl: true, baseBranch: true },
+    });
+    if (!repo) throw new AppError('SDLC repository not found', 404);
+    const parsed = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
+
     return {
       version: 1,
       operation: input.operation,
@@ -209,6 +223,12 @@ export class SdlcAgentContextService {
       projectId: channel.projectId,
       channelId,
       actorUserId: actor.userId,
+      repository: {
+        id: repo.id,
+        name: repo.name,
+        url: parsed.cloneUrl,
+        baseBranch: requireSdlcBaseBranch(repo.baseBranch),
+      },
       permissions: { repositoryRole: role === 'ADMIN' ? 'ADMIN' : 'MEMBER' },
       gates: { capabilities: [], allBaselinesApproved: false },
       execution: {

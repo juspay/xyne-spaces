@@ -1,6 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
-import { sdlcRepoIdsSchema } from '@xyne/shared/sdlc';
+import { sdlcRepoIds, sdlcRepoIdsSchema } from '@xyne/shared/sdlc';
 import { AppError } from '@/middleware/errorHandler';
 import { SdlcArtifactVersionStore } from '@/sdlc/SdlcArtifactVersionStore';
 
@@ -20,6 +20,8 @@ const selectorSchema = z.discriminatedUnion('type', [
 ]);
 
 const bindingSchema = z.object({
+  // Claw's SDLC tools bind a single `repoId`; `repoIds` is the hub-scoped form.
+  repoId: z.string().trim().min(1).optional(),
   repoIds: sdlcRepoIdsSchema,
   workspaceId: z.string().trim().min(1),
   actorUserId: z.string().trim().min(1),
@@ -51,11 +53,12 @@ function binding(req: Request) {
   if (!actingUserId || actingUserId !== parsed.actorUserId) {
     throw new AppError('SDLC artifact history binding mismatch', 403);
   }
-  if (!parsed.channelId && !parsed.repoIds?.length) {
+  const repoIds = sdlcRepoIds(parsed);
+  if (!parsed.channelId && repoIds.length === 0) {
     throw new AppError('channelId is required', 400);
   }
   return {
-    ...(parsed.repoIds ? { repoIds: parsed.repoIds } : {}),
+    ...(repoIds.length > 0 ? { repoIds } : {}),
     workspaceId: parsed.workspaceId,
     userId: parsed.actorUserId,
     ...(parsed.channelId ? { channelId: parsed.channelId } : {}),
