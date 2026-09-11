@@ -1810,7 +1810,7 @@ model Channel {
   lastActivityAt  DateTime          @default(now())
   createdBy       String            // User ID (no FK constraint)
   metadata        Json?             // Additional metadata for future extension
-  projectId       String            // Project the channel is linked to. Stays NOT NULL for prod/pre-prod sync safety; a projectless (decoupled) channel stores '' (empty string) as the sentinel — boards live in channel_board_mappings.
+  projectId       String            // Project to which the channel is linked
   workspaceId     String            // Workspace for ACL optimization (denormalized from project)
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
