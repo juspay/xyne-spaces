@@ -1,3 +1,10 @@
+## [1.311.1](https://github.com/juspay/xyne-spaces/compare/v1.311.0...v1.311.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* moving labels from channel level to user level ([#1740](https://github.com/juspay/xyne-spaces/issues/1740)) ([65f6543](https://github.com/juspay/xyne-spaces/commit/65f6543191e9b2d44d76e3f9a132be9ab3e0e166))
+
 ## [1.311.0](https://github.com/juspay/xyne-spaces/compare/v1.310.2...v1.311.0) (2026-09-11)
 
 
