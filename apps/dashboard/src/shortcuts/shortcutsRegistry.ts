@@ -17,6 +17,9 @@ export const KNOWN_SHORTCUT_SCOPES = [
   'modal',
   'viewer',
   'canvas',
+  'sdlc-sidebar',
+  'sdlc-finder',
+  'sdlc-tickets',
 ] as const;
 
 export type KnownShortcutScope = (typeof KNOWN_SHORTCUT_SCOPES)[number];

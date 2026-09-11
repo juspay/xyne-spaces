@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
 import { intentClassifier, type IntentDetection } from '../services/onDeviceIntent';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
 
 /** What a suggestion is allowed to do. One entry per wired destination. */
 export interface IntentSuggestionActions {
@@ -128,7 +129,18 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
         ? {
             action: {
               label: copy.action,
-              onClick: () => copy.run?.(latestActions.current),
+              onClick: () => {
+                // The toast action is rendered by the toast library from a
+                // {label, onClick} pair, so there is no element to hang
+                // data-track-* on and the DOM listener never sees this click.
+                globalClickTracker.trackManualEvent(
+                  'INTENT_SUGGESTION',
+                  'ACT_ON_INTENT_SUGGESTION',
+                  copy.action,
+                  { intentKey: key, action: copy.action },
+                );
+                copy.run?.(latestActions.current);
+              },
             },
           }
         : {}),

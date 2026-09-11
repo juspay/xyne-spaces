@@ -7,7 +7,19 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
-type TicketWithTags = Ticket & { tagMappings?: TicketTagMapping[] };
+/**
+ * A tag as it arrives on a Vespa search row. `toTicket` (useVespaTicketSearch) builds
+ * these objects from the search context, but the raw context carries plain strings, so
+ * both forms are accepted here.
+ */
+type VespaSearchTag = string | { id?: string; name?: string; workspaceId?: string };
+
+type TicketWithTags = Ticket & {
+  /** Present on Zero/DB rows. */
+  tagMappings?: TicketTagMapping[];
+  /** Present on direct-Vespa search rows, which have no tagMappings relation. */
+  tags?: VespaSearchTag[];
+};
 import type {
   DroppableStageProps,
   SortableTicketCardProps,
@@ -254,12 +266,25 @@ const VirtualizedStageList: React.FC<{
             >
               <SortableTicketCard
                 ticket={ticket}
-                tags={((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
-                  workspaceId: m.workspaceId,
-                  id: m.id,
-                  name: m.tagName,
-                  ticketId: m.ticketId,
-                }))}
+                tags={
+                  // Use tagMappings from Zero/DB, or fall back to tags from Vespa search results
+                  ((ticket as TicketWithTags).tagMappings ?? []).length > 0
+                    ? ((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
+                        workspaceId: m.workspaceId,
+                        id: m.id,
+                        name: m.tagName,
+                        ticketId: m.ticketId,
+                      }))
+                    : ((ticket as TicketWithTags).tags ?? []).map(t => {
+                        const name = typeof t === 'string' ? t : (t.name ?? '');
+                        return {
+                          workspaceId: typeof t === 'string' ? '' : (t.workspaceId ?? ''),
+                          id: (typeof t === 'string' ? undefined : t.id) ?? `${ticket.id}:${name}`,
+                          name,
+                          ticketId: ticket.id,
+                        };
+                      })
+                }
                 availableTags={availableTags}
                 onLoadMoreTags={onLoadMoreTags}
                 hasMoreTags={hasMoreTags}

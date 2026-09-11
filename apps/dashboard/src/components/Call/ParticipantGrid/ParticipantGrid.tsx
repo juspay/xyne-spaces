@@ -9,7 +9,7 @@ import { PaginationIndicator } from './PaginationIndicator';
 import { PaginationControls } from './PaginationControls';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
+import { filterAgentTiles } from '../../../utils/livekitAgent';
 import { SpotlightView } from '../SpotlightView';
 
 interface ParticipantGridProps {
@@ -32,7 +32,7 @@ export function ParticipantGrid({
   onToggleHandRaise,
 }: ParticipantGridProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as Lotus ParticipantsGrid
-  const isAIAssistantEnabled = aiController !== null;
+  const isAIAssistantEnabled = !!aiController;
   // Max 4 tiles (2x2) for compact view, 16 tiles (4x4) for full view
   const maxTiles = compact ? 4 : 16;
   // Grid gap in px, matched to the container's Tailwind gap classes below
@@ -40,19 +40,15 @@ export function ParticipantGrid({
   // solver's target since it only needs to be a close approximation).
   const gridGap = compact ? 6 : 12;
 
-  // Host kill-switch: when transcription is off the agent stays in the room but
-  // its tile is hidden (mirrors the participants-sidebar filter) so the call looks
-  // agent-free while capture is paused.
+  // The agent tile is hidden until someone invokes it via the AI button, and always
+  // while the host kill-switch has transcription off.
   const isTranscriptionEnabled = useSelector(
     roomActor,
     state => state.context.isTranscriptionEnabled,
   );
   const visibleParticipants = useMemo(
-    () =>
-      isTranscriptionEnabled
-        ? participants
-        : participants.filter(p => !isTranscriptionAgentIdentity(p.identity)),
-    [participants, isTranscriptionEnabled],
+    () => filterAgentTiles(participants, isTranscriptionEnabled && isAIAssistantEnabled),
+    [participants, isTranscriptionEnabled, isAIAssistantEnabled],
   );
 
   // Compute layout first using raw participant count — layout.maxTiles is the true
