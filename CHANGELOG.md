@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.13](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.12...v1.295.0-release-20260909.13) (2026-09-11)
+
+
+### Features
+
+* fix search in tag and usergroup filter ([#1807](https://github.com/juspay/xyne-spaces/issues/1807)) ([b8795a7](https://github.com/juspay/xyne-spaces/commit/b8795a73274be675892ad6d09055914463afe8b6))
+
 ## [1.295.0-release-20260909.12](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.11...v1.295.0-release-20260909.12) (2026-09-11)
 
 
