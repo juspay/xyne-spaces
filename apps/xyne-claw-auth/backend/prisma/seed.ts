@@ -995,7 +995,6 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask",
           "xyne-workflows__workflow_create": "ask",
           "xyne-workflows__workflow_update": "ask",
           "xyne-workflows__workflow_run": "ask"
@@ -1081,7 +1080,6 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask",
           "xyne-workflows__workflow_create": "ask",
           "xyne-workflows__workflow_update": "ask",
           "xyne-workflows__workflow_run": "ask"
