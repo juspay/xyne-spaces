@@ -304,6 +304,24 @@ export default function SdlcScreen(): ReactElement {
     [selectedRepo, channel],
   );
   const repoId = repo?.id;
+
+  const setupExecutionQuery = useQuery({
+    queryKey: ['sdlc-setup-execution', repoId, repo?.sdlcSetupExecutionId ?? null],
+    queryFn: async () => {
+      const response = await apiInstance.get<{
+        success: boolean;
+        execution: RepoSetupExecution | null;
+      }>(`/sdlc/repositories/${encodeURIComponent(repoId!)}/setup-execution`);
+      return response.data.execution;
+    },
+    enabled: Boolean(repoId),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: query =>
+      isRepoKnowledgeRunning(repoKnowledgeState(query.state.data).phase) ? 2_000 : false,
+  });
+  const setupExecution = setupExecutionQuery.data ?? null;
+
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
