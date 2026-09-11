@@ -258,21 +258,19 @@ export class TestAuthController {
 
       // Ensure the per-workspace "DM" project exists (normally created during org
       // onboarding); without it POST /api/users/me/dms 500s for pre-existing test workspaces.
-      const existingDmProject = await db.project.findFirst({
-        where: { workspaceId: workspace.id, code: 'DM', type: ProjectType.DM },
+      // createMany+skipDuplicates is a single INSERT ... ON CONFLICT DO NOTHING, so concurrent
+      // test logins can't race each other into a P2002 (upsert is not atomic here).
+      await db.project.createMany({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project (test-auth)',
+          workspaceId: workspace.id,
+          type: ProjectType.DM,
+          createdBy: user.id,
+        },
+        skipDuplicates: true,
       });
-      if (!existingDmProject) {
-        await db.project.create({
-          data: {
-            name: 'Direct Messages',
-            code: 'DM',
-            description: 'DM project (test-auth)',
-            workspaceId: workspace.id,
-            type: ProjectType.DM,
-            createdBy: user.id,
-          },
-        });
-      }
 
       const effectiveIsNewUser = setAsNewUser ?? isNewUser;
       logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`);
