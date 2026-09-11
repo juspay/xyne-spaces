@@ -491,11 +491,26 @@
     display: none;
   }
 
-  /* Custom scrollbars app-wide, every theme: transparent rails + subtle thumb.
-     Forcing a width switches WebKit off native scrollbars so the transparent
-     track actually applies. Opt-out utilities (.no-scrollbar, .scrollbar-none)
-     win via higher class specificity. */
-  * {
+  /* Custom scrollbars: transparent rails + subtle thumb, scoped to the actual
+     scroll containers (document root + Tailwind overflow utilities) instead of a
+     universal `*` rule. The old `* { scrollbar-color: hsl(var(--border)) ... }`
+     matched every element with declarations, which defeated Blink's ComputedStyle
+     sharing cache and forced a per-element re-resolution of the `--border` CSS var
+     on every style recalc. That dominated style-recalc time on channel/DM switch.
+     Scoping to elements that can actually show a scrollbar removes that cost while
+     keeping the same appearance. The ::-webkit-scrollbar* rules below stay global:
+     they match scrollbar pseudo-elements (only rendered on scrollable elements),
+     not real elements, so they do not defeat style sharing. Opt-out utilities
+     (.no-scrollbar, .scrollbar-none) still win via higher class specificity. */
+  html,
+  body,
+  #root,
+  .overflow-auto,
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-scroll,
+  .overflow-x-scroll,
+  .overflow-y-scroll {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
