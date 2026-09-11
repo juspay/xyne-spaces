@@ -43,6 +43,7 @@ import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
@@ -1301,6 +1302,10 @@ export class TicketController {
       // Post-commit + fire-and-forget so it can't delay or fail ticket creation.
       if (ticket.stageName) {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
+      }
+
+      if (sourceConversationId) {
+        void activityService.fillSdlcOwner(sourceConversationId, validatedConversation.channelId);
       }
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
