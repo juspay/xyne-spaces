@@ -8,9 +8,9 @@ import {
   isSdlcChannel,
   sdlcConversationOwner,
   sdlcConversationTicket,
+  sdlcFolderTrackId,
   sdlcTicketConversation,
 } from '@/sdlc/sdlcNavTarget';
-import { resolveFolderTrackId } from '@/sdlc/entityLinkService';
 
 export interface CreateActivityParams {
   id?: string;
@@ -264,9 +264,7 @@ export class ActivityService {
         if (owner.sourceType === 'CANVAS') return { canvasId: owner.sourceId, conversationId };
         // A folder discussion opens under its parent track, as notifications route it.
         const trackId =
-          owner.sourceType === 'FOLDER'
-            ? await runAsSystem(() => resolveFolderTrackId(db, owner.sourceId))
-            : owner.sourceId;
+          owner.sourceType === 'FOLDER' ? await sdlcFolderTrackId(owner.sourceId) : owner.sourceId;
         return trackId ? { trackId, conversationId } : {};
       }
       if (row.ticketId) return {};
