@@ -1,3 +1,10 @@
+## [1.295.0-release-20260909.11](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.10...v1.295.0-release-20260909.11) (2026-09-11)
+
+
+### Features
+
+* ask ai event bus ([#1770](https://github.com/juspay/xyne-spaces/issues/1770)) ([bd07a5b](https://github.com/juspay/xyne-spaces/commit/bd07a5b3f646be8e8585dac2944559ae208d9a0f))
+
 ## [1.295.0-release-20260909.10](https://github.com/juspay/xyne-spaces/compare/v1.295.0-release-20260909.9...v1.295.0-release-20260909.10) (2026-09-11)
 
 
