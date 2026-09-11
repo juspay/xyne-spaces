@@ -1,3 +1,10 @@
+## [1.274.0-release-20260904.9](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.8...v1.274.0-release-20260904.9) (2026-09-11)
+
+
+### Bug Fixes
+
+* switch PostHog persistence to localStorage-only ([#1576](https://github.com/juspay/xyne-spaces/issues/1576)) ([#1791](https://github.com/juspay/xyne-spaces/issues/1791)) ([1b3bc7e](https://github.com/juspay/xyne-spaces/commit/1b3bc7eb1dd316324b2aa6d19c828b424a7d0469)), closes [#1673](https://github.com/juspay/xyne-spaces/issues/1673)
+
 ## [1.274.0-release-20260904.8](https://github.com/juspay/xyne-spaces/compare/v1.274.0-release-20260904.7...v1.274.0-release-20260904.8) (2026-09-10)
 
 
