@@ -1,3 +1,4 @@
+import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 const GRANT_VERSION = 1 as const;
@@ -5,7 +6,7 @@ const GRANT_TTL_MS = 30 * 60_000;
 
 export interface SdlcInteractiveGrantClaims {
   version: typeof GRANT_VERSION;
-  agentSlug: 'sdlc-agent';
+  agentSlug: typeof SDLC_AGENT_SLUG;
   workspaceId: string;
   repoId: string;
   actorUserId: string;
@@ -59,7 +60,7 @@ export function verifySdlcInteractiveGrant(
   const value = claims as Partial<SdlcInteractiveGrantClaims>;
   if (
     value.version !== GRANT_VERSION ||
-    value.agentSlug !== 'sdlc-agent' ||
+    value.agentSlug !== SDLC_AGENT_SLUG ||
     !value.workspaceId ||
     !value.repoId ||
     !value.actorUserId ||

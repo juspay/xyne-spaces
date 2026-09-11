@@ -202,6 +202,7 @@ import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
@@ -637,6 +638,8 @@ export class App {
       );
       res.json({ encryptedFields });
     });
+
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',

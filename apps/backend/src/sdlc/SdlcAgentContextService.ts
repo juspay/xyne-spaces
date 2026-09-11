@@ -1,3 +1,4 @@
+import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -20,6 +21,7 @@ export type SdlcWikiAgentRole =
 
 export interface SdlcAgentContextInput {
   operation: SdlcAgentOperation;
+  channelId?: string;
   workflowExecutionId?: string;
   sessionId?: string;
   conversationId?: string;
@@ -98,10 +100,18 @@ export class SdlcAgentContextService {
         workspaceId: actor.workspaceId,
         repoId,
         userId: actor.userId,
+        ...(input.channelId ? { channelId: input.channelId } : {}),
       }),
     ]);
     if (!repo?.projectId) throw new AppError('SDLC repository not found', 404);
-    if (!membership) throw new AppError('You are not a member of this repository', 403);
+    if (!membership) {
+      throw new AppError(
+        input.channelId
+          ? 'This repository is not part of that SDLC Hub'
+          : 'You are not a member of this repository',
+        403
+      );
+    }
     const channelId = membership.channelId;
     const baselines = await this.prisma.sdlcArtifact.findMany({
       where: { repoId: repo.id, canvas: { is: { channelId } } },
@@ -139,7 +149,7 @@ export class SdlcAgentContextService {
         input.operation === 'interactive' && input.conversationId
           ? issueSdlcInteractiveGrant(
               {
-                agentSlug: 'sdlc-agent',
+                agentSlug: SDLC_AGENT_SLUG,
                 workspaceId: actor.workspaceId,
                 repoId: repo.id,
                 actorUserId: actor.userId,

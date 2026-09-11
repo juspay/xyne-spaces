@@ -150,6 +150,7 @@ export class SdlcWikiPageStore {
     repoId: string;
     workspaceId: string;
     userId: string;
+    channelId?: string;
     includeArchived?: boolean;
     sourcePaths?: string[];
   }): Promise<
@@ -167,7 +168,7 @@ export class SdlcWikiPageStore {
     const pages = await this.prisma.canvas.findMany({
       where: {
         channelId: repo.channelId,
-        sdlcArtifact: { is: { artifactType: 'WIKI' } },
+        sdlcArtifact: { is: { artifactType: 'WIKI', repoId: repo.id } },
       },
       select: {
         id: true,
@@ -220,6 +221,7 @@ export class SdlcWikiPageStore {
     repoId: string;
     workspaceId: string;
     userId: string;
+    channelId?: string;
     includeArchived?: boolean;
   }): Promise<WikiMapEntry[]> {
     const pages = await this.listPages(input);
@@ -235,6 +237,7 @@ export class SdlcWikiPageStore {
     repoId: string;
     workspaceId: string;
     userId: string;
+    channelId?: string;
     targetHeadSha?: string;
     changedSourcePaths?: string[];
   }): Promise<WikiAuditFinding[]> {
@@ -269,6 +272,7 @@ export class SdlcWikiPageStore {
     repoId: string;
     workspaceId: string;
     userId: string;
+    channelId?: string;
     path: string;
     includeArchived?: boolean;
   }): Promise<{
@@ -1152,15 +1156,16 @@ export class SdlcWikiPageStore {
     repoId: string;
     workspaceId: string;
     userId: string;
+    channelId?: string;
   }): Promise<{ id: string; channelId: string }> {
     // Membership is the read check: the actor must participate in a hub this
-    // repository belongs to.
     const membership = await this.prisma.sdlcEntityLink.findFirst({
       where: {
         workspaceId: input.workspaceId,
         targetType: 'REPOSITORY',
         targetId: input.repoId,
         relationType: SDLC_MEMBERSHIP_RELATION,
+        ...(input.channelId ? { channelId: input.channelId } : {}),
         channel: { participants: { some: { userId: input.userId } } },
       },
       orderBy: { createdAt: 'asc' },

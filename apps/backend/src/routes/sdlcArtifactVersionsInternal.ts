@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
+import { sdlcRepoIdsSchema } from '@xyne/shared/sdlc';
 import { AppError } from '@/middleware/errorHandler';
 import { SdlcArtifactVersionStore } from '@/sdlc/SdlcArtifactVersionStore';
 
@@ -19,9 +20,10 @@ const selectorSchema = z.discriminatedUnion('type', [
 ]);
 
 const bindingSchema = z.object({
-  repoId: z.string().trim().min(1),
+  repoIds: sdlcRepoIdsSchema,
   workspaceId: z.string().trim().min(1),
   actorUserId: z.string().trim().min(1),
+  channelId: z.string().trim().min(1).optional(),
 }).passthrough();
 
 function route(
@@ -49,10 +51,14 @@ function binding(req: Request) {
   if (!actingUserId || actingUserId !== parsed.actorUserId) {
     throw new AppError('SDLC artifact history binding mismatch', 403);
   }
+  if (!parsed.channelId && !parsed.repoIds?.length) {
+    throw new AppError('channelId is required', 400);
+  }
   return {
-    repoId: parsed.repoId,
+    ...(parsed.repoIds ? { repoIds: parsed.repoIds } : {}),
     workspaceId: parsed.workspaceId,
     userId: parsed.actorUserId,
+    ...(parsed.channelId ? { channelId: parsed.channelId } : {}),
   };
 }
 
