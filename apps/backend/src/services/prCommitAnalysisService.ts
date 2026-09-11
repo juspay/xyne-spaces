@@ -41,52 +41,43 @@ export class PrCommitAnalysisService {
    * - Store in Commit table with agentSlug field
    */
   async analyzePullRequestCommits(input: CommitAnalysisInput): Promise<CommitAnalysisResult> {
-    const result: CommitAnalysisResult = {
-      totalCommits: 0,
-      botCommits: 0,
-      humanCommits: 0,
+    // Step 1: Fetch commits from VCS
+    const commits = await this.vcsClient.getCommitsForPullRequest(
+      input.projectKey,
+      input.repositorySlug,
+      input.prId,
+    );
+
+    if (commits.length === 0) {
+      logger.info(`[PRCommitAnalysis] PR #${input.prId} has no commits`);
+      return {
+        totalCommits: 0,
+        botCommits: 0,
+        humanCommits: 0,
+        status: CommitAnalysisStatus.COMPLETED,
+        error: null,
+      };
+    }
+
+    // Step 2: Process and persist commits
+    const { botCommitCount, humanCommitCount } = await this.processCommits(
+      commits,
+      input.prInternalId,
+      input.workspaceId,
+    );
+
+    logger.info(
+      `[PRCommitAnalysis] Analyzed PR #${input.prId}: ${commits.length} commits ` +
+        `(${botCommitCount} bot, ${humanCommitCount} human)`,
+    );
+
+    return {
+      totalCommits: commits.length,
+      botCommits: botCommitCount,
+      humanCommits: humanCommitCount,
       status: CommitAnalysisStatus.COMPLETED,
       error: null,
     };
-
-    try {
-      // Step 1: Fetch commits from VCS
-      const commits = await this.vcsClient.getCommitsForPullRequest(
-        input.projectKey,
-        input.repositorySlug,
-        input.prId,
-      );
-
-      result.totalCommits = commits.length;
-
-      if (commits.length === 0) {
-        logger.info(`[PRCommitAnalysis] PR #${input.prId} has no commits`);
-        return result;
-      }
-
-      // Step 2: Process and persist commits
-      const { botCommitCount, humanCommitCount } = await this.processCommits(
-        commits,
-        input.prInternalId,
-        input.workspaceId,
-      );
-
-      result.botCommits = botCommitCount;
-      result.humanCommits = humanCommitCount;
-
-      logger.info(
-        `[PRCommitAnalysis] Analyzed PR #${input.prId}: ${result.totalCommits} commits ` +
-          `(${result.botCommits} bot, ${result.humanCommits} human)`,
-      );
-
-      return result;
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      result.status = CommitAnalysisStatus.FAILED;
-      result.error = errorMsg;
-      logger.error(`[PRCommitAnalysis] Failed to analyze PR #${input.prId}: ${errorMsg}`, error);
-      return result;
-    }
   }
 
   /**
