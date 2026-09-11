@@ -25,6 +25,7 @@ import { buildInitialMessageMd,
   NotificationDeliveryMethod,
   NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
+import { isDMScope, parseDMParticipantIds, formatMentionLocation } from '@/utils/channelDisplayName';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -1112,9 +1113,15 @@ class NotificationService {
     prefetchedData?: PrefetchedFilterData,
     isGroupDM: boolean = false,
   ): Promise<{ deliveredUserIds: string[] }> {
+    // Resolve the location fragment once. Regular channels keep the zero-cost
+    // `#name` path; only DM / GROUP_DM channels (whose `channelName` is the raw
+    // participant-id CSV) go through the resolver, which returns real names.
+    const channelLocation = isDMChannel
+      ? ((await this.resolveChannelNotificationLabel(channelId, senderId)) ?? 'a direct message')
+      : `#${channelName}`;
     const title = mentionType
-      ? `${mentionType} in #${channelName}`
-      : `You were mentioned in #${channelName}`;
+      ? `${mentionType} in ${channelLocation}`
+      : `You were mentioned in ${channelLocation}`;
 
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -1306,6 +1313,52 @@ class NotificationService {
   }
 
   /**
+   * Turn a channelId into a safe notification location fragment:
+   * `#name` for a regular channel, or the DM participants' names for a
+   * DM / GROUP_DM. Never returns the raw participant-id CSV that lives in
+   * `channel.name` for direct-message channels. `viewerId` (the sender or the
+   * recipient) is excluded from DM labels.
+   *
+   * Single backend home for channel-name resolution — every mention title
+   * routes through here instead of interpolating `channel.name` on its own.
+   */
+  private async resolveChannelNotificationLabel(
+    channelId: string,
+    viewerId?: string | null,
+  ): Promise<string | null> {
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true, scopeType: true },
+    });
+    if (!channel) return null;
+
+    // Prisma types `scopeType` as a plain string; it carries the same values as
+    // the shared ChannelScopeType enum.
+    const scopeType = channel.scopeType as ChannelScopeType;
+
+    let participantNames = new Map<string, string>();
+    if (isDMScope(scopeType)) {
+      const ids = parseDMParticipantIds(channel.name, scopeType);
+      if (ids.length > 0) {
+        const users = await prisma.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, name: true, displayName: true },
+        });
+        participantNames = new Map(
+          users.map(u => [u.id, u.displayName || u.name || '']),
+        );
+      }
+    }
+
+    return formatMentionLocation({
+      scopeType,
+      name: channel.name,
+      participantNames,
+      viewerId,
+    });
+  }
+
+  /**
    * Send mention notifications for canvas mentions.
    * Mirrors message mention flow: when canvas is in a channel, use "You were mentioned in #channelName".
    * Respects global pause and channel notification level (NONE = silenced).
@@ -1317,7 +1370,6 @@ class NotificationService {
     senderId: string,
     senderName: string,
     workspaceId: string,
-    channelName?: string,
     blockId?: string,
     commentThreadId?: string,
     channelId?: string | null,
@@ -1328,6 +1380,14 @@ class NotificationService {
       logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping notification creation`);
       return { deliveredUserIds: [] };
     }
+
+    // Resolve the channel into a safe location label. The raw `channel.name` is
+    // the participant-id CSV for DM / GROUP_DM channels, so it must never be
+    // interpolated into a title directly — resolveChannelNotificationLabel
+    // returns real participant names for those (viewer = the canvas author).
+    const channelLocation = channelId
+      ? await this.resolveChannelNotificationLabel(channelId, senderId)
+      : null;
 
     // Apply pause and channel-level filtering.
     // If the canvas is in a channel, use channel-level settings; otherwise fall back to global pause only.
@@ -1348,13 +1408,13 @@ class NotificationService {
     const isCommentMention = mentionContext === 'comment';
     const title = isCommentMention
       ? `You were mentioned in a comment on ${canvasTitle}`
-      : channelName
-        ? `You were mentioned in #${channelName}`
+      : channelLocation
+        ? `You were mentioned in ${channelLocation}`
         : `You were mentioned in ${canvasTitle}`;
     const message = isCommentMention
       ? ''
-      : channelName
-        ? `${senderName} mentioned you in #${channelName}`
+      : channelLocation
+        ? `${senderName} mentioned you in ${channelLocation}`
         : `${senderName} mentioned you in a canvas`;
 
     const notificationData = {
