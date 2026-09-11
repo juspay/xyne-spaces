@@ -85,7 +85,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:7880/"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -125,7 +125,7 @@ services:
     volumes:
       - fake_gcs_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -193,7 +193,7 @@ services:
     extra_hosts:
       - "host.containers.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4848/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4848/"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -342,7 +342,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
