@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
@@ -30,6 +30,7 @@ import { useNowWithBoundary } from '../../../hooks/useNowWithBoundary';
 import { roomActor } from '../../../machines/roomMachine';
 import { callService } from '../../../services/Call/callService';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { cn } from '../../../utils/classNames';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { formatRelativeTime, formatTimeAmPm, formatTimeUntil } from '../../../utils/dateUtils';
@@ -37,6 +38,8 @@ import { GoogleCalendarIcon, MicrosoftIcon } from '../../../routes/CallHistorySc
 import {
   type Call,
   type CallParticipant,
+  canEditScheduledCallParticipants,
+  canJoinCall,
   isGoogleCalendarCall,
   isMicrosoftCalendarCall,
   isScheduledCallManageable,
@@ -358,6 +361,13 @@ function CallLocationSection({
   location: string | undefined;
 }): ReactElement {
   const [copied, setCopied] = useState(false);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+    };
+  }, []);
 
   const handleCopyLink = (): void => {
     if (!copyLink) {
@@ -366,7 +376,8 @@ function CallLocationSection({
     void copyTextToClipboard(copyLink)
       .then(() => {
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
       })
       .catch(() => {
         setCopied(false);
@@ -487,6 +498,7 @@ const CallDetailSidebarView = ({
   const isEnded = call.status === CallStatus.ENDED;
   const isLive = call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
   const isRecurring = !!call.recurringSeriesId;
+  const allVisibleChannels = useAllVisibleChannels();
 
   const startsAtTime = call.startsAt ? new Date(call.startsAt).getTime() : null;
   const startedAtTime = call.startedAt ? new Date(call.startedAt).getTime() : null;
@@ -516,7 +528,7 @@ const CallDetailSidebarView = ({
   const metadata = callDetails.metadata ?? null;
 
   const participants = useMemo<readonly CallParticipant[]>(() => {
-    const rows = participantRows ?? call.participants ?? [];
+    const rows = participantRows?.length ? participantRows : (call.participants ?? []);
     return [...rows].sort((first, second) => {
       if (first.userId === organizerUserId) return -1;
       if (second.userId === organizerUserId) return 1;
@@ -537,9 +549,7 @@ const CallDetailSidebarView = ({
       : formatTimeAmPm(call.startsAt)
     : '';
   const recurrenceLabel = isRecurring
-    ? formatRecurrenceRule(
-        callDetails.recurrenceRule ?? callDetails.recurringSeries?.recurrenceRule,
-      )
+    ? formatRecurrenceRule(callDetails.recurringSeries?.recurrenceRule)
     : 'One-off';
 
   const isCurrentUserInCall = isRoomActive && currentCallExternalId === call.externalId;
@@ -593,21 +603,27 @@ const CallDetailSidebarView = ({
 
   const canRsvp =
     !isExternalCalendar && !isEnded && !hasReachedScheduledStart && !!currentParticipant;
-  const canJoin = !isExternalCalendar && !isEnded && !!onJoinCall && !!currentParticipant;
+  const canJoin = !isExternalCalendar && canJoinCall(call) && !!onJoinCall && !!currentParticipant;
   const canDownloadTranscript =
     isEnded &&
     !!onDownloadTranscript &&
     (isOrganizerCurrentUser || currentParticipant !== undefined);
-  const canManageScheduledCall =
-    !isCurrentUserInCall && isScheduledCallManageable(call, currentUserId);
+
+  // participant can still edit a DM/group call's participant list, but only the
+  // organizer can delete it.
+  const isManageableScheduledCall = isScheduledCallManageable(call, currentUserId);
+  const canEditScheduledCall =
+    isManageableScheduledCall ||
+    canEditScheduledCallParticipants(call, currentUserId, allVisibleChannels);
+  const canDeleteScheduledCall = isManageableScheduledCall;
 
   return (
     <div className='flex h-full min-h-0 w-full flex-col'>
       <CallDetailHeader
         dayLabel={dayLabel}
         onBack={onBack}
-        onEdit={canManageScheduledCall ? onEditCall : undefined}
-        onDelete={canManageScheduledCall ? onDeleteCall : undefined}
+        onEdit={canEditScheduledCall ? onEditCall : undefined}
+        onDelete={canDeleteScheduledCall ? onDeleteCall : undefined}
         onClose={onClose}
       />
 

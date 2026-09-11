@@ -130,6 +130,10 @@ export const HOURS = Array.from({ length: 24 }, (_, i) => i);
 export const ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE = 75;
 export const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
 
+// computeEventPositions: max side-by-side columns per overlap cluster before pills
+// start doubling up instead of shrinking further.
+const MAX_OVERLAP_COLUMNS = 4;
+
 /** Diagonal hatch used on a call pill's clipped edge when it continues from/to an adjacent day. */
 export const HATCH_BACKGROUND =
   'repeating-linear-gradient(135deg, color-mix(in hsl, currentColor 55%, transparent) 0, color-mix(in hsl, currentColor 55%, transparent) 1px, transparent 1px, transparent 6px)';
@@ -202,15 +206,16 @@ export function minutesSinceMidnight(date: Date): number {
 /**
  * Convert minutes since midnight to pixel position on the calendar
  */
-export function topPxForMinutes(minutes: number): number {
-  return (minutes * HOUR_HEIGHT) / 60;
+export function topPxForMinutes(minutes: number, hourHeight: number = HOUR_HEIGHT): number {
+  return (minutes * hourHeight) / 60;
 }
 
 /**
- * Format hour number to human readable label with AM/PM
+ * Format hour number to human readable label with AM/PM. 24 wraps to midnight,
+ * for callers (e.g. a 25-row hour grid) that label the trailing boundary too.
  */
 export function formatHourLabel(hour: number): string {
-  if (hour === 0) return '12 AM';
+  if (hour === 0 || hour === 24) return '12 AM';
   if (hour === 12) return '12 PM';
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
 }
@@ -305,7 +310,7 @@ export function getCallsOverlappingDay<
   return calls.filter(call => {
     if (!call.startsAt) return false;
     const startsAtMs = new Date(call.startsAt).getTime();
-    const endsAtMs = call.endsAt ? new Date(call.endsAt).getTime() : startsAtMs;
+    const endsAtMs = call.endsAt ? new Date(call.endsAt).getTime() : startsAtMs + 1;
     return startsAtMs < dayEnd && endsAtMs > dayStart;
   });
 }
@@ -371,7 +376,14 @@ export function computeEventPositions(
           break;
         }
       }
-      if (!placed) columns.push([item]);
+      // If no column was found, create a new one (or double up in the last column if maxed out)
+      if (!placed) {
+        if (columns.length < MAX_OVERLAP_COLUMNS) {
+          columns.push([item]);
+        } else {
+          columns[columns.length - 1]!.push(item);
+        }
+      }
     }
 
     const numCols = columns.length;

@@ -150,7 +150,7 @@ const MonthView: React.FC<{
                 <span
                   className={cn(
                     'absolute bottom-1 size-1 rounded-full',
-                    isSelected ? 'bg-background' : 'bg-status-failure',
+                    isSelected ? 'bg-background' : 'bg-muted-foreground/50',
                   )}
                   aria-hidden='true'
                 />

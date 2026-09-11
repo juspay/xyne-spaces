@@ -2,6 +2,7 @@ import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 import type { CanvasRole } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { xyneCalendarActor } from './xyneCalendarMachine';
 
 // Available XyneAI states
 export type XyneAIState = 'closed' | 'open';
@@ -490,6 +491,10 @@ export const xyneAIMachine = setup({
     events: {} as XyneAIEvent,
   },
   actions: {
+    // Close the calendar actor when the XyneAI machine is closed
+    closeCalendar: () => {
+      xyneCalendarActor.send({ type: 'CLOSE' });
+    },
     // Update context when transitioning to different states
     setOpen: assign(({ event, context }) => {
       if (event.type === 'OPEN') {
@@ -878,7 +883,7 @@ export const xyneAIMachine = setup({
       on: {
         OPEN: {
           target: 'open',
-          actions: 'setOpen',
+          actions: ['setOpen', 'closeCalendar'],
         },
         SET_TICKET_CONTEXT: {
           actions: 'setTicketContext',

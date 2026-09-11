@@ -16,14 +16,15 @@ export type XyneCalendarCallPillVariant =
 type CalendarCallTime = Date | number | string;
 
 export interface XyneCalendarCallPillProps {
+  callId: string;
   title: string;
   variant: XyneCalendarCallPillVariant;
   startsAt?: CalendarCallTime | null;
   endsAt?: CalendarCallTime | null;
   channel?: XyneCalendarChannelPresentation;
   metadata?: string;
-  onSelect: () => void;
-  onJoin?: () => void;
+  onSelect: (callId: string) => void;
+  onJoin?: (callId: string) => void;
   joinable?: boolean;
   showJoinByDefault?: boolean;
   joinDisabled?: boolean;
@@ -58,6 +59,7 @@ const getTimeRange = (
 };
 
 const XyneCalendarCallPillComponent = ({
+  callId,
   title,
   variant,
   startsAt,
@@ -125,7 +127,7 @@ const XyneCalendarCallPillComponent = ({
       <Button
         type='button'
         variant='ghost'
-        onClick={onSelect}
+        onClick={() => onSelect(callId)}
         title={accessibleLabel}
         aria-label={accessibleLabel}
         data-track-category='Calendar'
@@ -222,7 +224,7 @@ const XyneCalendarCallPillComponent = ({
         <Button
           type='button'
           size='sm'
-          onClick={onJoin}
+          onClick={() => onJoin(callId)}
           disabled={joinDisabled}
           data-track-category='Calendar'
           data-track-name='JOIN_CALL_PILL'

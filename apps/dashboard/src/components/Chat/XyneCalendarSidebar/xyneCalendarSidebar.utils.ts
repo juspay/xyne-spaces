@@ -80,9 +80,10 @@ export interface PeriodCallCounts {
 export const getPeriodCallCountLabel = (
   { callCount, liveCount, scheduledCount, endedCount }: PeriodCallCounts,
   nearPeriodPhrase: string | null,
+  isLoading = false,
 ): string => {
   const callWord = callCount === 1 ? 'call' : 'calls';
-  if (callCount === 0) return 'No calls scheduled';
+  if (callCount === 0) return isLoading ? 'Loading…' : 'No calls scheduled';
   if (nearPeriodPhrase) return `${callCount} ${callWord} ${nearPeriodPhrase}`;
   if (liveCount > 0) return `${callCount} ${callWord} · ${liveCount} live now`;
   if (scheduledCount === callCount) return `${callCount} ${callWord} scheduled`;

@@ -617,7 +617,7 @@ const AppRoot = (): ReactElement => {
       size: {
         default: XYNE_AI_PANEL_DEFAULT_SIZE,
         min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
-        max: isXyneDebuggerOpen ? 55 : 40,
+        max: isXyneDebuggerOpen ? 55 : 50,
       },
       panelRef: xyneAIRightPanelRef,
       content: (
@@ -638,6 +638,8 @@ const AppRoot = (): ReactElement => {
             kbFolderId={xyneAIKbFolderId ?? ''}
             kbFolderName={xyneAIKbFolderName ?? ''}
             kbOpenNonce={xyneAIKbOpenNonce}
+            workflowInfo={xyneAIWorkflowInfo}
+            workflowDismissed={xyneAIWorkflowDismissed}
             researchContext={xyneAIResearchContext}
             initialQuery={xyneAIInitialQuery ?? undefined}
             autoSendNonce={xyneAIAutoSendNonce}
@@ -846,9 +848,9 @@ const AppRoot = (): ReactElement => {
                                 <Panel
                                   id='sdlc-frame-xyneai'
                                   defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                  maxSize={isXyneDebuggerOpen ? '55%' : '40%'}
+                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
                                   minSize={
-                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '15%'
+                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
                                   }
                                 >
                                   <XyneAISidebarZIndexShell>
@@ -891,7 +893,11 @@ const AppRoot = (): ReactElement => {
                         <AppSidebarHost
                           panels={renderPanels}
                           mainPanelRef={browserPanelLeftRef}
-                          forceRender={webviewState === 'closed' || webviewState === 'idle'}
+                          forceRender={
+                            webviewState === 'closed' ||
+                            webviewState === 'idle' ||
+                            browserPanelState === 'open'
+                          }
                           fallback={
                             <div className='flex flex-col h-screen'>
                               <ResizableGroup
