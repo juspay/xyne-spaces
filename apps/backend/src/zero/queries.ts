@@ -35,6 +35,7 @@ import {
   SDLC_TREE_TARGET_TYPES,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_WORKFLOW_RELATION,
   EmailType,
   ActivityClassification, LinkVisibility,
   NudgeState,
@@ -4502,6 +4503,26 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           .related('repo', repo => repo.related('project').related('setupExecution')),
       )
       .one(),
+  ),
+  /**
+   * The hub's seeded Repo Knowledge workflow and its recent runs. Separate from
+   * `getSdlcChannelById` because that one already claims `sdlcEntityLinks` for the
+   * membership edges, and a second alias cannot carry a different filter.
+   */
+  getSdlcHubWorkflow: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('sourceType', 'CHANNEL')
+        .where('targetType', 'WORKFLOW')
+        .where('relationType', SDLC_WORKFLOW_RELATION)
+        .related('workflow', workflow =>
+          workflow.related('workflowExecutions', execution =>
+            execution.orderBy('createdAt', 'desc').limit(5),
+          ),
+        )
+        .one(),
   ),
   /**
    * One level of a track's folder tree: the things directly inside `parentId`.
