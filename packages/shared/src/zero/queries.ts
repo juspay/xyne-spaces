@@ -130,6 +130,7 @@ const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageArgsSchema.extend({
   dir: z.literal('forward').or(z.literal('backward')).optional(),
   showOverdueOnly: z.boolean().optional(),
   overdueReferenceTime: z.number().optional(),
+  createdAfter: z.number().optional(),
 });
 
 type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
@@ -1063,7 +1064,17 @@ export const queries = defineQueries({
         .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
 
       if (args.start) {
-        query = query.start({ createdAt: args.start.createdAt, id: args.start.id }, { inclusive: false });
+        query =
+          dir === 'forward'
+            ? query.where('createdAt', '<=', args.start.createdAt)
+            : query.where('createdAt', '>=', args.start.createdAt);
+      }
+
+      if (args.createdAfter !== undefined) {
+        query =
+          dir === 'forward'
+            ? query.where('createdAt', '>=', args.createdAfter)
+            : query.where('createdAt', '<=', args.createdAfter);
       }
 
       let finalQuery = query
