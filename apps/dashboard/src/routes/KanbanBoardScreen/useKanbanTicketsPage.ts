@@ -54,6 +54,7 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   vespaTicketIds?: string[];
   showOverdueOnly?: boolean;
   overdueReferenceTime?: number | null;
+  createdAfter?: number | null;
 };
 
 type KanbanCursor = {
@@ -92,6 +93,18 @@ type UseKanbanTicketsPageResult = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
+
+const DAY_MS = 86_400_000;
+/**
+ * Sliding-window steps for the page query's far-side `createdAt` bound, widened in
+ * order until a page comes back full. The last step is "no bound at all", so nothing
+ * is ever permanently hidden — a dormant board just costs a few probes to reach, and
+ * a window containing no rows scans zero rows (the index seek finds nothing).
+ */
+const WINDOW_STEPS_MS: readonly number[] = [30 * DAY_MS, 60 * DAY_MS, 180 * DAY_MS, 365 * DAY_MS];
+/** Page 1 has no cursor to anchor to, so its bound comes from the clock. Quantised so
+ *  it does not mint a fresh query hash on every render. */
+const WINDOW_ANCHOR_QUANTUM_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
@@ -277,6 +290,7 @@ export const buildKanbanTicketsPageArgs = (
         : {}),
       showOverdueOnly: options.showOverdueOnly,
       overdueReferenceTime: options.overdueReferenceTime ?? undefined,
+      createdAfter: options.createdAfter ?? undefined,
     },
     options.channelId,
   );
@@ -380,6 +394,17 @@ export const useKanbanTicketsPage = (
 ): UseKanbanTicketsPageResult => {
   const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
   const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
+  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
+  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
+  // nothing but already-seen rows the tie group is bigger than the page, and paging
+  // would stall — widen the page until it clears.
+  const [tieSlack, setTieSlack] = useState(0);
+  /** Index into WINDOW_STEPS_MS; === length means "no window bound". */
+  const [windowStep, setWindowStep] = useState(0);
+  const windowAnchorRef = useRef<{ queryKey: string; anchor: number } | null>(null);
+  // Mirrors ticketsState so the page merge can be computed in the effect body rather
+  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
+  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
@@ -431,18 +456,13 @@ export const useKanbanTicketsPage = (
     : null;
   // Only send to Vespa when we have real IDs and not inverted/includeUnassigned
   // (those semantics require the Zero/local filter path).
-  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
+  // Send bare IDs - the backend expands to all identity forms for Vespa matching.
   const vespaAssignee =
     parsedAssignee &&
     parsedAssignee.ids.length > 0 &&
     !parsedAssignee.inverted &&
     !parsedAssignee.includeUnassigned
-      ? parsedAssignee.ids
-          .flatMap(id => {
-            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
-            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
-          })
-          .join(',')
+      ? parsedAssignee.ids.map(id => id.replace(/^(user:|group:|userGroup:)/, '')).join(',')
       : undefined;
 
   const vespaTags =
@@ -450,15 +470,10 @@ export const useKanbanTicketsPage = (
       ? options.filters.tags.join(',')
       : undefined;
 
-  // Send all 4 identity forms to match prefixedKanbanIdentityValues storage variants.
+  // Send bare IDs - the backend expands to all identity forms for Vespa matching.
   const vespaCreatedBy =
     options.filters?.createdBy && options.filters.createdBy.length > 0
-      ? options.filters.createdBy
-          .flatMap(id => {
-            const bareId = id.replace(/^(user:|group:|userGroup:)/, '');
-            return [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`];
-          })
-          .join(',')
+      ? options.filters.createdBy.map(id => id.replace(/^(user:|group:|userGroup:)/, '')).join(',')
       : undefined;
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
@@ -475,12 +490,9 @@ export const useKanbanTicketsPage = (
     if (options.groupBy === 'assignee') {
       // Don't filter if groupKey is "Unassigned" - Vespa can't filter for null assignee easily
       if (options.groupKey === 'Unassigned') return {};
-      // Vespa may store assignedTo in any of these forms (see prefixedKanbanIdentityValues).
-      // Send all variants so we match regardless of storage format.
+      // Send bare ID - the backend expands to all identity forms for Vespa matching.
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
-      return {
-        assignee: [bareId, `user:${bareId}`, `group:${bareId}`, `userGroup:${bareId}`].join(','),
-      };
+      return { assignee: bareId };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
@@ -490,34 +502,68 @@ export const useKanbanTicketsPage = (
     return {};
   })();
 
+  // When searching, skip stage/status/groupBy filters - fetch all results and segregate in frontend.
+  // For dynamic field grouping, keep the filters as-is.
+  const isFormFieldGroupBy =
+    typeof options.groupBy === 'object' && options.groupBy?.type === 'formField';
+  const skipColumnFiltersForSearch = hasSearchTerm && !isFormFieldGroupBy;
+
   // Create a search key that changes when the group context changes
   // This forces the search to re-trigger when switching views
+  // When searching without column filters, use a shared key so all columns share one search call
+  // Include filter values in the key so that filter changes trigger a new search
   const groupByKey =
     typeof options.groupBy === 'object'
       ? `${options.groupBy.type}:${options.groupBy.fieldId}`
       : String(options.groupBy ?? 'none');
-  const vespaSearchKey = `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
+  // Include ALL filter values in search key so all columns re-search when filters change
+  // Previously this only included priority, assignee, tags, createdBy - missing boards, stages, etc.
+  const filterKey = skipColumnFiltersForSearch
+    ? JSON.stringify({
+        priority: vespaPriority ?? '',
+        assignee: vespaAssignee ?? '',
+        tags: vespaTags ?? '',
+        createdBy: vespaCreatedBy ?? '',
+        boards: options.filters?.boards ?? [],
+        stages: options.filters?.stages ?? [],
+        ticketTypes: options.filters?.ticketTypes ?? [],
+        sourceChannels: options.filters?.sourceChannels ?? [],
+        userGroups: options.filters?.userGroups ?? [],
+        dynamicFields: options.filters?.dynamicFields ?? {},
+        boardId: effectiveVespaBoardId ?? '',
+        projectId: options.projectId ?? '',
+      })
+    : '';
+  const vespaSearchKey = skipColumnFiltersForSearch
+    ? `search:${groupByKey}:${filterKey}` // Shared key includes filters
+    : `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
 
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
     enabled: requiresVespaTicketIds,
-    limit: 200,
+    limit: hasSearchTerm ? 400 : 200,
     fetchAllDynamicFieldMatches: true,
-    maxFetchedResults: 400,
+    maxFetchedResults: hasSearchTerm ? 800 : 400,
     searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(effectiveVespaBoardId ? { boardId: effectiveVespaBoardId } : {}),
-    ...(options.columnType === 'status' ? { status: options.stageName } : {}),
-    ...(options.columnType === 'stage' ? { stage: options.stageName } : {}),
+    // Skip column filters when searching (will segregate in frontend)
+    ...(!skipColumnFiltersForSearch && options.columnType === 'status'
+      ? { status: options.stageName }
+      : {}),
+    ...(!skipColumnFiltersForSearch && options.columnType === 'stage'
+      ? { stage: options.stageName }
+      : {}),
     ...(vespaPriority ? { priority: vespaPriority } : {}),
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
     ...(vespaCreatedBy ? { createdBy: vespaCreatedBy } : {}),
-    ...vespaGroupFilter,
+    // Skip group filters when searching (will segregate in frontend)
+    ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
   });
   const localFilterKey = JSON.stringify({
     priority: options.filters?.priority ?? [],
@@ -530,20 +576,76 @@ export const useKanbanTicketsPage = (
     ticketTypes: options.filters?.ticketTypes ?? [],
     sourceChannels: options.filters?.sourceChannels ?? [],
   });
-  const directVespaPage = useMemo(
-    () =>
-      shouldUseDirectVespaRows
-        ? applyLocalVespaFilters(
-            options.channelId
-              ? (vespaTicketSearch.searchResults?.filter(
-                  ticket => ticket.channelId === options.channelId,
-                ) ?? null)
-              : vespaTicketSearch.searchResults,
-            options.filters,
-          )
-        : null,
-    [localFilterKey, options.channelId, shouldUseDirectVespaRows, vespaTicketSearch.searchResults],
-  );
+  const directVespaPage = useMemo(() => {
+    if (!shouldUseDirectVespaRows) return null;
+
+    // When a new search is in progress, don't apply current filters to stale results
+    // as they may not match (e.g., user added a filter while search was cached).
+    // Return null to show loading state until fresh results arrive.
+    if (vespaTicketSearch.isSearching) return null;
+
+    let results = vespaTicketSearch.searchResults;
+    if (!results) return null;
+
+    // Filter by channelId if specified
+    if (options.channelId) {
+      results = results.filter(ticket => ticket.channelId === options.channelId);
+    }
+
+    // Apply local filters (priority, boards, assignee, etc.)
+    const filtered = applyLocalVespaFilters(results, options.filters);
+    if (!filtered) return null;
+
+    // When searching without column filters, segregate by stage/status in frontend
+    if (skipColumnFiltersForSearch) {
+      const segregated = filtered.filter(ticket => {
+        // Filter by column stage/status
+        if (options.columnType === 'status' && (ticket.statusV2 as string) !== options.stageName) {
+          return false;
+        }
+        if (options.columnType === 'stage' && ticket.stageName !== options.stageName) {
+          return false;
+        }
+
+        // Filter by groupBy (assignee, priority, status)
+        if (options.groupBy === 'assignee' && options.groupKey) {
+          const ticketAssignee = normalizeIdentity(ticket.assignedTo);
+          if (options.groupKey === 'Unassigned') {
+            if (ticketAssignee) return false;
+          } else {
+            const groupAssignee = normalizeIdentity(options.groupKey);
+            if (ticketAssignee !== groupAssignee) return false;
+          }
+        }
+        if (options.groupBy === 'priority' && options.groupKey) {
+          if (options.groupKey === 'No Priority') {
+            if (ticket.priority) return false;
+          } else {
+            if ((ticket.priority as string) !== options.groupKey) return false;
+          }
+        }
+        if (options.groupBy === 'status' && options.groupKey) {
+          if ((ticket.statusV2 as string) !== options.groupKey) return false;
+        }
+
+        return true;
+      });
+      return segregated;
+    }
+
+    return filtered;
+  }, [
+    localFilterKey,
+    options.channelId,
+    options.columnType,
+    options.stageName,
+    options.groupBy,
+    options.groupKey,
+    shouldUseDirectVespaRows,
+    skipColumnFiltersForSearch,
+    vespaTicketSearch.isSearching,
+    vespaTicketSearch.searchResults,
+  ]);
   const vespaTicketIds = requiresVespaTicketIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? [])
     : undefined;
@@ -561,11 +663,34 @@ export const useKanbanTicketsPage = (
     overdueReferenceTime,
   };
   const basePageArgs = buildKanbanTicketsPageArgs(pageOptions, null);
-  const { start: _start, ...queryKeyArgs } = basePageArgs;
+  const { start: _start, createdAfter: _createdAfter, ...queryKeyArgs } = basePageArgs;
+  // queryKey identifies the filter set, not the page — the cursor and the window bound
+  // both move as you scroll and must stay out of it.
   const queryKey = JSON.stringify(queryKeyArgs);
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
-  const pageArgs = buildKanbanTicketsPageArgs(pageOptions, fetchCursor);
+  ticketsStateRef.current = ticketsState;
+
+  if (windowAnchorRef.current?.queryKey !== queryKey) {
+    windowAnchorRef.current = {
+      queryKey,
+      anchor: Math.ceil(Date.now() / WINDOW_ANCHOR_QUANTUM_MS) * WINDOW_ANCHOR_QUANTUM_MS,
+    };
+  }
+  // The window hangs off the page cursor, so it descends with the scroll instead of
+  // being pinned to a fixed date — a fixed floor would report a false end of list.
+  const windowAnchor = fetchCursor?.createdAt ?? windowAnchorRef.current.anchor;
+  const windowSpan = WINDOW_STEPS_MS[windowStep];
+  const createdAfter = windowSpan === undefined ? null : windowAnchor - windowSpan;
+
+  const pageArgs = buildKanbanTicketsPageArgs(
+    {
+      ...pageOptions,
+      createdAfter,
+      ...(tieSlack > 0 ? { pageSize: (options.pageSize ?? DEFAULT_PAGE_SIZE) + tieSlack } : {}),
+    },
+    fetchCursor,
+  );
   const pageQuery = queries.kanbanTicketsPageV3(
     pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
   );
@@ -625,8 +750,12 @@ export const useKanbanTicketsPage = (
     setFetchCursorState(null);
     setNextCursor(null);
     setHasMore(true);
+    setTieSlack(0);
+    setWindowStep(0);
     isLoadingMoreRef.current = false;
   }, [queryKey, shouldUseDirectVespaRows]);
+
+  const currentLimit = (options.pageSize ?? DEFAULT_PAGE_SIZE) + tieSlack;
 
   useEffect(() => {
     if (effectivePageDetailsType !== 'complete') return;
@@ -663,16 +792,25 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setTicketsState(prev => {
-      if (shouldUseDirectVespaRows || fetchCursor === null) {
-        return { queryKey, tickets: pageRows };
-      }
-
-      const previousTickets = prev.queryKey === queryKey ? prev.tickets : [];
+    if (shouldUseDirectVespaRows || fetchCursor === null) {
+      setTicketsState({ queryKey, tickets: pageRows });
+      if (tieSlack !== 0) setTieSlack(0);
+    } else {
+      const prevState = ticketsStateRef.current;
+      const previousTickets = prevState.queryKey === queryKey ? prevState.tickets : [];
       const combined = [...previousTickets, ...pageRows];
+      // The cursor bound is inclusive, so the boundary tie group arrives again — drop
+      // the rows we already hold.
       const unique = Array.from(new Map(combined.map(ticket => [ticket.id, ticket])).values());
-      return { queryKey, tickets: unique };
-    });
+      setTicketsState({ queryKey, tickets: unique });
+      // A full page that adds nothing new means the boundary tie group is larger than
+      // the page. Widen and re-fetch rather than looping on the same rows.
+      if (unique.length === previousTickets.length && rawPageRows.length >= currentLimit) {
+        setTieSlack(slack => (slack === 0 ? currentLimit : slack * 2));
+      } else if (tieSlack !== 0) {
+        setTieSlack(0);
+      }
+    }
 
     if (shouldUseDirectVespaRows) {
       setNextCursor(null);
@@ -680,7 +818,14 @@ export const useKanbanTicketsPage = (
       return;
     }
 
-    setHasMore(rawPageRows.length >= (options.pageSize ?? DEFAULT_PAGE_SIZE));
+    // A short page means either the window is too narrow or we have genuinely reached
+    // the end. Widen first; only the unbounded step is allowed to conclude.
+    const full = rawPageRows.length >= currentLimit;
+    if (!full && windowStep < WINDOW_STEPS_MS.length) {
+      setWindowStep(step => step + 1);
+      return;
+    }
+    setHasMore(full);
 
     const lastItemOfPage = rawPageRows.at(-1);
     if (lastItemOfPage) {
@@ -694,6 +839,9 @@ export const useKanbanTicketsPage = (
   }, [
     fetchCursor,
     queryKey,
+    currentLimit,
+    tieSlack,
+    windowStep,
     options.pageSize,
     options.excludeFlowSteps,
     effectivePage,
@@ -705,6 +853,10 @@ export const useKanbanTicketsPage = (
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;
     isLoadingMoreRef.current = true;
+    // Deliberately NOT resetting windowStep: it is sticky per column. A dense column
+    // stays on the narrow window; a sparse one that had to widen keeps the wider one
+    // instead of re-climbing the ladder on every page. Paying the widening probes once
+    // is the difference between a 6.4x win and a 2.8x loss on thin columns.
     setFetchCursorState({ queryKey, cursor: nextCursor });
   }, [hasMore, nextCursor, queryKey]);
 
@@ -713,6 +865,7 @@ export const useKanbanTicketsPage = (
     setFetchCursorState(null);
     setNextCursor(null);
     setHasMore(true);
+    setWindowStep(0);
     isLoadingMoreRef.current = false;
   }, [queryKey]);
 

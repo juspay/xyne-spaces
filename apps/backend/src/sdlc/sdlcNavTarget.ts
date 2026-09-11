@@ -2,7 +2,7 @@ import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
-import { resolveInheritedOwner } from './entityLinkService';
+import { resolveFolderTrackId, resolveInheritedOwner } from './entityLinkService';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -123,6 +123,10 @@ async function conversationLocation(conversationId: string): Promise<SdlcLocatio
   }
   if (owner.sourceType === 'TRACK') {
     return { section: 'tracks', trackId: owner.sourceId, discussionId: conversationId };
+  }
+  if (owner.sourceType === 'FOLDER') {
+    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+    return trackId ? { section: 'tracks', trackId, discussionId: conversationId } : null;
   }
   const canvas = await canvasLocation(owner.sourceId);
   return canvas ? { ...canvas, discussionId: conversationId } : null;

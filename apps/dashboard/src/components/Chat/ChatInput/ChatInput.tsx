@@ -915,7 +915,17 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
               ...(entityLinkScope && {
-                entityLinkContext: { ...entityLinkScope, linkId: uuidv4() },
+                entityLinkContext: {
+                  sourceType: entityLinkScope.sourceType,
+                  sourceId: entityLinkScope.sourceId,
+                  linkId: uuidv4(),
+                  ...(entityLinkScope.rollUpTrackId && {
+                    trackRollUp: {
+                      trackId: entityLinkScope.rollUpTrackId,
+                      linkId: uuidv4(),
+                    },
+                  }),
+                },
               }),
             });
 
@@ -1241,6 +1251,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 sendDisabledReason: 'Attachment is still uploading',
               })}
               onScheduleSend={handleScheduleSend}
+              showSchedulePresets={!!isDM && !conversationId}
               {...(globalShortcuts.length > 0 && {
                 bottomLeftSlot: (
                   <>

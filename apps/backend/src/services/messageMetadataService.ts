@@ -9,7 +9,7 @@ import {
   parseRepliesMd,
   serializeRepliesMd,
   addReplyToData,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '@xyne/shared';
 import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
@@ -70,29 +70,10 @@ export class MessageMetadataService {
     return hasReactions;
   }
 
-  /**
-   * Add a reply to conversation's replies_md
-   * Called when a thread reply is created
-   */
-  async addReply(conversationId: string, replierUserId: string): Promise<void> {
-    const conversation = await this.prisma.conversation.findUnique({
-      where: { conversationId },
-      select: { replies_md: true }
-    });
-
-    const data = parseRepliesMd(conversation?.replies_md);
-    const updatedData = addReplyToData(data, replierUserId);
-    const updatedMd = serializeRepliesMd(updatedData);
-
-    await this.prisma.conversation.update({
-      where: { conversationId },
-      data: { replies_md: updatedMd }
-    });
-
-    logger.info('[MessageMetadataService] Added reply to replies_md', {
-      conversationId, replierUserId
-    });
+  buildRepliesMdAfterReply(currentMd: string | null | undefined, replierUserId: string): string | null {
+    return serializeRepliesMd(addReplyToData(parseRepliesMd(currentMd), replierUserId));
   }
+
 
   /**
    * Rebuild replies_md from remaining replies in the conversation
@@ -166,27 +147,11 @@ export class MessageMetadataService {
 
     if (!message) return;
 
-    const summary: InitialMessageSummary = {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      content: message.content,
+    const md = buildInitialMessageMd({
+      ...message,
       msgType: message.msgType as InitialMessageSummary['msgType'],
-      hasAttachment: message.hasAttachment,
-      edited: message.edited,
-      isDeleted: message.isDeleted,
-      showInChannel: message.showInChannel,
-      visibleTo: message.visibleTo,
       createdAt: message.createdAt.getTime(),
-      metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-      nudgeCount: message.nudgeCount,
-      isSent: message.isSent,
-      reactions_md: message.reactions_md,
-      link_preview_md: message.link_preview_md,
-      childConversationId: message.childConversationId,
-    };
-
-    const md = serializeInitialMessageMd(summary);
+    });
     if (conversation.initial_message_md === md) return;
 
     await this.prisma.conversation.update({

@@ -8,6 +8,7 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  WorkspaceRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -133,7 +134,7 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -237,7 +238,7 @@ import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDesk
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
 
 const ChannelInfoModal = ({
   channelId,
@@ -574,6 +575,7 @@ const SupportScreen = (): ReactElement => {
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const { isMobile } = usePlatform();
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -1246,10 +1248,11 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    !!channelPreference?.metricsEnabled;
+    (isGuest || !!channelPreference?.metricsEnabled);
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
@@ -4517,7 +4520,7 @@ export const SupportTicketDetail = ({
       if (!channelId) return [];
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       return (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4568,7 +4571,7 @@ export const SupportTicketDetail = ({
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,

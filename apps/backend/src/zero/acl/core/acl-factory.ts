@@ -118,6 +118,7 @@ import { ReleaseChangesACL } from '../tables/release-changes-acl';
 import { ReleaseEventsACL } from '../tables/release-events-acl';
 import { ReposACL } from '../tables/repos-acl';
 import { SdlcEntityLinksACL } from '../tables/sdlc-entity-links-acl';
+import { SdlcFoldersACL } from '../tables/sdlc-folders-acl';
 import { SdlcTracksACL } from '../tables/sdlc-tracks-acl';
 import { StageApproversACL } from '../tables/stage-approvers-acl';
 import { CommitsACL } from '../tables/commits-acl';
@@ -424,6 +425,8 @@ export class ACLFactory {
       case 'sdlc_artifacts':
         // Server-written provenance table: no client mutations (BaseACL denies all).
         return new BaseACL<any>(ctx);
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx);
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx);
       case 'stage_approvers':

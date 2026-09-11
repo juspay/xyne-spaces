@@ -391,7 +391,7 @@ export class TestAuthController {
       // Set last workspace pointer so authV2Middleware can find the right token
       res.cookie('xyne_last_workspace', user.workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       if (sessionId) {

@@ -1048,6 +1048,8 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     };
     const attachedThreadConversationId = readAgentConfigString("SPACES_CONVERSATION_ID");
     const attachedCanvasViewAccessId = readAgentConfigString("SPACES_CANVAS_VIEW_ACCESS_ID");
+    const attachedWorkflowId = readAgentConfigString("SPACES_WORKFLOW_ID");
+    const attachedWorkflowExecutionId = readAgentConfigString("SPACES_WORKFLOW_EXECUTION_ID");
     let resolvedAttachedContext:
       | { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string }
       | undefined;
@@ -1057,7 +1059,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       if (normalized.error) log.warn(`[run] attachedContext ignored: ${normalized.error}`);
       normalizedAttached = normalized.items;
     }
-    if (normalizedAttached.length > 0 || attachedThreadConversationId || attachedCanvasViewAccessId) {
+    if (
+      normalizedAttached.length > 0 ||
+      attachedThreadConversationId ||
+      attachedCanvasViewAccessId ||
+      attachedWorkflowId ||
+      attachedWorkflowExecutionId
+    ) {
       // Try to get Spaces auth from request cookies
       const spacesAuth = await resolveSpacesAuthFromRequest(req, resolved.userId);
       if (spacesAuth) {
@@ -1065,9 +1073,13 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
           resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
             ...(attachedThreadConversationId ? { threadConversationId: attachedThreadConversationId } : {}),
             ...(attachedCanvasViewAccessId ? { canvasViewAccessId: attachedCanvasViewAccessId } : {}),
+            ...(attachedWorkflowId ? { workflowId: attachedWorkflowId } : {}),
+            ...(attachedWorkflowExecutionId
+              ? { workflowExecutionId: attachedWorkflowExecutionId }
+              : {}),
           });
           log.info(
-            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
+            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""}${attachedWorkflowExecutionId ? " + workflow-run" : attachedWorkflowId ? " + workflow" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
           );
         } catch (err) {
           log.warn(
@@ -1493,22 +1505,22 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
       storeAttachedContextForSession(sessionId, normalizedAttached).catch(() => {});
     }
 
-    // Dashboard-ai run scalars: the Spaces proxy passes the dashboard being
-    // edited via agentConfig. Stored per-session so the MCP /call boundary can
-    // force-inject them into xyne-dashboard tool calls. Fire-and-forget.
     {
       const ac = mergedAgentConfig as Record<string, unknown>;
       const scalar = (k: string): string | undefined =>
         typeof ac[k] === "string" && ac[k] ? (ac[k] as string) : undefined;
-      const dashboardDataSourceId = scalar("SPACES_DATA_SOURCE_ID");
-      const dashboardDraftId = scalar("SPACES_DASHBOARD_DRAFT_ID");
-      const dashboardFocusedComponentId = scalar("SPACES_FOCUSED_COMPONENT_ID");
-      if (dashboardDataSourceId || dashboardDraftId || dashboardFocusedComponentId) {
-        storeRunScalars(sessionId, {
-          ...(dashboardDataSourceId ? { dataSourceId: dashboardDataSourceId } : {}),
-          ...(dashboardDraftId ? { draftId: dashboardDraftId } : {}),
-          ...(dashboardFocusedComponentId ? { focusedComponentId: dashboardFocusedComponentId } : {}),
-        }).catch(() => {});
+      const pick = (k: string, v: string | undefined): Record<string, string> =>
+        v ? { [k]: v } : {};
+      const scalars = {
+        ...pick("dataSourceId", scalar("SPACES_DATA_SOURCE_ID")),
+        ...pick("draftId", scalar("SPACES_DASHBOARD_DRAFT_ID")),
+        ...pick("focusedComponentId", scalar("SPACES_FOCUSED_COMPONENT_ID")),
+        ...pick("workflowId", scalar("SPACES_WORKFLOW_ID")),
+        ...pick("executionId", scalar("SPACES_WORKFLOW_EXECUTION_ID")),
+        ...pick("focusedStepId", scalar("SPACES_WORKFLOW_STEP_ID")),
+      };
+      if (Object.keys(scalars).length > 0) {
+        storeRunScalars(sessionId, scalars).catch(() => {});
       }
     }
 

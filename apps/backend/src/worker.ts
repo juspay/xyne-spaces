@@ -277,6 +277,12 @@ class WorkerService {
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
 
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        logger.info('Starting desk auto-label backfill worker...');
+        await deskLabelBackfillWorker.start();
+
         const { cleanupUnreferencedAutomationTemplates } = await import(
           '@/automations/services/automation-template.service'
         );
@@ -516,6 +522,8 @@ class WorkerService {
 
       if (workflowsEnabled) {
         await workflowsWorker.stop()
+        const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
+        await shutdownWorkflows()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -563,6 +571,13 @@ class WorkerService {
 
       if (appConfig.enableAiProvisioningWorker) {
         await aiProvisioningWorker.shutdown();
+      }
+
+      if (appConfig.enableAutomationWorker) {
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        await deskLabelBackfillWorker.shutdown();
       }
 
       await autoDraftWorker.shutdown();

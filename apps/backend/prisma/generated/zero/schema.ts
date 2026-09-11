@@ -1631,8 +1631,6 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string().optional(),
-    message: string().optional(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
@@ -2059,6 +2057,17 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
     updatedAt: number(),
   })
   .primaryKey("artifactId");
+
+export const sdlcFolderTable = table("sdlc_folders")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
@@ -3056,18 +3065,6 @@ export const executionRunLogTable = table("execution_run_logs")
     error: string().optional(),
     durationMs: number().optional(),
     createdAt: number(),
-  })
-  .primaryKey("id");
-
-export const radarTeamTable = table("radar_teams")
-  .columns({
-    workspaceId: string(),
-    id: string(),
-    ownerId: string(),
-    name: string(),
-    memberIds: json<string[]>(),
-    createdAt: number(),
-    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -5228,6 +5225,7 @@ export const schema = createSchema(
       repoTable,
       sdlcEntityLinkTable,
       sdlcArtifactTable,
+      sdlcFolderTable,
       sdlcTrackTable,
       lookupValueTable,
       formTable,
@@ -5294,7 +5292,6 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
-      radarTeamTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5536,6 +5533,7 @@ export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
@@ -5602,4 +5600,3 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
-export type RadarTeam = Row<typeof schema.tables.radar_teams>;
