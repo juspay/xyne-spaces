@@ -1265,7 +1265,11 @@ export default function SdlcScreen(): ReactElement {
           size={compact ? 'sm' : 'default'}
           variant={knowledgeRunning ? 'destructive' : 'default'}
           loading={busy === action.key}
-          disabled={busy !== null || (!knowledgeRunning && !readReady)}
+          // Not gated on the selected repository's READ capability any more: the run
+          // covers the whole hub, and each clone is authorized per repository at
+          // sandbox-repo-setup. A broken repo fails that step with a real error,
+          // which beats a button that cannot be pressed and does not say why.
+          disabled={busy !== null}
           onClick={() => void (knowledgeRunning ? cancelKnowledge() : runKnowledge())}
           data-track-category='SdlcHub'
           data-track-name={`RepoKnowledge${knowledgeRunning ? 'Cancel' : 'Run'}Clicked`}
@@ -2850,7 +2854,7 @@ export default function SdlcScreen(): ReactElement {
                             {renderRepoKnowledgeControls()}
                             {!isAdmin && state.phase === 'NOT_STARTED' ? (
                               <span className='max-w-40 text-right text-xs text-muted-foreground'>
-                                Repository admin must generate Repo Knowledge.
+                                A hub admin must generate Repo Knowledge.
                               </span>
                             ) : null}
                           </div>
