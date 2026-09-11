@@ -82,8 +82,8 @@ import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
-import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
-import { getTicketStatusColor } from '../../Tickets/CalendarView/CompactTicketBadge/utils';
+import { TicketPriorityIcon } from '../../../assets/icons';
+import { StageIndicator } from '../../../utils/board/stageStatusIcon';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
@@ -104,7 +104,6 @@ import {
   formatReferenceLabel,
   useTicketReferences,
 } from '../../../hooks/useTicketReferences';
-import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
@@ -171,18 +170,6 @@ interface StageInfo {
   formId?: string | null;
   eta: number | null;
 }
-
-const getStageProgress = (
-  currentStageName: string | null | undefined,
-  stages: StageInfo[] | undefined,
-): number => {
-  if (!stages || stages.length === 0 || !currentStageName) return 0;
-
-  const currentStage = stages.find(stage => stage.name === currentStageName);
-  if (!currentStage) return 0;
-
-  return Math.round((currentStage.sequenceNumber / stages.length) * 100);
-};
 
 const PRIORITY_OPTIONS: TicketPriority[] = [
   TicketPriority.LOW,
@@ -474,6 +461,8 @@ interface TicketDetailsProps {
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
+  /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
+  subTicketsOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -589,6 +578,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   hideBackNav = false,
   onFillRCA,
   stageReadOnly = false,
+  subTicketsOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -2972,8 +2962,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = relatedTicket?.boardId
       ? stagesByBoardId.get(relatedTicket.boardId)
       : undefined;
-    const stageProgress = getStageProgress(relatedTicket?.stageName, boardStages);
-    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const assigneeId = relatedTicket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
     const priorityIcon = relatedTicket?.priority ? getPriorityIcon(relatedTicket.priority) : null;
 
@@ -3016,7 +3004,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
         <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
           <div className='flex items-center gap-3 min-w-0'>
-            <TicketStageIcon progressPercentage={displayProgress} size={18} />
+            <StageIndicator stages={boardStages} stageName={relatedTicket?.stageName} size={18} />
             <div className='flex items-center gap-4 min-w-0'>
               <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
                 {relatedTicket?.xyneId || relatedTicket?.id || '—'}
@@ -3130,8 +3118,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = mappedTicket?.boardId
       ? stagesByBoardId.get(mappedTicket.boardId)
       : undefined;
-    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
-    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const priority = mappedTicket?.priority;
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
@@ -3275,7 +3261,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             )}
             {boardStages && boardStages.length > 0 && (
               <div className='flex items-center gap-1.5'>
-                <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                <StageIndicator
+                  stages={boardStages}
+                  stageName={mappedTicket?.stageName}
+                  size={18}
+                />
                 <span className='text-xs font-medium text-foreground whitespace-nowrap'>
                   {boardStages.findIndex(stage => stage.name === mappedTicket?.stageName) + 1}/
                   {boardStages.length}
@@ -3458,17 +3448,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      <div className='relative'>
+      <div
+        className={cn(
+          'relative',
+          // Hide the sibling sections instead of re-parenting the sub-tickets one.
+          subTicketsOnly &&
+            '[&>*:not([data-testid=sub-tickets-section]):not(.archived-guard)]:hidden',
+        )}
+      >
         {/* Archived overlay - blocks all interactions on content */}
         {ticket?.isArchived && (
           <div
-            className='absolute inset-0 z-50 cursor-not-allowed'
+            className='archived-guard absolute inset-0 z-50 cursor-not-allowed'
             style={{ backgroundColor: 'transparent' }}
           />
         )}
 
         {ticket?.isArchived && (
-          <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
+          <div className='archived-guard mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
             <Archive className='w-5 h-5 text-muted-foreground shrink-0' />
             <div className='flex-1'>
               <p className='text-sm font-medium text-foreground'>
@@ -3901,7 +3898,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   {stageReadOnly ? (
                     <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                      <StageIndicator
+                        stages={stages}
+                        stageName={ticket.stageName}
+                        fallbackStatus={ticket.statusV2}
+                        isNonLinearBoard={isNonLinearBoard}
+                      />
                       {ticket.stageName || 'Not set'}
                     </span>
                   ) : (
@@ -3911,20 +3913,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       onValueChange={handleStageChange}
                       placeholder='Set Status'
                       icon={
-                        <TicketStatusIcon size={14} color={getTicketStatusColor(ticket.statusV2)} />
+                        <StageIndicator
+                          stages={stages}
+                          stageName={ticket.stageName}
+                          fallbackStatus={ticket.statusV2}
+                          isNonLinearBoard={isNonLinearBoard}
+                        />
                       }
-                      getItemIcon={item =>
-                        (() => {
-                          const stage = selectorStages.find(s => s.name === item.name);
-                          const itemStatusV2 = stage?.defaultTicketStatusV2 ?? ticket.statusV2;
-                          return (
-                            <TicketStatusIcon
-                              size={14}
-                              color={getTicketStatusColor(itemStatusV2)}
-                            />
-                          );
-                        })()
-                      }
+                      getItemIcon={item => (
+                        <StageIndicator
+                          stages={stages}
+                          stageName={item.name}
+                          isNonLinearBoard={isNonLinearBoard}
+                        />
+                      )}
                       noBorder={true}
                       isItemDisabled={item => item.name === ticket.stageName}
                     />
@@ -4937,8 +4939,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   : undefined;
                 const stageIndex =
                   boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
-                const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
-                const displayProgress = stageProgress === 0 ? 1 : stageProgress;
                 const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
                 const navigateToParentTicket = (): void => {
                   const channelType = channelTypeMap.get(parentTicket.channelId);
@@ -5013,7 +5013,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       </Tooltip>
                       {boardStages && boardStages.length > 0 && (
                         <div className='flex items-center gap-1.5'>
-                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                          <StageIndicator
+                            stages={boardStages}
+                            stageName={parentTicket.stageName}
+                            size={18}
+                          />
                           <span className='whitespace-nowrap text-xs font-medium text-foreground'>
                             {stageIndex + 1}/{boardStages.length}
                           </span>

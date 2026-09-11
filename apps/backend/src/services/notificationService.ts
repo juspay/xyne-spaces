@@ -18,7 +18,7 @@ import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd,
+import { buildInitialMessageMd,
   isDeskChannelType,
   type InitialMessageSummary,
   ChannelScopeType,
@@ -70,26 +70,11 @@ async function fetchConversationForNotification(conversationId: string) {
         where: { messageId: conversation.initialMessageId },
       });
       if (message) {
-        const summary: InitialMessageSummary = {
-          messageId: message.messageId,
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          content: message.content,
+        initialMessageMd = buildInitialMessageMd({
+          ...message,
           msgType: message.msgType as InitialMessageSummary['msgType'],
-          hasAttachment: message.hasAttachment,
-          edited: message.edited,
-          isDeleted: message.isDeleted,
-          showInChannel: message.showInChannel,
-          visibleTo: message.visibleTo,
           createdAt: message.createdAt.getTime(),
-          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-          nudgeCount: message.nudgeCount,
-          isSent: message.isSent,
-          reactions_md: message.reactions_md,
-          link_preview_md: message.link_preview_md,
-          childConversationId: message.childConversationId,
-        };
-        initialMessageMd = serializeInitialMessageMd(summary);
+        });
       }
     }
 
@@ -208,8 +193,6 @@ class NotificationService {
       workspaceId,
       userId,
       type: data.type,
-      title: data.title,
-      message: data.message,
       relatedEntityType: data.relatedEntityType,
       relatedEntityId: data.relatedEntityId,
       actionUrl: data.actionUrl,
@@ -1504,6 +1487,7 @@ class NotificationService {
     actorId: string,
     actorName: string,
     actorAction: 'recording_shared' | 'recording_access_revoked',
+    subject: string = 'recording',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1518,8 +1502,8 @@ class NotificationService {
 
     const isRevoked = actorAction === 'recording_access_revoked';
     const title = isRevoked
-      ? `${actorName} removed your access to a recording`
-      : `${actorName} shared a recording with you`;
+      ? `${actorName} removed your access to a ${subject}`
+      : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
       : `${actorName} shared "${recordingTitle}" with you`;

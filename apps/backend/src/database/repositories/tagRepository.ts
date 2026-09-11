@@ -5,6 +5,13 @@ import { logger } from '../../utils/logger';
 
 export type TxClient = Prisma.TransactionClient;
 
+export interface MirrorTagRow {
+  tagCategory: string;
+  tag: string;
+  method: TagMethod;
+  reason?: string | null;
+}
+
 interface InsertConfigRowData {
   configKey: string;
   sourceType: string;
@@ -109,6 +116,27 @@ export class TagRepository {
     });
   }
 
+  async findActiveTagsBySourceIds(
+    sourceIds: string[],
+    workspaceId: string,
+    sourceType: string,
+    tagCategory?: string,
+    tx?: TxClient
+  ): Promise<Tag[]> {
+    if (sourceIds.length === 0) return [];
+
+    return this.client(tx).tag.findMany({
+      where: {
+        workspaceId,
+        sourceId: { in: sourceIds },
+        sourceType,
+        isDeleted: false,
+        ...(tagCategory !== undefined ? { tagCategory } : {}),
+      },
+      orderBy: [{ tag: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   /**
    * Bulk-resolve Tag ids to their `{ id, tag }` rows, scoped to a workspace.
    * Used to resolve id-referencing arrays (e.g. Call.labels) back to display
@@ -125,15 +153,26 @@ export class TagRepository {
     workspaceId: string,
     sourceType: string,
     tagCategory: string,
+    query?: string,
+    pagination?: { skip?: number; take?: number }
   ): Promise<string[]> {
+    const where: Prisma.TagWhereInput = {
+      workspaceId,
+      sourceType,
+      tagCategory,
+      isDeleted: false,
+      ...(query ? { tag: { contains: query, mode: 'insensitive' } } : {}),
+    };
+
     const rows = await this.client().tag.findMany({
-      where: { workspaceId, sourceType, tagCategory, isDeleted: false },
+      where,
       distinct: ['tag'],
       select: { tag: true },
       orderBy: { tag: 'asc' },
-      take: 50,
+      skip: pagination?.skip,
+      take: pagination?.take ?? 50,
     });
-    return rows.map(r => r.tag);
+    return rows.map((r) => r.tag);
   }
 
   async insertTagRow(data: InsertTagRowData, tx?: TxClient): Promise<Tag> {
@@ -203,6 +242,91 @@ export class TagRepository {
   }
 
   /**
+   * Delta-sync all tags for a projection source (e.g. 'desk-ticket') against
+   * the given rows in one transaction step.
+   *
+   * Semantics:
+   *   - Rows present in both existing and incoming → untouched.
+   *   - Rows only in existing → HARD-DELETED (not soft-deleted).
+   *   - Rows only in incoming → inserted.
+   *   - Empty `rows` → all existing rows hard-deleted.
+   *
+   * Hard delete is intentional: ticket tag rows are a derived projection of
+   * the canonical desk-email tag rows. Audit history lives on the email side
+   * (isDeleted rows there). Do NOT reuse this hard-delete policy for
+   * source-of-truth entities like 'desk-email' — that would cause data loss.
+   *
+   * Equality is checked by (tagCategory, tag, method) — reason is excluded to
+   * avoid constant rewrites when LLM reasons change on every regen.
+   * Incoming rows are deduped by the same key before diffing.
+   *
+   * Must be called inside an existing transaction (tx is required).
+   * Returns true if anything actually changed.
+   */
+  async replaceAllTagsForSource(
+    params: {
+      sourceId: string;
+      sourceType: string;
+      workspaceId: string;
+      configKey: string;
+      rows: MirrorTagRow[];
+    },
+    tx: TxClient,
+  ): Promise<boolean> {
+    const { sourceId, sourceType, workspaceId, configKey, rows } = params;
+
+    const existing = await tx.tag.findMany({
+      where: { sourceId, sourceType, isDeleted: false },
+      select: { id: true, tagCategory: true, tag: true, method: true },
+    });
+
+    const toKey = (r: { tagCategory: string; tag: string; method: string }) =>
+      `${r.tagCategory}|${r.tag}|${r.method}`;
+
+    const existingByKey = new Map(existing.map(r => [toKey(r), r.id]));
+    const incomingKeySet = new Set(rows.map(toKey));
+
+    const isEqual =
+      existingByKey.size === incomingKeySet.size &&
+      [...incomingKeySet].every(k => existingByKey.has(k));
+
+    if (isEqual) return false;
+
+    const toDeleteIds = existing
+      .filter(r => !incomingKeySet.has(toKey(r)))
+      .map(r => r.id);
+
+    const toInsert = [...new Map(rows.map(r => [toKey(r), r])).values()]
+      .filter(r => !existingByKey.has(toKey(r)));
+
+    const now = new Date();
+
+    if (toDeleteIds.length > 0) {
+      await tx.tag.deleteMany({ where: { id: { in: toDeleteIds } } });
+    }
+
+    if (toInsert.length > 0) {
+      await tx.tag.createMany({
+        data: toInsert.map(row => ({
+          sourceId,
+          sourceType,
+          workspaceId,
+          configKey,
+          tagCategory: row.tagCategory,
+          tag: row.tag,
+          method: row.method,
+          reason: row.reason ?? null,
+          createdAt: now,
+          updatedAt: now,
+          isDeleted: false,
+        })),
+      });
+    }
+
+    return true;
+  }
+
+  /**
    * Returns conversationIds of tickets where any email in the conversation carries
    * any of the given "category:tag" values (OR semantics).
    */
@@ -222,7 +346,7 @@ export class TagRepository {
     if (pairs.length === 0) return [];
 
     const conditions = pairs.map(
-      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`,
+      ({ category, tag }) => Prisma.sql`(t."tagCategory" = ${category} AND t.tag = ${tag})`
     );
     const whereClause = Prisma.join(conditions, ' OR ');
 

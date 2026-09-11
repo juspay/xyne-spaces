@@ -1514,6 +1514,17 @@ export const sdlcArtifactTable = table('sdlc_artifacts')
   .primaryKey('artifactId');
 
 // Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
+export const sdlcFolderTable = table('sdlc_folders')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
@@ -3454,6 +3465,15 @@ export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, (
   }),
 }));
 
+export const sdlcFolderTableRelationships = relationships(sdlcFolderTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
 export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many }) => ({
   // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
   sdlcEntityLinks: many({
@@ -4858,6 +4878,7 @@ export const schema = createSchema({
     repoTable,
     sdlcEntityLinkTable,
     sdlcArtifactTable,
+    sdlcFolderTable,
     sdlcTrackTable,
     emailTable,
     emailDraftTable,
@@ -4958,6 +4979,7 @@ export const schema = createSchema({
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
     sdlcArtifactTableRelationships,
+    sdlcFolderTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -5130,6 +5152,7 @@ export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;

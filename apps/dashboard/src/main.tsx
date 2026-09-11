@@ -5,6 +5,7 @@ import '@xyne/workflow-ui/styles.css';
 import './styles/workflow-ui-theme.css';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
+import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
 import { logger, Event } from './utils/logger';
 
 // Expose app version to window for Electron access
@@ -114,5 +115,12 @@ if ('serviceWorker' in navigator && !isCustomProtocol) {
 }
 
 globalClickTracker.initialize();
+
+// If this is a shared link opened in a plain browser, offer to hand it off to
+// the desktop app (Slack-style). No-op inside Electron. This does NOT defer
+// render — <App /> still mounts underneath so "Continue in browser" is instant;
+// running it before createRoot only avoids a flash of the app before the
+// interstitial paints.
+maybeOpenInDesktopApp();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);

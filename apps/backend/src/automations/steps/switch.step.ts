@@ -45,12 +45,12 @@ export class SwitchStep extends BaseControlFlowStep<typeof SwitchConfigSchema, S
       const caseEntry = config.cases[i]!;
       const matched = this.evaluator.evaluate(caseEntry.condition, context);
       if (matched) {
-        await ctx.walkBranch(caseEntry.steps as AutomationStepConfig[], context, `case_${i}`);
+        await ctx.walkBranch(caseEntry.steps as AutomationStepConfig[], context, { kind: 'case', index: i });
         return { matchedIndex: i };
       }
     }
     // No case matched — run default branch
-    await ctx.walkBranch(config.default as AutomationStepConfig[], context, 'default');
+    await ctx.walkBranch(config.default as AutomationStepConfig[], context, { kind: 'default' });
     return { matchedIndex: -1 };
   }
 }

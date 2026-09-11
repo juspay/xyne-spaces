@@ -66,7 +66,3 @@ export function decryptCredentialPayload(
     decipher.final(),
   ]).toString('utf8');
 }
-
-export function credentialFingerprint(token: string): string {
-  return crypto.createHmac('sha256', encryptionKey()).update(token).digest('hex').slice(0, 12);
-}

@@ -18,7 +18,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, buildInitialMessageMd } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -87,6 +87,8 @@ export interface CreateConversationWithMessageParams {
   pinned?: boolean;
   /** Migration import: skip live-only side effects (MESSAGE_RECEIVED automations, meet-link extraction) so bulk-imported history never fires workflows. */
   suppressAutomations?: boolean;
+  /** Caller replays MessagesSideEffectHandler.onInsert itself, which already emits MESSAGE_RECEIVED for the initial message — don't emit it twice. */
+  emitsMessageReceivedViaSideEffects?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -340,6 +342,7 @@ export class ConversationService {
       isAddingParticipant = true,
       pinned,
       suppressAutomations = false,
+      emitsMessageReceivedViaSideEffects = false,
     } = params;
 
     // Check if channel exists
@@ -385,34 +388,57 @@ export class ConversationService {
 
     const messageContent = await replaceEmojisInContent(content?.trim() || '');
 
-    // First create the message
-    const messageData: CreateMessageInput = {
-      conversationId: 'temp', // Will be updated after conversation creation
-      senderId: userId,
-      content: messageContent,
-      msgType: msgType || MessageType.USER,
-      hasAttachment: processedFiles.length > 0,
-      metadata: {
-        ...messageMetadata,
-        contentFormat: isMarkdown ? 'markdown' : 'html',
-      },
-      ...(createdAt && { createdAt }),
+    // Both ids are minted here so the conversation can carry a complete
+    // initial_message_md on its INSERT. The alternative — insert a placeholder,
+    // then patch initialMessageId, then patch the md — is three commits, and
+    // between the first and the last the conversation is live with no message
+    // body for every subscriber.
+    const conversationId = uuidv4();
+    const messageId = uuidv4();
+    const resolvedMsgType = msgType || MessageType.USER;
+    const messageCreatedAt = createdAt ?? new Date();
+    const resolvedMessageMetadata = {
+      ...messageMetadata,
+      contentFormat: isMarkdown ? 'markdown' : 'html',
     };
 
-    // Create a placeholder conversation first
+    const messageData: CreateMessageInput = {
+      messageId,
+      conversationId,
+      senderId: userId,
+      content: messageContent,
+      msgType: resolvedMsgType,
+      hasAttachment: processedFiles.length > 0,
+      metadata: resolvedMessageMetadata,
+      createdAt: messageCreatedAt,
+    };
+
     const conversationData: CreateConversationInput = {
+      conversationId,
       channelId,
       createdBy: userId,
-      initialMessageId: 'temp', // Will be updated after message creation
+      initialMessageId: messageId,
+      initial_message_md: buildInitialMessageMd({
+        messageId,
+        conversationId,
+        workspaceId: channel.workspaceId,
+        senderId: userId,
+        content: messageContent,
+        msgType: resolvedMsgType,
+        hasAttachment: processedFiles.length > 0,
+        createdAt: messageCreatedAt.getTime(),
+        metadata: resolvedMessageMetadata,
+        // Mirror the messages column defaults the insert below relies on, so the
+        // snapshot matches the row it describes.
+        isSent: true,
+        nudgeCount: 0,
+      }),
       metadata,
       pinned: pinned || false,
       ...(createdAt && { createdAt }),
     };
 
     const conversation = await this.conversationRepository.create(conversationData);
-
-    // Update message with real conversation ID
-    messageData.conversationId = conversation.conversationId;
     const message = await this.messageRepository.create(messageData);
 
     if (await this.userRepository.findById(userId)) {
@@ -483,12 +509,6 @@ export class ConversationService {
       );
     });
 
-    // Update conversation with real initial message ID
-    await this.conversationRepository.update(conversation.conversationId, {
-      initialMessageId: message.messageId,
-    });
-    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
-
     if (
       !suppressAutomations &&
       !isBot &&
@@ -541,7 +561,7 @@ export class ConversationService {
     // new channel conversation. Which message kinds fire is a user-configured
     // trigger condition; loops are prevented by the run chain. Fire-and-forget.
     // Migration import suppresses this so bulk-imported history never fires workflows.
-    if (!suppressAutomations) {
+    if (!suppressAutomations && !emitsMessageReceivedViaSideEffects) {
       void emitMessageReceived({
         messageId: message.messageId,
         conversationId: conversation.conversationId,
@@ -752,19 +772,32 @@ export class ConversationService {
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
+        initial_message_md: buildInitialMessageMd({
+          ...message,
+          msgType: message.msgType as MessageType,
+          createdAt: message.createdAt.getTime(),
+        }),
         parentMessageId: conversation.initialMessageId,
         pinned: false,
       });
-      await messageMetadataService.syncInitialMessageMd(childConversationId);
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
-    await this.conversationRepository.incrementReplyCount(
+    // Single conversations write: replyCount, lastActivityAt and replies_md were
+    // three separate commits against this row, each replayed through every
+    // subscribed Zero pipeline. replies_md is read immediately before the write
+    // so the lost-update window stays as narrow as the previous append's was.
+    const replyAppliedAt = new Date();
+    await this.conversationRepository.applyThreadReply({
       conversationId,
-      createdAt === undefined ? undefined : message.createdAt,
+      repliesMd: messageMetadataService.buildRepliesMdAfterReply(
+        await this.conversationRepository.findRepliesMd(conversationId),
+        userId,
+      ),
+      lastActivityAt: lastActivityAt ?? replyAppliedAt,
+      replyCreatedAt: createdAt === undefined ? replyAppliedAt : message.createdAt,
       markParticipantsRead,
-    );
-    await messageMetadataService.addReply(conversationId, userId);
+    });
 
     // Update reply count for previous message's child conversation if it exists
     // This matches the mutator logic - get the most recent previous message and check if it has showInChannel
@@ -777,13 +810,6 @@ export class ConversationService {
     if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
       await this.conversationRepository.update(mostRecentPrevMsg.childConversationId, {
         replyCount: 1,
-      });
-    }
-
-    // Update last activity for the conversation
-    if (lastActivityAt) {
-      await this.conversationRepository.update(conversationId, {
-        lastActivityAt: lastActivityAt,
       });
     }
 

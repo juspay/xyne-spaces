@@ -73,7 +73,7 @@ const UpdateCallLabelsSchema = z.object({
   labels: z.array(z.string().trim().min(1).max(80)).max(50),
 });
 
-const RegenerateHeadlessSummarySchema = z.object({
+const RegenerateSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
   // Optional explicit model tier (e.g. the "Try the thinking model" button).
   // Omitted → the creator's saved preference is used.
@@ -1726,7 +1726,7 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1751,9 +1751,10 @@ export class CallController {
   };
 
   /**
-   * POST /api/calls/recordings/:callId/generate-summary
-   * Kick off detailed-summary generation for a headless recording and return
-   * 202 immediately. Progress is observable through
+   * POST /api/calls/recordings/:callId/generate-summary  (recordings)
+   * POST /api/calls/:callId/generate-summary             (calls)
+   * Kick off detailed-summary generation with an explicitly chosen template and
+   * return 202 immediately. Progress is observable through
    * Call.metadata.detailedSummaryStatus ('pending' → 'ready' | 'failed'),
    * which Zero replicates to the open screen; completion also notifies the
    * owner (RECORDING_SUMMARY_READY). The underlying LLM call retries
@@ -1769,19 +1770,21 @@ export class CallController {
     }
 
     try {
-      const input = RegenerateHeadlessSummarySchema.parse(req.body);
+      const input = RegenerateSummarySchema.parse(req.body);
       const call = await repositories.calls.findByExternalId(callId);
 
       if (
         !call ||
-        call.callType !== CallType.HEADLESS ||
         (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
       ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      const canRegenerate = isRecording(call)
+        ? call.createdByUserId === userId
+        : await callShareService.isCallAudience(call, userId);
+      if (!canRegenerate) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1885,7 +1888,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2016,7 +2019,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2120,7 +2123,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2698,21 +2701,6 @@ export class CallController {
    * channel members can view/download them even if they didn't join the call.
    * Mutating ops (start/stop/rename/delete) stay participant/starter-gated.
    */
-  /**
-   * Whether a caller belongs to a call's audience: its host, anyone who took part, or a
-   * member of the channel it happened in. A channel call is offered to the channel, so a
-   * member who could not attend can still read what came out of it.
-   */
-  private async isCallAudience(
-    call: { id: string; channelId: string | null; createdByUserId: string },
-    userId: string,
-  ): Promise<boolean> {
-    if (call.createdByUserId === userId) return true;
-    if (await repositories.calls.findParticipant(call.id, userId)) return true;
-    if (!call.channelId) return false;
-    return repositories.channelParticipants.isParticipant(call.channelId, userId);
-  }
-
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
     if (!call) return false;

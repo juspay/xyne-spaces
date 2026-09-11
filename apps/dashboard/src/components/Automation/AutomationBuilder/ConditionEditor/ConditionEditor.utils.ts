@@ -49,7 +49,6 @@ const OPERATOR_VERBS: Record<string, string> = {
   eq: 'equals',
   neq: 'does not equal',
   contains: 'contains',
-  matches_regex: 'matches regex',
   gt: '>',
   gte: '≥',
   lt: '<',

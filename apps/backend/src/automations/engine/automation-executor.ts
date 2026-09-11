@@ -11,12 +11,18 @@ import type { AutomationStepConfig } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import type { TriggerType } from '../types/trigger-types';
 import type { StepType } from '../types/step-types';
-import { CONTROL_FLOW_STEP_TYPES } from '../types/known-types';
+import { CONTROL_FLOW_STEP_TYPES, ControlFlowStepType } from '../types/known-types';
 import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
 import { automationContextStorage } from './automation-context-storage';
-import { PauseStep, type PauseBranchSegment } from './pause-step';
+import {
+  PauseStep,
+  branchKeyEquals,
+  branchKeyToString,
+  type BranchKey,
+  type PauseBranchSegment,
+} from './pause-step';
 import {
   isExecutableAutomationWorkflowType,
   mayDrainInFlight,
@@ -40,20 +46,16 @@ interface PreparedRun {
   resumeBranchPath?: readonly PauseBranchSegment[];
 }
 
-const PAUSE_BRANCH_PATH_KEY = '__pauseBranchPath';
-
-function readPauseBranchPath(context: AutomationContext): PauseBranchSegment[] {
-  const raw = (context as unknown as Record<string, unknown>)[PAUSE_BRANCH_PATH_KEY];
-  return Array.isArray(raw) ? (raw as PauseBranchSegment[]) : [];
+function readPauseBranchPath(context: AutomationContext): readonly PauseBranchSegment[] {
+  return context.__pauseBranchPath ?? [];
 }
 
 function writePauseBranchPath(
   context: AutomationContext,
   path: readonly PauseBranchSegment[],
 ): void {
-  const bag = context as unknown as Record<string, unknown>;
-  if (path.length === 0) delete bag[PAUSE_BRANCH_PATH_KEY];
-  else bag[PAUSE_BRANCH_PATH_KEY] = path;
+  if (path.length === 0) delete context.__pauseBranchPath;
+  else context.__pauseBranchPath = [...path];
 }
 
 const EXTERNAL_WAIT_STATUS = 'EXTERNAL_WAIT';
@@ -73,24 +75,27 @@ function parseStepIndexFromName(name: string): number | null {
   return Number.isInteger(n) ? n : null;
 }
 
+interface BranchOwnerConfig {
+  if_true?: unknown[];
+  if_false?: unknown[];
+  default?: unknown[];
+  cases?: { steps?: unknown[] }[];
+}
+
 function resolveBranchSteps(
-  step: AutomationStepConfig,
-  branchKey: string,
+  config: BranchOwnerConfig,
+  branchKey: BranchKey,
 ): AutomationStepConfig[] | null {
-  const config = step.config as Record<string, unknown>;
-
-  if (branchKey === 'if_true') return (config['if_true'] as AutomationStepConfig[]) ?? null;
-  if (branchKey === 'if_false') return (config['if_false'] as AutomationStepConfig[]) ?? [];
-  if (branchKey === 'default') return (config['default'] as AutomationStepConfig[]) ?? [];
-
-  const caseMatch = /^case_(\d+)$/.exec(branchKey);
-  if (caseMatch) {
-    const cases = config['cases'] as { steps?: AutomationStepConfig[] }[] | undefined;
-    const entry = cases?.[Number.parseInt(caseMatch[1] as string, 10)];
-    return entry?.steps ?? null;
+  switch (branchKey.kind) {
+    case 'if_true':
+      return (config.if_true as AutomationStepConfig[] | undefined) ?? null;
+    case 'if_false':
+      return (config.if_false as AutomationStepConfig[] | undefined) ?? null;
+    case 'default':
+      return (config.default as AutomationStepConfig[] | undefined) ?? null;
+    case 'case':
+      return (config.cases?.[branchKey.index]?.steps as AutomationStepConfig[] | undefined) ?? null;
   }
-
-  return null;
 }
 
 export class AutomationExecutor {
@@ -481,17 +486,19 @@ export class AutomationExecutor {
     context: AutomationContext,
     runId: string,
     parentStepName: string,
-    branchKey: string,
+    branchKey: BranchKey,
     resumePath: readonly PauseBranchSegment[] = [],
   ): Promise<void> {
     const [resumeHere, ...deeperResume] = resumePath;
-    const startIndex =
-      resumeHere && resumeHere.branchKey === branchKey ? resumeHere.index : 0;
+    const resumeAt =
+      resumeHere && branchKeyEquals(resumeHere.branchKey, branchKey) ? resumeHere.index : null;
+    const startIndex = resumeAt ?? 0;
+    const branchLabel = branchKeyToString(branchKey);
 
     for (let j = startIndex; j < steps.length; j++) {
       const step = steps[j] as AutomationStepConfig;
-      const stepName = `${parentStepName}__${branchKey}__step_${j}`;
-      const isResuming = startIndex === j && resumeHere?.branchKey === branchKey;
+      const stepName = `${parentStepName}__${branchLabel}__step_${j}`;
+      const isResuming = resumeAt === j;
 
       if (!isResuming) {
         await this.upsertStepRow(runId, stepName, step, 'RUNNING', null);
@@ -636,24 +643,36 @@ export class AutomationExecutor {
       const t0 = Date.now();
 
       if (callCtx.isResuming && callCtx.resumeBranchPath && callCtx.resumeBranchPath.length > 0) {
-        const [segment, ...deeper] = callCtx.resumeBranchPath;
-        const branchSteps = resolveBranchSteps(step, segment!.branchKey);
+        const [segment, ...deeper] = callCtx.resumeBranchPath as [
+          PauseBranchSegment,
+          ...PauseBranchSegment[],
+        ];
+        const branchKey = segment.branchKey;
+        const branchLabel = branchKeyToString(branchKey);
+        const branchSteps = resolveBranchSteps(safeResult.data as BranchOwnerConfig, branchKey);
         if (!branchSteps) {
           throw new Error(
-            `Step "${step.id}" (${step.type}) cannot resume: branch "${segment!.branchKey}" no longer exists in the automation.`,
+            `Step "${step.id}" (${step.type}) cannot resume: branch "${branchLabel}" no longer exists in the automation.`,
           );
         }
         logger.info(
-          `[automations] step RESUME id=${step.id} type=${step.type} branch=${segment!.branchKey} at=${segment!.index}`,
+          `[automations] step RESUME id=${step.id} type=${step.type} branch=${branchLabel} at=${segment.index}`,
         );
         await this.walkNestedBranch(
           branchSteps,
           context,
           callCtx.runId,
           callCtx.stepName,
-          segment!.branchKey,
-          [segment!, ...deeper],
+          branchKey,
+          [segment, ...deeper],
         );
+        context.steps[step.id] = {
+          type: step.type,
+          output:
+            step.type === ControlFlowStepType.SWITCH
+              ? { matchedIndex: branchKey.kind === 'case' ? branchKey.index : -1 }
+              : { result: branchKey.kind === 'if_true' },
+        };
         logger.info(
           `[automations] step OK    id=${step.id} type=${step.type} elapsedMs=${Date.now() - t0}`,
         );

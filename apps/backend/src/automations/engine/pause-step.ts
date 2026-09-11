@@ -1,5 +1,20 @@
+export type BranchKey =
+  | { kind: 'if_true' }
+  | { kind: 'if_false' }
+  | { kind: 'default' }
+  | { kind: 'case'; index: number };
+
+export function branchKeyToString(key: BranchKey): string {
+  return key.kind === 'case' ? `case_${key.index}` : key.kind;
+}
+
+export function branchKeyEquals(a: BranchKey, b: BranchKey): boolean {
+  if (a.kind === 'case') return b.kind === 'case' && a.index === b.index;
+  return a.kind === b.kind;
+}
+
 export interface PauseBranchSegment {
-  branchKey: string;
+  branchKey: BranchKey;
   index: number;
   stepName: string;
 }

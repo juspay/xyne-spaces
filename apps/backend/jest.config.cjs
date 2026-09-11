@@ -17,5 +17,8 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    // @xyne/shared ships ESM in dist/, which jest cannot parse. Point at the TS
+    // source so ts-jest transforms it.
+    '^@xyne/shared/(.*)$': '<rootDir>/../../packages/shared/src/$1',
   },
 };

@@ -61,6 +61,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -488,6 +489,7 @@ const ConversationHeader = ({
                       onClick={handleLeaveChannel}
                       data-track-category='CHANNELS'
                       data-track-name='LEAVE_CHANNEL'
+                      data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
                     >
                       <UserArrowRight size={16} className='shrink-0' />
                       Leave channel
