@@ -316,6 +316,10 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
  * Workspace-scoped canvas deep link on the app's own origin (FRONTEND_URL), so
  * the dashboard's same-origin check can open it as an overlay. The workspace
  * prefix is required — the bare `/chat/canvas/:id` route 404s on a hard load.
+ *
+ * Ticket links (`/chat/:channelId?tab=tickets...`) still build inline on
+ * `config.slackFrontendUrl` — deliberately left alone here; moving them onto
+ * FRONTEND_URL is its own pass.
  */
 export function buildWorkspaceCanvasUrl(workspaceId: string, canvasId: string): string {
   const frontendUrl = (config.frontendUrl ?? '').replace(/\/+$/, '');
