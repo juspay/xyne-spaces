@@ -320,16 +320,16 @@ export class SlackController {
 			return;
 		}
 
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
 		const context = getSlackAuthContext(req);
 		const channelId = getResolvedChannelId(req);
 		const args = await transformPostMessage(
 			{ ...parsed.data, channel: channelId },
 			context,
 		);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
 
 		const threadResolution = await resolveSlackThreadConversationId(
 			args.conversationId,
@@ -416,12 +416,12 @@ export class SlackController {
 			return;
 		}
 
-		const context = getSlackAuthContext(req);
-		const args = await transformUpdate(parsed.data, context);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
 			res.status(200).json({ ok: false, error: "msg_too_long" });
 			return;
 		}
+		const context = getSlackAuthContext(req);
+		const args = await transformUpdate(parsed.data, context);
 		const channelId = getResolvedChannelId(req);
 
 		const existingMessage = await repositories.messages.findById(args.messageId);

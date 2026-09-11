@@ -20,7 +20,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
@@ -83,8 +83,15 @@ export const DmListItem = ({
       }
     }
 
-    const rawContent =
-      lastMessage.content || (lastMessage.hasAttachment ? 'Sent an attachment' : 'Message');
+    // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
+    // which is truthy but renders blank. Fall back to a label whenever the message
+    // has no visible text, so an attachment preview is not shown as an empty line.
+    const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    const rawContent = hasVisibleText
+      ? lastMessage.content
+      : lastMessage.hasAttachment
+        ? 'Sent an attachment'
+        : lastMessage.content || 'Message';
 
     return sanitizeHtmlString(rawContent);
   }, [lastMessage]);
@@ -273,8 +280,8 @@ export const DmListItem = ({
       className={cn(
         'group flex w-full font-normal items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
         isUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
-        'hover:bg-sidebar-accent',
-        isSelected && 'bg-sidebar-accent border-sidebar-border',
+        'hover:!bg-sidebar-accent',
+        isSelected && '!bg-sidebar-accent border-sidebar-border',
       )}
       role='button'
       tabIndex={0}
@@ -340,8 +347,10 @@ export const DmListItem = ({
             data-track-category='DM_LIST'
             data-track-name='PREVIEW_LINK_CONTAINER'
             className={cn(
-              'w-full text-sm line-clamp-1 truncate break-normal whitespace-normal',
-              isUnread ? 'text-foreground' : 'text-muted-foreground',
+              'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
+              isUnread
+                ? 'text-foreground [&_.message-html-root]:!text-foreground'
+                : 'text-muted-foreground [&_.message-html-root]:!text-muted-foreground',
               // Make RenderMessageWithHTML output inline and preserve link styles
               '[&_.message-html-root]:inline',
               '[&_.message-html-root_*]:inline',

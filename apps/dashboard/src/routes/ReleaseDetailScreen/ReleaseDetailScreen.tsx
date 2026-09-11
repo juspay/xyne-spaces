@@ -761,6 +761,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                   <ReleaseStagePicker
                     ticketId={releaseTicket.id}
                     stageName={releaseTicket.stageName}
+                    statusV2={releaseTicket.statusV2}
                     boardId={releaseTicket.boardId}
                     stages={stagesByBoard.get(releaseTicket.boardId) ?? []}
                   />

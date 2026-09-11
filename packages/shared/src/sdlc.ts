@@ -117,6 +117,7 @@ export const SDLC_ENTITY_TYPES = [
   "REPOSITORY",
   "WORKFLOW_EXECUTION",
   "TRACK",
+  "FOLDER",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -135,8 +136,47 @@ export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
  */
 export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
-/** Structure, not content. Every read of the content graph excludes these. */
+/**
+ * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
+ * holds on the target. Shares its name with track membership because a root-level
+ * item's containment edge *is* its track membership; nesting only changes which
+ * parent is on the source side.
+ */
+export const SDLC_CONTAINMENT_RELATION = "TRACK_ITEM";
+
+/**
+ * What the folder tree renders. Tickets ride the same relationType from a track
+ * but belong to their own section, so the tree filters rather than assuming
+ * everything a track holds is a tree node.
+ */
+export const SDLC_TREE_TARGET_TYPES = ["FOLDER", "CANVAS"] as const;
+
+/**
+ * A TRACK -> item edge kept alongside the containment edge, so "everything in
+ * this track" is one indexed lookup rather than a walk down the folder tree.
+ * Derived: written and removed with the item it mirrors, never on its own.
+ */
+export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
+
+/**
+ * Edges no user may write or delete through the generic link API. Derived or
+ * structural: the app maintains them with the thing they describe.
+ */
 export const SDLC_STRUCTURAL_RELATIONS = [
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+] as const;
+
+/**
+ * Edges a hub's link graph leaves out: they place things in the hub rather than
+ * relate them, so readers of the graph would double-count them.
+ *
+ * Narrower than SDLC_STRUCTURAL_RELATIONS on purpose. The flat track edge is not
+ * user-writable, but the client does need to read it — excluding it here is what
+ * made a track's artifact count read zero.
+ */
+export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 ] as const;
@@ -164,7 +204,7 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 export const sdlcDiscussionSchema = z
   .object({
     repoId: z.string().min(1),
-    ownerType: z.enum(["CANVAS", "TRACK"]),
+    ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
     surfaceId: z.string().min(1).optional(),
@@ -184,13 +224,25 @@ export const sdlcDiscussionSchema = z
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
 export const entityLinkContextSchema = z.object({
-  sourceType: z.enum(["CANVAS", "TRACK"]),
+  sourceType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
   sourceId: z.string().min(1),
   linkId: z.string().min(1),
+  /**
+   * A folder's conversation is filed on its track as well, so the track's list
+   * shows everything discussed anywhere inside it. The flat relation, not a
+   * second DISCUSSION row: DISCUSSION has to stay one per conversation or
+   * resolveInheritedOwner picks between owners arbitrarily.
+   */
+  trackRollUp: z
+    .object({ trackId: z.string().min(1), linkId: z.string().min(1) })
+    .optional(),
 });
 export type EntityLinkContextInput = z.infer<typeof entityLinkContextSchema>;
 
-export const entityLinkOwnerSchema = entityLinkContextSchema.omit({ linkId: true });
+export const entityLinkOwnerSchema = entityLinkContextSchema.omit({
+  linkId: true,
+  trackRollUp: true,
+});
 export type EntityLinkOwner = z.infer<typeof entityLinkOwnerSchema>;
 
 export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;
@@ -260,12 +312,6 @@ export const configureSdlcVcsCredentialSchema = z.object({
       /^github_pat_[A-Za-z0-9_]+$/,
       "Enter a GitHub fine-grained personal access token",
     ),
-  resourceOwner: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .regex(/^[A-Za-z0-9_.-]+$/),
 });
 export type ConfigureSdlcVcsCredentialInput = z.infer<
   typeof configureSdlcVcsCredentialSchema
@@ -768,44 +814,75 @@ export function inferRepositoryNameFromUrl(raw: string): string | null {
   return segments.length >= 3 ? segments.at(-1)! : null;
 }
 
-/** Where to open in an SDLC hub, as entity ids only — `buildSdlcPath` makes the route. */
-export interface SdlcNavTarget {
-  channelId: string;
-  canvasId?: string | null | undefined;
-  ticketId?: string | null | undefined;
-  conversationId?: string | null | undefined;
-  messageId?: string | null | undefined;
-  blockId?: string | null | undefined;
-  commentThreadId?: string | null | undefined;
+export const SDLC_SECTIONS = [
+  "overview",
+  "wiki",
+  "baseline",
+  "tracks",
+  "tickets",
+  "artifacts",
+] as const;
+export type SdlcSection = (typeof SDLC_SECTIONS)[number];
+
+/** A schema because it crosses the wire. */
+export const sdlcNavTargetSchema = z.object({
+  channelId: z.string().min(1),
+  section: z.enum(SDLC_SECTIONS),
+  canvasId: z.string().min(1).optional(),
+  folderId: z.string().min(1).optional(),
+  trackId: z.string().min(1).optional(),
+  ticketId: z.string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
+  messageId: z.string().min(1).optional(),
+  blockId: z.string().min(1).optional(),
+  commentThreadId: z.string().min(1).optional(),
+});
+export type SdlcNavTarget = z.infer<typeof sdlcNavTargetSchema>;
+
+export function parseSdlcNavTarget(value: unknown): SdlcNavTarget | null {
+  const parsed = sdlcNavTargetSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Baselines and the wiki get their own sections; every other artifact a folder. */
+export function sdlcSectionForCanvas(
+  artifactType: string | null | undefined,
+  folderId: string | null | undefined,
+): { section: SdlcSection; folderId?: string } {
+  if (isBaselineCanvasType(artifactType)) return { section: "baseline" };
+  if (artifactType === "WIKI") return { section: "wiki" };
+  return { section: "artifacts", ...(folderId ? { folderId } : {}) };
+}
+
+function messageAnchor(target: SdlcNavTarget): string {
+  if (!target.conversationId) return "";
+  const anchor = new URLSearchParams({ origin: target.conversationId });
+  if (target.messageId) anchor.set("messageId", target.messageId);
+  return `#${anchor.toString()}`;
 }
 
 /** The repository is chosen inside the screen; the workspace prefix by the caller. */
 export function buildSdlcPath(target: SdlcNavTarget): string {
-  const search = new URLSearchParams();
-  let section = "overview";
-
-  if (target.canvasId) {
-    section = "artifacts";
-    search.set("canvas", target.canvasId);
-    // CanvasScreen reads both straight off the URL to focus an inline comment.
-    if (target.blockId) search.set("blockId", target.blockId);
-    if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
-  } else if (target.ticketId) {
-    section = "tickets";
-    search.set("ticket", target.ticketId);
+  const hub = `/sdlc/${encodeURIComponent(target.channelId)}`;
+  if (target.ticketId) {
+    return `${hub}/tickets/${encodeURIComponent(target.ticketId)}${messageAnchor(target)}`;
   }
 
-  // A discussion hangs off whatever was opened above, not a section of its own.
-  // Without a message to scroll to, opening the panel is a guess — every ticket
-  // notification carries the ticket's conversationId whether or not it is about one.
-  let hash = "";
-  if (target.conversationId && target.messageId) {
+  const search = new URLSearchParams();
+  if (target.canvasId) search.set("canvas", target.canvasId);
+  if (target.folderId) search.set("type", target.folderId);
+  if (target.trackId) search.set("track", target.trackId);
+  if (target.blockId) search.set("blockId", target.blockId);
+  if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
+
+  // Opens on any artifact or track, showing that owner's threads when none is named.
+  if (target.conversationId || target.canvasId || target.trackId) {
     search.set("discussion", "1");
     search.set("chat", "conversations");
-    search.set("conversation", target.conversationId);
-    hash = `#${new URLSearchParams({ origin: target.conversationId, messageId: target.messageId }).toString()}`;
   }
+  if (target.conversationId) search.set("conversation", target.conversationId);
+  const hash = messageAnchor(target);
 
   const query = search.toString();
-  return `/sdlc/${encodeURIComponent(target.channelId)}/${section}${query ? `?${query}` : ""}${hash}`;
+  return `${hub}/${target.section}${query ? `?${query}` : ""}${hash}`;
 }

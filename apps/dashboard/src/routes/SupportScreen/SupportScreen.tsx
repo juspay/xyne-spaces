@@ -8,6 +8,7 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  WorkspaceRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -133,7 +134,7 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -237,7 +238,7 @@ import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDesk
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
 
 const ChannelInfoModal = ({
   channelId,
@@ -574,6 +575,7 @@ const SupportScreen = (): ReactElement => {
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const { isMobile } = usePlatform();
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -1246,10 +1248,11 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    !!channelPreference?.metricsEnabled;
+    (isGuest || !!channelPreference?.metricsEnabled);
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
@@ -1666,6 +1669,7 @@ const SupportScreen = (): ReactElement => {
     channelId: string;
     conversationId: string;
     stageName?: string | null | undefined;
+    statusV2?: string | null | undefined;
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
@@ -1695,6 +1699,7 @@ const SupportScreen = (): ReactElement => {
       channelId: string;
       conversationId: string;
       stageName?: string | null | undefined;
+      statusV2?: string | null | undefined;
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
@@ -1716,6 +1721,7 @@ const SupportScreen = (): ReactElement => {
             channelId: row.channelId,
             conversationId: row.conversationId,
             stageName: row.stageName,
+            statusV2: row.statusV2,
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
@@ -1757,6 +1763,7 @@ const SupportScreen = (): ReactElement => {
         channelId: string;
         conversationId: string;
         stageName?: string | null | undefined;
+        statusV2?: string | null | undefined;
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
@@ -1779,6 +1786,7 @@ const SupportScreen = (): ReactElement => {
               channelId: row.channelId,
               conversationId: row.conversationId,
               stageName: row.stageName,
+              statusV2: row.statusV2,
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
@@ -1815,6 +1823,7 @@ const SupportScreen = (): ReactElement => {
             channelId: ticket.channelId ?? '',
             conversationId: ticket.conversationId ?? '',
             stageName: ticket.stageName,
+            statusV2: ticket.statusV2,
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
@@ -1865,7 +1874,11 @@ const SupportScreen = (): ReactElement => {
     () =>
       deskBoardGatesStageMoves
         ? []
-        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+        : availableStages.map(stage => ({
+            id: stage.name,
+            name: stage.name,
+            defaultTicketStatusV2: stage.status,
+          })),
     [availableStages, deskBoardGatesStageMoves],
   );
 
@@ -4136,6 +4149,11 @@ type SupportTicketDetailProps = {
     title: string;
     lastEmailAt?: number | null;
   }>;
+  /**
+   * Show the prev/next adjacent-ticket controls (chevrons + j/k shortcuts). Defaults to shown;
+   * the search-results pane disables them since there's no ticket list to page through there.
+   */
+  showAdjacentNav?: boolean;
 };
 
 type TicketReplyKind = 'app' | 'channel';
@@ -4160,6 +4178,7 @@ export const SupportTicketDetail = ({
   navBasePath,
   onBack,
   navTickets,
+  showAdjacentNav = true,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -4624,6 +4643,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Next ticket',
       category: 'Support',
+      enabled: showAdjacentNav,
     },
   );
   useShortcut(
@@ -4635,6 +4655,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Previous ticket',
       category: 'Support',
+      enabled: showAdjacentNav,
     },
   );
   useShortcut(
@@ -4803,22 +4824,26 @@ export const SupportTicketDetail = ({
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
-                <button
-                  type='button'
-                  onClick={() => {
-                    if (onBack) {
-                      onBack();
-                      return;
-                    }
-                    goBackToTicketList();
-                  }}
-                  className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
-                  aria-label='Back to ticket list'
-                  data-track-category='Support'
-                  data-track-name='BackToList'
-                >
-                  <ArrowLeft size={18} />
-                </button>
+                {/* Hidden in the search-results pane (showAdjacentNav=false): it hosts the ticket
+                    with its own close header and has no ticket list to return to. */}
+                {showAdjacentNav && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (onBack) {
+                        onBack();
+                        return;
+                      }
+                      goBackToTicketList();
+                    }}
+                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                    aria-label='Back to ticket list'
+                    data-track-category='Support'
+                    data-track-name='BackToList'
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
                 <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
                   {ticketIdParam}
                 </span>
@@ -4840,52 +4865,56 @@ export const SupportTicketDetail = ({
 
                 {/* Prev/Next + Status pill + ··· overflow menu */}
                 <div className='flex items-center gap-1.5 min-w-0 shrink-0'>
-                  <div className='flex items-center gap-0.5'>
-                    <Tooltip
-                      side='bottom'
-                      delayDuration={300}
-                      content={
-                        <span className='flex items-center gap-2'>
-                          Previous ticket
-                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            K
-                          </kbd>
-                        </span>
-                      }
-                    >
-                      <button
-                        type='button'
-                        onClick={() => void navigateAdjacent('backward')}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                        data-track-category='Support'
-                        data-track-name='PrevTicket'
+                  {/* Adjacent-ticket paging — hidden in the search-results pane (no ticket list
+                      to page through); the status pill + overflow menu below stay visible. */}
+                  {showAdjacentNav && (
+                    <div className='flex items-center gap-0.5'>
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Previous ticket
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              K
+                            </kbd>
+                          </span>
+                        }
                       >
-                        <ChevronUp size={16} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      side='bottom'
-                      delayDuration={300}
-                      content={
-                        <span className='flex items-center gap-2'>
-                          Next ticket
-                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            J
-                          </kbd>
-                        </span>
-                      }
-                    >
-                      <button
-                        type='button'
-                        onClick={() => void navigateAdjacent('forward')}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                        data-track-category='Support'
-                        data-track-name='NextTicket'
+                        <button
+                          type='button'
+                          onClick={() => void navigateAdjacent('backward')}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='PrevTicket'
+                        >
+                          <ChevronUp size={16} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Next ticket
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              J
+                            </kbd>
+                          </span>
+                        }
                       >
-                        <ChevronDown size={16} />
-                      </button>
-                    </Tooltip>
-                  </div>
+                        <button
+                          type='button'
+                          onClick={() => void navigateAdjacent('forward')}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='NextTicket'
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  )}
                   {/* Status pill */}
                   {ticket && (
                     <div className='border border-border rounded-md overflow-hidden shrink-0'>
@@ -4893,6 +4922,7 @@ export const SupportTicketDetail = ({
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
                         stageLabel={ticket.stageName || 'To Do'}
+                        statusV2={ticket.statusV2}
                         boardId={boardId}
                       />
                     </div>

@@ -117,7 +117,7 @@ const envSchema = Joi.object({
   // decision, not a config one. Toggling loses nothing — watermarks persist,
   // so the next enqueue replays everything above them.
   ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
-  RADAR_PARSER_MODEL: Joi.string().default('open-fast'),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast-sa'),
   RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // Kept as a knob deliberately: this is the hard ceiling on how much text can
@@ -126,6 +126,10 @@ const envSchema = Joi.object({
   RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
   RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
   RADAR_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(30_000),
+  // Longer than a thread's. A DM has no threading convention, so once its gate
+  // opens every message reaches the parser — the debounce is the only thing
+  // bounding that, and one job per minute per active DM is the ceiling.
+  RADAR_DM_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(60_000),
   RADAR_MAX_CONSECUTIVE_FAILURES: Joi.number().integer().min(1).max(20).default(3),
   RADAR_MAX_MESSAGE_TEXT_CHARS: Joi.number().integer().min(100).max(20_000).default(5_000),
   RADAR_RATE_LIMIT_MAX_RETRIES: Joi.number().integer().min(0).max(3).default(3),
@@ -764,6 +768,7 @@ export const config = {
     // forever.
     maxOpenItems: envVars.RADAR_MAX_OPEN_ITEMS as number,
     debounceMs: envVars.RADAR_DEBOUNCE_MS as number,
+    dmDebounceMs: envVars.RADAR_DM_DEBOUNCE_MS as number,
     maxConsecutiveFailures: envVars.RADAR_MAX_CONSECUTIVE_FAILURES as number,
     maxMessageTextChars: envVars.RADAR_MAX_MESSAGE_TEXT_CHARS as number,
     rateLimitMaxRetries: envVars.RADAR_RATE_LIMIT_MAX_RETRIES as number,

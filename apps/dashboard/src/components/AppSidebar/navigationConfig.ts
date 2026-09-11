@@ -153,9 +153,8 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
 ];
 
-// Core items that are always in the toolbar. Users cannot remove these — their
-// toggle is locked on in the customize UI.
-export const REQUIRED_TOOLBAR_PATHS: string[] = [
+// Paths shown in the toolbar by default (before any user customization).
+export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/ai',
   '/chat/dir',
   '/chat/dm',
@@ -165,16 +164,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
-  '/guide',
-  '/releaseManager',
 ];
-
-// Paths shown in the toolbar by default (before any user customization).
-export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
-
-// Whether a path is locked into the toolbar (cannot be toggled off).
-export const isRequiredToolbarPath = (path: string): boolean =>
-  REQUIRED_TOOLBAR_PATHS.includes(path);
 
 // One-line description per toolbar-manageable path, shown under the label in
 // the workspace admin's Toolbar tab — same { name, description } shape as

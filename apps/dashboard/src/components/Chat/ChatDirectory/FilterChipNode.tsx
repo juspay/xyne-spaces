@@ -11,13 +11,17 @@
  * (`from: [avatar] Alice`), per the design. It still reports its text through
  * `getTextContent()`, so the pill's combined text is unchanged (`from: Alice`).
  *
- * `$createFilterChip(mentionData)` builds the whole pill; `FilterChipPlugin`
- * demotes it to plain text on the first edit so the filter stays parseable
- * downstream.
+ * `$createFilterChip(mentionData)` builds the whole pill and
+ * `$spliceFilterChip()` puts it into the editor in place of the text that summoned it —
+ * the one splice shared by every chip source, whether the value was picked from a
+ * typeahead (`MentionPlugin`) or typed and committed by a keystroke (`EntityChipPlugin`).
+ * `FilterChipPlugin` demotes a chip back to plain text on the first edit so the filter
+ * stays parseable downstream.
  */
 
 import React from 'react';
 import {
+  $createTextNode,
   $getRoot,
   $isElementNode,
   DecoratorNode,
@@ -31,19 +35,19 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { SignalHigh } from 'lucide-react';
+import { Building2, CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
 import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
-import { ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
+import { type Channel, ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
-import { MentionType, type MentionData } from './ChannelCommandMenu.types';
+import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
 // ---- Editable label (FilterChipNode) ----
 
 export type SerializedFilterChipNode = Spread<
   {
     type: 'filter-chip';
-    mentionData: MentionData;
+    mentionData: ChipData;
     expectedText: string;
   },
   SerializedTextNode
@@ -51,9 +55,37 @@ export type SerializedFilterChipNode = Spread<
 
 /** The pill's leading prefix (`from:`, `in:`, `priority:`), or null for a prefix-less
  *  mention chip. Rendered as its own node so the avatar/glyph can sit after it. */
-export function chipPrefixText(mentionData: MentionData): string | null {
-  // Priority is a value filter; its chip always reads `priority:` regardless of MentionData.
-  if (mentionData.type === MentionType.PRIORITY) {
+/**
+ * True when the chip points at the signed-in user — `@me`, or `from:`/`with:`/`assignee:`
+ * me. Slack tints those differently, and both the editor chip and the palette's summary
+ * row need the same answer.
+ */
+export function isSelfMentionChip(mentionData: ChipData, currentUserId?: string): boolean {
+  return mentionData.type === ChipType.USER && !!currentUserId && mentionData.id === currentUserId;
+}
+
+/**
+ * A chip stores an id; the label needs a name, and only the rendering surface knows how to
+ * look one up. Same shape as the registry's `FilterResolvers`, kept local so this module
+ * stays free of registry imports (a cycle here is a module-init crash, not a type error).
+ */
+export function resolveChipName(
+  mentionData: ChipData,
+  resolve: {
+    userName: (id: string) => string | undefined;
+    channelName: (id: string) => string | undefined;
+  },
+): string {
+  if (mentionData.type === ChipType.USER) return resolve.userName(mentionData.id) ?? mentionData.id;
+  if (mentionData.type === ChipType.CHANNEL) {
+    return resolve.channelName(mentionData.id) ?? mentionData.id;
+  }
+  return mentionData.name ?? mentionData.id;
+}
+
+export function chipPrefixText(mentionData: ChipData): string | null {
+  // Priority is a value filter; its chip always reads `priority:` regardless of ChipData.
+  if (mentionData.type === ChipType.PRIORITY) {
     return 'priority:';
   }
   return mentionData.prefix ?? null;
@@ -62,21 +94,35 @@ export function chipPrefixText(mentionData: MentionData): string | null {
 /** The pill's value label — the only editable part of the chip. A prefix-less mention reads
  *  with its sigil (`@alice`/`#general`), not `from:`/`in:` (which would mislabel it as an
  *  author/scope filter). */
-export function chipLabelText(mentionData: MentionData): string {
+export function chipLabelText(mentionData: ChipData): string {
   // Chip always reads lowercase (`priority: high`), independent of the dropdown label.
-  if (mentionData.type === MentionType.PRIORITY) {
+  if (mentionData.type === ChipType.PRIORITY) {
     return mentionData.id.toLowerCase();
+  }
+  // Date chips read as the bare date; the prefix already says which edge it is.
+  if (mentionData.type === ChipType.DATE) {
+    return mentionData.id;
+  }
+  // Entity chips read as the bare name ("Big Basket") — the `entity:` prefix carries the rest.
+  if (mentionData.type === ChipType.ENTITY) {
+    return mentionData.name;
+  }
+  // A mention filter reads the way a mention is written — `mentions: @alice` — because the
+  // `@` is the thing being searched for, not a type marker. The avatar beside it doesn't
+  // duplicate it the way the hash glyph would duplicate a `#`.
+  if (mentionData.prefix === 'mentions:' && mentionData.type === ChipType.USER) {
+    return `@${mentionData.name}`;
   }
   if (mentionData.prefix) {
     return mentionData.name;
   }
-  const sigil = mentionData.type === MentionType.USER ? '@' : '#';
+  const sigil = mentionData.type === ChipType.USER ? '@' : '#';
   return `${sigil}${mentionData.name}`;
 }
 
 /** The pill's full text (`from: alice`) — what demotion leaves behind verbatim to re-arm the
  *  dropdown. Split across the prefix + label nodes, but always reads as one string. */
-export function buildChipText(mentionData: MentionData): string {
+export function buildChipText(mentionData: ChipData): string {
   const prefix = chipPrefixText(mentionData);
   const label = chipLabelText(mentionData);
   return prefix ? `${prefix} ${label}` : label;
@@ -84,7 +130,7 @@ export function buildChipText(mentionData: MentionData): string {
 
 export class FilterChipNode extends TextNode {
   /** The picked entity + filter metadata this chip represents. */
-  __mentionData: MentionData;
+  __mentionData: ChipData;
   /** Label text at creation time (value only — the prefix lives in its own node);
    *  `FilterChipPlugin` demotes the chip once it diverges. */
   __expectedText: string;
@@ -97,7 +143,7 @@ export class FilterChipNode extends TextNode {
     return new FilterChipNode(node.__mentionData, node.__text, node.__expectedText, node.__key);
   }
 
-  constructor(mentionData: MentionData, text?: string, expectedText?: string, key?: NodeKey) {
+  constructor(mentionData: ChipData, text?: string, expectedText?: string, key?: NodeKey) {
     const resolved = text ?? chipLabelText(mentionData);
     super(resolved, key);
     this.__mentionData = mentionData;
@@ -137,7 +183,7 @@ export class FilterChipNode extends TextNode {
     return false;
   }
 
-  getMentionData(): MentionData {
+  getMentionData(): ChipData {
     return this.__mentionData;
   }
 
@@ -146,7 +192,7 @@ export class FilterChipNode extends TextNode {
   }
 }
 
-export function $createFilterChipNode(mentionData: MentionData): FilterChipNode {
+export function $createFilterChipNode(mentionData: ChipData): FilterChipNode {
   return new FilterChipNode(mentionData);
 }
 
@@ -159,7 +205,7 @@ export function $isFilterChipNode(node: LexicalNode | null | undefined): node is
 export type SerializedFilterChipIconNode = Spread<
   {
     type: 'filter-chip-icon';
-    mentionData: MentionData;
+    mentionData: ChipData;
   },
   SerializedLexicalNode
 >;
@@ -183,38 +229,72 @@ export const PRIORITY_ICON_COLOR: Record<string, string> = {
 };
 
 /**
- * Resolves a channel chip's glyph by id (keeping MentionData lean): DM → person,
+ * Resolves a channel chip's glyph by id (keeping ChipData lean): DM → person,
  * public channel → hash, private → lock; hash while the channel isn't cached yet.
  * Mirrors ChannelIcon's privacy logic but uses a generic person for DMs, not an avatar.
  */
-function ChannelChipIcon({ id }: { id: string }): React.JSX.Element {
+export function ChannelChipIcon({
+  id,
+  size = ICON_SIZE,
+}: {
+  id: string;
+  size?: number;
+}): React.JSX.Element {
   const channel = useChannel(id);
+  return <ChannelChipGlyph channel={channel} size={size} />;
+}
+
+export function ChannelChipGlyph({
+  channel,
+  size = ICON_SIZE,
+}: {
+  channel: Channel | null | undefined;
+  size?: number;
+}): React.JSX.Element {
   if (!channel) {
-    return <Hashtag size={ICON_SIZE} />;
+    return <Hashtag size={size} />;
   }
   if (
     channel.scopeType === ChannelScopeType.DM ||
     channel.scopeType === ChannelScopeType.GROUP_DM
   ) {
-    return <UserTwo size={ICON_SIZE} />;
+    return <UserTwo size={size} />;
   }
   return channel.visibility === ChannelVisibility.PUBLIC ? (
-    <Hashtag size={ICON_SIZE} />
+    <Hashtag size={size} />
   ) : (
-    <Lock02Close size={ICON_SIZE} />
+    <Lock02Close size={size} />
   );
 }
 
-function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Element {
+/**
+ * Exported so the palette's "Show detailed results for" row renders the *same* glyph as the
+ * chip above it — it previously had a parallel copy that drifted on size and colour.
+ */
+export function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.Element {
   // Priority — checked first so it never falls through to the channel branch (which
   // calls `useChannel`). Glyph tinted by severity; pill stays blue.
-  if (mentionData.type === MentionType.PRIORITY) {
+  if (mentionData.type === ChipType.PRIORITY) {
     return <SignalHigh className={`${ICON_CLASS} ${PRIORITY_ICON_COLOR[mentionData.id] ?? ''}`} />;
   }
+  // Date — like priority, a value filter with a glyph rather than an entity avatar.
+  if (mentionData.type === ChipType.DATE) {
+    return <CalendarDays className={ICON_CLASS} />;
+  }
+  // Board — checked before the channel branch below, which would otherwise claim it and
+  // call useChannel with a board id.
+  if (mentionData.type === ChipType.BOARD) {
+    return <LayoutGrid className={ICON_CLASS} />;
+  }
+  // Entity — a value filter like board, glyph rather than an avatar. Also checked before
+  // the channel branch, which would otherwise call useChannel with an entity name.
+  if (mentionData.type === ChipType.ENTITY) {
+    return <Building2 className={ICON_CLASS} />;
+  }
   // User filters show the picked person's photo (the design's 16px avatar, rounded-sm = 4px);
-  // `Avatar` resolves the user from the id and falls back to initials, so MentionData stays
+  // `Avatar` resolves the user from the id and falls back to initials, so ChipData stays
   // lean. No presence dot — it reads as noise inside a 16px chip.
-  if (mentionData.type === MentionType.USER) {
+  if (mentionData.type === ChipType.USER) {
     return <Avatar userId={mentionData.id} size='xs' showActiveStatus={false} />;
   }
   // The channel lookup lives in its own component so `useChannel` is never called
@@ -225,10 +305,10 @@ function ChipIcon({ mentionData }: { mentionData: MentionData }): React.JSX.Elem
 /**
  * The chip's avatar/glyph, sitting between the prefix and the value label. A DecoratorNode
  * (not part of the label TextNode) so it can render a real React component; it carries the
- * label's MentionData. Contributes no text, so the pill's text stays `from: alice`.
+ * label's ChipData. Contributes no text, so the pill's text stays `from: alice`.
  */
 export class FilterChipIconNode extends DecoratorNode<React.JSX.Element> {
-  __mentionData: MentionData;
+  __mentionData: ChipData;
 
   static override getType(): string {
     return 'filter-chip-icon';
@@ -238,7 +318,7 @@ export class FilterChipIconNode extends DecoratorNode<React.JSX.Element> {
     return new FilterChipIconNode(node.__mentionData, node.__key);
   }
 
-  constructor(mentionData: MentionData, key?: NodeKey) {
+  constructor(mentionData: ChipData, key?: NodeKey) {
     super(key);
     this.__mentionData = mentionData;
   }
@@ -280,12 +360,12 @@ export class FilterChipIconNode extends DecoratorNode<React.JSX.Element> {
     return <ChipIcon mentionData={this.__mentionData} />;
   }
 
-  getMentionData(): MentionData {
+  getMentionData(): ChipData {
     return this.__mentionData;
   }
 }
 
-export function $createFilterChipIconNode(mentionData: MentionData): FilterChipIconNode {
+export function $createFilterChipIconNode(mentionData: ChipData): FilterChipIconNode {
   return new FilterChipIconNode(mentionData);
 }
 
@@ -456,15 +536,13 @@ export function $isFilterChipContainerNode(
  *  chips are the value alone (no prefix, no icon); a chip of the current user also gets
  *  Slack's self color. */
 export function $createFilterChip(
-  mentionData: MentionData,
+  mentionData: ChipData,
   currentUserId?: string,
 ): FilterChipContainerNode {
   const prefix = chipPrefixText(mentionData);
   // Any chip referencing the current user — bare @me or from:/with:/assignee: me — gets the
   // Slack self-mention color.
-  const isSelfMention =
-    mentionData.type === MentionType.USER && !!currentUserId && mentionData.id === currentUserId;
-  const container = new FilterChipContainerNode(isSelfMention);
+  const container = new FilterChipContainerNode(isSelfMentionChip(mentionData, currentUserId));
   if (prefix === null) {
     container.append($createFilterChipNode(mentionData));
   } else {
@@ -475,6 +553,58 @@ export function $createFilterChip(
     );
   }
   return container;
+}
+
+export interface ChipSpliceOptions {
+  // `| undefined` explicitly: under exactOptionalPropertyTypes a caller whose own
+  // `currentUserID` prop is optional could not otherwise forward it as a property.
+  currentUserId?: string | undefined;
+  /**
+   * Text node left after the LAST chip, and where the caret lands. Defaults to a plain
+   * space; a caller that re-arms its own trigger passes e.g. `' entity:'` so the user can
+   * keep typing the next value.
+   */
+  trailingText?: string;
+}
+
+/**
+ * Replaces `node`'s `[start, end)` with `chips` — the one splice every chip source needs,
+ * however the value was obtained (picked from a typeahead, or typed and committed by a
+ * keystroke). Each chip is followed by a space so the pills read as separate filters;
+ * whatever followed `end` is preserved after the trailing text, and the caret is placed
+ * at the end of that trailing node.
+ *
+ * Must run inside an `editor.update()`. Returns the trailing text node the caret ends up
+ * in, or null when there is nothing to insert.
+ */
+export function $spliceFilterChip(
+  node: TextNode,
+  start: number,
+  end: number,
+  chips: ChipData[],
+  { currentUserId, trailingText = ' ' }: ChipSpliceOptions = {},
+): TextNode | null {
+  if (chips.length === 0) return null;
+
+  const text = node.getTextContent();
+  const textAfter = text.slice(end);
+  node.setTextContent(text.slice(0, start));
+
+  let cursor: LexicalNode = node;
+  let trailing: TextNode | null = null;
+  for (const [index, chipData] of chips.entries()) {
+    const chip = $createFilterChip(chipData, currentUserId);
+    cursor.insertAfter(chip);
+    // Only the last separator is the caller's to choose — the caret ends up there.
+    trailing = $createTextNode(index === chips.length - 1 ? trailingText : ' ');
+    chip.insertAfter(trailing);
+    cursor = trailing;
+  }
+  if (!trailing) return null;
+
+  if (textAfter) trailing.insertAfter($createTextNode(textAfter));
+  trailing.selectEnd();
+  return trailing;
 }
 
 // ---- Priority chip helpers ----
@@ -489,7 +619,7 @@ export function $removeExistingPriorityChips(): void {
   const visit = (node: LexicalNode): void => {
     if ($isFilterChipContainerNode(node)) {
       const label = node.getChildren().find($isFilterChipNode);
-      if (label && label.getMentionData().type === MentionType.PRIORITY) {
+      if (label && label.getMentionData().type === ChipType.PRIORITY) {
         containers.push(node);
         return;
       }

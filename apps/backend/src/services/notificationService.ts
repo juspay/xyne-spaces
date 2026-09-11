@@ -14,6 +14,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
+import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
@@ -207,8 +208,6 @@ class NotificationService {
       workspaceId,
       userId,
       type: data.type,
-      title: data.title,
-      message: data.message,
       relatedEntityType: data.relatedEntityType,
       relatedEntityId: data.relatedEntityId,
       actionUrl: data.actionUrl,
@@ -861,6 +860,33 @@ class NotificationService {
    * disconnect between send and check, or WebSocket "send" only confirms server push, not client
    * receipt. This is acceptable for reducing duplicate notifications but is not deterministic.
    */
+  /** No builder knows the SDLC routes, so the target is resolved once in the funnel they share. */
+  private async withSdlcTarget(data: NotificationData): Promise<NotificationData> {
+    // Builders put objects in metadata too, so every id is read as one or dropped.
+    const meta: Record<string, unknown> =
+      data.metadata && typeof data.metadata === 'object' ? data.metadata : {};
+    const id = (key: string): string | undefined =>
+      typeof meta[key] === 'string' ? (meta[key] as string) : undefined;
+    try {
+      const target = await resolveSdlcNavTarget({
+        channelId: id('channelId'),
+        canvasId: id('canvasId'),
+        ticketId: id('ticketId'),
+        conversationId: id('conversationId'),
+        messageId: id('messageId'),
+        blockId: id('blockId'),
+        commentThreadId: id('commentThreadId'),
+      });
+      if (!target) return data;
+      // actionUrl is left alone: mobile and web push have no SDLC routes, so they keep
+      // the builder's chat path. Clients that can render a hub read sdlcTarget instead.
+      return { ...data, metadata: { ...meta, sdlcTarget: target } };
+    } catch (error) {
+      logger.error('[NOTIFICATION-SERVICE] SDLC routing failed', { error });
+      return data;
+    }
+  }
+
   async createNotification(
     userId: string,
     data: NotificationData,
@@ -869,6 +895,7 @@ class NotificationService {
     let deliveredViaApp = false;
 
     try {
+      data = await this.withSdlcTarget(data);
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
         userId,
         notificationType: data.type,
@@ -1475,6 +1502,7 @@ class NotificationService {
     actorId: string,
     actorName: string,
     actorAction: 'recording_shared' | 'recording_access_revoked',
+    subject: string = 'recording',
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1489,8 +1517,8 @@ class NotificationService {
 
     const isRevoked = actorAction === 'recording_access_revoked';
     const title = isRevoked
-      ? `${actorName} removed your access to a recording`
-      : `${actorName} shared a recording with you`;
+      ? `${actorName} removed your access to a ${subject}`
+      : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
       : `${actorName} shared "${recordingTitle}" with you`;

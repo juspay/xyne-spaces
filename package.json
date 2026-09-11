@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.281.0",
+  "version": "1.310.1",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -290,7 +290,7 @@
       "nanoid@3": "3.3.18",
       "nanoid@4": "5.1.16",
       "nanoid@5": "5.1.16",
-      "next": "16.2.11",
+      "next": "16.3.3",
       "node-forge": "1.4.0",
       "nodemailer": "9.0.1",
       "path-to-regexp@0": "0.1.13",

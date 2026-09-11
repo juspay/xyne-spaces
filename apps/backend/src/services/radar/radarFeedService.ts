@@ -1,5 +1,10 @@
 import { DatabaseClient } from '@/database/client';
-import { canAccessConversation, viewerChannelAccess } from '@/services/radar/radarAcl';
+import {
+  canAccessConversation,
+  viewerAccessibleChannelIds,
+  viewerChannelAccess,
+} from '@/services/radar/radarAcl';
+import { radarScopeFor, scopeKeyFor, type RadarScope } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -12,11 +17,17 @@ const THREAD_PREVIEW_CHARS = 200;
 const MAX_DEBUG_RUNS = 50;
 
 const stripHtml = (html: string): string =>
-  html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 interface AuthContext {
   userId: string;
   workspaceId: string;
+  /** Required: the ACL needs it to tell a guest from a member. */
+  role: string;
 }
 
 export interface FeedItem {
@@ -38,9 +49,19 @@ interface FeedConversation {
   channelId: string;
   initial_message_md: string | null;
   lastActivityAt: Date;
+  /** Decides whether this conversation is a card of its own or folds into its channel. */
+  scopeType: string | null;
 }
 
 export interface FeedThreadCard {
+  /**
+   * What this card IS: a thread, or a whole DM. Bulk actions address the card
+   * through this, since a DM card spans several conversations and a
+   * conversation-scoped call would clear only one of them.
+   */
+  scopeKey: string;
+  /** Representative conversation — the most recently updated item's. Per-item
+   *  navigation uses the item's own conversationId, not this. */
   conversationId: string;
   channelId: string;
   threadPreview: string | null;
@@ -49,11 +70,13 @@ export interface FeedThreadCard {
 }
 
 /**
- * The two GIN-backed reads the engine exists to serve:
+ * The GIN-backed reads the engine exists to serve:
  *
  * - Pending Me: pendingOn ∋ me.
  * - Waiting On: requestedBy ∋ me, minus items I also hold. An ownerless item
  *   (pendingOn: []) stays here — tracked, nobody on the hook yet.
+ * - Pending Others: held by someone who is not me, whoever asked — plus my
+ *   own ownerless asks, so it is a superset of Waiting On.
  */
 class RadarFeedService {
   async pendingMe(auth: AuthContext): Promise<FeedThreadCard[]> {
@@ -68,6 +91,50 @@ class RadarFeedService {
   }
 
   /**
+   * Where Waiting On answers "what have I chased", this answers "what is this
+   * team holding" — every open item held by someone else, whoever asked, plus
+   * the viewer's own asks that nobody holds yet, since this is the only feed
+   * fetched in All mode and an ownerless ask is still the viewer's.
+   *
+   * It covers Waiting On only while the workspace fits inside the cap. This
+   * scan is workspace-wide and capped at MAX_FEED_ITEMS by recency, where the
+   * other two are GIN-scoped to the viewer and so are effectively unbounded
+   * for one person. Past that, an old ownerless ask of the viewer's is visible
+   * under "requested by me" and missing here, and a team narrows only what
+   * reached the workspace-wide window — silently, with nothing saying the feed
+   * was truncated.
+   *
+   * The other feeds name the viewer in a GIN predicate, so their scan window
+   * is about the viewer by construction. This one is not, so the viewer's
+   * channel rule goes into the WHERE as a channel id list — a leading
+   * predicate the (channelId, status) index can drive off, which a relation
+   * filter through each item's conversation could not. The bound has to be
+   * there at all because the scan is capped: a row dropped by the cap can
+   * never be put back by the check that runs after it.
+   *
+   * item.channelId is safe to scope on: reparenting a thread rewrites it in
+   * the same transaction that moves the conversation. The Jira migration is
+   * the one path that moves a conversation without it, so an item it touched
+   * could be missed here — never wrongly shown, since viewerChannelAccess
+   * still resolves through the conversation afterwards.
+   *
+   * An item the viewer stepped away from that a colleague still holds belongs
+   * here: Dismiss changes who is on the hook, not what the viewer may see.
+   */
+  async pendingOthers(auth: AuthContext): Promise<FeedThreadCard[]> {
+    const scoped = await viewerAccessibleChannelIds(auth);
+    return this.buildFeed(
+      auth,
+      {
+        channelId: { in: scoped },
+        NOT: { pendingOn: { has: auth.userId } },
+        OR: [{ pendingOn: { isEmpty: false } }, { requestedBy: { has: auth.userId } }],
+      },
+      scoped
+    );
+  }
+
+  /**
    * Read items, narrow to what the viewer may open, group into thread cards.
    *
    * The conversation rows are fetched ONCE and threaded through both halves:
@@ -78,11 +145,17 @@ class RadarFeedService {
   private async buildFeed(
     auth: AuthContext,
     filter: Record<string, unknown>,
+    /** Channel ids the caller already resolved for the scan bound, so the
+     *  post-query check does not repeat the lookup. */
+    scopedChannelIds?: string[]
   ): Promise<FeedThreadCard[]> {
     const items = await this.openItems(auth, filter);
     if (items.length === 0) return [];
-    const conversations = await this.conversationsFor(items.map(i => i.conversationId));
-    return this.groupByThread(await this.aclFilter(auth, items, conversations), conversations);
+    const conversations = await this.conversationsFor(items.map((i) => i.conversationId));
+    return this.groupByThread(
+      await this.aclFilter(auth, items, conversations, scopedChannelIds),
+      conversations
+    );
   }
 
   /**
@@ -94,6 +167,7 @@ class RadarFeedService {
     auth: AuthContext,
     items: FeedItem[],
     conversations: Map<string, FeedConversation>,
+    scopedChannelIds?: string[]
   ): Promise<FeedItem[]> {
     if (items.length === 0) return items;
     // Resolve each item's channel from its conversation rather than trusting
@@ -101,10 +175,11 @@ class RadarFeedService {
     // item whose conversation has since vanished is denied.
     const access = await viewerChannelAccess(
       auth,
-      [...conversations.values()].map(c => c.channelId),
+      [...conversations.values()].map((c) => c.channelId),
+      scopedChannelIds
     );
     return items
-      .filter(i => {
+      .filter((i) => {
         const channelId = conversations.get(i.conversationId)?.channelId;
         return channelId ? access.get(channelId)?.allowed : false;
       })
@@ -117,7 +192,7 @@ class RadarFeedService {
    * stamp the cards render.
    */
   private async conversationsFor(
-    conversationIds: string[],
+    conversationIds: string[]
   ): Promise<Map<string, FeedConversation>> {
     const unique = [...new Set(conversationIds)];
     if (unique.length === 0) return new Map();
@@ -128,9 +203,33 @@ class RadarFeedService {
         channelId: true,
         initial_message_md: true,
         lastActivityAt: true,
+        channel: { select: { scopeType: true } },
       },
     });
-    return new Map(conversations.map(c => [c.conversationId, c]));
+    return new Map(
+      conversations.map((c) => [
+        c.conversationId,
+        { ...c, scopeType: c.channel?.scopeType ?? null },
+      ])
+    );
+  }
+
+  /**
+   * The parse scope a conversation belongs to. Run logs and the watermark are
+   * keyed by scope, not by conversation, so a DM's debug view has to resolve
+   * its channel before it can find either.
+   */
+  private async scopeOf(conversationId: string): Promise<RadarScope | null> {
+    const conversation = await prisma.conversation.findUnique({
+      where: { conversationId },
+      select: { channelId: true, channel: { select: { scopeType: true } } },
+    });
+    if (!conversation?.channelId) return null;
+    return radarScopeFor(
+      conversation.channel?.scopeType ?? null,
+      conversation.channelId,
+      conversationId
+    );
   }
 
   /**
@@ -152,9 +251,9 @@ class RadarFeedService {
 
     const messageIds = [
       ...new Set(
-        [item.sourceMessageId, ...mutations.map(m => m.sourceMessageId)].filter(
-          (id): id is string => !!id,
-        ),
+        [item.sourceMessageId, ...mutations.map((m) => m.sourceMessageId)].filter(
+          (id): id is string => !!id
+        )
       ),
     ];
     const messages = messageIds.length
@@ -170,7 +269,7 @@ class RadarFeedService {
         })
       : [];
     const sourceMessages = Object.fromEntries(
-      messages.map(m => [
+      messages.map((m) => [
         m.messageId,
         {
           senderId: m.senderId,
@@ -178,16 +277,22 @@ class RadarFeedService {
           text: stripHtml(m.content).slice(0, 300),
           createdAt: m.createdAt,
         },
-      ]),
+      ])
     );
 
+    const itemScope = await this.scopeOf(item.conversationId);
     const [threadState, latestMessage] = await Promise.all([
       prisma.executionThreadState.findUnique({
-        where: { conversationId: item.conversationId },
+        where: { conversationId: itemScope?.key ?? item.conversationId },
         select: { watermarkCreatedAt: true, watermarkMsgId: true, updatedAt: true },
       }),
       prisma.message.findFirst({
-        where: { conversationId: item.conversationId, isDeleted: false },
+        where: {
+          ...(itemScope?.isDmChannel
+            ? { conversation: { channelId: itemScope.channelId } }
+            : { conversationId: item.conversationId }),
+          isDeleted: false,
+        },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
         select: { messageId: true, createdAt: true },
       }),
@@ -216,26 +321,38 @@ class RadarFeedService {
       return null;
     }
 
+    // Runs, watermark and "latest message" are all scope-keyed. For a DM that
+    // is the channel, so a drawer opened on any one of its conversations shows
+    // the whole DM's trail rather than the single message that started it.
+    const scope = await this.scopeOf(conversationId);
+    const scopeKey = scope?.key ?? conversationId;
+    const messageScope = scope?.isDmChannel
+      ? { conversation: { channelId: scope.channelId } }
+      : { conversationId };
+
     const runs = await prisma.executionRunLog.findMany({
-      where: { workspaceId: auth.workspaceId, conversationId },
+      where: { workspaceId: auth.workspaceId, conversationId: scopeKey },
       orderBy: { createdAt: 'desc' },
       take: MAX_DEBUG_RUNS,
     });
 
     const [threadState, latestMessage, items] = await Promise.all([
       prisma.executionThreadState.findUnique({
-        where: { conversationId },
+        where: { conversationId: scopeKey },
         select: { watermarkCreatedAt: true, watermarkMsgId: true, updatedAt: true },
       }),
       prisma.message.findFirst({
-        where: { conversationId, isDeleted: false },
+        where: { ...messageScope, isDeleted: false },
         orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
         select: { messageId: true, createdAt: true, senderId: true, content: true },
       }),
       // Every item the thread ever produced (resolved included), so a debug
       // lookup by thread id can render the full trail set.
       prisma.executionItem.findMany({
-        where: { conversationId, workspaceId: auth.workspaceId },
+        where: {
+          ...(scope?.isDmChannel ? { channelId: scope.channelId } : { conversationId }),
+          workspaceId: auth.workspaceId,
+        },
         orderBy: { createdAt: 'asc' },
         select: { id: true, title: true, status: true },
       }),
@@ -252,7 +369,7 @@ class RadarFeedService {
       : null;
 
     const asPreview = (
-      m: { messageId: string; createdAt: Date; senderId: string | null; content: string } | null,
+      m: { messageId: string; createdAt: Date; senderId: string | null; content: string } | null
     ) =>
       m && {
         messageId: m.messageId,
@@ -296,24 +413,42 @@ class RadarFeedService {
 
   private groupByThread(
     items: FeedItem[],
-    conversations: Map<string, FeedConversation>,
+    conversations: Map<string, FeedConversation>
   ): FeedThreadCard[] {
     if (items.length === 0) return [];
 
     const cards = new Map<string, FeedThreadCard>();
     for (const item of items) {
-      let card = cards.get(item.conversationId);
+      const conversation = conversations.get(item.conversationId);
+      // Resolved from the conversation, not item.channelId — that column is a
+      // stamp taken at creation and never refreshed.
+      const channelId = conversation?.channelId ?? item.channelId;
+      const scopeKey = scopeKeyFor(conversation?.scopeType, channelId, item.conversationId);
+      const isDmCard = scopeKey !== item.conversationId;
+
+      let card = cards.get(scopeKey);
       if (!card) {
-        const conversation = conversations.get(item.conversationId);
         card = {
+          scopeKey,
           conversationId: item.conversationId,
-          channelId: item.channelId,
-          threadPreview:
-            conversation?.initial_message_md?.slice(0, THREAD_PREVIEW_CHARS) ?? null,
+          channelId,
+          // A DM card spans conversations, so one conversation's opening message
+          // is not the card's subject. The channel label is, and the header
+          // already renders it.
+          threadPreview: isDmCard
+            ? null
+            : (conversation?.initial_message_md?.slice(0, THREAD_PREVIEW_CHARS) ?? null),
           lastActivityAt: conversation?.lastActivityAt ?? null,
           items: [],
         };
-        cards.set(item.conversationId, card);
+        cards.set(scopeKey, card);
+      } else if (
+        conversation?.lastActivityAt &&
+        (!card.lastActivityAt || conversation.lastActivityAt > card.lastActivityAt)
+      ) {
+        // Newest activity across everything the card covers, or a busy DM would
+        // sort by whichever of its conversations happened to be seen first.
+        card.lastActivityAt = conversation.lastActivityAt;
       }
       card.items.push(item);
     }
@@ -321,7 +456,7 @@ class RadarFeedService {
     // Newest thread activity first; items inside a card are already
     // updatedAt-desc from the query.
     return [...cards.values()].sort(
-      (a, b) => (b.lastActivityAt?.getTime() ?? 0) - (a.lastActivityAt?.getTime() ?? 0),
+      (a, b) => (b.lastActivityAt?.getTime() ?? 0) - (a.lastActivityAt?.getTime() ?? 0)
     );
   }
 }

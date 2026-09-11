@@ -1,6 +1,7 @@
 import { apiInstance } from './clients/apiClient';
 import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
+import { toSearchQuery } from '../utils/exactSearch';
 /**
  * Sanitizes search query by removing potentially harmful characters
  */
@@ -15,6 +16,22 @@ export function sanitizeSearchQuery(query: string): string {
       .replace(/[\u0000-\u001F\u007F]/g, '') // Remove control characters
       .substring(0, 500)
   ); // Enforce max length
+}
+
+export interface VespaTagSearchResponse {
+  success: boolean;
+  data?: {
+    tags: string[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface VespaTagSearchFilters {
+  query?: string | undefined;
+  projectId?: string | undefined;
+  boardIds?: string[] | undefined;
+  limit?: number | undefined;
 }
 
 export class SearchService {
@@ -63,6 +80,8 @@ export class SearchService {
       }
 
       const data = response.data.data;
+      // Whether anything ranked these results — a filter-only search has no query text.
+      const hasQuery = Boolean(sanitizedFilters.query?.trim());
 
       // Handle grouped results - flatten them for backward compatibility
       let vespaResult: VespaSearchResult;
@@ -73,7 +92,11 @@ export class SearchService {
         }
 
         vespaResult = {
-          results: flattenedResults.filter(result => result.relevanceScore > 0),
+          // Zero-score rows are only noise when a query ranked them. A filter-only search
+          // (`q=` empty, filterOnly=true) has nothing to rank against, so Vespa scores every
+          // match 0 — dropping them here threw away the entire result set for a chip-only
+          // search like `from:@someone` or a date range.
+          results: flattenedResults.filter(result => !hasQuery || result.relevanceScore > 0),
           totalCount: data.totalCount,
           offset: data.offset,
           limit: data.limit,
@@ -112,8 +135,12 @@ export class SearchService {
    * Build query parameters for Vespa search request
    */
   private buildVespaSearchParams(filters: VespaSearchFilters): Record<string, string> {
+    // Exact match is expressed by quoting the query, which is what the backend's phrase
+    // grammar keys off. Done here rather than in the box so the user never sees the quotes.
+    // Same helper the ticket search uses, so the two surfaces can't drift on what "exact"
+    // means or on where the mode stops being a flag and becomes text.
     const params: Record<string, string> = {
-      q: filters.query,
+      q: toSearchQuery(filters.query, filters.exactMatch === true),
     };
 
     if (filters.apps) {
@@ -205,6 +232,10 @@ export class SearchService {
       params['tags'] = filters.tags;
     }
 
+    if (filters.entity) {
+      params['entity'] = filters.entity;
+    }
+
     if (filters.before) {
       params['before'] = filters.before;
     }
@@ -280,6 +311,55 @@ export class SearchService {
     }
 
     return params;
+  }
+
+  /**
+   * Search for ticket tags via Vespa grouping
+   */
+  async searchTags(
+    filters: VespaTagSearchFilters,
+    signal?: AbortSignal,
+  ): Promise<{ tags: string[]; total: number }> {
+    try {
+      const params: Record<string, string> = {
+        type: 'ticket_tags',
+      };
+
+      if (filters.query) {
+        params['q'] = sanitizeSearchQuery(filters.query);
+      }
+
+      if (filters.projectId) {
+        params['projectId'] = filters.projectId;
+      }
+
+      if (filters.boardIds && filters.boardIds.length > 0) {
+        params['board'] = filters.boardIds.join(',');
+      }
+
+      if (filters.limit !== undefined) {
+        params['limit'] = filters.limit.toString();
+      }
+
+      const response = await apiInstance.get<VespaTagSearchResponse>(this.vespaBaseUrl, {
+        params,
+        ...(signal ? { signal } : {}),
+      });
+
+      if (!response.data.success || !response.data.data) {
+        throw new Error(response.data.error || 'Vespa tag search request failed');
+      }
+
+      return {
+        tags: response.data.data.tags,
+        total: response.data.data.total,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Vespa tag search request failed');
+    }
   }
 }
 

@@ -87,7 +87,10 @@ import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOver
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
-import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
+import {
+  ElectronUpdateNudge,
+  ELECTRON_UPDATE_NUDGE_ENABLED,
+} from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
@@ -493,6 +496,11 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  const xyneAIWorkflowDismissed = useSelector(
+    xyneAIActor,
+    state => state.context.workflowDismissed,
+  );
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -772,6 +780,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -881,6 +891,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -963,7 +975,7 @@ const AppRoot = (): ReactElement => {
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />
-                          <ElectronUpdateNudge />
+                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
@@ -1009,6 +1021,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1043,6 +1057,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1083,6 +1099,10 @@ const AppRoot = (): ReactElement => {
 /** Real screen in the SDLC bundle; the framed placeholder in the main one. */
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
+
+/** A ticket page, but still inside the hub's frame so its history stays in one router. */
+const SdlcTicketRouteElement = (): ReactElement =>
+  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1630,6 +1650,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/tickets/:ticketId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcTicketRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },

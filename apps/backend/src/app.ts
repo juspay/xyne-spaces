@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -166,6 +166,7 @@ import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
+import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
@@ -204,6 +205,7 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import { encryptedFieldsConfig } from '@xyne/shared';
 
 
 export class App {
@@ -487,6 +489,7 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
     this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
@@ -622,6 +625,18 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+
+    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
+    // encryption service fetches this and caches it instead of importing @xyne/shared.
+    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
+      const encryptedFields = Object.fromEntries(
+        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
+          table,
+          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
+        ]),
+      );
+      res.json({ encryptedFields });
+    });
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -997,6 +1012,11 @@ export class App {
     logger.info('Initializing Google Calendar sync queue (producer)...');
     await googleCalendarSyncQueue.initialize();
 
+    // Outbound side of the same story: scheduling a call here enqueues a push
+    // onto the organizer's calendar, drained by the worker.
+    logger.info('Initializing call calendar push queue (producer)...');
+    await callCalendarPushQueue.initialize();
+
     // Initialize unified watch renewal queue (replaces Gmail + Calendar renewal queues)
     logger.info('Initializing unified watch renewal queue...');
     await watchRenewalQueue.initialize();
@@ -1130,6 +1150,7 @@ export class App {
       // Close calendar sync queues
       await microsoftCalendarSyncQueue.close();
       await googleCalendarSyncQueue.close();
+      await callCalendarPushQueue.close();
       await watchRenewalQueue.close();
 
       // Close warm user registry queue

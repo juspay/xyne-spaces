@@ -40,6 +40,7 @@ import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
+import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
@@ -276,6 +277,12 @@ class WorkerService {
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
 
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        logger.info('Starting desk auto-label backfill worker...');
+        await deskLabelBackfillWorker.start();
+
         const { cleanupUnreferencedAutomationTemplates } = await import(
           '@/automations/services/automation-template.service'
         );
@@ -309,6 +316,9 @@ class WorkerService {
 
         logger.info('Starting Microsoft Calendar sync worker...');
         await microsoftCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting call calendar push worker...');
+        await callCalendarPushQueue.startProcessing();
       } else {
         logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
       }
@@ -542,6 +552,7 @@ class WorkerService {
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();
         await microsoftCalendarSyncQueue.close();
+        await callCalendarPushQueue.close();
       }
 
       if (appConfig.enableTeamIntelligenceWorker) {
@@ -558,6 +569,13 @@ class WorkerService {
 
       if (appConfig.enableAiProvisioningWorker) {
         await aiProvisioningWorker.shutdown();
+      }
+
+      if (appConfig.enableAutomationWorker) {
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        await deskLabelBackfillWorker.shutdown();
       }
 
       await autoDraftWorker.shutdown();

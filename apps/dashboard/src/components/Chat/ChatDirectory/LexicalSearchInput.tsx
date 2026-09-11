@@ -13,6 +13,8 @@ import {
   $isElementNode,
   LexicalNode,
   $createTextNode,
+  TextNode,
+  type ElementNode,
   $createParagraphNode,
   PASTE_COMMAND,
   COMMAND_PRIORITY_LOW,
@@ -32,10 +34,14 @@ import {
   UserTriggerType,
   ChannelTriggerType,
   PriorityTriggerType,
+  DateTriggerType,
+  BoardTriggerType,
+  MentionsTriggerType,
 } from './MentionPlugin';
+import { EntityChipPlugin } from './EntityChipPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
-import { MentionType, type MentionData } from './ChannelCommandMenu.types';
+import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 import { Search } from 'lucide-react';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -44,21 +50,29 @@ interface LexicalSearchInputProps {
   value?: string;
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   onPrioritySearch?: (query: string | null, trigger?: PriorityTriggerType) => void;
+  onDateSearch?: (query: string | null, trigger?: DateTriggerType) => void;
+  onBoardSearch?: (query: string | null, trigger?: BoardTriggerType) => void;
+  onMentionsSearch?: (query: string | null, trigger?: MentionsTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   availablePriorities?: Array<{ id: string; name: string }>;
+  availableDates?: Array<{ id: string; name: string }>;
+  availableBoards?: Array<{ id: string; name: string }>;
+  availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
   className?: string;
   open?: boolean;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
   setSelectedMentionIndex?: (index: number | ((prev: number) => number)) => void;
   onNavigate?: () => void;
   hasNavigated?: boolean;
+  onReplaceTriggerChipsReady?: (replaceChips: (chips: ChipData[]) => void) => void;
+  onCommitEntityReady?: (commitEntity: () => boolean) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -69,7 +83,9 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
-  initialMention?: MentionData | null | undefined;
+  /** Imperative "put quotes around the free text, or take them off again". */
+  onToggleQuotesReady?: (toggleQuotes: () => void) => void;
+  initialMention?: ChipData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
   disableAutoFocus?: boolean;
   // Current user's id — threaded to chip creation so a current-user chip gets Slack's color.
@@ -80,7 +96,7 @@ interface LexicalSearchInputProps {
 }
 
 export interface InitialQueryData {
-  mentions: MentionData[];
+  mentions: ChipData[];
   text: string;
 }
 
@@ -104,7 +120,7 @@ function InitialMentionPlugin({
   initialMention,
   currentUserID,
 }: {
-  initialMention?: MentionData | null;
+  initialMention?: ChipData | null;
   currentUserID?: string;
 }) {
   const [editor] = useLexicalComposerContext();
@@ -285,14 +301,152 @@ function InsertTextPlugin({
       const insertText = (text: string) => {
         editor.update(() => {
           const selection = $getSelection();
-          if (selection !== null) {
-            selection.insertText(text);
+          if (selection === null) return;
+          // A filter keyword only parses on a word boundary — inserting `with: ` with the
+          // caret right after "issue" would produce "issuewith:", which reads as plain
+          // text and silently filters nothing. Add the separating space when the character
+          // to the left isn't already whitespace (and isn't the start of the input).
+          let prefix = '';
+          if ($isRangeSelection(selection) && selection.isCollapsed()) {
+            const anchor = selection.anchor;
+            const node = anchor.getNode();
+            const before =
+              anchor.type === 'text' ? node.getTextContent().slice(0, anchor.offset) : '';
+            // An empty `before` at a text node's start still needs the check: the previous
+            // sibling may be a chip, after which a space is wanted too.
+            const prevSibling = node.getPreviousSibling();
+            const hasContentBefore = before.length > 0 || prevSibling !== null;
+            if (hasContentBefore && !/\s$/.test(before)) prefix = ' ';
           }
+          selection.insertText(`${prefix}${text}`);
         });
       };
       onInsertTextReady(insertText);
     }
   }, [editor, onInsertTextReady]);
+
+  return null;
+}
+
+/**
+ * Rewrites the line as: every chip, then a single run of free text.
+ *
+ * Text typed on either side of a chip lives in separate nodes, so "the query" is scattered
+ * and a chip can sit in the middle of it. Collecting the text into one run — and pushing the
+ * chips left — gives both the quote pair and the reader one contiguous phrase, and is what
+ * keeps a filter from ending up inside the quotes.
+ *
+ * Returns the rebuilt text node, or null when there is no paragraph to work on.
+ * `transform` decides what the collected phrase becomes.
+ */
+function $regroupLine(transform: (phrase: string) => string): TextNode | null {
+  const root = $getRoot();
+  // An editor that has never been typed into can have no paragraph yet, so one is created
+  // rather than bailing — otherwise the exact-match pill would do nothing on an empty box.
+  const existing = root.getLastChild();
+  let paragraph: ElementNode;
+  if ($isElementNode(existing)) {
+    paragraph = existing;
+  } else {
+    paragraph = $createParagraphNode();
+    root.append(paragraph);
+  }
+
+  const children = paragraph.getChildren();
+  const chips = children.filter($isFilterChipContainerNode);
+  const phrase = children
+    .filter(node => !$isFilterChipContainerNode(node))
+    .map(node => node.getTextContent())
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  paragraph.clear();
+  chips.forEach(chip => paragraph.append(chip));
+  // A separator so the chips keep their own boundary and the phrase reads apart from them.
+  if (chips.length > 0) paragraph.append($createTextNode(' '));
+  const text = $createTextNode(transform(phrase));
+  paragraph.append(text);
+  return text;
+}
+
+/**
+ * Keeps chips grouped at the left as they are added, so the free text after them is always
+ * one contiguous phrase.
+ *
+ * It only rebuilds when the order is actually wrong — a chip sitting after text — which in
+ * practice means just after a chip is inserted mid-line. Reordering on every update would
+ * yank the caret to the end of the line while the user is still typing.
+ */
+function ChipOrderPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        const misordered = editorState.read(() => {
+          const paragraph = $getRoot().getLastChild();
+          if (!$isElementNode(paragraph)) return false;
+          let seenText = false;
+          for (const node of paragraph.getChildren()) {
+            if ($isFilterChipContainerNode(node)) {
+              if (seenText) return true;
+            } else if (node.getTextContent().trim().length > 0) {
+              seenText = true;
+            }
+          }
+          return false;
+        });
+        if (!misordered) return;
+        editor.update(() => {
+          $regroupLine(phrase => phrase)?.selectEnd();
+        });
+      }),
+    [editor],
+  );
+
+  return null;
+}
+
+/**
+ * Imperative "quote the free text, or unquote it" for the exact-match pill.
+ *
+ * The quotes are ordinary characters in the query, exactly as if they had been typed — the
+ * backend reads exactness off them (`isExactMatch` in the Vespa searchService), so the box
+ * and the search run the same string, and deleting one turns exact mode off by itself.
+ *
+ * Only free text is touched. `FilterChipNode` extends `TextNode`, so chips would otherwise
+ * be swept up by `getAllTextNodes()` and quoted along with the query; excluding them is
+ * what keeps `from:Nasim` a filter rather than part of the phrase.
+ */
+function ToggleQuotesPlugin({
+  onToggleQuotesReady,
+}: {
+  onToggleQuotesReady: (toggleQuotes: () => void) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    const toggleQuotes = (): void => {
+      editor.update(() => {
+        let next = '';
+        const text = $regroupLine(phrase => {
+          const quoted = phrase.length >= 2 && phrase.startsWith('"') && phrase.endsWith('"');
+          const bare = quoted ? phrase.slice(1, -1).trim() : phrase;
+          // Off drops the quotes; on adds them, and an empty box gets an empty pair so the
+          // caret has somewhere to sit.
+          next = quoted ? bare : `"${bare}"`;
+          return next;
+        });
+        // Caret inside the quotes when they were just added, after the text otherwise.
+        if (!text) return;
+        if (next.endsWith('"')) text.select(next.length - 1, next.length - 1);
+        else text.selectEnd();
+      });
+    };
+
+    onToggleQuotesReady(toggleQuotes);
+  }, [editor, onToggleQuotesReady]);
 
   return null;
 }
@@ -387,17 +541,17 @@ function OnChangePluginWrapper({
 }: {
   onChange?: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
 }) {
   const extractMentions = (
     node: LexicalNode,
-  ): Array<{ id: string; type: MentionType; prefix?: string; name: string }> => {
-    const mentions: Array<{ id: string; type: MentionType; prefix?: string; name: string }> = [];
+  ): Array<{ id: string; type: ChipType; prefix?: string; name: string }> => {
+    const mentions: Array<{ id: string; type: ChipType; prefix?: string; name: string }> = [];
 
     if ($isFilterChipNode(node)) {
       const mentionData = node.getMentionData();
-      const mention: { id: string; type: MentionType; prefix?: string; name: string } = {
+      const mention: { id: string; type: ChipType; prefix?: string; name: string } = {
         id: mentionData.id,
         type: mentionData.type,
         name: mentionData.name,
@@ -492,9 +646,15 @@ export function LexicalSearchInput({
   onUserSearch,
   onChannelSearch,
   onPrioritySearch,
+  onDateSearch,
+  onBoardSearch,
+  onMentionsSearch,
   availableUsers = [],
   availableChannels = [],
   availablePriorities = [],
+  availableDates = [],
+  availableBoards = [],
+  availableMentionTargets = [],
   enableToTrigger = false,
   className,
   open,
@@ -503,7 +663,9 @@ export function LexicalSearchInput({
   setSelectedMentionIndex,
   onNavigate,
   hasNavigated,
+  onCommitEntityReady,
   onInsertMentionReady,
+  onReplaceTriggerChipsReady,
   onMentionInserted,
   onPasteDetected,
   onManualKeystroke,
@@ -515,6 +677,7 @@ export function LexicalSearchInput({
   disableAutoFocus = false,
   currentUserID,
   hideSearchIcon = false,
+  onToggleQuotesReady,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const showLeadingIcon = !hideSearchIcon && !isMobile;
@@ -601,22 +764,35 @@ export function LexicalSearchInput({
           )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           {onSetTextReady && <SetTextPlugin onSetTextReady={onSetTextReady} />}
+          {onToggleQuotesReady && <ToggleQuotesPlugin onToggleQuotesReady={onToggleQuotesReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <SingleLinePastePlugin />
           <FilterChipPlugin />
+          <ChipOrderPlugin />
+          <EntityChipPlugin
+            {...(onCommitEntityReady ? { onCommitEntityReady } : {})}
+            {...(currentUserID ? { currentUserID } : {})}
+          />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}
             {...(onPrioritySearch ? { onPrioritySearch } : {})}
+            {...(onDateSearch ? { onDateSearch } : {})}
+            {...(onBoardSearch ? { onBoardSearch } : {})}
+            {...(onMentionsSearch ? { onMentionsSearch } : {})}
             availableUsers={availableUsers}
             availableChannels={availableChannels}
             availablePriorities={availablePriorities}
+            availableDates={availableDates}
+            availableBoards={availableBoards}
+            availableMentionTargets={availableMentionTargets}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}
             {...(onNavigate ? { onNavigate } : {})}
             {...(hasNavigated !== undefined ? { hasNavigated } : {})}
             {...(onInsertMentionReady ? { onInsertMentionReady } : {})}
+            {...(onReplaceTriggerChipsReady ? { onReplaceTriggerChipsReady } : {})}
             {...(onMentionInserted ? { onMentionInserted } : {})}
             enableToTrigger={enableToTrigger}
             {...(currentUserID ? { currentUserID } : {})}
