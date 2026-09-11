@@ -47,6 +47,39 @@ async function runTool(def: ToolDefinition, params: unknown): Promise<string> {
 }
 
 describe("subagent-sourced MCP groups", () => {
+  it("matches subagent tool names when the sanitized server name itself contains a double underscore", () => {
+    const serverName = "Juspay Dashboard (Streamable HTTP)";
+    const prefixed = (raw: string) =>
+      `${serverName}__${raw}`.replace(/[^a-zA-Z0-9_\-]/g, "_");
+    const withRaw = (raw: string): ToolDefinition =>
+      ({ ...tool(prefixed(raw)), mcpToolName: raw }) as unknown as ToolDefinition;
+    const group: McpToolGroup = {
+      serverType: "juspay-dashboard-stream",
+      serverName,
+      tools: [withRaw("create_payment_link"), withRaw("list_payment_links_v1")],
+      writeTools: ["create_payment_link"],
+      sourceSubagent: { id: "sub-pl", name: "paymentlinks" },
+    };
+    const specs = [
+      { ...customSubagents[0], tools: { direct: ["create_payment_link", "list_payment_links_v1"] } },
+    ];
+
+    expect(prefixed("create_payment_link")).toContain("__Streamable_HTTP___");
+
+    const { subagentTools } = buildSubagentTools(
+      [group],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      specs as never,
+    );
+
+    expect(subagentTools.map((t) => t.name)).toContain("paymentlinks");
+  });
+
   it("keeps the group out of the parent's direct tools but still builds the subagent", () => {
     const { subagentTools, directTools } = buildSubagentTools(
       [subagentSourcedGroup],

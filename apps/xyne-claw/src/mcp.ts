@@ -340,8 +340,9 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string } = {
         name: safeName,
+        mcpToolName: mcpTool.name,
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }

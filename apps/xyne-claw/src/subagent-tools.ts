@@ -1454,8 +1454,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 /**
  * Extract the original tool name from a prefixed name (e.g. "Xyne_Spaces__spaces-search" → "spaces-search")
  */
-function extractToolName(prefixedName: string): string {
-  const idx = prefixedName.indexOf("__");
+function extractToolName(tool: ToolDefinition | string): string {
+  if (typeof tool !== "string") {
+    const raw = (tool as ToolDefinition & { mcpToolName?: string }).mcpToolName;
+    if (raw) return raw;
+  }
+  const prefixedName = typeof tool === "string" ? tool : tool.name;
+  const idx = prefixedName.lastIndexOf("__");
   return idx >= 0 ? prefixedName.slice(idx + 2) : prefixedName;
 }
 
@@ -1503,7 +1508,7 @@ function resolveCustomSubagentTools(
   if (directNames.size > 0) {
     for (const group of groups) {
       for (const t of group.tools) {
-        const name = extractToolName(t.name);
+        const name = extractToolName(t);
         // Include write tools too. Their ToolDefinition still queues a signed
         // pendingAction via the parent run's MCP wrapper; it does not execute
         // until the human approval card is approved in claw-auth.
@@ -1578,7 +1583,7 @@ export function buildSubagentTools(
 
     if (def) {
       const writeSet = new Set(group.writeTools.map(String));
-      const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t.name)));
+      const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t)));
 
       if (group.tools.length > 0) {
         const skills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
