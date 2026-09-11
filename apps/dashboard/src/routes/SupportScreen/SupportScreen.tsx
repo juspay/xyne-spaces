@@ -161,7 +161,7 @@ import { PriorityPicker } from '../../components/Tickets/TicketListView/Priority
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
 import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
-import { getOzonetelConfig } from '../../services/clients/telephonyApi';
+import { getOzonetelConfig, getOzonetelToolbar } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
@@ -211,7 +211,7 @@ import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -3517,9 +3517,7 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </div>
                         {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                        {isSelectedChannelJoined && selectedChannelFull && (
-                          <CloudAgentDock buttonBehavior='floating' />
-                        )}
+                        {isSelectedChannelJoined && selectedChannelFull && <CloudAgentDock />}
                         {isSelectedChannelJoined &&
                           selectedChannelId &&
                           !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
@@ -4774,6 +4772,11 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
+  const { data: ozonetelToolbarData } = useQuery({
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
+  });
+  const ozonetelToolbarUrl = ozonetelToolbarData?.toolbarUrl ?? null;
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -4926,6 +4929,13 @@ export const SupportTicketDetail = ({
                         boardId={boardId}
                       />
                     </div>
+                  )}
+
+                  {channel?.type === ChannelType.CALL && ozonetelToolbarUrl && (
+                    <>
+                      <div className='w-px h-4 bg-border' />
+                      <CloudAgentDock />
+                    </>
                   )}
 
                   {/* ··· overflow menu */}
@@ -5126,12 +5136,12 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && (
+                      {channel && channel.type !== ChannelType.CALL && (
                         <DropdownMenuItem
                           onSelect={e => e.preventDefault()}
                           className='p-0 focus:bg-transparent'
                         >
-                          <CloudAgentDock buttonBehavior='floating' />
+                          <CloudAgentDock />
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />
