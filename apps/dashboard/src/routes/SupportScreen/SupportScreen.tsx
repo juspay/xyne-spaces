@@ -4510,7 +4510,7 @@ export const SupportTicketDetail = ({
       if (!channelId) return [];
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       return (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4561,7 +4561,7 @@ export const SupportTicketDetail = ({
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
