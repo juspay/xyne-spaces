@@ -4,7 +4,7 @@ import {
   addReplyToData,
   EntityUserAccess,
   parseRepliesMd,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeRepliesMd,
   ShareableEntityType,
   type GrantableEntityUserAccess,
@@ -315,7 +315,7 @@ export class RecordingSharingService {
     };
 
     // Store the initial message snapshot for conversation lists.
-    const initialMessageMd = serializeInitialMessageMd({
+    const initialMessageMd = buildInitialMessageMd({
       messageId,
       conversationId,
       workspaceId: actor.workspaceId,
@@ -328,7 +328,7 @@ export class RecordingSharingService {
       showInChannel: false,
       visibleTo: null,
       createdAt: now.getTime(),
-      metadata: JSON.stringify(metadata),
+      metadata,
       nudgeCount: null,
       isSent: true,
       reactions_md: null,
@@ -431,7 +431,7 @@ export class RecordingSharingService {
       },
     });
     // Update the conversation preview tombstone.
-    const tombstoneMd = serializeInitialMessageMd({
+    const tombstoneMd = buildInitialMessageMd({
       messageId: post.messageId,
       conversationId: post.conversationId,
       workspaceId: message.workspaceId,

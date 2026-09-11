@@ -73,7 +73,7 @@ import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwarde
 import { getNudgeActionBehavior } from '../nudges.js';
 import {
   parseTicketMd,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '../utils/activityMetadataParser.js';
 import {
@@ -212,42 +212,6 @@ export function isAttachmentUploadInFlight(attachment: {
   );
 }
 
-/** Build initial_message_md from message data. Single helper for all conversation creation sites. */
-function buildInitialMessageMd(msg: {
-  messageId: string;
-  conversationId: string;
-  workspaceId?: string | null;
-  senderId: string;
-  content: string;
-  msgType: MessageTypeEnum;
-  hasAttachment?: boolean;
-  showInChannel?: boolean;
-  visibleTo?: string | null;
-  createdAt: number;
-  metadata?: unknown;
-  childConversationId?: string | null;
-}): string | null {
-  return serializeInitialMessageMd({
-    messageId: msg.messageId,
-    conversationId: msg.conversationId,
-    workspaceId: msg.workspaceId ?? null,
-    senderId: msg.senderId,
-    content: msg.content,
-    msgType: msg.msgType,
-    hasAttachment: msg.hasAttachment ?? false,
-    edited: false,
-    isDeleted: false,
-    showInChannel: msg.showInChannel ?? false,
-    visibleTo: msg.visibleTo ?? null,
-    createdAt: msg.createdAt,
-    metadata: msg.metadata ? JSON.stringify(msg.metadata) : null,
-    nudgeCount: null,
-    isSent: false,
-    reactions_md: null,
-    link_preview_md: null,
-    childConversationId: msg.childConversationId ?? null,
-  });
-}
 
 /** Build parent_message_md from an existing message row. */
 function buildParentMessageMd(msg: {
