@@ -63,6 +63,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Server
   livekit:
@@ -88,6 +89,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Egress Service (audio recording)
   livekit-egress:
@@ -127,6 +129,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # MinIO (local S3-compatible storage for testing)
   minio:
@@ -146,6 +149,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # Zero Cache Server
   zero-cache:
@@ -193,6 +197,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 60s
 
   # Python Transcription Agent
   transcription-agent:
