@@ -78,10 +78,11 @@ export const SDLC_GENERIC_SPACES_WRITE_TOOLS = [
   "spaces-update-ticket",
   "spaces-schedule-call",
   "spaces-create-canvas",
-  "spaces-edit-canvas",
   "user-send-message",
   "spaces-upload-to-kb",
 ] as const;
+
+export const SDLC_SPACES_REVIEWED_WRITE_TOOLS = ["spaces-edit-canvas"] as const;
 
 export const SDLC_RETIRED_TOOL_NAMES = [
   "spaces-sdlc-create-artifact",
@@ -126,6 +127,9 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   const toolPermissions: Record<string, "allow" | "ask"> = {};
   for (const name of SDLC_GENERIC_SPACES_WRITE_TOOLS) {
     if (direct.includes(name)) toolPermissions[`xyne-spaces__${name}`] = "ask";
+  }
+  for (const name of SDLC_SPACES_REVIEWED_WRITE_TOOLS) {
+    if (direct.includes(name)) toolPermissions[`xyne-spaces__${name}`] = "allow";
   }
   for (const tool of SDLC_TOOL_CAPABILITIES) {
     if (tool.transport === "direct") toolPermissions[`xyne-spaces__${tool.name}`] = "allow";
