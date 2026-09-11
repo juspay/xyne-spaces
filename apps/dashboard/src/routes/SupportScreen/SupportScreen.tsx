@@ -4928,6 +4928,13 @@ export const SupportTicketDetail = ({
                     </div>
                   )}
 
+                  {channel?.type === ChannelType.CALL && (
+                    <>
+                      <div className='w-px h-4 bg-border' />
+                      <CloudAgentDock buttonBehavior='floating' />
+                    </>
+                  )}
+
                   {/* ··· overflow menu */}
                   <DropdownMenu
                     open={moreMenuOpen}
@@ -5126,7 +5133,7 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && (
+                      {channel && channel.type !== ChannelType.CALL && (
                         <DropdownMenuItem
                           onSelect={e => e.preventDefault()}
                           className='p-0 focus:bg-transparent'
