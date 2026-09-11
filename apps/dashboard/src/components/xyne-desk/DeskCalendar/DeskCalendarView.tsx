@@ -22,9 +22,9 @@ import { queries } from '../../../zero/queries';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import type { DynamicFieldQueryFilter } from '../../../utils/board/dynamicFieldFilters';
 
-type SupportTicketsArgs = Parameters<typeof queries.supportTicketsPageV3>[0];
+type SupportTicketsArgs = Parameters<typeof queries.supportTicketsPageV4>[0];
 
-/** Row cap for one rendered span — supportTicketsPageV3's `limit` is required. */
+/** Row cap for one rendered span — supportTicketsPageV4's `limit` is required. */
 const RANGE_LIMIT = 50000;
 
 /** Mounted keyed by its query args so a span change never serves a stale span's cached rows. */
@@ -43,7 +43,7 @@ const RangeCalendar = ({
   onTicketClick: (ticket: Ticket) => void;
   onTicketsLoaded?: (tickets: Ticket[]) => void;
 }): ReactElement => {
-  const [rows, details] = useFallbackHydratedQuery(queries.supportTicketsPageV3(args), { enabled });
+  const [rows, details] = useFallbackHydratedQuery(queries.supportTicketsPageV4(args), { enabled });
   const tickets = useMemo(
     () => (details?.type === 'complete' ? ((rows ?? []) as unknown as Ticket[]) : []),
     [rows, details?.type],
@@ -89,7 +89,7 @@ export const DeskCalendarView = ({
   onTicketClick,
   onTicketsLoaded,
 }: DeskCalendarViewProps): ReactElement => {
-  // supportTicketsPageV3's schema has no `conversationIdWhitelist` field — it's
+  // supportTicketsPageV4's schema has no `conversationIdWhitelist` field — it's
   // `conversationIds`. Every other caller (TicketListView, SupportScreen's own nav
   // queries) renames it before spreading; skipping that here silently drops the
   // "AI Tags" filter for this view since the zod schema just strips the unknown key.
