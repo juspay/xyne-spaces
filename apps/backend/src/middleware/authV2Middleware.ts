@@ -8,6 +8,7 @@ import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
+import { accountDeactivationService } from '../services/accountDeactivationService';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
@@ -217,6 +218,10 @@ class AuthV2Middleware {
           email: session.user.email,
         });
         if (revoked) {
+          await accountDeactivationService.handleDeactivatedUser({
+            userId: session.user.id,
+            email: session.user.email,
+          });
           return false;
         }
       } else if (session.user.authProvider === AuthProvider.MICROSOFT) {
@@ -256,11 +261,19 @@ class AuthV2Middleware {
                 logger.info(`[Auto-Refresh] Microsoft token refreshed for user ${session.user.email}`);
               } else {
                 logger.warn(`[Auto-Refresh] Microsoft token refresh failed for ${session.user.email}. User may be disabled in Azure AD.`);
+                await accountDeactivationService.handleDeactivatedUser({
+                  userId: session.user.id,
+                  email: session.user.email,
+                });
                 return false;
               }
             } else {
               // 403 or other error — user likely disabled/deleted in Azure AD
               logger.warn(`[Auto-Refresh] Microsoft Graph returned ${graphResponse.status} for ${session.user.email}. User may be disabled in Azure AD.`);
+              await accountDeactivationService.handleDeactivatedUser({
+                userId: session.user.id,
+                email: session.user.email,
+              });
               return false;
             }
           } catch (err) {
