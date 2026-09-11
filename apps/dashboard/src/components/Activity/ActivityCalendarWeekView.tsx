@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import {
   addDays,
   endOfWeek,
-  format,
   isSameWeek,
   isWithinInterval,
   startOfDay,
@@ -21,16 +20,13 @@ import { useCallHistory } from '../../routes/CallHistoryScreen/useCallHistory';
 import CalendarWeekView from '../../routes/CallHistoryScreen/CalendarWeekView';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { DeleteCallModal } from '../Call/DeleteCallModal';
-import { formatWeekRangeLabel } from '../../utils/dateUtils';
+import { dateToIso, isoToDate, formatWeekRangeLabel } from '../../utils/dateUtils';
 import {
   getNearPeriodPhrase,
   getPeriodCallCountLabel,
   getXyneCalendarChannelPresentation,
 } from '../Chat/XyneCalendarSidebar/xyneCalendarSidebar.utils';
 import type { Call } from '../../routes/CallHistoryScreen/callHistoryItem.utils';
-
-const dateToIso = (date: Date): string => format(date, 'yyyy-MM-dd');
-const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
 
 /**
  * Renders a call activity's week directly in the Activity center pane, as a real
@@ -56,6 +52,8 @@ export const ActivityCalendarWeekView = (): ReactElement => {
   const {
     calls,
     calendarScheduledCalls,
+    isLoading,
+    isScheduledCallsLoading,
     handleCallRowClick,
     handleGotoTranscript,
     handleDownloadTranscript,
@@ -129,6 +127,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
       endedCount: weekCalls.filter(call => call.status === CallStatus.ENDED).length,
     },
     getNearPeriodPhrase('week', currentWeekStart, new Date()),
+    isLoading || isScheduledCallsLoading,
   );
 
   return (

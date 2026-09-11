@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type ReactElement, type ReactNode, type RefObject } from 'react';
 import {
   ResizableGroup,
   Panel,
@@ -34,10 +34,16 @@ export const AppSidebarHost = ({
   mainPanelRef,
 }: AppSidebarHostProps): ReactElement => {
   const activePanel = panels.find(panel => panel.isActive) ?? null;
+  const slotPanelId = activePanel ? `app-root-slot-${activePanel.id}` : null;
   const slotPanelRef = useRef<PanelImperativeHandle>(null);
+  const forwardedPanelRef = useRef<RefObject<PanelImperativeHandle | null> | null>(null);
 
-  // Forward the shared slot ref to a panel that requested its own handle.
-  useEffect(() => {
+  // When the active panel changes, we need to update the forwarded ref to point to the new panel's ref, and clear the old one.
+  useLayoutEffect(() => {
+    if (forwardedPanelRef.current && forwardedPanelRef.current !== activePanel?.panelRef) {
+      forwardedPanelRef.current.current = null;
+    }
+    forwardedPanelRef.current = activePanel?.panelRef ?? null;
     if (activePanel?.panelRef) {
       activePanel.panelRef.current = slotPanelRef.current;
     }
@@ -52,7 +58,7 @@ export const AppSidebarHost = ({
         orientation='horizontal'
         className='flex-1 no-scrollbar overflow-auto'
         autoSaveId='app-root-browser'
-        panelIds={activePanel ? ['app-root-left', 'app-root-slot'] : ['app-root-left']}
+        panelIds={slotPanelId ? ['app-root-left', slotPanelId] : ['app-root-left']}
       >
         <Panel
           id='app-root-left'
@@ -61,16 +67,13 @@ export const AppSidebarHost = ({
         >
           {children}
         </Panel>
-        {activePanel && (
+        {activePanel && slotPanelId && (
           <>
-            <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-              <div
-                id='panel-resize-divider'
-                className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-              ></div>
+            <Separator className='w-1 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+              <div className='w-0.5 h-full bg-sidebar-divider group-hover:bg-primary group-active:bg-primary transition-colors duration-200 rounded-full'></div>
             </Separator>
             <Panel
-              id='app-root-slot'
+              id={slotPanelId}
               panelRef={slotPanelRef}
               defaultSize={`${activePanel.size.default}%`}
               minSize={`${activePanel.size.min}%`}

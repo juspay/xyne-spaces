@@ -52,14 +52,18 @@ import {
   isScheduledCallJoinable,
 } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import {
+  ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE,
+  COMPACT_METADATA_MIN_WIDTH_PERCENTAGE,
   computeEventPositions,
   createSlotClickHandler,
+  formatHourLabel,
   getCalendarCreateSlot,
   getCallPillVariant,
   getCallsOverlappingDay,
   hasCallEnded,
   isSameDay,
   minutesFromTopPx,
+  topPxForMinutes,
 } from '../../../routes/CallHistoryScreen/CalenderViewUtils';
 import { useDragCreate } from '../../../routes/CallHistoryScreen/useDragCreate';
 import { XyneCalendarCallPill } from './XyneCalendarCallPill';
@@ -69,7 +73,7 @@ import CalendarMonthView from '../../../routes/CallHistoryScreen/CalenderMonthVi
 import { GoogleCalendarIcon, MicrosoftIcon } from '../../../routes/CallHistoryScreen/CalendarIcons';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { formatWeekRangeLabel } from '../../../utils/dateUtils';
+import { dateToIso, isoToDate, formatWeekRangeLabel } from '../../../utils/dateUtils';
 import { DeleteCallModal } from '../../Call/DeleteCallModal';
 import { roomActor } from '../../../machines/roomMachine';
 import { useCalendarSync } from '../../../hooks/useCalendarSync';
@@ -79,15 +83,8 @@ const TIMELINE_HOURS = Array.from({ length: 25 }, (_, hour) => hour);
 const TIMELINE_DAY_MINUTES = 24 * 60;
 const MINIMUM_CALL_PILL_HEIGHT = 20;
 const CALL_PILL_VERTICAL_INSET = 2;
-const ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE = 75;
-const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
 const CREATE_SLOT_DURATION_MINUTES = 30;
 const CREATE_SLOT_SNAP_MINUTES = 15;
-
-// Bare 'yyyy-MM-dd' is parsed as UTC per spec; appending a local time-of-day
-// avoids a day shift in negative-UTC-offset timezones.
-const dateToIso = (date: Date): string => format(date, 'yyyy-MM-dd');
-const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
 
 const XyneCalendarSidebarComponent = (): ReactElement => {
   const { user } = useAuth();
@@ -95,10 +92,6 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
     useCalendarSync(user?.id);
   const selectedDateIso = useSelector(xyneCalendarActor, state => state.context.selectedDate);
   const selectedCallId = useSelector(xyneCalendarActor, state => state.context.selectedCallId);
-  const selectedCallFallback = useSelector(
-    xyneCalendarActor,
-    state => state.context.selectedCallFallback,
-  );
   const viewMode = useSelector(xyneCalendarActor, state => state.context.viewMode);
   const selectedDate = useMemo(() => isoToDate(selectedDateIso), [selectedDateIso]);
 
@@ -178,7 +171,6 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
       <XyneCalendarSidebarTimeline
         selectedDate={selectedDate}
         selectedCallId={selectedCallId}
-        selectedCallFallback={selectedCallFallback}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
         onSelectCall={handleSelectCall}
@@ -241,6 +233,7 @@ interface XyneCalendarSidebarHeaderProps {
   liveCount: number;
   scheduledCount: number;
   endedCount: number;
+  isLoading: boolean;
 }
 
 const VIEW_MODE_OPTIONS: ReadonlyArray<{ mode: CalendarViewMode; label: string }> = [
@@ -263,6 +256,7 @@ const XyneCalendarSidebarHeader = memo(
     liveCount,
     scheduledCount,
     endedCount,
+    isLoading,
   }: XyneCalendarSidebarHeaderProps): ReactElement => {
     const handleDateSelect = (date: Date | null): void => {
       if (!date) return;
@@ -289,6 +283,7 @@ const XyneCalendarSidebarHeader = memo(
     const callCountLabel = getPeriodCallCountLabel(
       { callCount, liveCount, scheduledCount, endedCount },
       nearPeriodPhrase,
+      isLoading,
     );
 
     return (
@@ -406,7 +401,6 @@ XyneCalendarSidebarHeader.displayName = 'XyneCalendarSidebarHeader';
 interface XyneCalendarSidebarTimelineProps {
   selectedDate: Date;
   selectedCallId: string | null;
-  selectedCallFallback: Call | null;
   viewMode: CalendarViewMode;
   onViewModeChange: (mode: CalendarViewMode) => void;
   onSelectCall: (callId: string) => void;
@@ -417,13 +411,8 @@ interface XyneCalendarSidebarTimelineProps {
   onToday: () => void;
 }
 
-const formatTimelineHour = (hour: number): string => {
-  if (hour === 0 || hour === 24) return '12 AM';
-  if (hour === 12) return '12 PM';
-  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
-};
-
-const getTimelineOffset = (minutes: number): number => (minutes * TIMELINE_HOUR_HEIGHT) / 60;
+const getTimelineOffset = (minutes: number): number =>
+  topPxForMinutes(minutes, TIMELINE_HOUR_HEIGHT);
 
 const getMinutesSinceMidnight = (date: Date): number =>
   date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
@@ -495,7 +484,6 @@ const XyneCalendarSidebarTimeline = memo(
   ({
     selectedDate,
     selectedCallId,
-    selectedCallFallback,
     viewMode,
     onViewModeChange,
     onSelectCall,
@@ -684,6 +672,14 @@ const XyneCalendarSidebarTimeline = memo(
       );
     }, [calendarScheduledCalls, calls, selectedDate]);
 
+    const handleJoinPill = useCallback(
+      (callId: string): void => {
+        const call = dailyCalls.find(candidate => candidate.id === callId);
+        if (call) handleCallRowClick(call);
+      },
+      [dailyCalls, handleCallRowClick],
+    );
+
     // Header count badge — Day reuses dailyCalls; Week/Month filter the full pool
     // (dailyCalls excludes them, being scoped + startsAt-required for the timeline grid).
     const viewPeriodCalls = useMemo(() => {
@@ -767,15 +763,15 @@ const XyneCalendarSidebarTimeline = memo(
     }, [callPositions, isCallDetailOpen, isLoading, isScheduledCallsLoading, selectedDate]);
 
     // Not `dailyCalls`: that list requires `startsAt` (getCallsOverlappingDay) and only
-    // covers SCHEDULED/ended-history statuses — selectedCallFallback covers what neither finds.
+    // covers SCHEDULED/ended-history statuses.
     const queriedSelectedCall = useMemo(() => {
       if (!selectedCallId) return null;
       return (
         calls?.find(call => call.id === selectedCallId) ??
         calendarScheduledCalls?.find(call => call.id === selectedCallId) ??
-        (selectedCallFallback?.id === selectedCallId ? selectedCallFallback : null)
+        null
       );
-    }, [calls, calendarScheduledCalls, selectedCallId, selectedCallFallback]);
+    }, [calls, calendarScheduledCalls, selectedCallId]);
 
     useEffect(() => {
       if (queriedSelectedCall) selectedCallSnapshotRef.current = queriedSelectedCall;
@@ -821,6 +817,7 @@ const XyneCalendarSidebarTimeline = memo(
         liveCount={liveCount}
         scheduledCount={scheduledCount}
         endedCount={endedCount}
+        isLoading={isLoading || isScheduledCallsLoading}
       />
     );
 
@@ -904,7 +901,7 @@ const XyneCalendarSidebarTimeline = memo(
                   style={{ top: hour * TIMELINE_HOUR_HEIGHT }}
                 >
                   <span className='w-10 shrink-0 text-right text-xs font-mono leading-none text-muted-foreground/80'>
-                    {formatTimelineHour(hour)}
+                    {formatHourLabel(hour)}
                   </span>
                   <span className='h-px flex-1 bg-muted-foreground/15 rounded' aria-hidden='true' />
                 </div>
@@ -945,7 +942,7 @@ const XyneCalendarSidebarTimeline = memo(
                   <div
                     className={
                       dragCreatePreview
-                        ? 'pointer-events-none absolute left-1 right-1  overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
+                        ? 'pointer-events-none absolute left-1 right-1 overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
                         : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-sm'
                     }
                     style={{
@@ -1026,13 +1023,14 @@ const XyneCalendarSidebarTimeline = memo(
                       }}
                     >
                       <XyneCalendarCallPill
+                        callId={call.id}
                         title={call.title ?? 'Call'}
                         variant={variant}
                         startsAt={call.startsAt}
                         endsAt={call.endsAt}
                         {...(channel && { channel })}
-                        onSelect={() => onSelectCall(call.id)}
-                        onJoin={() => handleCallRowClick(call)}
+                        onSelect={onSelectCall}
+                        onJoin={handleJoinPill}
                         joinable={joinable}
                         showJoinByDefault={
                           position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE

@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 import { setup, createActor, assign } from 'xstate';
 import { logger, Event as LogEvent } from '../utils/logger';
-import type { Call } from '../routes/CallHistoryScreen/callHistoryItem.utils';
+import { dateToIso } from '../utils/dateUtils';
 import type { PanelImperativeHandle } from '../components/ui/Resizable/Resizable';
 
 export let globalXyneCalendarPanelRef: RefObject<PanelImperativeHandle | null> = {
@@ -21,8 +21,6 @@ export interface XyneCalendarContext {
   /** ISO day string (yyyy-MM-dd) — the day the timeline is showing. */
   selectedDate: string;
   selectedCallId: string | null;
-  /** Caller-provided call snapshot, used when the id isn't in either query pool (e.g. gone ACTIVE/CANCELLED). */
-  selectedCallFallback: Call | null;
   viewMode: CalendarViewMode;
 }
 
@@ -30,10 +28,10 @@ export type XyneCalendarEvent =
   | { type: 'OPEN'; date?: string }
   | { type: 'CLOSE' }
   | { type: 'SELECT_DATE'; date: string }
-  | { type: 'SELECT_CALL'; callId: string | null; callFallback?: Call }
+  | { type: 'SELECT_CALL'; callId: string | null }
   | { type: 'SET_VIEW_MODE'; mode: CalendarViewMode };
 
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
+const todayIso = (): string => dateToIso(new Date());
 
 // Own IndexedDB (not xyneAIMachine's) so a schema bump on one doesn't touch the other.
 const DB_NAME = 'xyne-calendar-state';
@@ -50,16 +48,24 @@ interface PersistedCalendarState {
   savedAt: number;
 }
 
+// Cached so every save/load reuses one connection instead of opening a fresh one each
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 const initDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
-    request.onerror = () => reject(new Error(request.error?.message || 'Failed to open IndexedDB'));
+    request.onerror = () => {
+      dbPromise = null;
+      reject(new Error(request.error?.message || 'Failed to open IndexedDB'));
+    };
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = event => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
     };
   });
+  return dbPromise;
 };
 
 const savePersistedState = async (
@@ -138,7 +144,6 @@ export const xyneCalendarMachine = setup({
         xyneCalendarState: 'open' as XyneCalendarState,
         selectedDate: date,
         selectedCallId: null,
-        selectedCallFallback: null,
       };
     }),
     setClosed: assign(({ context }) => {
@@ -152,7 +157,7 @@ export const xyneCalendarMachine = setup({
     }),
     setSelectedCall: assign(({ event }) => {
       if (event.type !== 'SELECT_CALL') return {};
-      return { selectedCallId: event.callId, selectedCallFallback: event.callFallback ?? null };
+      return { selectedCallId: event.callId };
     }),
     setViewMode: assign(({ event, context }) => {
       if (event.type !== 'SET_VIEW_MODE') return {};
@@ -165,7 +170,6 @@ export const xyneCalendarMachine = setup({
     xyneCalendarState: 'closed',
     selectedDate: todayIso(),
     selectedCallId: null,
-    selectedCallFallback: null,
     viewMode: 'day',
   }),
   id: 'xyneCalendarMachine',

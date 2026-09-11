@@ -387,10 +387,14 @@ export const formatDatePill = (date: Date | number): string => {
 
 /**
  * Format a Sunday-start week as a range label for a week-view date picker.
- * - "Sep 1 - 7, 2026" (same month)
- * - "Sep 28 - Oct 4, 2026" (crosses month)
- * - "Dec 29, 2025 - Jan 4, 2026" (crosses year)
+ * - "Sep 6 - 12, 2026" (same month — week of Sunday, Sep 6 2026)
+ * - "Aug 30 - Sep 5, 2026" (crosses month — week of Sunday, Aug 30 2026)
+ * - "Dec 28, 2025 - Jan 3, 2026" (crosses year — week of Sunday, Dec 28 2025)
  */
+// Bare 'yyyy-MM-dd' is parsed as UTC per spec;
+export const dateToIso = (date: Date): string => format(date, 'yyyy-MM-dd');
+export const isoToDate = (iso: string): Date => new Date(`${iso}T00:00:00`);
+
 export const formatWeekRangeLabel = (date: Date): string => {
   const weekStart = startOfWeek(date, { weekStartsOn: 0 });
   const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
