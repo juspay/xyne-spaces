@@ -7,7 +7,12 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile
 
 # pnpm v10 blocks @getgauge/cli's install script; run it explicitly to fetch the gauge binary.
-RUN cd node_modules/@getgauge/cli && node src/index.js
+RUN cd node_modules/@getgauge/cli && \
+    version=$(node -pe "require('./package.json').version") && \
+    url="https://github.com/getgauge/gauge/releases/download/v${version}/gauge-${version}-linux.x86_64.zip" && \
+    curl -fsSL -o /tmp/gauge.zip "$url" && \
+    node -e "const AdmZip=require('adm-zip'); new AdmZip('/tmp/gauge.zip').extractAllTo('bin', true, true)" && \
+    rm /tmp/gauge.zip
 
 COPY . .
 
