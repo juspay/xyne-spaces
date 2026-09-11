@@ -26,7 +26,7 @@ export interface FlowNodeData {
   item: FlowItem;
   selected: boolean;
   readOnly: boolean;
-  catalogItem?: StepCatalogItem | TriggerCatalogItem;
+  catalogItem?: StepCatalogItem | TriggerCatalogItem | undefined;
   onSelect: (id: string) => void;
 }
 
