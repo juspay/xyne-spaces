@@ -154,8 +154,20 @@ jobs:
           REPORT_HTML=$(find tools/xyne-automation/reports -type f -path '*/html-report/index.html' -printf '%T@ %p\n' \
             | sort -n | tail -n1 | cut -d' ' -f2-)
 
-          if [ -z "$REPORT_HTML" ]; then
-            echo "::error::No html-report/index.html found under tools/xyne-automation/reports"
+          DOCKER_LOGS_DIR=$(find tools/xyne-automation/reports -maxdepth 2 -type d -name docker-logs -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+          UPLOAD_ARGS=()
+          if [ -n "$DOCKER_LOGS_DIR" ]; then
+            for log in "$DOCKER_LOGS_DIR"/*.log; do
+              [ -e "$log" ] && UPLOAD_ARGS+=(-F "files=@${log};type=text/plain")
+            done
+          fi
+          if [ -n "$REPORT_HTML" ]; then
+            UPLOAD_ARGS+=(-F "files=@${REPORT_HTML};type=text/html")
+          fi
+
+          if [ ${#UPLOAD_ARGS[@]} -eq 0 ]; then
+            echo "::error::Nothing to push — no html-report and no docker-logs found"
             exit 1
           fi
 
@@ -163,7 +175,7 @@ jobs:
             -H "Authorization: Bearer $JWT" \
             -F "channelId=$CHANNELID" \
             -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
-            -F "files=@${REPORT_HTML};type=text/html"
+            "${UPLOAD_ARGS[@]}"
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
