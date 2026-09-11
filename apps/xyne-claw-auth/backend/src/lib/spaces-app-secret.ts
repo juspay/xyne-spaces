@@ -23,7 +23,7 @@
  * 2. DB path (`backfillSigningSecretFromSpacesDb`) — reads
  *    `installed_apps.signingSecret` straight from the Spaces DB via the
  *    existing SPACES_DB_URL read-only connection (same as user-session
- *    reads), decrypts with SPACES_ENCRYPTION_KEY, re-encrypts with
+ *    reads), decrypts with the original key or optional key ring, re-encrypts with
  *    claw-auth's own key. No per-user ACL — claw-auth's DB access is the
  *    trust boundary. Used by the temporary admin backfill endpoint for OLD
  *    agents created by other users. Delete that route once backfill is done.
@@ -36,6 +36,7 @@ import { errMsg } from "./errors.js";
 import { encrypt, decryptSpacesCbc } from "../crypto.js";
 import { prisma } from "../db.js";
 import { getInstalledAppSigningSecret } from "./spaces-db.js";
+import { loadSpacesEncryptionRuntimeConfig } from "../spaces-encryption-key-ring-config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces-app-secret");
@@ -47,48 +48,190 @@ function packGcm(plaintext: string): string {
 
 /**
  * DB-path backfill — reads the CBC-encrypted signing secret straight from
- * the Spaces DB, decrypts with SPACES_ENCRYPTION_KEY, re-encrypts with
+ * the Spaces DB, decrypts with the original key or optional key ring, re-encrypts with
  * claw-auth's GCM key, persists to agents.signingSecret. Bypasses the
  * per-user ACL the API path is subject to.
  *
  * Returns true on success, false on any failure (logged). Requires
- * SPACES_ENCRYPTION_KEY to be set AND SPACES_DB_URL configured with SELECT
+ * a usable Spaces encryption reader AND SPACES_DB_URL configured with SELECT
  * on installed_apps.
  */
-export async function backfillSigningSecretFromSpacesDb(args: {
-  agentId: string;
-  spacesAppId: string;
-}): Promise<boolean> {
-  const { agentId, spacesAppId } = args;
-  if (CONFIG.spacesEncryptionKey.length === 0) {
-    log.warn(
-      `[spaces-app-secret] SPACES_ENCRYPTION_KEY unset — cannot decrypt Spaces DB blob for agentId=${agentId}. Set it to xyne-spaces' ENCRYPTION_KEY value.`,
-    );
-    return false;
-  }
-  const blob = await getInstalledAppSigningSecret(spacesAppId);
-  if (!blob) {
-    log.warn(`[spaces-app-secret] no installed_apps row for spacesAppId=${spacesAppId} (agentId=${agentId})`);
-    return false;
-  }
-  try {
-    const plaintext = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
-    if (!plaintext) {
-      log.warn(`[spaces-app-secret] decrypt produced empty secret for agentId=${agentId}`);
-      return false;
+export type SigningSecretBackfillResult =
+  | {
+      ok: true;
+      action: "validated" | "updated";
     }
-    await prisma.agent.update({
-      where: { id: agentId },
-      data: { signingSecret: packGcm(plaintext) },
-    });
-    log.info(`[spaces-app-secret] stored signing secret for agentId=${agentId} (db path)`);
-    return true;
-  } catch (err) {
+  | {
+      ok: false;
+      reason:
+        | "configuration_unavailable"
+        | "row_missing"
+        | "empty_secret"
+        | "read_failed"
+        | "decrypt_failed"
+        | "encrypt_failed"
+        | "write_failed";
+    };
+
+type BackfillStage =
+  | "read"
+  | "decrypt"
+  | "encrypt"
+  | "write";
+
+const failureReasonForStage = {
+  read: "read_failed",
+  decrypt: "decrypt_failed",
+  encrypt: "encrypt_failed",
+  write: "write_failed",
+} as const;
+
+/**
+ * Read, decrypt, and re-encrypt one signing secret.
+ *
+ * With dryRun enabled, all cryptographic operations run but
+ * the agents table is not updated.
+ */
+export async function backfillSigningSecretFromSpacesDbDetailed(
+  args: {
+    agentId: string;
+    spacesAppId: string;
+    dryRun: boolean;
+  },
+): Promise<SigningSecretBackfillResult> {
+  const {
+    agentId,
+    spacesAppId,
+    dryRun,
+  } = args;
+
+  const spacesEncryptionConfig =
+    loadSpacesEncryptionRuntimeConfig();
+
+  const legacyKeyAvailable =
+    CONFIG.spacesEncryptionKey.length === 32;
+
+  if (
+    !legacyKeyAvailable &&
+    spacesEncryptionConfig.mode === "legacy"
+  ) {
     log.warn(
-      `[spaces-app-secret] db-path backfill failed for agentId=${agentId}: ${errMsg(err)}`,
+      `[spaces-app-secret] no usable Spaces encryption configuration for agentId=${agentId}`,
     );
-    return false;
+
+    return {
+      ok: false,
+      reason: "configuration_unavailable",
+    };
   }
+
+  let stage: BackfillStage = "read";
+
+  try {
+    const blob =
+      await getInstalledAppSigningSecret(
+        spacesAppId,
+      );
+
+    if (!blob) {
+      log.warn(
+        `[spaces-app-secret] no installed_apps row for spacesAppId=${spacesAppId} (agentId=${agentId})`,
+      );
+
+      return {
+        ok: false,
+        reason: "row_missing",
+      };
+    }
+
+    stage = "decrypt";
+
+    const plaintext = decryptSpacesCbc(
+      blob,
+      CONFIG.spacesEncryptionKey,
+      dryRun
+        ? "admin-backfill-signing-secrets-dry-run"
+        : "admin-backfill-signing-secrets-write",
+    );
+
+    if (!plaintext) {
+      log.warn(
+        `[spaces-app-secret] decrypt produced empty secret for agentId=${agentId}`,
+      );
+
+      return {
+        ok: false,
+        reason: "empty_secret",
+      };
+    }
+
+    stage = "encrypt";
+
+    const packedSecret = packGcm(plaintext);
+
+    if (dryRun) {
+      log.info(
+        `[spaces-app-secret] validated signing secret for agentId=${agentId} (dry run)`,
+      );
+
+      return {
+        ok: true,
+        action: "validated",
+      };
+    }
+
+    stage = "write";
+
+    await prisma.agent.update({
+      where: {
+        id: agentId,
+      },
+      data: {
+        signingSecret: packedSecret,
+      },
+    });
+
+    log.info(
+      `[spaces-app-secret] stored signing secret for agentId=${agentId} (db path)`,
+    );
+
+    return {
+      ok: true,
+      action: "updated",
+    };
+  } catch (error) {
+    const errorType =
+      error instanceof Error
+        ? error.name
+        : "NonError";
+
+    log.warn(
+      `[spaces-app-secret] backfill failed for agentId=${agentId} stage=${stage} errorType=${errorType}`,
+    );
+
+    return {
+      ok: false,
+      reason: failureReasonForStage[stage],
+    };
+  }
+}
+
+/**
+ * Compatibility wrapper for existing callers.
+ */
+export async function backfillSigningSecretFromSpacesDb(
+  args: {
+    agentId: string;
+    spacesAppId: string;
+  },
+): Promise<boolean> {
+  const result =
+    await backfillSigningSecretFromSpacesDbDetailed({
+      ...args,
+      dryRun: false,
+    });
+
+  return result.ok;
 }
 
 /**
