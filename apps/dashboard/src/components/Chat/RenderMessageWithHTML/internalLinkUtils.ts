@@ -12,6 +12,8 @@ export type InternalXyneLinkKind =
 export interface ParsedInternalXyneLink {
   kind: InternalXyneLinkKind;
   href: string;
+  /** Workspace segment when the link carries one; absent for the bare form. */
+  workspaceId?: string;
   channelId?: string;
   conversationId?: string;
   ticketId?: string;
@@ -100,8 +102,9 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     };
 
     const segments = url.pathname.split('/').filter(Boolean);
+    let linkWorkspaceId: string | undefined;
     if (segments[0] !== 'chat' && segments[1] === 'chat') {
-      segments.shift();
+      linkWorkspaceId = segments.shift();
     }
     if (segments[0] !== 'chat') {
       return fallbackUnknownLink;
@@ -111,6 +114,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
       return {
         kind: 'canvas',
         href,
+        ...(linkWorkspaceId ? { workspaceId: linkWorkspaceId } : {}),
         canvasId: segments[2],
       };
     }
