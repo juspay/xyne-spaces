@@ -38,6 +38,7 @@ import {
   BoardTriggerType,
   MentionsTriggerType,
 } from './MentionPlugin';
+import { EntityChipPlugin } from './EntityChipPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
@@ -71,6 +72,7 @@ interface LexicalSearchInputProps {
   onNavigate?: () => void;
   hasNavigated?: boolean;
   onReplaceTriggerChipsReady?: (replaceChips: (chips: ChipData[]) => void) => void;
+  onCommitEntityReady?: (commitEntity: () => boolean) => void;
   onInsertMentionReady?: (
     insertMention: (item: { id: string; name: string; email?: string }) => void,
   ) => void;
@@ -661,6 +663,7 @@ export function LexicalSearchInput({
   setSelectedMentionIndex,
   onNavigate,
   hasNavigated,
+  onCommitEntityReady,
   onInsertMentionReady,
   onReplaceTriggerChipsReady,
   onMentionInserted,
@@ -766,6 +769,10 @@ export function LexicalSearchInput({
           <SingleLinePastePlugin />
           <FilterChipPlugin />
           <ChipOrderPlugin />
+          <EntityChipPlugin
+            {...(onCommitEntityReady ? { onCommitEntityReady } : {})}
+            {...(currentUserID ? { currentUserID } : {})}
+          />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

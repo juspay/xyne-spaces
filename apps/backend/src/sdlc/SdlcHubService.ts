@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
+  SDLC_CONTAINMENT_RELATION,
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   CanvasVisibility,
@@ -916,7 +918,19 @@ export class SdlcHubService implements SdlcHub {
                 sourceId: input.trackId,
                 targetType: 'CANVAS',
                 targetId: canvas.id,
-                relationType: 'TRACK_ITEM',
+                relationType: SDLC_CONTAINMENT_RELATION,
+                createdBy: actor.userId,
+              },
+            });
+            await tx.sdlcEntityLink.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                channelId: repo.channelId,
+                sourceType: 'TRACK',
+                sourceId: input.trackId,
+                targetType: 'CANVAS',
+                targetId: canvas.id,
+                relationType: SDLC_TRACK_FLAT_RELATION,
                 createdBy: actor.userId,
               },
             });
@@ -1523,7 +1537,7 @@ export class SdlcHubService implements SdlcHub {
             sourceType: 'TRACK',
             targetType: 'CANVAS',
             targetId: input.sourceId,
-            relationType: 'TRACK_ITEM',
+            relationType: SDLC_TRACK_FLAT_RELATION,
           },
           select: { sourceId: true },
         });

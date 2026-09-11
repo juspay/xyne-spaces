@@ -44,6 +44,8 @@ export {
   parseSubTicketsMd,
   serializeSubTicketsMd,
   SUB_TICKETS_MD_LIMIT,
+} from './utils/activityMetadataParser';
+export type {
   TicketCardSummary,
   SubTicketsMdData,
 } from './utils/activityMetadataParser';

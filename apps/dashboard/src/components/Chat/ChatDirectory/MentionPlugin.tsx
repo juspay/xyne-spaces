@@ -9,15 +9,13 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
   TextNode,
-  type LexicalNode,
   $getSelection,
   $isRangeSelection,
-  $createTextNode,
   $getRoot,
 } from 'lexical';
 import { TicketPriority } from '@xyne/shared';
 import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
-import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNode';
+import { $removeExistingPriorityChips, $spliceFilterChip } from './FilterChipNode';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
@@ -229,21 +227,10 @@ export function MentionPlugin({
         // Bail if the trigger moved out from under us (same guard insertMention uses).
         if (textContent.substring(mentionStart, mentionStart + trigger.length) !== trigger) return;
 
-        const textBefore = textContent.substring(0, mentionStart);
-        const textAfter = textContent.substring(cursorOffset);
-        anchorNode.setTextContent(textBefore);
-
         // Chips in order, each followed by a space, so they read as separate pills.
-        let cursor: LexicalNode = anchorNode;
-        for (const chip of chips) {
-          const chipNode = $createFilterChip(chip, currentUserID);
-          cursor.insertAfter(chipNode);
-          const spaceNode = $createTextNode(' ');
-          chipNode.insertAfter(spaceNode);
-          cursor = spaceNode;
-        }
-        if (textAfter) cursor.insertAfter($createTextNode(textAfter));
-        cursor.selectEnd();
+        $spliceFilterChip(anchorNode, mentionStart, cursorOffset, chips, {
+          currentUserId: currentUserID,
+        });
 
         for (const chip of chips) onMentionSelect?.(chip);
       });
@@ -311,32 +298,15 @@ export function MentionPlugin({
               return;
             }
 
-            // Get text parts
-            const textBefore = textContent.substring(0, mentionStart);
-            const textAfter = textContent.substring(cursorOffset);
-
-            // Set the node text to only the text before trigger
-            anchorNode.setTextContent(textBefore);
-
             const mentionData = buildMentionData(item, type, trigger);
             // Priority is the exclusive filter — drop any existing priority chip first.
             if (type === ChipType.PRIORITY) {
               $removeExistingPriorityChips();
             }
-            // Insert the chip pill (icon + editable label) then a trailing space.
-            const chip = $createFilterChip(mentionData, currentUserID);
-            const spaceNode = $createTextNode(' ');
-            anchorNode.insertAfter(chip);
-            chip.insertAfter(spaceNode);
-
-            // If there's text after, add it
-            if (textAfter) {
-              const afterNode = $createTextNode(textAfter);
-              spaceNode.insertAfter(afterNode);
-            }
-
-            // Move cursor after the space
-            spaceNode.selectEnd();
+            // Swap the typed trigger for the chip pill; the caret lands after its trailing space.
+            $spliceFilterChip(anchorNode, mentionStart, cursorOffset, [mentionData], {
+              currentUserId: currentUserID,
+            });
 
             onMentionSelect?.(mentionData);
           } else {
@@ -357,32 +327,15 @@ export function MentionPlugin({
         const triggerAtStart = textContent.substring(mentionStart, mentionStart + trigger.length);
         if (triggerAtStart !== trigger) return;
 
-        // Get text parts
-        const textBefore = textContent.substring(0, mentionStart);
-        const textAfter = textContent.substring(cursorOffset);
-
-        // Set the node text to only the text before trigger
-        anchorNode.setTextContent(textBefore);
-
         const mentionData = buildMentionData(item, type, trigger);
         // Priority is the exclusive filter — drop any existing priority chip first.
         if (type === ChipType.PRIORITY) {
           $removeExistingPriorityChips();
         }
-        // Insert the chip pill (icon + editable label) then a trailing space.
-        const chip = $createFilterChip(mentionData, currentUserID);
-        const spaceNode = $createTextNode(' ');
-        anchorNode.insertAfter(chip);
-        chip.insertAfter(spaceNode);
-
-        // If there's text after, add it
-        if (textAfter) {
-          const afterNode = $createTextNode(textAfter);
-          spaceNode.insertAfter(afterNode);
-        }
-
-        // Move cursor after the space
-        spaceNode.selectEnd();
+        // Swap the typed trigger for the chip pill; the caret lands after its trailing space.
+        $spliceFilterChip(anchorNode, mentionStart, cursorOffset, [mentionData], {
+          currentUserId: currentUserID,
+        });
 
         onMentionSelect?.(mentionData);
       });
