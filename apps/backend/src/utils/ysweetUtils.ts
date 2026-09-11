@@ -423,8 +423,9 @@ export async function readFromYSweetStrict(
 }
 
 /**
- * The same distinction reported as `null` instead of a throw, for the callers
- * that have no acting user to authorize the read with.
+ * The same distinction reported as `null` instead of a throw, for callers that
+ * want to refuse a write on a failed read without try/catch at every site.
+ * A 404 (no Y-Sweet document yet) is a genuinely empty canvas, not a failure.
  *
  * @returns The blocks ([] for a genuinely empty document), or null if the read failed
  */
