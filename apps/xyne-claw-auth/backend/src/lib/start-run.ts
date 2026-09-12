@@ -57,7 +57,6 @@ import { isScheduledOrAutomationEvent } from "./run-bridge.js";
 import { dispatchRun } from "./dispatch-run.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
-import { isSafeObjectKey } from "./safe-keys.js";
 
 const log = createLogger("run");
 
@@ -1077,15 +1076,15 @@ export async function prepareRun(
         const cfg = effectiveProviderConfigs?.[runOverride.provider];
         if (cfg) {
           effectiveProvider = runOverride.provider;
-          if (runOverride.model?.trim() && isSafeObjectKey(runOverride.provider)) {
-            const nextConfigs = { ...effectiveProviderConfigs };
-            Object.defineProperty(nextConfigs, runOverride.provider, {
-              value: { ...cfg, model: runOverride.model.trim() },
-              enumerable: true,
-              writable: true,
-              configurable: true,
+          if (runOverride.model?.trim()) {
+            const nextConfigs = new Map(
+              Object.entries(effectiveProviderConfigs ?? {}),
+            );
+            nextConfigs.set(runOverride.provider, {
+              ...cfg,
+              model: runOverride.model.trim(),
             });
-            effectiveProviderConfigs = nextConfigs;
+            effectiveProviderConfigs = Object.fromEntries(nextConfigs);
           }
           effectiveProviderOrder = [];
         } else if (runOverride.provider === "litellm" && runOverride.model?.trim()) {

@@ -13,9 +13,9 @@ function stripNulDeep(value: unknown): unknown {
   if (typeof value === "string") return value.replace(/\u0000/g, "");
   if (Array.isArray(value)) return value.map(stripNulDeep);
   if (value && typeof value === "object") {
-    const out: Record<string, unknown> = Object.create(null);
-    for (const [k, v] of Object.entries(value)) out[k] = stripNulDeep(v);
-    return out;
+    const out = new Map<string, unknown>();
+    for (const [k, v] of Object.entries(value)) out.set(k, stripNulDeep(v));
+    return Object.fromEntries(out);
   }
   return value;
 }
