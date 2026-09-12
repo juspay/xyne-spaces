@@ -50,10 +50,10 @@ export function stripPlatformConfigKeys(
   config: Record<string, unknown> | undefined | null,
 ): Record<string, unknown> {
   if (!config) return {};
-  const out: Record<string, unknown> = Object.create(null);
+  const out = new Map<string, unknown>();
   for (const [key, value] of Object.entries(config)) {
     if (PLATFORM_ONLY_CONFIG_KEYS.has(key)) continue;
-    out[key] = value;
+    out.set(key, value);
   }
-  return out;
+  return Object.fromEntries(out);
 }
