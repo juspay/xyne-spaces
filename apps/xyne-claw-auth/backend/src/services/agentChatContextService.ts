@@ -128,15 +128,15 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
 
   const items: AttachedContextRef[] = [];
   const seen = new Set<string>();
-  const perTypeCounts: Record<Exclude<ContextType, "activity">, number> = {
-    channel: 0,
-    ticket: 0,
-    canvas: 0,
-    call: 0,
-    collection: 0,
-    file: 0,
-    folder: 0,
-  };
+  const perTypeCounts = new Map<Exclude<ContextType, "activity">, number>([
+    ["channel", 0],
+    ["ticket", 0],
+    ["canvas", 0],
+    ["call", 0],
+    ["collection", 0],
+    ["file", 0],
+    ["folder", 0],
+  ]);
 
   for (const raw of input) {
     if (!raw || typeof raw !== "object") return { items: [], error: "attachedContext contains invalid entries" };
@@ -153,7 +153,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     }
 
     // Only apply per-type limit for non-activity types
-    if (type !== "activity" && perTypeCounts[type] >= PER_TYPE_LIMIT) {
+    if (type !== "activity" && (perTypeCounts.get(type) ?? 0) >= PER_TYPE_LIMIT) {
       return { items: [], error: `attachedContext exceeds ${PER_TYPE_LIMIT} items for type ${type}` };
     }
 
@@ -161,7 +161,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     if (seen.has(key)) continue;
     seen.add(key);
     if (type !== "activity") {
-      perTypeCounts[type] += 1;
+      perTypeCounts.set(type, (perTypeCounts.get(type) ?? 0) + 1);
     }
     
     // Build item with all activity-specific fields if applicable

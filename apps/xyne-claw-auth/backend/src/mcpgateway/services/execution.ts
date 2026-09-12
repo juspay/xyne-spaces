@@ -8,6 +8,7 @@ import * as registryDb from "../db/registry.js";
 import * as tokenCache from "../cache/token-cache.js";
 import { signGatewayJwt } from "../crypto/jwt.js";
 import { httpRequest, HttpRequestError } from "./http-client.js";
+import { logSafe } from "../../lib/log-safe.js";
 import type {
   Service,
   Tool,
@@ -129,7 +130,7 @@ export async function executeTool(
 ): Promise<ExecuteToolResult> {
   const startTime = Date.now();
   const { serviceName, toolName, arguments: toolArgs, backendId } = request;
-  console.log(`[execute] START service=${serviceName} tool=${toolName} backend=${backendId ?? "auto"}`);
+  console.log(`[execute] START service=${logSafe(serviceName)} tool=${logSafe(toolName)} backend=${logSafe(backendId ?? "auto")}`);
 
   if (!isGatewayEnabled) {
     return {
@@ -229,10 +230,10 @@ export async function executeTool(
     });
 
     const fullUrl = `${selectedBackend.backendUrl}${pathWithParams}`;
-    console.log(`[execute] Calling service=${serviceName} tool=${toolName} method=${tool.method || "POST"}`);
+    console.log(`[execute] Calling service=${logSafe(serviceName)} tool=${logSafe(toolName)} method=${logSafe(tool.method || "POST")}`);
 
     // Strip path params from body
-    const requestArgs: Record<string, unknown> = {};
+    const requestArgs: Record<string, unknown> = Object.create(null);
     for (const [key, value] of Object.entries(toolArgs)) {
       if (!pathParamNames.has(key)) {
         requestArgs[key] = value;
@@ -247,7 +248,7 @@ export async function executeTool(
       "Content-Type": "application/json",
       [xAuthHeaderName]: authToken,
     };
-    console.log(`[execute] Forward request prepared service=${serviceName} tool=${toolName} method=${httpMethod}`);
+    console.log(`[execute] Forward request prepared service=${logSafe(serviceName)} tool=${logSafe(toolName)} method=${logSafe(httpMethod)}`);
 
     // Execute request
     let backendResponse: { status: number; data: unknown };
@@ -303,7 +304,7 @@ export async function executeTool(
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[execute] SUCCESS service=${serviceName} tool=${toolName} backend=${selectedBackend.backendId} status=${backendResponse.status} duration=${duration}ms`);
+    console.log(`[execute] SUCCESS service=${logSafe(serviceName)} tool=${logSafe(toolName)} backend=${logSafe(selectedBackend.backendId)} status=${backendResponse.status} duration=${duration}ms`);
 
     return {
       success: true,
@@ -315,7 +316,7 @@ export async function executeTool(
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.log(`[execute] FAILED service=${serviceName} tool=${toolName} duration=${duration}ms error=${error instanceof Error ? error.message : "unknown"}`);
+    console.log(`[execute] FAILED service=${logSafe(serviceName)} tool=${logSafe(toolName)} duration=${duration}ms error=${logSafe(error instanceof Error ? error.message : "unknown")}`);
 
     if (error instanceof HttpRequestError) {
       if (error.code === "http") {

@@ -50,7 +50,7 @@ export function hydrateCitationIcons<T>(invocations: T): T {
 export function collectCitationIconUrls(
   invocations: unknown,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = Object.create(null);
   if (!Array.isArray(invocations)) return out;
   for (const inv of invocations) {
     if (!inv || typeof inv !== "object") continue;
