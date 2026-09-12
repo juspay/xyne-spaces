@@ -30,6 +30,7 @@ import { WorkflowsPageV3 } from "./components/WorkflowsPageV3";
 import { DigitalTwinPageV3 } from "./components/digital-twin/DigitalTwinPageV3";
 import { AdminPageV3 } from "./components/AdminPageV3";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
+import { RunsPageV3 } from "./components/RunsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
 import { SearchEvalsPageV3 } from "./components/SearchEvalsPageV3";
 import { EntityTypesPageV3 } from "./components/EntityTypesPageV3";
@@ -207,6 +208,14 @@ export function AppV3() {
                 )
               }
             />
+            {/* Ungated: a non-admin gets their own runs, which is the point of
+                the page. The only elevated control ("All users") is hidden by
+                isAdmin in the component and re-checked server-side. */}
+            <Route path="/v3/runs" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <RunsPageV3 userId={userId} />
+              </div>
+            } />
             <Route path="/v3/metrics" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <MetricsPageV3 userId={userId} />

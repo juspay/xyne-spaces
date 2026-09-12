@@ -884,6 +884,11 @@ const CalendarCallPopup = ({
               disabled={isJoinDisabled}
               data-track-category='CALLS'
               data-track-name='popup-join-call'
+              data-track-metadata={JSON.stringify({
+                source: 'call_history_calendar',
+                callId: call.externalId,
+                callStatus: call.status,
+              })}
               className={cn(
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
                 isJoinDisabled

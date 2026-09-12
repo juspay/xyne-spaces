@@ -63,6 +63,10 @@ export function resolveBaseUrl(override?: string): string {
   return raw.trim().replace(/\/+$/, "");
 }
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 // Extract Spaces userId from the JWT token's `sub` claim (user tokens)
 // or `userId` claim (app tokens)
 function extractUserIdFromToken(token: string): string {
@@ -177,8 +181,10 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       res.status === 503 ||
       res.status === 504)
   ) {
+    const safePath = sanitizeForLog(path);
+    const safeClawless = sanitizeForLog(clawless);
     console.warn(
-      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${path} — falling back to ${clawless}`,
+      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${safePath} — falling back to ${safeClawless}`,
     );
     res = await attempt(clawless);
   }

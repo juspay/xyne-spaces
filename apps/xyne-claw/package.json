@@ -21,6 +21,7 @@
     "@upstash/context7-mcp": "^2.1.7",
     "@xyne/litellm-client": "workspace:*",
     "@xyne/storage": "workspace:*",
+    "bullmq": "^5.81.2",
     "deepwiki-mcp": "^0.0.6",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",
@@ -33,7 +34,8 @@
     "undici": "^7.28.0",
     "unpdf": "^1.6.2",
     "xyne-claw-shared": "workspace:*",
-    "yaml": "^2.8.3"
+    "yaml": "^2.8.3",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
@@ -41,6 +43,6 @@
     "@types/node": "^22.0.0",
     "patch-package": "^8.0.1",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.6"
+    "vitest": "^2.0.0"
   }
 }

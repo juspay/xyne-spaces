@@ -1,3 +1,79 @@
+## [1.317.0](https://github.com/juspay/xyne-spaces/compare/v1.316.4...v1.317.0) (2026-09-12)
+
+
+### Features
+
+* sync claw folders from feature/deploy-xyneclaw ([#1823](https://github.com/juspay/xyne-spaces/issues/1823)) ([c38c33b](https://github.com/juspay/xyne-spaces/commit/c38c33bbd9a122383cde0a60c362ee49363882cf)), closes [#1824](https://github.com/juspay/xyne-spaces/issues/1824) [#1825](https://github.com/juspay/xyne-spaces/issues/1825)
+
+## [1.316.4](https://github.com/juspay/xyne-spaces/compare/v1.316.3...v1.316.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* multi bundle handling for dashboard ([#1790](https://github.com/juspay/xyne-spaces/issues/1790)) ([07824f2](https://github.com/juspay/xyne-spaces/commit/07824f264e94b0555e10a73bfce0874486c57288))
+
+## [1.316.3](https://github.com/juspay/xyne-spaces/compare/v1.316.2...v1.316.3) (2026-09-11)
+
+
+### Bug Fixes
+
+* save SDLC activity owner on updates, late links and folder discussions ([#1794](https://github.com/juspay/xyne-spaces/issues/1794)) ([c7512d5](https://github.com/juspay/xyne-spaces/commit/c7512d5e52fa184ae5966a50f66ffc0dc85524ae))
+
+## [1.316.2](https://github.com/juspay/xyne-spaces/compare/v1.316.1...v1.316.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* read MCP credential fields from the registry, not the DB column ([#1819](https://github.com/juspay/xyne-spaces/issues/1819)) ([26d7347](https://github.com/juspay/xyne-spaces/commit/26d73473ff45abf6e15586f8ca48058cc8e6b569))
+
+## [1.316.1](https://github.com/juspay/xyne-spaces/compare/v1.316.0...v1.316.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* workflow executions moved to workflow schema ([#1533](https://github.com/juspay/xyne-spaces/issues/1533)) ([b944f12](https://github.com/juspay/xyne-spaces/commit/b944f120d17d0f91bd3373b5e50114eb3d3ccd96))
+
+## [1.316.0](https://github.com/juspay/xyne-spaces/compare/v1.315.0...v1.316.0) (2026-09-11)
+
+
+### Features
+
+* keyboard navigation for the SDLC finder, tickets and sidebar ([#1804](https://github.com/juspay/xyne-spaces/issues/1804)) ([1baa3ae](https://github.com/juspay/xyne-spaces/commit/1baa3aea3b6bb99199b7b42250854f6f85a94a76))
+
+## [1.315.0](https://github.com/juspay/xyne-spaces/compare/v1.314.0...v1.315.0) (2026-09-11)
+
+
+### Features
+
+* fix search in tag and usergroup filter ([#1800](https://github.com/juspay/xyne-spaces/issues/1800)) ([992408e](https://github.com/juspay/xyne-spaces/commit/992408e2296b591eac3992c38996f876716e5e06))
+
+## [1.314.0](https://github.com/juspay/xyne-spaces/compare/v1.313.0...v1.314.0) (2026-09-11)
+
+
+### Features
+
+* screen-recordings in scribe ([#1788](https://github.com/juspay/xyne-spaces/issues/1788)) ([e1eb5a0](https://github.com/juspay/xyne-spaces/commit/e1eb5a0c0358dc5a259994aba777a6dd8a6706b5))
+* xyne automatic tile hide by default ([#1793](https://github.com/juspay/xyne-spaces/issues/1793)) ([892176a](https://github.com/juspay/xyne-spaces/commit/892176a946e22d83bba384a2573959f240a34a6d))
+
+
+### Bug Fixes
+
+* Add tracking for calls & recordings ([#1798](https://github.com/juspay/xyne-spaces/issues/1798)) ([da5993b](https://github.com/juspay/xyne-spaces/commit/da5993b31c44dad33fea10c5f4d73b9069e80133))
+
+## [1.313.0](https://github.com/juspay/xyne-spaces/compare/v1.312.2...v1.313.0) (2026-09-11)
+
+
+### Features
+
+* retain only the last 1000 completed vespa jobs ([#1795](https://github.com/juspay/xyne-spaces/issues/1795)) ([1da6de6](https://github.com/juspay/xyne-spaces/commit/1da6de606b54cdea529a8813d01c8069b5bdef09))
+
+## [1.312.2](https://github.com/juspay/xyne-spaces/compare/v1.312.1...v1.312.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* keep SDLC frame route sync pointed at where each side really is ([#1727](https://github.com/juspay/xyne-spaces/issues/1727)) ([b46b6dc](https://github.com/juspay/xyne-spaces/commit/b46b6dccde27b3c858fed9d2e4e655215d66629e))
+
 ## [1.312.1](https://github.com/juspay/xyne-spaces/compare/v1.312.0...v1.312.1) (2026-09-11)
 
 ## [1.312.0](https://github.com/juspay/xyne-spaces/compare/v1.311.1...v1.312.0) (2026-09-11)

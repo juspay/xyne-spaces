@@ -38,6 +38,7 @@ import {
 import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
 import { useCallGoogleDocExport } from './useCallGoogleDocExport';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 /** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
 const POST_BUTTON_CLASS =
@@ -192,6 +193,24 @@ export default function CallDetailScreen(): ReactElement {
     selectedTab && availableTabIds.includes(selectedTab)
       ? selectedTab
       : (availableTabIds[0] ?? null);
+
+  // "Someone actually read the summary" is the payoff signal for the whole
+  // transcription pipeline, and it is the one call event with no click behind it
+  // — the detailed summary is the default tab and renders unprompted. Emit it
+  // once per call per mount, when the summary is genuinely on screen.
+  const summaryViewLogged = useRef<string | null>(null);
+  useEffect(() => {
+    const callExternalId = call?.externalId;
+    if (activeTab !== 'detailed-summary' || !detailedSummaryCanvasId || !callExternalId) return;
+    if (summaryViewLogged.current === callExternalId) return;
+    summaryViewLogged.current = callExternalId;
+    globalClickTracker.trackManualEvent('CALLS', 'VIEW_CALL_DETAILED_SUMMARY', undefined, {
+      callId: callExternalId,
+      hoursSinceCallEnded: call?.endedAt
+        ? Math.round((Date.now() - new Date(call.endedAt).getTime()) / 3600000)
+        : null,
+    });
+  }, [activeTab, detailedSummaryCanvasId, call?.externalId, call?.endedAt]);
 
   // Tabs come out of the call's conversation messages, so an unresolved query means
   // "not known yet" rather than "this call has nothing".

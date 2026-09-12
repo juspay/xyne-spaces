@@ -334,6 +334,26 @@ export class S3StorageService implements StorageService {
     return results;
   }
 
+  async listPrefixes(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const resp = await this.client.send(new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: prefix,
+        Delimiter: '/',
+        ContinuationToken: continuationToken,
+      }));
+      for (const cp of resp.CommonPrefixes ?? []) {
+        if (cp.Prefix) {
+          out.push(cp.Prefix.slice(prefix.length).replace(/\/$/, ''));
+        }
+      }
+      continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return out;
+  }
+
   async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
     await this.client.send(new CopyObjectCommand({
       Bucket: this.bucketName,

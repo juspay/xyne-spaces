@@ -14,7 +14,7 @@ bundle() { # bundle <prefix> <label>
   printf '<!doctype html><title>%s</title><script type=module src=/assets/app.%s.js></script><h1>%s</h1>\n' "$2" "$2" "$2" > "$d/index.html"
   printf "console.log('%s')\n" "$2" > "$d/assets/app.$2.js"
   printf 'h1{color:red}\n' > "$d/assets/style.$2.css"
-  printf '{"bundle":"%s"}\n' "$1" > "$d/version.json"
+  printf '{"version":"%s"}\n' "${VERSION:-1.0.0-local.1}" > "$d/version.json"
   printf "self.addEventListener('fetch',()=>{})\n" > "$d/sw.js"
   printf 'export default 1\n' > "$d/chunks/lazy.$2.mjs"
 }
@@ -24,6 +24,11 @@ bundle main aaa111
 bundle release-20260101 bbb222
 bundle main-sdlc ccc333
 bundle devqa-xyne-feature-x featurex
+
+# Pinned per-version copies, exactly as the pipeline uploads them beside each
+# lane; a rule with pin_version stamps a cookie naming one of these.
+VERSION=1.0.0-local.1 bundle main/1.0.0-local.1 aaa111
+VERSION=1.0.0-local.1 bundle main-sdlc/1.0.0-local.1 ccc333
 
 # --- fake-gcs -------------------------------------------------------------
 until curl -sf "http://${HOST}/storage/v1/b" >/dev/null; do sleep 1; done

@@ -15,7 +15,7 @@ export interface SessionTokenPayload {
 
 function b64url(input: Buffer | string): string {
   const buf = typeof input === "string" ? Buffer.from(input, "utf8") : input;
-  return buf.toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return buf.toString("base64url");
 }
 
 function fromB64url(input: string): Buffer {
