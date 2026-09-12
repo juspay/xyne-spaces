@@ -32,8 +32,14 @@ import {
   GitBranch,
   type PikaIconProps,
   Tag,
+  ChatPlus,
+  Subtask,
+  ChatTyping,
+  BookmarkDefault,
+  SendPlaneSlant,
+  ListAiGenerated,
 } from '@xyne/icons';
-import { AudioLines } from 'lucide-react';
+import { AudioLines, Radar } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
@@ -48,6 +54,87 @@ export type PikaIcon = ComponentType<PikaIconProps>;
 // pair, so `variant` is dropped here rather than passed through to the <svg>.
 const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
   createElement(AudioLines, props);
+
+const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+  createElement(Radar, props);
+
+export type ChatNavKey =
+  | 'new-message'
+  | 'threads'
+  | 'unreads'
+  | 'bookmarks'
+  | 'drafts-sent'
+  | 'recap'
+  | 'radar';
+
+export interface ChatNavItem {
+  key: ChatNavKey;
+  label: string;
+  to: string;
+  icon: PikaIcon;
+  trackName: string;
+  replace?: boolean;
+  sidebarTo?: string;
+  requiresRadar?: boolean;
+}
+
+export const CHAT_NAV_ITEMS: ChatNavItem[] = [
+  {
+    key: 'new-message',
+    label: 'New Message',
+    to: '/chat/search?mode=dm',
+    icon: ChatPlus,
+    trackName: 'NEW_MESSAGE',
+    replace: true,
+  },
+  {
+    key: 'threads',
+    label: 'Threads',
+    to: '/chat/dir/threads',
+    icon: Subtask,
+    trackName: 'OPEN_THREADS',
+  },
+  {
+    key: 'unreads',
+    label: 'Unreads',
+    to: '/chat/dir/unreads',
+    icon: ChatTyping,
+    trackName: 'OPEN_UNREADS',
+  },
+  {
+    key: 'bookmarks',
+    label: 'Bookmarks',
+    to: '/chat/bookmarks',
+    icon: BookmarkDefault,
+    trackName: 'OPEN_BOOKMARKS',
+  },
+  {
+    key: 'drafts-sent',
+    label: 'Drafts & Sent',
+    to: '/chat/drafts-sent',
+    icon: SendPlaneSlant,
+    trackName: 'OPEN_DRAFTS_AND_SENT',
+    sidebarTo: 'drafts-sent',
+  },
+  {
+    key: 'recap',
+    label: 'Recap',
+    to: '/chat/dir/recap',
+    icon: ListAiGenerated,
+    trackName: 'OPEN_RECAP',
+  },
+  {
+    key: 'radar',
+    label: 'Radar',
+    to: '/chat/dir/radar',
+    icon: RadarNavIcon,
+    trackName: 'OPEN_RADAR',
+    requiresRadar: true,
+  },
+];
+
+export const chatNavItems = (radarEnabled: boolean): ChatNavItem[] =>
+  CHAT_NAV_ITEMS.filter(item => !item.requiresRadar || radarEnabled);
 
 export const RAIL_SHORTCUT_LIMIT = 9;
 export const railShortcutsAvailable = (): boolean => isElectronApp();

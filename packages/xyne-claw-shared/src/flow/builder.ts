@@ -32,6 +32,7 @@ type FlowComponentType =
   | 'agent'
   | 'agent_summary'
   | 'mcp_suggest'
+  | 'provider_suggest'
   | 'mcpConfigure'
   | 'pr'
   | 'user_question'
@@ -1228,6 +1229,61 @@ export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
       fallbackText: chart.caption?.trim()
         ? chart.caption.trim()
         : `${chart.type} chart · ${pointCount} point${pointCount === 1 ? '' : 's'}`,
+    })
+    .build();
+}
+
+export interface ProviderSuggestItem {
+  provider: string;
+  name: string;
+  description?: string;
+  connected?: boolean;
+  sharedName?: string;
+  connectMethod?: "oauth" | "device" | "api_key" | "none";
+}
+
+/**
+ * AI provider suggestions posted into a conversation. Same shape as the
+ * connector card, but the provider list is a fixed six defined in code rather
+ * than DB rows, so the server can answer "what do I have?" without the model.
+ */
+export function buildProviderSuggestFlow(context: {
+  providers: ProviderSuggestItem[];
+  title?: string;
+  reason?: string;
+  browseAll?: boolean;
+  totalCount?: number;
+  screenKey: string;
+  agentSlug?: string;
+  userId: string;
+  conversationId?: string;
+  channelId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`provider-suggest-${context.screenKey}`)
+    .addComponent({
+      id: "provider-suggest",
+      type: "provider_suggest",
+      props: {
+        ...(context.title ? { title: context.title } : {}),
+        ...(context.reason ? { reason: context.reason } : {}),
+        ...(context.browseAll ? { browseAll: true } : {}),
+        ...(context.totalCount !== undefined ? { totalCount: context.totalCount } : {}),
+        providers: context.providers.map((p) => ({
+          provider: p.provider,
+          name: p.name,
+          ...(p.description ? { description: p.description } : {}),
+          ...(p.connected !== undefined ? { connected: p.connected } : {}),
+          ...(p.sharedName ? { sharedName: p.sharedName } : {}),
+          ...(p.connectMethod ? { connectMethod: p.connectMethod } : {}),
+        })),
+      },
+    })
+    .setData({
+      actionType: "provider-suggest",
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      userId: context.userId,
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.channelId ? { channelId: context.channelId } : {}),
     })
     .build();
 }
