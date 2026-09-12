@@ -41,11 +41,11 @@ import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {

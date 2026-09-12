@@ -61,11 +61,11 @@ import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  return String(value).replace(/\n|\r/g, " ");
 }
 
 const router = Router();
