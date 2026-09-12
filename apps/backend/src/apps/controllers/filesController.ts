@@ -96,19 +96,43 @@ export class FilesController {
         ? getStorageService(config.gcs.transcriptionBucketName)
         : storageService;
 
-      const buffer = await service.getFileBuffer(filePath);
+      const fileExists = await service.fileExists(filePath);
+      if (!fileExists) {
+        logger.error(`File not found in storage: ${filePath}`);
+        res.status(404).json({ error: 'File not found in storage', code: 'NOT_FOUND' });
+        return;
+      }
 
-      res.setHeader('Content-Length', buffer.length);
+      const fileMetadata = await service.getFileMetadata(filePath);
+      const fileSize = parseInt(String(fileMetadata.size || '0'), 10);
+
+      if (fileSize > 0) {
+        res.setHeader('Content-Length', fileSize);
+      }
       setSafeDownloadHeaders(res, {
         mimetype: attachment.mimetype,
         filename: attachment.originalFilename,
       });
       res.setHeader('Cache-Control', 'private, max-age=3600');
 
-      res.send(buffer);
+      // Stream directly from object storage to the client instead of buffering
+      // the whole object in heap (previously getFileBuffer + res.send).
+      const stream = await service.createReadStream(filePath);
+      stream.pipe(res);
+
+      stream.on('error', (error) => {
+        logger.error('File download stream error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to download file' });
+        } else {
+          res.destroy(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
     } catch (error) {
       logger.error('Error downloading file:', error);
-      res.status(500).json({ error: 'Failed to download file' });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to download file' });
+      }
     }
   };
 
