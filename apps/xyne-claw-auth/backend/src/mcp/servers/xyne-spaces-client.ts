@@ -12,6 +12,7 @@
  */
 
 import { errMsg } from "../../lib/errors.js";
+import { logSafe } from "../../lib/log-safe.js";
 
 export interface SpacesAuthContext {
   token?: string;
@@ -178,7 +179,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       res.status === 504)
   ) {
     console.warn(
-      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${path} — falling back to ${clawless}`,
+      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${logSafe(path)} — falling back to ${logSafe(clawless)}`,
     );
     res = await attempt(clawless);
   }

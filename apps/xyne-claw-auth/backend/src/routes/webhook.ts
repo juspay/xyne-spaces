@@ -152,6 +152,8 @@ import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
 import { availabilityForServerIds } from "../lib/connector-availability.js";
+import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
@@ -1804,14 +1806,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasUserToken=${!!userSpacesToken} hasSessionId=${!!userSpacesSessionId}`,
         );
 
-        const sources: Array<{ label: string; url: string; headers?: Record<string, string> }> = [];
+        const safeAttachmentId = safePathSegment(att.attachmentId);
+        const sources: Array<{ label: string; url: string; headers?: Record<string, string>; external?: boolean }> = [];
         if (att.fileUrl && /^https?:\/\//i.test(att.fileUrl)) {
-          sources.push({ label: "fileUrl", url: att.fileUrl });
+          sources.push({ label: "fileUrl", url: att.fileUrl, external: true });
         }
-        if (userSpacesToken) {
+        if (userSpacesToken && safeAttachmentId) {
           sources.push({
             label: "user-token",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
             headers: {
               Authorization: `Bearer ${userSpacesToken}`,
               ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
@@ -1819,21 +1822,24 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             },
           });
         }
-        sources.push({
-          label: "apps-route",
-          url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${att.attachmentId}/download`,
-          headers: { Authorization: `Bearer ${agent.appToken}` },
-        });
-        sources.push({
-          label: "user-route",
-          url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
-          headers: { Authorization: `Bearer ${agent.appToken}` },
-        });
+        if (safeAttachmentId) {
+          sources.push({
+            label: "apps-route",
+            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
+            headers: { Authorization: `Bearer ${agent.appToken}` },
+          });
+          sources.push({
+            label: "user-route",
+            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
+            headers: { Authorization: `Bearer ${agent.appToken}` },
+          });
+        }
 
         const failures: string[] = [];
         let downloaded = false;
         for (const src of sources) {
           try {
+            if (src.external) await assertSafeOutboundUrl(src.url);
             const dlRes = await fetch(src.url, {
               signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
               ...(src.headers ? { headers: src.headers } : {}),
@@ -6036,7 +6042,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             mimeType: a.mimeType,
             sizeBytes: typeof a.data === "string"
               // base64 → bytes: ceil(len * 3/4), minus padding "="s
-              ? Math.max(0, Math.floor(a.data.length * 3 / 4) - (a.data.match(/=+$/)?.[0]?.length ?? 0))
+              ? Math.max(0, Math.floor(a.data.length * 3 / 4) - countTrailingBase64Padding(a.data))
               : 0,
           }));
           const decision = await recordTurnAndDecide({

@@ -71,6 +71,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
+import { apiLimiter } from "../middleware/rate-limiters.js";
 
 const BASE = "/claw/api/v1";
 
@@ -105,6 +106,8 @@ function mountRequestContext(app: Express): void {
   app.get("/claw/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
   });
+
+  app.use(BASE, apiLimiter);
 }
 
 function mountCoreApi(app: Express): void {
