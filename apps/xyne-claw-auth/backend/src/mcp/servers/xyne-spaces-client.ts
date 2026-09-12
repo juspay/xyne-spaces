@@ -178,7 +178,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       res.status === 504)
   ) {
     console.warn(
-      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${String(path).replace(/[\r\n]+/g, " ")} — falling back to ${String(clawless).replace(/[\r\n]+/g, " ")}`,
+      `[spaces-client] /claw route unavailable (${res.status ?? "network"}) for ${String(path).replace(/\n|\r/g, " ")} — falling back to ${String(clawless).replace(/\n|\r/g, " ")}`,
     );
     res = await attempt(clawless);
   }
