@@ -64,10 +64,6 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/\n|\r/g, " ");
 }
 
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/\n|\r/g, " ");
-}
-
 const router = Router();
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")

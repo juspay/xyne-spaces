@@ -44,10 +44,6 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/\n|\r/g, " ");
 }
 
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/\n|\r/g, " ");
-}
-
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
     if (!item || typeof item !== "object") return true;

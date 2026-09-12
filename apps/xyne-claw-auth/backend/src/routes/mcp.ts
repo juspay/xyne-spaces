@@ -85,10 +85,6 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/\n|\r/g, " ");
 }
 
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/\n|\r/g, " ");
-}
-
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
   .map((tenant) => tenant.trim())
   .find((tenant) => tenant.length > 0);
