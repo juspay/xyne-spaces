@@ -340,9 +340,24 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     );
   }
 
-  async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {
+  async checkDuplicateName(
+    name: string,
+    workspaceId: string,
+    excludeChannelId?: string,
+  ): Promise<boolean> {
+    // A channel name is only "taken" by an ACTIVE, DEFAULT-scope channel in the
+    // workspace. Archived channels release their name, and non-DEFAULT scopes
+    // (DM/TICKET/DOCUMENT/GROUP_DM) carry system-generated names that must not
+    // block user-facing channel names. excludeChannelId lets a channel keep its
+    // own current name during a rename pre-check.
     const existingChannel = await this.db.channel.findFirst({
-      where: { name, project: { workspaceId } }
+      where: {
+        name,
+        isArchived: false,
+        scopeType: ChannelScopeType.DEFAULT,
+        project: { workspaceId },
+        ...(excludeChannelId ? { id: { not: excludeChannelId } } : {}),
+      },
     });
     return !!existingChannel;
   }
