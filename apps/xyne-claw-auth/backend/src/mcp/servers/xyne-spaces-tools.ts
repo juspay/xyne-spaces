@@ -31,6 +31,7 @@ import {
 import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
+import { automationTools } from "./xyne-spaces-automations-tools.js";
 
 const log = createLogger("xyne-spaces-tools");
 
@@ -77,7 +78,7 @@ function buildTicketUrl(channelId: string | undefined, conversationId: string | 
 
 // ── Types ────────────────────────────────────────────────────────────
 
-interface ToolResult {
+export interface ToolResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
@@ -9115,4 +9116,5 @@ export const tools: ToolDef[] = [
   spacesSdlcWikiVerifySources,
   spacesSdlcWikiBeginCheckpoint,
   spacesSdlcWikiFinalizeCommit,
+  ...automationTools,
 ];

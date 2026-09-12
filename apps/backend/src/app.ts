@@ -138,6 +138,7 @@ import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { tagRoutes, registerDeskEmailTags } from '@/tags';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
+import automationClawRoutes from '@/automations/routes/automation-claw.routes';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
@@ -735,6 +736,11 @@ export class App {
 
     // Generic tag routes (auth applied per-route within tagRoutes)
     this.app.use('/api/tags', tagRoutes);
+
+    // Headless automation management routes for agents / app tokens.
+    // Must be mounted before /api/automations so Express does not treat
+    // "/claw" as an automation id parameter.
+    this.app.use('/api/automations/claw', authenticateUserOrApp, automationClawRoutes);
 
     // Automations routes (auth required, no ACL — matches /api/calls)
     this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);
