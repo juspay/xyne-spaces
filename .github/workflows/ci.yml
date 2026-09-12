@@ -24,7 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'false' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -65,7 +65,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'false' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,6 +116,73 @@ jobs:
       - name: Build
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
+
+  test:
+    name: Automation tests
+    runs-on: ci-cluster-github-runners
+    env:
+      TEST_ENV: test
+      BROWSER: chromium
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
+
+      - name: Install Playwright browser
+        run: pnpm --filter xyne-automation exec playwright install chromium
+
+      - name: Run automation tests
+        run: pnpm run test
+
+      - name: Show container states and logs
+        if: always()
+        run: |
+          find tools/xyne-automation/reports -type f \( -name '*.log' -o -name '*.txt' \) | sort | while read -r f; do
+            echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
+          done
+
+      - name: Push report to Spaces
+        if: always()
+        env:
+          JWT: ${{ secrets.TESTCASES_JWT }}
+          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
+          SPACES_URL: ${{ secrets.SPACES_URL }}
+        run: |
+          set -euo pipefail
+          REPORT_HTML=$(find tools/xyne-automation/reports -type f -path '*/html-report/index.html' -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+
+          DOCKER_LOGS_DIR=$(find tools/xyne-automation/reports -maxdepth 2 -type d -name docker-logs -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+          UPLOAD_ARGS=()
+          if [ -n "$DOCKER_LOGS_DIR" ]; then
+            for log in "$DOCKER_LOGS_DIR"/*.log "$DOCKER_LOGS_DIR"/*.txt; do
+              [ -e "$log" ] && UPLOAD_ARGS+=(-F "files=@${log};type=text/plain")
+            done
+          fi
+          if [ -n "$REPORT_HTML" ]; then
+            UPLOAD_ARGS+=(-F "files=@${REPORT_HTML};type=text/html")
+          fi
+
+          if [ ${#UPLOAD_ARGS[@]} -eq 0 ]; then
+            echo "::error::Nothing to push — no html-report and no docker-logs found"
+            exit 1
+          fi
+
+          curl -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+            -H "Authorization: Bearer $JWT" \
+            -F "channelId=$CHANNELID" \
+            -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
+            "${UPLOAD_ARGS[@]}"
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:

@@ -4,11 +4,14 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-frozen-lockfile --ignore-scripts
 
-# pnpm v10 blocks @getgauge/cli's install script; run it explicitly to fetch the gauge binary.
-RUN cd node_modules/@getgauge/cli && node src/index.js
-RUN pnpm exec gauge install ts && pnpm exec gauge install html-report
+RUN cd node_modules/@getgauge/cli && \
+    version=$(node -pe "require('./package.json').version") && \
+    url="https://github.com/getgauge/gauge/releases/download/v${version}/gauge-${version}-linux.x86_64.zip" && \
+    curl -fsSL -o /tmp/gauge.zip "$url" && \
+    node -e "const AdmZip=require('adm-zip'); new AdmZip('/tmp/gauge.zip').extractAllTo('bin', true, true)" && \
+    rm /tmp/gauge.zip
 
 COPY . .
 
@@ -18,5 +21,15 @@ RUN mkdir -p /app/reports
 # so report/artifact writes at runtime succeed without root.
 RUN chown -R pwuser:pwuser /app
 USER pwuser
+
+# Install gauge plugins + corepack pnpm as pwuser (the runtime user) so they cache
+# in its home, not /root — otherwise the runtime re-downloads pnpm and re-installs
+# plugins each run. Pre-create the global gauge config to silence its missing-file warning.
+RUN corepack prepare pnpm@10.15.0 --activate \
+  && mkdir -p /home/pwuser/.gauge/config \
+  && : > /home/pwuser/.gauge/config/gauge.properties \
+  && pnpm exec gauge install ts \
+  && pnpm exec gauge install html-report \
+  && pnpm exec gauge install screenshot
 
 CMD ["tail", "-f", "/dev/null"]

@@ -21,10 +21,23 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
+    # docker/livekit.yaml posts webhooks to host.docker.internal:3001 (the dev stack's
+    # host-run backend). Here the backend is this container, so answer to that name —
+    # without it participant_joined never lands, no call row/message is created, and a
+    # second member never sees the join button.
+    networks:
+      default:
+        aliases:
+          - host.docker.internal
     ports:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
       - ./apps/backend/.env.test   # Override with container hostnames
+    environment:
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     depends_on:
       backend-migrate:
@@ -38,7 +51,7 @@ services:
       livekit:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:3001/api/health"]
       interval: 5s
       timeout: 10s
       retries: 60
@@ -53,13 +66,18 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dashboard
     env_file:
       - ./apps/dashboard/.env.test   # Override with container hostnames
+    environment:
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     ports:
       - "${DASHBOARD_BIND_PORT:-0}:5173"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173/"]
+      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:5173/"]
       interval: 5s
       timeout: 5s
       retries: 24
@@ -76,8 +94,8 @@ services:
   #     - DATABASE_URL=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
   #     - REDIS_URL=redis://redis:6379
   #     - LIVEKIT_URL=ws://livekit:7880
-  #     - LIVEKIT_API_KEY=devkey
-  #     - LIVEKIT_API_SECRET=devsecret
+  #     - LIVEKIT_API_KEY=localdevkey
+  #     - LIVEKIT_API_SECRET=localdevsecret
   #     - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
   #     - YSWEET_URL=http://ysweet:8085
   #     - ZERO_CACHE_URL=http://zero-cache:4848
@@ -95,7 +113,7 @@ services:
   #     livekit:
   #       condition: service_healthy
   #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+  #     test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:3001/api/health"]
   #     interval: 10s
   #     timeout: 5s
   #     retries: 15
@@ -118,7 +136,7 @@ services:
   #     backend:
   #       condition: service_healthy
   #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:5173/"]
+  #     test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:5173/"]
   #     interval: 10s
   #     timeout: 5s
   #     retries: 10
@@ -140,6 +158,19 @@ services:
       - BACKEND_URL=http://backend:3001
       - DASHBOARD_URL=http://dashboard:5173
       - BROWSER=chromium
+      # Use the pre-baked image deps as-is: make pnpm non-interactive and stop it
+      # re-verifying/reinstalling (a reinstall re-blocks @getgauge/cli's build script).
+      - CI=true
+      - NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
+      - NPM_CONFIG_CONFIRM_MODULES_PURGE=false
+      # Container-scoped log-noise suppression for the test run.
+      - NPM_CONFIG_LOGLEVEL=error
+      - NODE_NO_WARNINGS=1
+      - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     depends_on:
       backend:
         condition: service_healthy

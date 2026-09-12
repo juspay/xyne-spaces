@@ -52,7 +52,7 @@ services:
 
   # Redis
   redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
+    image: mirror.gcr.io/library/redis:7-alpine
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-redis
     ports:
       - "${REDIS_BIND_PORT:-6379}:6379"
@@ -63,6 +63,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Server
   livekit:
@@ -78,13 +79,17 @@ services:
     volumes:
       - ./docker/livekit.yaml:/etc/livekit.yaml
     environment:
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:7880/"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Egress Service (audio recording)
   livekit-egress:
@@ -120,10 +125,11 @@ services:
     volumes:
       - fake_gcs_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # MinIO (local S3-compatible storage for testing)
   minio:
@@ -143,6 +149,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # Zero Cache Server
   zero-cache:
@@ -186,10 +193,11 @@ services:
     extra_hosts:
       - "host.containers.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4848/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4848/"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 60s
 
   # Python Transcription Agent
   transcription-agent:
@@ -207,8 +215,8 @@ services:
       # Override LIVEKIT_URL to use container hostname instead of localhost
       # The python agent will use AGENT_LIVEKIT_URL from .env.local (ws://livekit:7880)
       - LIVEKIT_URL=ws://livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - BACKEND_URL=http://host.containers.internal:3001
       - REDIS_URL=redis://redis:6379
       - REDIS_HOST=redis
@@ -334,7 +342,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5

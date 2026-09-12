@@ -180,12 +180,37 @@ async function buildSession(
 
   context.setDefaultTimeout(config.timeout);
 
+  // Polyfill crypto.randomUUID for insecure-origin targets (http://<bare-host> like
+  // the Docker dashboard:5173 isn't a secure context), where it's undefined and app
+  // init throws. Provide a spec-compliant v4 fallback.
+  await context.addInitScript(`
+    (() => {
+      const c = globalThis.crypto;
+      if (c && typeof c.randomUUID !== 'function' && typeof c.getRandomValues === 'function') {
+        Object.defineProperty(c, 'randomUUID', {
+          configurable: true, writable: true,
+          value: () => {
+            const b = c.getRandomValues(new Uint8Array(16));
+            b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+            const h = Array.from(b, (x) => x.toString(16).padStart(2, '0'));
+            return h[0]+h[1]+h[2]+h[3]+'-'+h[4]+h[5]+'-'+h[6]+h[7]+'-'+h[8]+h[9]+'-'+h[10]+h[11]+h[12]+h[13]+h[14]+h[15];
+          },
+        });
+      }
+    })();
+  `);
+
   // Inject the Zero sync bridge before any page script runs.
   // This monitors WebSocket activity so tests can deterministically
   // wait for Zero to finish syncing mutations to the backend.
   await context.addInitScript(ZERO_SYNC_BRIDGE_SCRIPT);
   await context.addInitScript(TEST_CLIPBOARD_SCRIPT);
   await context.addInitScript(DISABLE_ANIMATIONS_SCRIPT);
+
+  // Every context is a fresh profile, so the "open in desktop app" interstitial
+  // (openInDesktopApp.ts) would cover the page on each full load and intercept
+  // clicks. Opt out the way a user does: "Always continue in browser".
+  await context.addInitScript(`window.localStorage.setItem('xyne:openInBrowser', 'true');`);
 
   const page: Page = await context.newPage();
 

@@ -8,8 +8,8 @@ redis:
   address: redis:6379
 
 # LiveKit server API credentials
-api_key: devkey
-api_secret: devsecret
+api_key: localdevkey
+api_secret: localdevsecret
 ws_url: ws://livekit:7880
 
 # File upload configuration
