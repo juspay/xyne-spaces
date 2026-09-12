@@ -229,11 +229,9 @@ export interface DevTicketRepoGroup {
   rangeFrom: string | null;
   rangeTo: string | null;
   rows: ReleaseDetailDevTicketRow[];
-  testedCount: number;
-  totalCount: number;
 }
 
-function isRowTested(row: ReleaseDetailDevTicketRow): boolean {
+export function isRowTested(row: ReleaseDetailDevTicketRow): boolean {
   return !!row.testedBy && !row.failureReason;
 }
 
@@ -258,6 +256,23 @@ export function groupDevTicketRowsByRepo(
 
   // Dedup by ticket within each repo bucket (several apps can map to one repo),
   // so tested/total counts aren't inflated.
+  const getOrCreate = <V>(m: Map<string, V>, k: string, make: () => V): V => {
+    const existing = m.get(k);
+    if (existing !== undefined) return existing;
+    const created = make();
+    m.set(k, created);
+    return created;
+  };
+  const pushUnique = (
+    bucket: ReleaseDetailDevTicketRow[],
+    seen: Set<string>,
+    row: ReleaseDetailDevTicketRow,
+  ): void => {
+    if (seen.has(row.internalTicketId)) return;
+    seen.add(row.internalTicketId);
+    bucket.push(row);
+  };
+
   const rowsByRepo = new Map<string, ReleaseDetailDevTicketRow[]>();
   const seenByRepo = new Map<string, Set<string>>();
   const unmapped: ReleaseDetailDevTicketRow[] = [];
@@ -265,23 +280,13 @@ export function groupDevTicketRowsByRepo(
   for (const row of rows) {
     const repoId = row.appReleaseBoardId ? boardToRepo.get(row.appReleaseBoardId) : undefined;
     if (repoId) {
-      let bucket = rowsByRepo.get(repoId);
-      if (!bucket) {
-        bucket = [];
-        rowsByRepo.set(repoId, bucket);
-      }
-      let seenTickets = seenByRepo.get(repoId);
-      if (!seenTickets) {
-        seenTickets = new Set<string>();
-        seenByRepo.set(repoId, seenTickets);
-      }
-      if (seenTickets.has(row.internalTicketId)) continue;
-      seenTickets.add(row.internalTicketId);
-      bucket.push(row);
+      pushUnique(
+        getOrCreate(rowsByRepo, repoId, () => []),
+        getOrCreate(seenByRepo, repoId, () => new Set()),
+        row,
+      );
     } else {
-      if (seenUnmapped.has(row.internalTicketId)) continue;
-      seenUnmapped.add(row.internalTicketId);
-      unmapped.push(row);
+      pushUnique(unmapped, seenUnmapped, row);
     }
   }
 
@@ -310,8 +315,6 @@ export function groupDevTicketRowsByRepo(
       rangeFrom: range?.deployedCommit ?? null,
       rangeTo: range?.newCommit ?? null,
       rows: groupRows,
-      testedCount: groupRows.filter(isRowTested).length,
-      totalCount: groupRows.length,
     });
   }
 

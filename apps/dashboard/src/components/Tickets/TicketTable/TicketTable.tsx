@@ -7,12 +7,10 @@ import {
   ICellRendererParams,
   ColDef,
   GridApi,
-  IHeaderParams,
   RowClickedEvent,
   GridReadyEvent,
   ValueGetterParams,
 } from 'ag-grid-community';
-import type { IRowNode } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { isDeskChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -53,6 +51,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { createGridSelectionRenderers } from '../../ui/DataGrid/gridSelection';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -69,119 +68,23 @@ interface TicketTableProps {
   onSelectionChange?: (tickets: Ticket[]) => void;
 }
 
-// Index header renderer component
-const IndexHeaderRenderer = (params: IHeaderParams) => {
-  const [allSelected, setAllSelected] = useState(false);
-
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      // The grid holds every ticket the channel query returned — there is no page
-      // limit here as there is on the Desk list view — and the bulk bar fans out a
-      // mutation per selected row. Cap the SELECTION rather than the action so the
-      // toolbar's count stays honest about what will actually change.
-      const capped: IRowNode[] = [];
-      params.api.forEachNodeAfterFilterAndSort(node => {
-        if (capped.length < MAX_BULK_TICKETS) {
-          capped.push(node);
-        }
-      });
-      // Clear first: rows past the cap may already be selected by hand.
-      params.api.deselectAll();
-      params.api.setNodesSelected({ nodes: capped, newValue: true });
-
-      const total = params.api.getDisplayedRowCount();
-      if (total > MAX_BULK_TICKETS) {
-        toast.info(
-          `Selected the first ${MAX_BULK_TICKETS} of ${total} tickets — bulk actions apply to ${MAX_BULK_TICKETS} at a time.`,
-        );
-      }
-    } else {
-      params.api.deselectAll();
-    }
-    setAllSelected(e.target.checked);
-  };
-
-  // Listen to selection changes
-  useEffect(() => {
-    const onSelectionChanged = () => {
-      const selectedRows = params.api.getSelectedRows();
-      const selectableRows = Math.min(params.api.getDisplayedRowCount(), MAX_BULK_TICKETS);
-      setAllSelected(selectedRows.length >= selectableRows && selectableRows > 0);
-    };
-
-    params.api.addEventListener('selectionChanged', onSelectionChanged);
-    return () => {
-      params.api.removeEventListener('selectionChanged', onSelectionChanged);
-    };
-  }, [params]);
-
-  return (
-    <div className='flex items-center justify-center h-full w-full'>
-      <input
-        type='checkbox'
-        checked={allSelected}
-        onChange={handleSelectAll}
-        className='w-4 h-4 cursor-pointer'
-        onClick={e => e.stopPropagation()}
-        data-track-category='Tickets'
-        data-track-name='ToggleSelectAll'
-      />
-    </div>
-  );
-};
-
-// Index cell renderer component
-const IndexCellRenderer = (params: ICellRendererParams<Ticket>) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isSelected, setIsSelected] = useState(params.node.isSelected());
-  const rowIndex = (params.node.rowIndex ?? 0) + 1;
-  useEffect(() => {
-    const onSelectionChanged = () => {
-      setIsSelected(params.node.isSelected());
-    };
-
-    params.api.addEventListener('selectionChanged', onSelectionChanged);
-    return () => {
-      params.api.removeEventListener('selectionChanged', onSelectionChanged);
-    };
-  }, [params.api, params.node]);
-
-  return (
-    <button
-      className='flex items-center justify-center h-full w-full'
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      {isSelected ? (
-        <button
-          className='flex items-center justify-center w-4 h-4 bg-blue-600 rounded cursor-pointer'
-          onClick={e => {
-            e.stopPropagation();
-            params.node.setSelected(false);
-          }}
-          data-track-category='Tickets'
-          data-track-name='DeselectRow'
-        >
-          <Check className='w-3 h-3 text-white' strokeWidth={3} />
-        </button>
-      ) : isHovered ? (
-        <input
-          type='checkbox'
-          checked={isSelected}
-          onChange={e => {
-            params.node.setSelected(e.target.checked);
-          }}
-          className='w-4 h-4 cursor-pointer'
-          onClick={e => e.stopPropagation()}
-          data-track-category='Tickets'
-          data-track-name='SelectRow'
-        />
-      ) : (
-        <span className='text-sm text-muted-foreground'>{rowIndex}</span>
-      )}
-    </button>
-  );
-};
+// The grid holds every ticket the channel query returned (no page limit) and
+// the bulk bar fans out a mutation per row, so select-all caps the SELECTION at
+// MAX_BULK_TICKETS and toasts the overflow — the toolbar count stays honest.
+const { IndexHeaderRenderer, IndexCellRenderer } = createGridSelectionRenderers<Ticket>({
+  maxSelectable: MAX_BULK_TICKETS,
+  onOverflow: (limit, total) =>
+    toast.info(
+      `Selected the first ${limit} of ${total} tickets — bulk actions apply to ${limit} at a time.`,
+    ),
+  tracking: {
+    category: 'Tickets',
+    selectAll: 'ToggleSelectAll',
+    select: 'SelectRow',
+    deselect: 'DeselectRow',
+  },
+  checkIcon: Check,
+});
 
 export const TicketTable: React.FC<TicketTableProps> = ({
   tickets,

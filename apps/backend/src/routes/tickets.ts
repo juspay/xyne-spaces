@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
 import { ReleaseNotesController } from '../controllers/releaseNotesController';
+import { ReleaseInsightsController } from '../controllers/releaseInsightsController';
 import { AnalyticsController } from '../controllers/analyticsController';
 import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
@@ -9,7 +10,7 @@ import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
-import { authorize } from '@/middleware/authorize';
+import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
 
@@ -19,6 +20,7 @@ const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
+const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
 
 // Note: Authentication and ACL middleware are applied at the app level
@@ -58,6 +60,12 @@ router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
+// Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
+router.post(
+  '/:ticketId/release-insights',
+  authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE),
+  releaseInsightsController.generate,
+);
 router.post(
   '/:ticketId/release-report/publish',
   authorize('TICKETS', AccessType.WRITE),
