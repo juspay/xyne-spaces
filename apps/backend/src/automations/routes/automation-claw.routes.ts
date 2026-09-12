@@ -42,8 +42,6 @@ import {
 } from './automation-route-helpers';
 import { applyConfigOperations, ConfigOpError, type ConfigOperation } from './automation-config-ops';
 import { clawClient } from '../services/claw-client';
-import { webhookSecretExists } from '../services/webhook-secret.service';
-import { config } from '@/config/env';
 import type { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { triggerRegistry } from '../triggers/trigger-registry';
@@ -690,49 +688,6 @@ router.post('/:id/clone', async (req: Request<{ id: string }>, res: Response) =>
     }
     logger.error('[automations/claw] clone failed:', err);
     res.status(500).json({ success: false, error: 'Failed to clone automation' });
-  }
-});
-
-function webhookEndpoint(): string {
-  return `${config.backendUrl.replace(/\/$/, '')}/api/automation-webhooks`;
-}
-
-/* GET /:id/webhook — read-only. Reports whether a secret was issued, never the
- * secret itself; minting one stays off the claw surface. */
-router.get('/:id/webhook', async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-
-    // Scoped by workspace so a caller cannot resolve another tenant's webhook.
-    const workflow = await db.workflow.findFirst({
-      where: {
-        id: req.params.id,
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
-        workspaceId: auth.workspaceId,
-        ...(proposalVisibilityWhere(auth.userId) as Prisma.WorkflowWhereInput),
-      },
-    });
-    if (!workflow) {
-      res.status(404).json({ success: false, error: 'Automation not found' });
-      return;
-    }
-
-    const seriesId = workflow.automationSeriesId ?? workflow.id;
-    res.json({
-      success: true,
-      data: {
-        url: `${webhookEndpoint()}/${seriesId}`,
-        issued: await webhookSecretExists(seriesId),
-      },
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    logger.error('[automations/claw] webhook lookup failed:', err);
-    res.status(500).json({ success: false, error: 'Failed to fetch webhook details' });
   }
 });
 

@@ -713,30 +713,6 @@ const automationsPending: ToolDef = {
   }),
 };
 
-const automationsWebhook: ToolDef = {
-  name: "automations-webhook",
-  description:
-    "Get the webhook URL for a WEBHOOK-triggered automation, and whether a signing secret has " +
-    "been issued. The secret itself is shown only once at creation and is never returned here.",
-  inputSchema: {
-    type: "object",
-    properties: { id: { type: "string", description: "Automation id." } },
-    required: ["id"],
-  },
-  handler: withToolErrors("Automation webhook error", async (args, _ctx) => {
-    const id = String(args["id"] ?? "").trim();
-    if (!id) return err("id is required.");
-    const resp = (await spacesFetch(
-      `/api/automations/claw/${encodeURIComponent(id)}/webhook`,
-    )) as { data?: { url?: string; issued?: boolean } };
-    const data = resp.data;
-    if (!data?.url) return err("Backend did not return webhook details.");
-    return ok(
-      `Webhook URL: ${data.url}\nSecret issued: ${data.issued ? "yes" : "no"}`,
-    );
-  }),
-};
-
 export const automationTools: ToolDef[] = [
   automationsGet,
   automationsVersions,
@@ -752,5 +728,4 @@ export const automationTools: ToolDef[] = [
   automationsSchema,
   automationsAgents,
   automationsPending,
-  automationsWebhook,
 ];
