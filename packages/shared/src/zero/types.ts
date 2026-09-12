@@ -223,13 +223,12 @@ export const WorkspaceType = {
 
 export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
 
-export const WorkspaceJoinPolicy = {
-  INVITE_ONLY: 'INVITE_ONLY',
-  OPEN: 'OPEN',
-  REQUEST_TO_JOIN: 'REQUEST_TO_JOIN',
-} as const;
-
-export type WorkspaceJoinPolicy = typeof WorkspaceJoinPolicy[keyof typeof WorkspaceJoinPolicy];
+// @ts-ignore TS1294
+export enum WorkspaceJoinPolicy {
+  INVITE_ONLY = 'INVITE_ONLY',
+  OPEN = 'OPEN',
+  REQUEST_TO_JOIN = 'REQUEST_TO_JOIN',
+}
 
 export const CommunityJoinResultStatus = {
   JOINED: 'JOINED',
