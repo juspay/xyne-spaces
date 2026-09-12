@@ -257,7 +257,7 @@ function parseDependencies(raw: unknown): Record<string, string> {
     fail("`dependencies` must be an object mapping package name to version.");
   }
 
-  const deps: Record<string, string> = {};
+  const deps: Record<string, string> = Object.create(null);
   for (const [name, version] of Object.entries(raw as Record<string, unknown>)) {
     if (!NPM_PACKAGE_NAME_RE.test(name)) {
       fail(`"${name}" is not a valid npm package name.`);
