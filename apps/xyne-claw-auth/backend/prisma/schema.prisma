@@ -1961,6 +1961,7 @@ model SubagentSkill {
   @@map("subagent_skills")
 }
 
+// workspace-check:ignore — tenant scope inherited via subagentDefinitionId -> SubagentDefinition.orgId (FK, onDelete: Cascade); never queried cross-tenant.
 model SubagentMcpConnection {
   id                   String             @id @default(cuid())
   subagentDefinitionId String
