@@ -69,6 +69,7 @@ import { registerAllExternalSources } from '@/integrations/core/externalSourceRe
 import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
+import viewAccessRoutes from '@/routes/viewAccess';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
@@ -383,6 +384,7 @@ export class App {
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
 
+    this.app.use('/api/views', viewAccessRoutes);
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
     this.app.use('/api/email', emailDemergeRoutes);

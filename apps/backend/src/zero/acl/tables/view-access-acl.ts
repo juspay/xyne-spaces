@@ -23,9 +23,19 @@ export class ViewAccessACL extends BaseACL<'view_access'> {
         'view_access',
       );
     }
-    if (view.userId !== this.ctx.userID) {
+    if (view.userId === this.ctx.userID) {
+      return;
+    }
+    const existingGrant = await tx.run(
+      zql.view_access
+        .where('viewId', args.viewId)
+        .where('entityType', ViewAccessEntityType.USER)
+        .where('entityId', this.ctx.userID)
+        .one(),
+    );
+    if (!existingGrant) {
       throw new MutationACLError(
-        'View access insert failed: only the view owner can share it',
+        'View access insert failed: only users with access to the view can share it',
         'view_access',
       );
     }
