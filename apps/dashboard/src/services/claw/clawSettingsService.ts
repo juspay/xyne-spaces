@@ -1,8 +1,6 @@
 import { clawRequest } from './clawRequest';
 import type {
   ClaudeModelInfo,
-  CodexOauthStart,
-  GitHubDeviceCode,
   ProviderCredential,
   ProviderCredentialPayload,
   ProviderModelOption,
@@ -83,37 +81,6 @@ export async function deleteSubagentRouting(userId: string, subagentName: string
   );
 }
 
-export async function initiateCopilotGitHubLogin(userId: string): Promise<GitHubDeviceCode> {
-  const data = await clawRequest<{ success: boolean; data: GitHubDeviceCode }>(
-    '/api/v1/settings/copilot/github-login',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  return data.data;
-}
-
-export async function pollCopilotGitHubLogin(userId: string): Promise<{ status: string }> {
-  const data = await clawRequest<{ success: boolean; data?: { status: string }; error?: string }>(
-    '/api/v1/settings/copilot/github-poll',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  if (!data.success || !data.data) throw new Error(data.error ?? 'Authorization failed');
-  return data.data;
-}
-
-export async function listCopilotModelsForUser(userId: string): Promise<ProviderModelOption[]> {
-  const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
-    '/api/v1/settings/copilot/models',
-    withUser(userId),
-  );
-  return data.data;
-}
-
 export async function listClaudeModelsForUser(userId: string): Promise<ClaudeModelInfo[]> {
   const data = await clawRequest<{ success: boolean; data: ClaudeModelInfo[] }>(
     '/api/v1/settings/claude/models',
@@ -122,69 +89,10 @@ export async function listClaudeModelsForUser(userId: string): Promise<ClaudeMod
   return data.data;
 }
 
-export async function startCodexOauth(userId: string): Promise<CodexOauthStart> {
-  const data = await clawRequest<{ success: boolean; data: CodexOauthStart }>(
-    '/api/v1/settings/codex/oauth/start',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-  return data.data;
-}
-
-export async function exchangeCodexOauth(
-  userId: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await clawRequest<{ success: boolean }>('/api/v1/settings/codex/oauth/exchange', {
-    method: 'POST',
-    headers: { [USER_ID_HEADER]: userId },
-    body: JSON.stringify(payload),
-  });
-}
-
 export async function listCodexModelsForUser(userId: string): Promise<ProviderModelOption[]> {
   const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
     '/api/v1/settings/codex/models',
     withUser(userId),
   );
   return data.data;
-}
-
-export interface ClaudeOauthFlow {
-  url: string;
-  state: string;
-  expiresIn: number;
-}
-
-/** Begin the Claude browser sign-in; returns the consent URL to open. */
-export async function startClaudeOauth(userId: string): Promise<ClaudeOauthFlow> {
-  const data = await clawRequest<{ success: boolean; data: ClaudeOauthFlow }>(
-    '/api/v1/settings/provider-credentials/claude/oauth/start',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-      body: JSON.stringify({}),
-    },
-  );
-  return data.data;
-}
-
-/**
- * Finish sign-in with what Anthropic showed the user. Accepts a bare code, a
- * "code#state" pair, or the whole redirect URL — the server normalises it.
- */
-export async function exchangeClaudeOauth(
-  userId: string,
-  payload: { code: string; state: string },
-): Promise<void> {
-  await clawRequest<{ success: boolean }>(
-    '/api/v1/settings/provider-credentials/claude/oauth/exchange',
-    {
-      method: 'POST',
-      headers: { [USER_ID_HEADER]: userId },
-      body: JSON.stringify(payload),
-    },
-  );
 }
