@@ -273,6 +273,9 @@ importers:
       '@types/yauzl':
         specifier: ^2.10.3
         version: 2.10.3
+      '@xyne/kata-sdk':
+        specifier: workspace:*
+        version: link:../../packages/kata-sdk
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../packages/shared

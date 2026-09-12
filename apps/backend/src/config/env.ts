@@ -464,6 +464,10 @@ const envSchema = Joi.object({
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
   XYNE_CLAW_AUTH_URL: Joi.string().uri().default('http://localhost:3003'),
+  // Kata sandbox fleet (workflowsV2 SandboxAdapter → in-cluster sandbox-router)
+  KATA_ROUTER_URL: Joi.string().allow('').default(''),
+  KATA_NAMESPACE: Joi.string().default('xyne-apps'),
+  KATA_TEMPLATE: Joi.string().default('kata-workspace-template'),
   XYNE_CLAW_WEBHOOK_URL: Joi.string().uri().default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION: Joi.string()
     .uri()
@@ -1146,6 +1150,11 @@ export const config = {
     webhookUrl: envVars.XYNE_CLAW_WEBHOOK_URL as string,
     clawAuthCallbackUrlAutomation: envVars.XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION as string,
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
+  },
+  kata: {
+    routerUrl: envVars.KATA_ROUTER_URL as string,
+    namespace: envVars.KATA_NAMESPACE as string,
+    template: envVars.KATA_TEMPLATE as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   apps: {
