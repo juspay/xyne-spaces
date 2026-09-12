@@ -376,9 +376,12 @@ router.get('/pending', async (req: Request, res: Response) => {
       sendUnauthorized(res);
       return;
     }
-    // listPendingProposals is not tenant-scoped, so re-filter by workspace.
+    // listPendingProposals is not tenant-scoped, so re-filter by workspace — and
+    // by author: a proposal is private to its submitter until approved, and each
+    // row carries the full config, so returning the workspace's would leak every
+    // pending automation's definition to any caller.
     const pending = (await approvalService.listPendingProposals()).filter(
-      p => p.workspaceId === auth.workspaceId,
+      p => p.workspaceId === auth.workspaceId && p.createdById === auth.userId,
     );
     res.json({ success: true, data: pending, timestamp: new Date().toISOString() });
   } catch (err) {
@@ -438,6 +441,9 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
         workflowType: AUTOMATION_WORKFLOW_TYPE,
         workspaceId: auth.workspaceId,
         status: { not: AutomationStatus.ARCHIVED },
+        // Without this, another user's private DRAFT could be forked into a new
+        // version and its config echoed back in the 201 response.
+        ...(proposalVisibilityWhere(auth.userId) as Prisma.WorkflowWhereInput),
       },
     });
     if (!existing) {
@@ -705,6 +711,7 @@ router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) 
         id: req.params.id,
         workflowType: AUTOMATION_WORKFLOW_TYPE,
         workspaceId: auth.workspaceId,
+        ...(proposalVisibilityWhere(auth.userId) as Prisma.WorkflowWhereInput),
       },
     });
     if (!workflow) {

@@ -54,20 +54,26 @@ function allStepLists(config: AutomationConfig): AutomationStepConfig[][] {
   const lists: AutomationStepConfig[][] = [config.steps];
   const walk = (steps: AutomationStepConfig[]): void => {
     for (const step of steps) {
+      // Branch arrays are typed as required but arrive from unvalidated operation
+      // bodies, so a control-flow step can reach here missing one. Guard rather
+      // than let findStep throw a raw TypeError, which would escape the
+      // ConfigOpError branch and surface as a 500 instead of an actionable 400.
       if (isConditional(step)) {
-        lists.push(step.config.if_true);
-        walk(step.config.if_true);
-        if (step.config.if_false) {
-          lists.push(step.config.if_false);
-          walk(step.config.if_false);
+        for (const branch of [step.config.if_true, step.config.if_false]) {
+          if (!Array.isArray(branch)) continue;
+          lists.push(branch);
+          walk(branch);
         }
       } else if (isSwitch(step)) {
-        for (const entry of step.config.cases) {
+        for (const entry of step.config.cases ?? []) {
+          if (!Array.isArray(entry?.steps)) continue;
           lists.push(entry.steps);
           walk(entry.steps);
         }
-        lists.push(step.config.default);
-        walk(step.config.default);
+        if (Array.isArray(step.config.default)) {
+          lists.push(step.config.default);
+          walk(step.config.default);
+        }
       }
     }
   };
@@ -231,9 +237,14 @@ export function applyConfigOperations(
 
       case 'set-trigger': {
         if (!operation.trigger?.type) throw new ConfigOpError('set-trigger requires trigger.type.');
+        // Only carry the existing config forward when the type is unchanged.
+        // Across a type change the old config describes a different trigger's
+        // scoping, so keeping it would silently fire on the wrong scope.
+        const sameTriggerType = next.trigger?.type === operation.trigger.type;
         next.trigger = {
           type: operation.trigger.type,
-          config: operation.trigger.config ?? next.trigger?.config ?? {},
+          config:
+            operation.trigger.config ?? (sameTriggerType ? (next.trigger?.config ?? {}) : {}),
         };
         break;
       }

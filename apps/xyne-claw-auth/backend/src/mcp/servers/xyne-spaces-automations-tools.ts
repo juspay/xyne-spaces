@@ -118,14 +118,29 @@ function setIfNumber(q: URLSearchParams, args: Record<string, unknown>, key: str
   if (typeof v === "number" && Number.isFinite(v)) q.set(key, String(v));
 }
 
+/** Multi-value filters: the backend splits on commas, so one or many both work. */
+function setIfList(q: URLSearchParams, args: Record<string, unknown>, key: string): void {
+  const v = args[key];
+  const parts = (Array.isArray(v) ? v : [v])
+    .filter((p): p is string => typeof p === "string")
+    .map(p => p.trim())
+    .filter(Boolean);
+  if (parts.length > 0) q.set(key, parts.join(","));
+}
+
 const automationsGet: ToolDef = {
   name: "automations-get",
   description:
     "Read automations. Pass `id` for ONE automation with its complete definition — status, " +
     "ownership, timestamps and the full config: the trigger, the schedule, and every step " +
     "including the conditions nested inside CONDITIONAL and SWITCH steps. " +
-    "Omit `id` to list automations, narrowed by any combination of status, triggerType, name " +
-    "and pagination. ARCHIVED automations are hidden unless includeArchived is true. " +
+    "Omit `id` to list automations. Every filter below combines, and status, triggerType, " +
+    "channelId and createdBy each accept several values at once, so you can ask for exactly " +
+    "one slice — e.g. ACTIVE plus DISABLED automations on two channels, created by one person, " +
+    "updated this week, newest first. The list shows live statuses (DRAFT, PENDING_APPROVAL, " +
+    "ACTIVE, DISABLED) by default; ARCHIVED, REJECTED, REVOKED and AUTO_REVOKED appear only " +
+    "when named in `status`. Other people's DRAFT and PENDING_APPROVAL automations are never " +
+    "listed, whatever the filters. " +
     "Use this before automations-update so the config you send is based on the real current one.",
   inputSchema: {
     type: "object",
@@ -135,24 +150,64 @@ const automationsGet: ToolDef = {
         description: "Automation id. When given, returns that automation in full and ignores the filters.",
       },
       status: {
-        type: ["string", "null"],
+        type: ["string", "array", "null"],
+        items: { type: "string" },
         description:
-          "Filter by status, e.g. DRAFT, PENDING_APPROVAL, ACTIVE, DISABLED, ARCHIVED.",
+          "One status or several to union: DRAFT, PENDING_APPROVAL, ACTIVE, DISABLED, " +
+          "ARCHIVED, REJECTED, REVOKED, AUTO_REVOKED. Unknown values are ignored.",
       },
       triggerType: {
-        type: ["string", "null"],
-        description: "Filter to automations using this trigger type (see automations-schema).",
+        type: ["string", "array", "null"],
+        items: { type: "string" },
+        description:
+          "One or several trigger types to union (see automations-schema for the list).",
+      },
+      channelId: {
+        type: ["string", "array", "null"],
+        items: { type: "string" },
+        description: "Only automations scoped to these channels.",
+      },
+      createdBy: {
+        type: ["string", "array", "null"],
+        items: { type: "string" },
+        description: "Only automations authored by these user ids.",
       },
       name: {
         type: ["string", "null"],
-        description: "Case-insensitive substring match on the automation name.",
+        description:
+          "Free-text search. Matches the automation name case-insensitively, and also its " +
+          "description and trigger type.",
       },
-      includeArchived: {
-        type: ["boolean", "null"],
-        description: "Include ARCHIVED automations in the list. Default false.",
+      dateField: {
+        type: ["string", "null"],
+        enum: ["createdAt", "updatedAt", null],
+        description: "Which timestamp `from`/`to` filter on. Default createdAt.",
+      },
+      from: {
+        type: ["integer", "null"],
+        description: "Start of the date window, epoch milliseconds, inclusive.",
+      },
+      to: {
+        type: ["integer", "null"],
+        description: "End of the date window, epoch milliseconds, inclusive.",
+      },
+      sortBy: {
+        type: ["string", "null"],
+        enum: ["updatedAt", "createdAt", "name", "status", null],
+        description: "Sort column. Default updatedAt.",
+      },
+      sortDir: {
+        type: ["string", "null"],
+        enum: ["asc", "desc", null],
+        description: "Sort direction. Default desc.",
       },
       limit: { type: ["integer", "null"], description: "Max items (default 50, max 100)." },
-      cursor: { type: ["string", "null"], description: "Cursor from a previous list response." },
+      cursor: {
+        type: ["string", "null"],
+        description:
+          "Cursor from a previous list response. It encodes the sort it was built for, so " +
+          "keep sortBy and sortDir identical when paging.",
+      },
     },
   },
   handler: withToolErrors("Get automations error", async (args, _ctx) => {
@@ -168,12 +223,23 @@ const automationsGet: ToolDef = {
     }
 
     const query = new URLSearchParams();
-    setIfString(query, args, "status");
-    setIfString(query, args, "triggerType");
-    setIfString(query, args, "name");
+    setIfList(query, args, "status");
+    setIfList(query, args, "triggerType");
+    setIfList(query, args, "channelId");
+    setIfList(query, args, "createdBy");
+    setIfString(query, args, "dateField");
+    setIfString(query, args, "sortBy");
+    setIfString(query, args, "sortDir");
     setIfString(query, args, "cursor");
+    setIfNumber(query, args, "from");
+    setIfNumber(query, args, "to");
     setIfNumber(query, args, "limit");
-    if (args["includeArchived"] === true) query.set("includeArchived", "true");
+    // The backend's free-text filter is `q`; sending `name` was silently ignored
+    // and returned an unfiltered first page.
+    const nameFilter = args["name"];
+    if (typeof nameFilter === "string" && nameFilter.trim()) {
+      query.set("q", nameFilter.trim());
+    }
 
     const qs = query.toString();
     const resp = (await spacesFetch(
@@ -601,8 +667,10 @@ const automationsEdit: ToolDef = {
   name: "automations-edit",
   description:
     "Make TARGETED edits to an automation's step tree without resending the whole config. " +
-    "Prefer this over automations-update for step-level changes: it cannot clobber a concurrent " +
-    "edit and you do not have to reproduce the tree. Steps nest, so address them by step id. " +
+    "Prefer this over automations-update for step-level changes: you do not have to reproduce " +
+    "the tree, and only the steps you name are touched. It is still a read-modify-write with no " +
+    "version check, so a concurrent edit can be lost — re-read with automations-get if the " +
+    "automation may have changed. Steps nest, so address them by step id. " +
     "Operations: add-step, update-step, delete-step, move-step, set-condition (CONDITIONAL), " +
     "set-case-condition (SWITCH), set-trigger, set-schedule. Applied in order and all-or-nothing: " +
     "if one fails nothing is saved. Editing your own DRAFT updates it in place; editing anything " +
