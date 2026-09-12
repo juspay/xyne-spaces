@@ -204,6 +204,9 @@
   },
   "packageManager": "pnpm@10.15.0",
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "@getgauge/cli"
+    ],
     "packageExtensions": {
       "@semantic-release/commit-analyzer": {
         "dependencies": {

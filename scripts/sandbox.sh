@@ -307,8 +307,8 @@ services:
       - REDIS_URL=redis://xyne-sandbox-redis:6379
       - REDIS_HOST=xyne-sandbox-redis
       - REDIS_PORT=6379
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - LIVEKIT_URL=ws://xyne-sandbox-livekit:7880
       - LIVEKIT_CLIENT_URL=http://${name}.localhost
       - LIVEKIT_SERVER_URL=ws://xyne-sandbox-livekit:7880

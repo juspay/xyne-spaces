@@ -629,7 +629,9 @@ export default class InputBoxSteps {
   @Step('clicking update link button')
   public async clickUpdateLinkButton(): Promise<void> {
     const page = testContext.activePage;
-    await page.locator('button:has-text("Update")').first().click();
+    // Button label toggles "Update"/"Apply" by selection state; both share this
+    // track-name and the same handler, so target it directly.
+    await page.locator("[data-track-name='APPLY_LINK']").first().click();
   }
 
   @Step('clicking remove link button')

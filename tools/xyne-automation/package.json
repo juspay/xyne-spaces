@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "description": "Automation testing for xyne-spaces",
   "main": "index.js",
+  "packageManager": "pnpm@10.15.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@getgauge/cli",
+      "protobufjs"
+    ]
+  },
   "scripts": {
     "test": "ts-node --project tsconfig.json scripts/run-gauge.ts tests",
     "test:api": "ts-node --project tsconfig.json scripts/run-gauge.ts tests/01_api",

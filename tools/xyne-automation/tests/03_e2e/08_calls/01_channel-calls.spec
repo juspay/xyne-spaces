@@ -1,5 +1,8 @@
 # Channel Calls E2E Flow
 > Initiate and join calls from a channel conversation.
+> The join button only renders once LiveKit's participant_joined webhook has created
+> the call row and channel message on the backend — in the Docker test stack the
+> backend container answers to host.docker.internal for this (docker-compose.test.yml).
 
 ## User starts call from channel
 * Using browser
