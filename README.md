@@ -171,6 +171,7 @@ acting as you needs your consent.
 **Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
 Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
 with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
+For the native Nix development environment, follow [Nix setup](docs/setup/nix.md).
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git

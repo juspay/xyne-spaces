@@ -34,12 +34,15 @@ const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 // NOT named VITE_API_BASE_URL — that already means the backend origin with no
 // '/api' suffix, used as a vite proxy target.
 const apiBaseOverride = (import.meta.env['VITE_API_BASE_OVERRIDE'] as string | undefined) || '';
+const useDevProxy = import.meta.env.DEV && import.meta.env['VITE_DEV_PROXY'] === 'true';
 
 export const API_BASE_URL =
   apiBaseOverride ||
-  (isElectronBundled
-    ? `${ELECTRON_BACKEND_URL}/api`
-    : `${protocol}://${hostname}${backendPort}/api`);
+  (useDevProxy
+    ? '/api'
+    : isElectronBundled
+      ? `${ELECTRON_BACKEND_URL}/api`
+      : `${protocol}://${hostname}${backendPort}/api`);
 
 const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
 export const APPS_PUBLIC_BASE_URL = isLocalhost
@@ -56,9 +59,11 @@ const laneZeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) |
 
 export const VITE_ZERO_SERVER = laneZeroPath
   ? `${window.location.origin}${laneZeroPath}`
-  : isElectronBundled
-    ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
-    : `${protocol}://${hostname}${zeroServerPort}/zero`;
+  : useDevProxy
+    ? `${window.location.origin}/zero`
+    : isElectronBundled
+      ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
+      : `${protocol}://${hostname}${zeroServerPort}/zero`;
 
 // OpenTelemetry
 const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
@@ -75,6 +80,8 @@ export const OTEL_EXPORT_INTERVAL_MS: number = parseInt(
 );
 export const ENABLE_OTEL_METRICS: boolean = import.meta.env['VITE_ENABLE_OTEL_METRICS'] !== 'false';
 export const ENABLE_ACTIVITY_LOG: boolean = import.meta.env['VITE_ENABLE_ACTIVITY_LOG'] !== 'false';
+export const ENABLE_REMOTE_LOGGING: boolean =
+  import.meta.env['VITE_ENABLE_REMOTE_LOGGING'] !== 'false';
 
 export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
 
