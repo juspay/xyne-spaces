@@ -207,6 +207,30 @@ export class SdlcHubService implements SdlcHub {
       },
     });
 
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
+    // downstream consumers resolve boards via the mapping, not channel.projectId.
+    // SDLC channels always have a project; default = oldest board.
+    const boards = await tx.board.findMany({
+      where: { projectId: input.projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (boards.length > 0) {
+      await tx.channelBoardMapping.createMany({
+        data: boards.map((board, index) => ({
+          id: randomUUID(),
+          channelId,
+          boardId: board.id,
+          workspaceId: actor.workspaceId,
+          isDefault: index === 0,
+          createdBy: actor.userId,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
     await tx.canvasFolder.createMany({
       data: SDLC_FOLDERS.map((folderName) => ({
         id: randomUUID(),

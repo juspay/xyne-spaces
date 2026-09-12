@@ -360,7 +360,9 @@ export const mapChannel = async (
     isPrivate: args.visibility === ChannelVisibility.PRIVATE,
     createdBy: args.createdBy,
     ownerId: args.createdBy,
-    projectId: args.projectId,
+    // Omit when the channel has no project (decoupling); mirrors the collection
+    // path below (`channel?.projectId ?? undefined`). Feed drops undefined keys.
+    projectId: args.projectId ?? undefined,
     visibility: args.visibility,
     isIm: args.scopeType === ChannelScopeType.DM,
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
@@ -839,9 +841,10 @@ export const mapCollection = async (
   if (rootCollection.scopeType === 'CHANNEL') {
     const channel = await db.channel.findUnique({
       where: { id: rootCollection.scopeId },
-      select: { projectId: true, workspaceId: true },
+      select: { workspaceId: true },
     });
-    projectId = channel?.projectId ?? undefined;
+    // projectId left undefined — channel collections no longer derive a project from
+    // channel.projectId (decoupled); the file doc's projectId is simply omitted.
     channelRef = getRef(channelSchema, rootCollection.scopeId);
     const resolved = await resolveOrgAndWorkspace(channel?.workspaceId);
     workspaceId = resolved.workspaceId;

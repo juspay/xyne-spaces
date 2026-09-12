@@ -7529,13 +7529,10 @@ export function createMutators(
             throw new Error('Project not found');
           }
 
-          // Validate channel exists and belongs to this project
+          // Validate channel exists (channel.projectId is decoupled — no project-membership check)
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error('Channel not found');
-          }
-          if (channel.projectId !== projectId) {
-            throw new Error('Channel does not belong to this project');
           }
 
           if (rawApplications.length === 0) {
@@ -10517,7 +10514,7 @@ export function createMutators(
 
           // Channel folders no longer require a project (the channel canvas UI has
           // no project grouping), but the channel itself must still be valid and
-          // not archived. A projectId is optional; when present it must match.
+          // not archived. channel.projectId is decoupled and no longer checked here.
           if (channelId) {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
             if (!channel) {
@@ -10526,10 +10523,6 @@ export function createMutators(
 
             if (channel.isArchived) {
               throw new Error('Channel is archived');
-            }
-
-            if (projectId && channel.projectId != null && channel.projectId !== projectId) {
-              throw new Error('Channel does not belong to project');
             }
           }
 

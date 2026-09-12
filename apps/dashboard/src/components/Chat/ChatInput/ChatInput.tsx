@@ -1290,7 +1290,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               setTicketDescription('');
             }}
             channelId={channelId}
-            projectId={(channel.projectId as string | null) || ''}
+            projectId={channel.projectId || ''}
             initialDescription={ticketDescription}
             sourceConversation={conversation ?? undefined}
             onTicketCreated={handleTicketCreated}

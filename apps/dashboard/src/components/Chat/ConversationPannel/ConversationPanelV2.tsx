@@ -80,6 +80,27 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
+// Channel Tickets tab. A channel with no board mappings (e.g. a native channel
+// created without a project — projects are decoupled from channels) has no boards
+// to show tickets on, so render a graceful empty state instead of the Kanban board.
+const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
+  const [channelBoards, boardsDetails] = useCachedQuery(queries.boardsByChannel({ channelId }));
+  const boardsSynced = boardsDetails.type === 'complete';
+  if (boardsSynced && (channelBoards?.length ?? 0) === 0) {
+    return (
+      <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
+        <p className='text-sm font-medium text-foreground'>
+          No boards are configured for this channel
+        </p>
+        <p className='text-sm text-muted-foreground'>
+          Link this channel to a project to start creating and tracking tickets.
+        </p>
+      </div>
+    );
+  }
+  return <KanbanBoardScreen channelId={channelId} />;
+};
+
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
@@ -283,7 +304,7 @@ const ConversationPanelV2 = ({
                   })}
                   cachedConversations={cachedConversations}
                   channelId={channelId}
-                  projectId={channel?.projectId}
+                  projectId={channel?.projectId ?? undefined}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
@@ -317,7 +338,7 @@ const ConversationPanelV2 = ({
                 conversationId={conversationId}
               />
             ) : (
-              <KanbanBoardScreen channelId={channelId} />
+              <ChannelTicketsTab channelId={channelId} />
             ))}
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}

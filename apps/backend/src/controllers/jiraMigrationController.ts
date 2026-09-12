@@ -118,15 +118,15 @@ export class JiraMigrationController {
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
         db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
         // The migration target is resolved by workspace, not by the operator's own membership.
-        db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
+        db.channel.findUnique({ where: { id: channelId }, select: { id: true, name: true } }),
       ]);
 
       if (!sourceBoard || !targetBoard || !channel) {
         res.status(404).json({ error: 'sourceBoardId, targetBoardId, or channelId not found' });
         return;
       }
-      if (sourceBoard.projectId !== targetBoard.projectId || channel.projectId !== targetBoard.projectId) {
-        res.status(400).json({ error: 'Boards and channel must belong to same project' });
+      if (sourceBoard.projectId !== targetBoard.projectId) {
+        res.status(400).json({ error: 'Source and target boards must belong to the same project' });
         return;
       }
 
@@ -462,11 +462,11 @@ export class JiraMigrationController {
             }),
             db.channel.findUnique({
               where: { id: sourceChannelId },
-              select: { id: true, name: true, projectId: true, workspaceId: true },
+              select: { id: true, name: true, workspaceId: true },
             }),
             db.channel.findUnique({
               where: { id: targetChannelId },
-              select: { id: true, name: true, projectId: true, workspaceId: true },
+              select: { id: true, name: true, workspaceId: true },
             }),
           ]);
 
@@ -477,11 +477,6 @@ export class JiraMigrationController {
 
       if (!sourceChannel || !targetChannel) {
         res.status(404).json({ error: 'sourceChannelId or targetChannelId not found' });
-        return;
-      }
-
-      if (sourceChannel.projectId !== targetChannel.projectId) {
-        res.status(400).json({ error: 'Source and target channels must belong to the same project' });
         return;
       }
 
@@ -707,6 +702,24 @@ export class JiraMigrationController {
       const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
       if (Number.isNaN(resolvedUpdatedAt.getTime())) {
         res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
+        return;
+      }
+
+      // channel.projectId is nullable (decoupling). This move only applies to channels
+      // that currently HAVE a project — a projectless channel is skipped (no-op), not moved.
+      const existingChannel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { projectId: true },
+      });
+      if (!existingChannel) {
+        res.status(404).json({ error: 'Channel not found for the provided channelId' });
+        return;
+      }
+      if (!existingChannel.projectId) {
+        res.json({
+          success: true,
+          data: { updatedCount: 0, skipped: true, reason: 'Channel has no project; nothing to move' },
+        });
         return;
       }
 

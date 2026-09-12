@@ -6849,7 +6849,7 @@ export const mutators = defineMutators({
 
         // Channel folders no longer require a project (the channel canvas UI has
         // no project grouping), but the channel itself must still be valid and
-        // not archived. A projectId is optional; when present it must match.
+        // not archived. channel.projectId is decoupled and no longer checked here.
         if (channelId) {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -6858,10 +6858,6 @@ export const mutators = defineMutators({
 
           if (channel.isArchived) {
             throw new Error('Channel is archived');
-          }
-
-          if (projectId && channel.projectId !== projectId) {
-            throw new Error('Channel does not belong to project');
           }
         }
 

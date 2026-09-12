@@ -825,15 +825,13 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         wsConfig = getBotConfigByWorkspaceId(workspaceId);
         xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
         if (xyneChannel.isMigrated) {
-          const project = xyneChannel.projectId
-            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
-            : null;
           logger.info('analytics_event', {
             event: 'channel_remigrated',
             timestamp: new Date().toISOString(),
             channelId: input.xyneSpaceChannelId,
             channelName,
-            channelProjectName: project?.name ?? null,
+            // channel.projectId is decoupled; no project-name enrichment.
+            channelProjectName: null,
             sourceType: 'slack',
           });
         }
@@ -1353,15 +1351,13 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
           await channelRepo.update(xyneSpaceChannelId, { isMigrated: true });
         }
         if (xyneChannel) {
-          const project = xyneChannel.projectId
-            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
-            : null;
           logger.info('analytics_event', {
             event: wasAlreadyMigrated ? 'dm_remigrated' : 'dm_migrated',
             timestamp: new Date().toISOString(),
             channelId: xyneSpaceChannelId,
             channelName: xyneChannel.name,
-            channelProjectName: project?.name ?? null,
+            // channel.projectId is decoupled; no project-name enrichment.
+            channelProjectName: null,
             sourceType: 'slack',
           });
         }

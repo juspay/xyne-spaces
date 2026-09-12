@@ -4677,18 +4677,6 @@ export const queries = defineQueries({
   ),
 
   // Recap Queries
-  projectRecaps: defineQuery(
-    z.object({
-      recapDate: z.number(),
-    }),
-    ({ ctx, args: { recapDate } }) => {
-      return zql.recaps
-        .where('recapDate', recapDate)
-        .where('entityType', RecapEntityType.PROJECT)
-        .where('userId', '=', ctx.userID);
-    },
-  ),
-
   channelRecaps: defineQuery(
     z.object({
       channelIds: z.array(z.string()),

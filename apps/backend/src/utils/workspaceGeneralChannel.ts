@@ -15,7 +15,6 @@ interface EnsureGeneralChannelParams {
 
 interface GeneralChannelResult {
   channel: { id: string };
-  project: { id: string };
   created: boolean;
 }
 
@@ -38,7 +37,7 @@ export async function ensureGeneralChannelForWorkspace(
       name: { equals: 'general', mode: 'insensitive' },
       isArchived: false,
     },
-    select: { id: true, projectId: true },
+    select: { id: true },
   });
 
   let channel = existing;
@@ -73,7 +72,7 @@ export async function ensureGeneralChannelForWorkspace(
         projectId: project.id,
         workspaceId,
       },
-      select: { id: true, projectId: true },
+      select: { id: true },
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping.
@@ -110,7 +109,6 @@ export async function ensureGeneralChannelForWorkspace(
 
   return {
     channel: { id: channel.id },
-    project: { id: channel.projectId },
     created: !existing,
   };
 }

@@ -3781,7 +3781,7 @@ export default function SdlcScreen(): ReactElement {
       </Dialog>
 
       <SdlcHubDialog
-        projectId={channel.projectId}
+        projectId={channel.projectId ?? ''}
         open={hubDialog !== null}
         onOpenChange={open => setHubDialog(open ? hubDialog : null)}
         {...(hubDialog === 'manage'
