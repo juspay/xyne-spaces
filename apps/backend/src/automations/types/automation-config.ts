@@ -4,6 +4,7 @@ import type { StepType } from './step-types';
 import { ControlFlowStepType } from './known-types';
 import { ConditionOperator, ConditionOperatorSchema } from './operators';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import { calculateETADeadline } from '@/utils/etaCalculation';
 
 function isValidHasTagValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -116,7 +117,7 @@ export interface SwitchStepConfig {
 
 export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig | SwitchStepConfig;
 
-export const ScheduleOffsetUnitSchema = z.enum(['minutes', 'hours', 'days']);
+export const ScheduleOffsetUnitSchema = z.enum(['seconds', 'minutes', 'hours', 'days']);
 export type ScheduleOffsetUnit = z.infer<typeof ScheduleOffsetUnitSchema>;
 
 export const ScheduleOffsetSchema = z.object({
@@ -129,10 +130,14 @@ export const ImmediateScheduleSchema = z.object({
   type: z.literal('IMMEDIATE'),
 });
 
+export const MAX_SCHEDULE_OFFSET_MINUTES = 30 * 24 * 60;
+export const MAX_SCHEDULE_OFFSET_MS = MAX_SCHEDULE_OFFSET_MINUTES * 60 * 1000;
+
 export const ScheduledScheduleSchema = z.object({
   type: z.literal('SCHEDULED'),
   field: z.string().min(1),
   offset: ScheduleOffsetSchema,
+  businessHoursOnly: z.boolean().default(false).describe('Business Hours Only'),
 });
 
 export const ScheduleConfigSchema = z.discriminatedUnion('type', [
@@ -141,16 +146,17 @@ export const ScheduleConfigSchema = z.discriminatedUnion('type', [
 ]);
 export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;
 
-export const MAX_SCHEDULE_OFFSET_MINUTES = 30 * 24 * 60;
-
 export function scheduleOffsetMs(offset: ScheduleOffset): number {
-  const minutes =
-    offset.unit === 'minutes'
-      ? offset.amount
-      : offset.unit === 'hours'
-        ? offset.amount * 60
-        : offset.amount * 60 * 24;
-  return minutes * 60 * 1000;
+  switch (offset.unit) {
+    case 'seconds':
+      return offset.amount * 1000;
+    case 'minutes':
+      return offset.amount * 60 * 1000;
+    case 'hours':
+      return offset.amount * 60 * 60 * 1000;
+    case 'days':
+      return offset.amount * 24 * 60 * 60 * 1000;
+  }
 }
 
 export function readDottedPath(payload: Record<string, unknown>, path: string): unknown {
@@ -183,7 +189,17 @@ export function computeScheduleRunAt(
   const fieldValue = readDottedPath(payload, schedule.field);
   const fieldDate = coerceToDate(fieldValue);
   if (!fieldDate) return null;
-  return fieldDate.getTime() + scheduleOffsetMs(schedule.offset);
+
+  const offsetMs = scheduleOffsetMs(schedule.offset);
+  if (!schedule.businessHoursOnly) {
+    return fieldDate.getTime() + offsetMs;
+  }
+
+  const seconds = Math.floor(offsetMs / 1000);
+  const roundedMinutes = Math.ceil(seconds / 60);
+  const deadline = calculateETADeadline(fieldDate, roundedMinutes / 60);
+  const roundingRemainderMs = (roundedMinutes * 60 - seconds) * 1000;
+  return deadline.getTime() - roundingRemainderMs;
 }
 
 export interface AutomationConfig {
