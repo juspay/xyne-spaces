@@ -5,6 +5,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { ExternalSource } from '@prisma/client';
+import { ExternalSourcePlatform } from './types';
 import { logger } from '../../utils/logger';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { decrypt, encrypt } from '../../services/encryptionService';
@@ -55,6 +56,21 @@ export async function authenticate(
     const resolvedSourceName = adapter.getSourceNameFromDB?.(rawBodyReq.body) || sourceName;
 
     let source = await externalSourceRepository.findByName(resolvedSourceName);
+
+    // Instagram fallback: source name is stored as `instagram-{igUserId}` (real user ID).
+    // Sources connected before this fix may have the IGSID stored instead, causing the
+    // primary name lookup to miss. The externalIdentifier column holds the real user ID
+    // (patched or set at connect time), so use it as a fallback to find the source.
+    if (!source && resolvedSourceName.startsWith('instagram-')) {
+      const webhookIgUserId = resolvedSourceName.replace('instagram-', '');
+      source = await externalSourceRepository.findInstagramByExternalIdentifier(webhookIgUserId);
+      if (source) {
+        logger.info(`[authenticate] Found Instagram source via externalIdentifier fallback`, {
+          webhookIgUserId, sourceName: source.name,
+        });
+      }
+    }
+
     if (!source && sourceName === 'google') {
       let emailAddress: string | undefined;
       try {
@@ -92,8 +108,12 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      res.status(504).json({
-        success: false,
+      // Meta retries on non-2xx indefinitely; return 200 for Instagram so a disconnected
+      // account doesn't trigger a retry storm. Other providers keep the original 504
+      // so their own retry semantics are unaffected.
+      const isInstagram = source.sourceType === ExternalSourcePlatform.INSTAGRAM;
+      res.status(isInstagram ? 200 : 504).json({
+        success: isInstagram,
         skipped: true,
         reason: 'inactive_source',
         sourceName: resolvedSourceName,

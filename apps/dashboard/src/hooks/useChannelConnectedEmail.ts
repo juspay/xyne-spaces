@@ -41,7 +41,7 @@ export const clearChannelConnectedEmailCache = (channelId?: string): void => {
   listeners.forEach(fn => fn(channelId ?? null));
 };
 
-const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => {
+export const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => {
   const cached = cache.get(channelId);
   if (cached !== undefined) return Promise.resolve(cached);
   const existing = inflight.get(channelId);
