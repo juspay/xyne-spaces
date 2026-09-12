@@ -748,9 +748,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     [message.messageId, clawCitationCtx],
   );
 
-  if (!message) {
-    return null;
-  }
+  // Memoize the emoji font-size decision for the main message body. It was
+  // called inline in JSX on every render and internally builds a DOMParser
+  // Document (via isEmojiOnly -> htmlToPlainText); keying it on message.content
+  // keeps it from re-running on unrelated re-renders. Declared before the early
+  // returns below so the hook runs unconditionally on every render.
+  const emojiFontSizeClass = useMemo(
+    () => getEmojiFontSizeClass(message.content),
+    [message.content],
+  );
 
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
@@ -1547,7 +1553,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <>
                   {hasMessageContent(message.content) && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
                       {isMobile ? (
