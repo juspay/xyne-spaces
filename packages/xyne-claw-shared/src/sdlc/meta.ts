@@ -47,21 +47,27 @@ export function packSdlcRunMeta(sdlcContext: unknown): Record<string, string> {
     if (name) meta[SDLC_META_KEYS.repositoryName] = name;
     if (url) meta[SDLC_META_KEYS.repositoryUrl] = url;
     if (baseBranch) meta[SDLC_META_KEYS.repositoryBaseBranch] = baseBranch;
+  }
 
-    const executionId = str(execution?.["workflowExecutionId"]);
-    const sessionId = str(execution?.["sessionId"]);
-    const conversationId = str(execution?.["conversationId"]);
+  // Independent of a pinned repository: a hub run still needs a usable grant at
+  // sandbox-repo-setup.
+  const executionId = str(execution?.["workflowExecutionId"]);
+  const sessionId = str(execution?.["sessionId"]);
+  const conversationId = str(execution?.["conversationId"]);
+  const interactiveGrant = str(context["interactiveGrant"]);
+  if (conversationId) meta[SDLC_META_KEYS.conversationId] = conversationId;
+
+  // A grant replaces the execution keys rather than joining them — sandbox-repo-setup
+  // rejects a binding carrying both.
+  if (interactiveGrant) {
+    meta[SDLC_META_KEYS.runtimeCredentialOperation] = "INTERACTIVE";
+    meta[SDLC_META_KEYS.interactiveGrant] = interactiveGrant;
+  } else {
     if (executionId) meta[SDLC_META_KEYS.executionId] = executionId;
     if (sessionId) meta[SDLC_META_KEYS.sessionId] = sessionId;
-    if (conversationId) meta[SDLC_META_KEYS.conversationId] = conversationId;
-
-    const interactiveGrant = str(context["interactiveGrant"]);
     if (executionId && sessionId) {
       meta[SDLC_META_KEYS.runtimeCredentialOperation] =
         context["operation"] === "work" ? "PUSH" : "CLONE";
-    } else if (context["operation"] === "interactive" && interactiveGrant) {
-      meta[SDLC_META_KEYS.runtimeCredentialOperation] = "INTERACTIVE";
-      meta[SDLC_META_KEYS.interactiveGrant] = interactiveGrant;
     }
   }
 

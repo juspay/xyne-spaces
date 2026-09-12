@@ -5312,7 +5312,7 @@ const spacesSdlcMutateArtifact: ToolDef = {
     "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Artifact types are canvas " +
     "folders on the SDLC Hub's channel and are shared by every repository in that hub: PRD and Tech Docs are seeded " +
     "built-in types, and users can add custom types; list them via spaces-sdlc-list-artifact-types. To create an " +
-    "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to). To update " +
+    "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to; Repo Knowledge and Wiki take none). To update " +
     "an artifact, pass its canvasId and markdown. Link related artifacts via relatedCanvasIds. Trusted repository, " +
     "hub, and execution identity is injected by the platform when the run has a repository pinned.",
   inputSchema: {
@@ -5349,7 +5349,7 @@ const spacesSdlcMutateArtifact: ToolDef = {
       sourceReferences: sdlcSourceReferencesSchema,
       folderId: { type: "string", minLength: 1, description: "The artifact-type folder id to create the artifact under; get it from spaces-sdlc-list-artifact-types. Required for every artifact create." },
       relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Optional canvas ids of existing artifacts to link as related context on create." },
-      trackId: { type: "string", minLength: 1, description: "Required when creating an artifact: the SDLC track it belongs to. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
+      trackId: { type: "string", minLength: 1, description: "The SDLC track this artifact belongs to. Required for every artifact type except Repo Knowledge, which describes the hub itself; Wiki pages take the WIKI actions and never carry one. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
       generationCommit: { type: "string", maxLength: 255 },
       canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
     },
@@ -5361,7 +5361,10 @@ const spacesSdlcMutateArtifact: ToolDef = {
           action: { const: "create" },
           folderId: { type: "string", minLength: 1 },
         },
-        required: ["action", "folderId", "title", "markdown", "trackId"],
+        // trackId is not required here: Repo Knowledge documents describe the hub
+        // rather than a workstream and carry none. Spaces enforces it per artifact
+        // type, which is the only place the folder's identity is known.
+        required: ["action", "folderId", "title", "markdown"],
         not: { required: ["artifactType"] },
       },
       {
