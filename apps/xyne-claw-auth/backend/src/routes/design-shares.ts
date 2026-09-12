@@ -7,6 +7,7 @@ import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { isOrgMember } from "./organizations.js";
 import { gcsService } from "../services/storageService.js";
 import { createLogger } from "../logger.js";
+import { publicShareLimiter } from "../middleware/rate-limiters.js";
 
 const log = createLogger("design-shares");
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
@@ -388,7 +389,7 @@ function denyPublicShare(res: Response, reason: "not_found" | "auth_required", s
   res.status(404).json({ success: false, error: "Shared design not found or no longer available" });
 }
 
-publicDesignSharesRouter.get("/metadata", async (req: Request, res: Response): Promise<void> => {
+publicDesignSharesRouter.get("/metadata", publicShareLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const access = await authorizePublicShare(req);
     if (!access.ok) {
@@ -411,7 +412,7 @@ publicDesignSharesRouter.get("/metadata", async (req: Request, res: Response): P
   }
 });
 
-publicDesignSharesRouter.get("/content", async (req: Request, res: Response): Promise<void> => {
+publicDesignSharesRouter.get("/content", publicShareLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const access = await authorizePublicShare(req);
     if (!access.ok) {
