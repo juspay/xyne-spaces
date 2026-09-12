@@ -28,6 +28,14 @@ import {
   safeParseJson,
   sendUnauthorized,
 } from './automation-route-helpers';
+import type { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { triggerRegistry } from '../triggers/trigger-registry';
+import { stepRegistry } from '../steps/step-registry';
+import { ConditionOperator, VALUE_LESS_OPERATORS } from '../types/operators';
+import { automationService } from '../services/automation.service';
+import { approvalService, ApprovalError } from '../services/approval.service';
+import type { AutomationConfig } from '../types/automation-config';
 
 /**
  * Claw-facing automation management routes.
@@ -46,6 +54,99 @@ const router = Router();
 router.use((_req, res, next) => {
   res.set('Cache-Control', 'no-store, max-age=0');
   next();
+});
+
+/* ── Schema discovery ──────────────────────────────────────────────────
+ * An agent has to author `config` from nothing, so it needs the vocabulary
+ * first: which triggers and steps exist, and what each one's parameters are.
+ * These are registry-driven and read-only, so they need no workspace scoping.
+ *
+ * Registered before the parameterised routes below. Express only matches a
+ * single path segment per ":param", so "/schema/triggers" could not collide
+ * with "/:id" anyway — the ordering is for the reader, not the router.
+ */
+
+// GET /schema/operators — condition operators available to `conditions`.
+// Derived from the exported enum + VALUE_LESS_OPERATORS rather than copying
+// the label map that lives privately in automation.routes.ts: one source of
+// truth, and nothing here goes stale when an operator is added there.
+router.get('/schema/operators', (_req: Request, res: Response) => {
+  const list = Object.values(ConditionOperator).map(value => ({
+    value,
+    requiresValue: !VALUE_LESS_OPERATORS.has(value),
+  }));
+  res.json({ success: true, data: list, timestamp: new Date().toISOString() });
+});
+
+// GET /schema/triggers — every trigger type, name, description, category
+router.get('/schema/triggers', (_req: Request, res: Response) => {
+  res.json({ success: true, data: triggerRegistry.listMetadata(), timestamp: new Date().toISOString() });
+});
+
+// GET /schema/triggers/:type — full JSON Schema for one trigger
+router.get('/schema/triggers/:type', (req: Request<{ type: string }>, res: Response) => {
+  const { type } = req.params;
+  if (!type || !triggerRegistry.has(type)) {
+    res.status(404).json({ success: false, error: `Unknown trigger type "${type}"` });
+    return;
+  }
+  const impl = triggerRegistry.get(type);
+  const rawConfig = zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }) as Record<
+    string,
+    unknown
+  >;
+  res.json({
+    success: true,
+    data: {
+      type: impl.type,
+      name: impl.name,
+      description: impl.description,
+      category: impl.category,
+      configSchema: impl.decorateConfigSchema(rawConfig),
+      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// GET /schema/steps — every step type
+router.get('/schema/steps', (_req: Request, res: Response) => {
+  res.json({ success: true, data: stepRegistry.listMetadata(), timestamp: new Date().toISOString() });
+});
+
+// GET /schema/steps/:type — full JSON Schema for one step
+router.get('/schema/steps/:type', (req: Request<{ type: string }>, res: Response) => {
+  const { type } = req.params;
+  if (!type || !stepRegistry.has(type)) {
+    res.status(404).json({ success: false, error: `Unknown step type "${type}"` });
+    return;
+  }
+  const impl = stepRegistry.get(type);
+  res.json({
+    success: true,
+    data: {
+      type: impl.type,
+      kind: impl.kind,
+      name: impl.name,
+      description: impl.description,
+      category: impl.category,
+      configSchema: zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }),
+      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// POST /validate — check a config without persisting anything.
+// Pure: lets an agent iterate on a config before it writes a DRAFT.
+router.post('/validate', (req: Request, res: Response) => {
+  const body = req.body as { config?: AutomationConfig };
+  if (!body?.config) {
+    res.status(400).json({ success: false, error: 'Missing `config` in request body' });
+    return;
+  }
+  const result = automationService.validateConfig(body.config);
+  res.json({ success: true, data: result, timestamp: new Date().toISOString() });
 });
 
 // POST / — create a new automation as DRAFT
@@ -268,6 +369,33 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
     }
     logger.error('[automations/claw] update failed:', err);
     res.status(500).json({ success: false, error: 'Failed to update automation' });
+  }
+});
+
+// POST /:id/submit — submit a DRAFT for approval.
+// This is the ONLY transition out of DRAFT: create and update both leave an
+// automation in DRAFT, so without this an agent-authored automation can never
+// run. Approval itself stays a human/admin action.
+router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+
+    const view = await approvalService.submitForApproval(req.params.id, auth.userId);
+    res.json({ success: true, data: { automation: view }, timestamp: new Date().toISOString() });
+  } catch (err) {
+    if (err instanceof ApprovalError) {
+      const status = err.code === 'not-found' ? 404
+        : err.code === 'not-owner' || err.code === 'not-admin' ? 403
+        : 409;
+      res.status(status).json({ success: false, error: err.message });
+      return;
+    }
+    logger.error('[automations/claw] submit failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to submit automation for approval' });
   }
 });
 

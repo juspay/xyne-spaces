@@ -59,6 +59,25 @@ type AutomationListResponse = {
   pagination?: { limit: number; nextCursor: string | null; hasMore: boolean };
 };
 
+/** GET /:id returns the automation directly under `data`, NOT wrapped in
+ *  `{ automation }` the way POST / and PUT /:id do. That asymmetry matches the
+ *  existing /api/automations contract, so the tool bends to it, not the route. */
+type AutomationDetailResponse = {
+  data: AutomationListResponse["data"][number];
+};
+
+type ValidateResponse = {
+  data?: { valid?: boolean } & Record<string, unknown>;
+};
+
+type SchemaListResponse = {
+  data?: Array<{ type?: string; name?: string; description?: string; category?: string }>;
+};
+
+type SchemaDetailResponse = {
+  data?: Record<string, unknown>;
+};
+
 type RunSummary = {
   id: string;
   automationId: string;
@@ -212,8 +231,8 @@ const automationsGet: ToolDef = {
 
     const resp = (await spacesFetch(
       `/api/automations/claw/${encodeURIComponent(id)}`,
-    )) as AutomationResponse;
-    const a = resp.data?.automation;
+    )) as AutomationDetailResponse;
+    const a = resp.data;
     if (!a) return err("Backend did not return an automation.");
 
     const lines = [
@@ -387,11 +406,155 @@ const automationsGetRun: ToolDef = {
   }),
 };
 
+const automationsSubmit: ToolDef = {
+  name: "automations-submit",
+  description:
+    "Submit a DRAFT automation for approval. This is the ONLY way an automation leaves DRAFT — " +
+    "automations-create and automations-update both leave it in DRAFT, and a DRAFT never runs. " +
+    "Approval itself is a human/admin action, so the automation becomes PENDING_APPROVAL, not ACTIVE.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "Automation id to submit for approval.",
+      },
+    },
+    required: ["id"],
+  },
+  handler: withToolErrors("Submit automation error", async (args, _ctx) => {
+    const id = String(args["id"] ?? "").trim();
+    if (!id) return err("id is required.");
+
+    const resp = (await spacesFetch(
+      `/api/automations/claw/${encodeURIComponent(id)}/submit`,
+      { method: "POST" },
+    )) as AutomationResponse;
+    const a = resp.data?.automation;
+    if (!a) return err("Backend did not return an automation.");
+
+    return ok(`Submitted **${a.name}** \`${a.id}\` for approval.\nStatus: ${a.status}`);
+  }),
+};
+
+const automationsValidate: ToolDef = {
+  name: "automations-validate",
+  description:
+    "Check an automation config without saving anything. Use this to iterate on a config " +
+    "before calling automations-create or automations-update, rather than learning about " +
+    "mistakes from a failed create.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      config: {
+        type: "object",
+        description:
+          "Automation configuration object to validate: { trigger: {...}, conditions: [...], steps: [...] }.",
+      },
+    },
+    required: ["config"],
+  },
+  handler: withToolErrors("Validate automation error", async (args, _ctx) => {
+    if (!args["config"] || typeof args["config"] !== "object") {
+      return err("config is required and must be an object.");
+    }
+
+    const resp = (await spacesFetch("/api/automations/claw/validate", {
+      method: "POST",
+      body: JSON.stringify({ config: args["config"] }),
+    })) as ValidateResponse;
+    const result = resp.data;
+    if (!result) return err("Backend did not return a validation result.");
+
+    if (result.valid === true) return ok("Config is valid.");
+    return ok(`Config is NOT valid:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``);
+  }),
+};
+
+const automationsSchema: ToolDef = {
+  name: "automations-schema",
+  description:
+    "Discover the automation vocabulary before authoring a config. List the available trigger " +
+    "types, step types, or condition operators; pass `type` to get the full JSON Schema for one " +
+    "trigger or step, including its parameters. Call this before automations-create so the config " +
+    "references real types instead of guessed ones.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["triggers", "steps", "operators"],
+        description: "Which part of the vocabulary to fetch.",
+      },
+      type: {
+        type: ["string", "null"],
+        description:
+          "Optional. With kind=triggers or kind=steps, fetch the full schema for this one type " +
+          "instead of the list. Ignored for kind=operators.",
+      },
+    },
+    required: ["kind"],
+  },
+  handler: withToolErrors("Automation schema error", async (args, _ctx) => {
+    const kind = String(args["kind"] ?? "").trim();
+    if (kind !== "triggers" && kind !== "steps" && kind !== "operators") {
+      return err('kind must be one of "triggers", "steps", or "operators".');
+    }
+
+    const type = typeof args["type"] === "string" ? args["type"].trim() : "";
+
+    if (kind === "operators") {
+      const resp = (await spacesFetch(
+        "/api/automations/claw/schema/operators",
+      )) as SchemaListResponse;
+      const list = resp.data ?? [];
+      if (list.length === 0) return ok("No operators found.");
+      return ok(
+        "Condition operators:\n" +
+          list
+            .map((o) => {
+              const row = o as { value?: string; requiresValue?: boolean };
+              return `- \`${row.value}\`${row.requiresValue === false ? " (no value needed)" : ""}`;
+            })
+            .join("\n"),
+      );
+    }
+
+    if (type) {
+      const resp = (await spacesFetch(
+        `/api/automations/claw/schema/${kind}/${encodeURIComponent(type)}`,
+      )) as SchemaDetailResponse;
+      const detail = resp.data;
+      if (!detail) return err(`Backend did not return a schema for "${type}".`);
+      return ok(`Schema for ${kind.slice(0, -1)} \`${type}\`:\n\`\`\`json\n${JSON.stringify(detail, null, 2)}\n\`\`\``);
+    }
+
+    const resp = (await spacesFetch(
+      `/api/automations/claw/schema/${kind}`,
+    )) as SchemaListResponse;
+    const list = resp.data ?? [];
+    if (list.length === 0) return ok(`No ${kind} found.`);
+
+    return ok(
+      `Available ${kind} (call again with \`type\` for full parameters):\n` +
+        list
+          .map((m) => {
+            const desc = m.description ? ` — ${m.description}` : "";
+            return `- \`${m.type}\` ${m.name ?? ""}${desc}`.replace(/\s+$/, "");
+          })
+          .join("\n"),
+    );
+  }),
+};
+
 export const automationTools: ToolDef[] = [
   automationsCreate,
   automationsList,
   automationsGet,
   automationsUpdate,
+  automationsSubmit,
+  automationsValidate,
+  automationsSchema,
   automationsListRuns,
   automationsGetRun,
 ];
