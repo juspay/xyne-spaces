@@ -742,9 +742,12 @@ export class LiteLLMProvider extends BaseProvider {
     }
 
     if (response.status === 429) {
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterSecs = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN;
       throw new LLMErrorClass(createRateLimitError(
         this.providerName,
-        errorMessage
+        errorMessage,
+        Number.isFinite(retryAfterSecs) ? { retryAfter: retryAfterSecs } : undefined
       ));
     }
 
