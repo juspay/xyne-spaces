@@ -220,7 +220,13 @@ async function getOrCreateSession(
         ...(appToken ? { token: appToken } : {}),
       };
     } else {
-      const live = await getSpacesAuthForUser(userId, "mcp-runner");
+      // Scope the identity resolution with the workspace the credentials
+      // were loaded for (a two-workspace user otherwise hits the ambiguity
+      // guard in resolveSpacesIdentity and silently gets null).
+      const credsWorkspaceId = typeof credentials["workspaceId"] === "string" && credentials["workspaceId"].trim()
+        ? (credentials["workspaceId"] as string).trim()
+        : undefined;
+      const live = await getSpacesAuthForUser(userId, "mcp-runner", credsWorkspaceId);
       if (live) {
         credentials = {
           ...credentials,
@@ -235,7 +241,7 @@ async function getOrCreateSession(
         // headlessly via /api/apps/* (no user session needed).
         const appToken = await resolveAppTokenForAppUser(userId);
         if (appToken) {
-          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner", credsWorkspaceId).catch(() => null);
           log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
           credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
         } else {
