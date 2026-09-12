@@ -54,6 +54,13 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
       return () => {};
     }
 
+    // An empty (0-byte) File can never decode into an image — fail fast with a
+    // clear message instead of waiting for the <img> onerror (XYNE-61758).
+    if (source.size === 0) {
+      setImageError(true);
+      return () => {};
+    }
+
     const url = URL.createObjectURL(source);
     setImageError(false);
     setImageUrl(url);
@@ -200,8 +207,8 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
     return (
       <div className='flex items-center justify-center h-full'>
         <div className='text-center text-muted'>
-          <p className='text-lg font-semibold mb-2 text-white'>Failed to load image</p>
-          <p className='text-sm text-muted-foreground'>The image could not be displayed</p>
+          <p className='text-lg font-semibold mb-2 text-white'>Couldn&apos;t load image</p>
+          <p className='text-sm text-muted-foreground'>The file may be missing or empty</p>
         </div>
       </div>
     );
