@@ -59,26 +59,6 @@ export function parseListLimit(raw: unknown): number {
   return Math.min(parsed, 100);
 }
 
-export function encodeAutomationListCursor(row: { id: string; createdAt: Date }): string {
-  return Buffer.from(JSON.stringify({ id: row.id, createdAt: row.createdAt.toISOString() })).toString('base64url');
-}
-
-export function decodeAutomationListCursor(raw: unknown): { id: string; createdAt: Date } | null {
-  if (typeof raw !== 'string' || raw.length === 0) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
-      id?: unknown;
-      createdAt?: unknown;
-    };
-    if (typeof parsed.id !== 'string' || typeof parsed.createdAt !== 'string') return null;
-    const createdAt = new Date(parsed.createdAt);
-    if (Number.isNaN(createdAt.getTime())) return null;
-    return { id: parsed.id, createdAt };
-  } catch {
-    return null;
-  }
-}
-
 export const RUN_STATUS_FILTER_VALUES: ReadonlySet<string> = new Set(
   Object.values(AutomationRunStatus),
 );
