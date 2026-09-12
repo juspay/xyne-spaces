@@ -2924,6 +2924,14 @@ export async function processTask(
       const rawCriteria = agentConfig?.["verifyResponseCriteria"];
       const verifyResponseCriteria =
         typeof rawCriteria === "string" && rawCriteria.trim() ? rawCriteria.trim() : undefined;
+      // Deterministic process guard: tool-name substrings that MUST have run
+      // this turn before submit-response will deliver (e.g. an RCA agent that
+      // must invoke `rca-critic`). Checked against the real tool-call log, so a
+      // model cannot satisfy it by claiming/substituting. Empty = no gate.
+      const rawRequireTools = agentConfig?.["verifyResponseRequireTools"];
+      const verifyResponseRequireTools = Array.isArray(rawRequireTools)
+        ? rawRequireTools.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        : [];
       allTools.push(
         buildVerifiedResponseTool({
           getPendingResponses,
@@ -2932,10 +2940,12 @@ export async function processTask(
           evidenceRef,
           agentSlug,
           ...(verifyResponseCriteria ? { criteria: verifyResponseCriteria } : {}),
+          ...(verifyResponseRequireTools.length > 0 ? { requiredTools: verifyResponseRequireTools } : {}),
         }),
       );
       log(
-        `verifyResponses enabled — injected submit-response tool${verifyResponseCriteria ? " (with per-agent criteria)" : ""}`,
+        `verifyResponses enabled — injected submit-response tool${verifyResponseCriteria ? " (with per-agent criteria)" : ""}` +
+          `${verifyResponseRequireTools.length > 0 ? ` (required tools: ${verifyResponseRequireTools.join(", ")})` : ""}`,
       );
     }
 
