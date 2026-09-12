@@ -68,6 +68,8 @@ export interface AppMentionEventPayload {
     channelId: string;
     channelName?: string;
     attachments?: AppEventAttachment[];
+    /** Files referenced (tagged) from the thread, resolved and authorized server-side. */
+    referencedAttachments?: AppEventAttachment[];
     metadata?: Record<string, unknown>;
 }
 
@@ -88,6 +90,8 @@ export interface DMEventPayload {
     channelId: string;
     channelName?: string;
     attachments?: AppEventAttachment[];
+    /** Files referenced (tagged) from the thread, resolved and authorized server-side. */
+    referencedAttachments?: AppEventAttachment[];
     metadata?: Record<string, unknown>;
 }
 

@@ -21,6 +21,14 @@ export type {
   ChannelResult,
 } from './ChannelMentionExtension';
 
+export { FileReferenceExtension, fileReferencePluginKey } from './FileReferenceExtension';
+export type {
+  FileReferenceOptions,
+  FileReferenceAttributes,
+  FileReferenceItem,
+  FileReferencePluginState,
+} from './FileReferenceExtension';
+
 export { MentionNodeView } from './MentionNodeView';
 
 export {

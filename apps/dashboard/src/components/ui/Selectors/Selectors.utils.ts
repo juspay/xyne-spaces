@@ -105,6 +105,30 @@ export const detectRecipientTrigger = (editor: Editor): TriggerMatch | null => {
   };
 };
 
+/**
+ * Detects `~query` before the cursor for the thread-file reference picker.
+ * `~` is used because @, #, /, :, and + are already claimed by other selectors.
+ * Mirrors detectMentionTrigger: closes on `~ ` or a double space.
+ */
+export const detectFileReferenceTrigger = (editor: Editor): TriggerMatch | null => {
+  const { from } = editor.state.selection;
+  const textBefore = getTextBeforeCursor(editor);
+  const fileMatch = textBefore.match(/(?:^|[\s\u200B(])~([\w\s.-]*)$/);
+
+  if (textBefore.match(/~ $/) || textBefore.match(/~[\w\s.-]* {2}$/)) {
+    return null;
+  }
+
+  if (!fileMatch || fileMatch[1] === undefined) return null;
+
+  return {
+    query: fileMatch[1],
+    match: fileMatch,
+    triggerStart: from - fileMatch[0].length,
+    triggerEnd: from,
+  };
+};
+
 export const getAbsolutePosition = (editor: Editor, pos: number): EditorPosition | null => {
   const { view } = editor;
   const coords = view.coordsAtPos(pos);
