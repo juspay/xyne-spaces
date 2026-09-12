@@ -132,7 +132,7 @@
     "mime": "^4.1.0",
     "ml-pca": "^4.1.1",
     "morgan": "^1.11.0",
-    "multer": "^2.2.0",
+    "multer": "^2.3.0",
     "node-fetch": "2.7.0",
     "node-html-markdown": "^2.0.0",
     "node-html-parser": "^6.1.13",
