@@ -40,6 +40,10 @@ import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
     if (!item || typeof item !== "object") return true;
@@ -3110,12 +3114,12 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     });
 
     if (!result.ok) {
-      log.error(`[agent-chat] approve-action failed: ${action.tool} — ${result.error}`);
+      log.error(`[agent-chat] approve-action failed: ${sanitizeForLog(action.tool)} — ${sanitizeForLog(result.error)}`);
       res.status(400).json({ success: false, error: result.error ?? "Execution failed" });
       return;
     }
 
-    log.info(`[agent-chat] approve-action ok: ${action.tool} → ${result.content.slice(0, 100)}`);
+    log.info(`[agent-chat] approve-action ok: ${sanitizeForLog(action.tool)} → ${sanitizeForLog(result.content).slice(0, 100)}`);
     res.json({ success: true, data: { content: result.content } });
   } catch (err) {
     log.error("[agent-chat] approve-action error:", err);

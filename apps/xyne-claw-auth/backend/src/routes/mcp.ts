@@ -81,6 +81,10 @@ import {
 
 const log = createLogger("mcp");
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
   .map((tenant) => tenant.trim())
   .find((tenant) => tenant.length > 0);
@@ -2143,15 +2147,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // so the error is attributable to a server/tool in the structured log.
     const body = req.body as { serverType?: string; tool?: string };
     const httpStatus = Number(/status code (\d{3})/.exec(msg)?.[1]) || undefined;
-    log.error(`[mcp/call] error: ${msg}`, {
+    log.error(`[mcp/call] error: ${sanitizeForLog(msg)}`, {
       event: "mcp_call",
       userId: req.session?.userId,
-      server: body.serverType,
-      tool: body.tool,
+      server: sanitizeForLog(body.serverType),
+      tool: sanitizeForLog(body.tool),
       status: "error",
       durationMs: Date.now() - startedAt,
       httpStatus,
-      errorMessage: msg,
+      errorMessage: sanitizeForLog(msg),
     });
     res
       .status(500)

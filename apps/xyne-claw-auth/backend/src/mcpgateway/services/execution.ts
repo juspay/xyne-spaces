@@ -20,6 +20,10 @@ function encodePathSegment(value: unknown): string {
   return encodeURIComponent(String(value));
 }
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 /**
  * Extract auth token from backend response
  */
@@ -129,7 +133,7 @@ export async function executeTool(
 ): Promise<ExecuteToolResult> {
   const startTime = Date.now();
   const { serviceName, toolName, arguments: toolArgs, backendId } = request;
-  console.log(`[execute] START service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} backend=${String(backendId ?? "auto").replace(/[\r\n]+/g, " ")}`);
+  console.log(`[execute] START service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(backendId ?? "auto")}`);
 
   if (!isGatewayEnabled) {
     return {
@@ -317,7 +321,7 @@ export async function executeTool(
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.log(`[execute] FAILED service=${String(serviceName).replace(/[\r\n]+/g, " ")} tool=${String(toolName).replace(/[\r\n]+/g, " ")} duration=${duration}ms error=${String(error instanceof Error ? error.message : "unknown").replace(/[\r\n]+/g, " ")}`);
+    console.log(`[execute] FAILED service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} duration=${duration}ms error=${sanitizeForLog(error instanceof Error ? error.message : "unknown")}`);
 
     if (error instanceof HttpRequestError) {
       if (error.code === "http") {
