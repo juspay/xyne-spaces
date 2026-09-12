@@ -54,6 +54,7 @@ import { SubagentPersonaTab } from "./subagents/SubagentPersonaTab";
 import { SubagentKnowledgeTab } from "./subagents/SubagentKnowledgeTab";
 import { SubagentToolsTab } from "./subagents/SubagentToolsTab";
 import { SubagentContributorsTab } from "./subagents/SubagentContributorsTab";
+import { SubagentMcpTabV3 } from "./subagents/SubagentMcpTabV3";
 import { Tabs, type TabItem } from "./ui/Tabs";
 
 /* ── helpers ───────────────────────────────────────────────────────── */
@@ -73,7 +74,7 @@ function normalizeToolsInput(input: string): string[] {
 
 /* ── tab IDs ───────────────────────────────────────────────────────── */
 
-type SubagentTopTabId = "persona" | "knowledge" | "tools" | "contributors";
+type SubagentTopTabId = "persona" | "knowledge" | "tools" | "mcp" | "contributors";
 
 /* ── props ─────────────────────────────────────────────────────────── */
 
@@ -366,6 +367,7 @@ export function SubagentEditPageV3({
     { id: "persona", label: "Persona" },
     { id: "knowledge", label: "Knowledge" },
     { id: "tools", label: "Tools" },
+    { id: "mcp", label: "MCP" },
     {
       id: "contributors",
       label:
@@ -442,6 +444,15 @@ export function SubagentEditPageV3({
               onDraftDirectToolsChange={setDraftDirectTools}
               draftCustomTools={draftCustomTools}
               onDraftCustomToolsChange={setDraftCustomTools}
+            />
+          )}
+
+          {activeTab === "mcp" && (
+            <SubagentMcpTabV3
+              subagentName={subagent.name}
+              userId={userId}
+              canEdit={canEdit}
+              isBuiltIn={isBuiltIn}
             />
           )}
 

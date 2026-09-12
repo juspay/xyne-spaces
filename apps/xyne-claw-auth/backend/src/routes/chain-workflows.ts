@@ -11,6 +11,13 @@ import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
+import {
+  parseChainWorkflowDefinition,
+  validateChainWorkflowDefinition,
+  type ChainWorkflowDefinition,
+  type ChainWorkflowEdge,
+  type ChainWorkflowNode,
+} from "../lib/chain-workflow.js";
 
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
@@ -21,29 +28,9 @@ const log = createLogger("chain-workflows");
 /*  Workflow definition types                                           */
 /* ------------------------------------------------------------------ */
 
-interface WorkflowNode {
-  id: string;
-  agentSlug: string;
-  taskTemplate?: string;
-}
-
-interface WorkflowEdge {
-  id: string;
-  fromNodeId: string;
-  toNodeId: string;
-  mode?: "always" | "tools" | "judge";
-  toolsMustInclude?: string[];
-  toolsMustExclude?: string[];
-  judgeContext?: string;
-  taskTemplate?: string;
-}
-
-interface WorkflowDefinition {
-  version?: number;
-  maxDepth?: number;
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-}
+type WorkflowNode = ChainWorkflowNode;
+type WorkflowEdge = ChainWorkflowEdge;
+type WorkflowDefinition = ChainWorkflowDefinition;
 
 /* ------------------------------------------------------------------ */
 /*  Trigger JSON types (stored on agent_chain_workflows.triggers)      */
@@ -82,76 +69,8 @@ interface TriggerPayloadItem {
 
 const router = Router();
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((v) => typeof v === "string");
-}
-
-function parseWorkflowDefinition(definition: unknown): WorkflowDefinition | null {
-  if (!definition || typeof definition !== "object") return null;
-
-  const raw = definition as Record<string, unknown>;
-  if (!Array.isArray(raw["nodes"]) || !Array.isArray(raw["edges"])) return null;
-
-  const nodes = raw["nodes"]
-    .filter((n): n is Record<string, unknown> => typeof n === "object" && n !== null)
-    .filter((n) => typeof n["id"] === "string" && typeof n["agentSlug"] === "string")
-    .map((n) => ({
-      id: n["id"] as string,
-      agentSlug: n["agentSlug"] as string,
-      ...(typeof n["taskTemplate"] === "string" ? { taskTemplate: n["taskTemplate"] } : {}),
-    }));
-
-  const edges = raw["edges"]
-    .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
-    .filter((e) => typeof e["id"] === "string" && typeof e["fromNodeId"] === "string" && typeof e["toNodeId"] === "string")
-    .map((e) => {
-      const edge: WorkflowEdge = {
-        id: e["id"] as string,
-        fromNodeId: e["fromNodeId"] as string,
-        toNodeId: e["toNodeId"] as string,
-      };
-      const mode = e["mode"];
-      if (mode === "always" || mode === "tools" || mode === "judge") edge.mode = mode;
-      if (isStringArray(e["toolsMustInclude"])) edge.toolsMustInclude = e["toolsMustInclude"];
-      if (isStringArray(e["toolsMustExclude"])) edge.toolsMustExclude = e["toolsMustExclude"];
-      if (typeof e["judgeContext"] === "string") edge.judgeContext = e["judgeContext"];
-      if (typeof e["taskTemplate"] === "string") edge.taskTemplate = e["taskTemplate"];
-      return edge;
-    });
-
-  if (nodes.length === 0) return null;
-
-  return {
-    nodes,
-    edges,
-    ...(typeof raw["version"] === "number" ? { version: raw["version"] } : {}),
-    ...(typeof raw["maxDepth"] === "number" ? { maxDepth: raw["maxDepth"] } : {}),
-  };
-}
-
-function validateWorkflowDefinition(definition: WorkflowDefinition): string | null {
-  if (definition.nodes.length === 0) return "workflow must include at least one node";
-
-  const nodeIdSet = new Set<string>();
-  for (const node of definition.nodes) {
-    if (!node.id.trim()) return "node id is required";
-    if (!node.agentSlug.trim()) return "node agentSlug is required";
-    if (nodeIdSet.has(node.id)) return `duplicate node id: ${node.id}`;
-    nodeIdSet.add(node.id);
-  }
-
-  for (const edge of definition.edges) {
-    if (!nodeIdSet.has(edge.fromNodeId) || !nodeIdSet.has(edge.toNodeId)) {
-      return `edge ${edge.id} references missing nodes`;
-    }
-  }
-
-  if (definition.maxDepth !== undefined && (definition.maxDepth < 1 || definition.maxDepth > 50)) {
-    return "maxDepth must be between 1 and 50";
-  }
-
-  return null;
-}
+const parseWorkflowDefinition = parseChainWorkflowDefinition;
+const validateWorkflowDefinition = validateChainWorkflowDefinition;
 
 function parseTriggers(raw: unknown): WorkflowTrigger[] {
   if (!Array.isArray(raw)) return [];

@@ -16,7 +16,8 @@ import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
-import { compactionExtension } from "./compaction-extension.js";
+import { isFencedSession } from "./run-ownership.js";
+import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
@@ -40,8 +41,11 @@ import {
   flushSessionNow,
   markSessionActive,
   markSessionIdle,
+  registerLiveSession,
+  unregisterLiveSession,
 } from "./session-store.js";
-import { acquireSessionLock, refreshSessionLock, releaseSessionLock, SessionLockedError } from "./session-lock.js";
+import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
+import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
 import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
@@ -137,6 +141,25 @@ function piAssistantText(m: PiMsg): string {
     .join("")
     .trim();
 }
+const CHECKPOINT_HEADINGS = [
+  "## Progress",
+  "### Done",
+  "### In Progress",
+  "## Key Decisions",
+  "## Next Steps",
+  "## Critical Context",
+];
+
+export function looksLikeCompactionCheckpoint(text: string | undefined | null): boolean {
+  if (!text) return false;
+  let hits = 0;
+  for (const heading of CHECKPOINT_HEADINGS) {
+    if (new RegExp(`^${heading.replace(/[#*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(text)) hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}
+
 export function extractFinalAnswerText(session: unknown, maxTurns?: number): string | undefined {
   const s = session as { messages?: unknown; getLastAssistantText?: () => string | undefined };
   const fallback = (): string | undefined =>
@@ -536,6 +559,24 @@ export function isTransientProviderError(err: unknown): boolean {
   );
 }
 
+/**
+ * The union of the three conditions run.ts's provider-fallback walk treats as
+ * "this provider cannot serve this run — advance to the next one": quota
+ * exhaustion, a present-but-bad credential (401/403/revoked OAuth), and a
+ * transient/terminal provider failure. Secondary callers that run a single
+ * task outside runWithProviderFallback (e.g. the PR review room's findings
+ * run) use this to decide whether a one-shot hop to the platform provider is
+ * worth attempting, without restating any of the matching rules.
+ */
+export function isProviderFallbackEligibleError(err: unknown): boolean {
+  return (
+    err instanceof QuotaExhaustedError ||
+    isQuotaExhaustedError(err) ||
+    isProviderAuthError(err) ||
+    isTransientProviderError(err)
+  );
+}
+
 export class RunCancelledError extends Error {
   readonly toolsUsed: string[];
   readonly toolInvocations: ToolInvocation[];
@@ -802,9 +843,22 @@ const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   return map;
 })();
 
+const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
+  ["claude-opus-4-8", 1_000_000],
+  ["claude-opus-5", 1_000_000],
+  ["claude-sonnet-5", 1_000_000],
+  ["claude-fable-5", 1_000_000],
+  ["claude-fable-5-1", 1_000_000],
+  ["gpt-5.6-luna", 272_000],
+  ["gpt-5.6-sol", 272_000],
+  ["gpt-5.6-terra", 272_000],
+  ["gpt-6-astra", 272_000],
+]);
+
 export function contextWindowFor(modelId: string | undefined): number {
   const id = (modelId ?? "").toLowerCase();
-  return MODEL_CONTEXT_WINDOWS.get(id)
+  return MODEL_CONTEXT_WINDOW_OVERRIDES.get(id)
+    ?? MODEL_CONTEXT_WINDOWS.get(id)
     ?? Number(process.env["XYNE_CLAW_DEFAULT_CONTEXT_WINDOW"] ?? 128_000);
 }
 
@@ -1253,6 +1307,27 @@ function extractPrUrl(obj: Record<string, unknown> | undefined, text: string): s
   return text.match(/https?:\/\/[^\s"')\]]+/i)?.[0];
 }
 
+function prBranchFrom(obj: Record<string, unknown> | undefined, key: "base" | "head"): string | undefined {
+  if (!obj) return undefined;
+  const gh = obj[key];
+  if (gh && typeof gh === "object") {
+    const ref = firstPrStr((gh as Record<string, unknown>)["ref"]);
+    if (ref) return ref;
+  }
+  const bbKey = key === "base" ? "destination" : "source";
+  const bb = obj[bbKey];
+  if (bb && typeof bb === "object") {
+    const branch = (bb as Record<string, unknown>)["branch"];
+    if (branch && typeof branch === "object") {
+      const name = firstPrStr((branch as Record<string, unknown>)["name"]);
+      if (name) return name;
+    }
+    const name = firstPrStr((bb as Record<string, unknown>)["name"]);
+    if (name) return name;
+  }
+  return undefined;
+}
+
 function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocation: unknown): void {
   try {
     const inv = (invocation ?? {}) as {
@@ -1327,6 +1402,25 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       a["repo"],
     );
 
+    const targetBranch = firstPrStr(
+      prBranchFrom(payload, "base"),
+      a["base"],
+      a["baseBranch"],
+      a["base_branch"],
+      a["destination_branch"],
+      a["destinationBranch"],
+      a["targetBranch"],
+      a["target_branch"],
+    );
+    const sourceBranch = firstPrStr(
+      prBranchFrom(payload, "head"),
+      a["head"],
+      a["headBranch"],
+      a["source_branch"],
+      a["sourceBranch"],
+      a["branch"],
+    );
+
     const pr: Record<string, unknown> = {
       provider,
       status,
@@ -1336,7 +1430,28 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       ...(ticketId ? { ticketId } : {}),
       ...(number ? { number } : {}),
       ...(repo ? { repo } : {}),
+      ...(targetBranch ? { targetBranch } : {}),
+      ...(sourceBranch ? { sourceBranch } : {}),
     };
+
+    if (status === "created") {
+      try {
+        kickOffPrReviewRoom(sessionId, {
+          provider,
+          status,
+          title,
+          url,
+          desc,
+          ticketId,
+          number,
+          repo,
+          targetBranch,
+          sourceBranch,
+        });
+      } catch (err) {
+        log.warn(`[pr-card] review room kickoff threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     // Dispatch on the progress channel type. SSE/streaming runs (spaces threads
     // go through claw-auth's SSE bridge, and the dashboard chat) carry an
@@ -1558,6 +1673,7 @@ function createProgressReporter(
   let keepAliveTimer: ReturnType<typeof setTimeout> | null = null;
 
   function send(toolLabel: string): void {
+    if (isFencedSession(sessionId)) return;
     if (isEmitter(dest)) {
       const meta: ClawStreamMeta = {};
       if (progressMeta?.conversationId !== undefined) meta.conversationId = progressMeta.conversationId;
@@ -1899,6 +2015,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     new RunHandoffError({ lastTurn: lastHandoffTurn, aborted: handoff?.isCapAborted() === true });
   let waitForCapAbortIdle: (() => Promise<void>) | undefined;
   let sessionReadyForFinalArchive = false;
+  let stopSessionLockHeartbeat: (() => void) | undefined;
   // HA: acquire the per-conversation lock BEFORE touching the session, so two
   // pods can't restore + run the same session concurrently and corrupt the
   // JSONL. A conflict (another pod owns it) throws SessionLockedError, which
@@ -1908,6 +2025,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     const acquired = await acquireSessionLock(conversationId);
     if (!acquired) throw new SessionLockedError(conversationId);
     markSessionActive(conversationId);
+    stopSessionLockHeartbeat = startSessionLockHeartbeat(conversationId);
   }
   try {
   // Freshness-aware restore (runs AFTER the conversation lock is acquired,
@@ -1996,6 +2114,26 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   } else {
     sessionManager = SessionManager.inMemory(workingDir);
   }
+
+  registerLiveSession([sessionId, conversationId], {
+    conversationId,
+    getCwd: () => sessionManager.getCwd(),
+    getHeader: () => sessionManager.getHeader(),
+    getLeafId: () => sessionManager.getLeafId(),
+    getBranch: (fromId?: string) => sessionManager.getBranch(fromId),
+    getEntries: () => sessionManager.getEntries(),
+    isPersisted: () => sessionManager.isPersisted(),
+  });
+  registerLivePrRunContext(sessionId, {
+    userId,
+    conversationId,
+    cwd: workingDir,
+    provider,
+    providerConfig: effectiveProviderConfig,
+    progressMeta: opts.progressMeta,
+    modelSettings,
+    automationRun: opts.automationRun,
+  });
 
   // NOTE: regenerate is now handled entirely by claw-auth's /clone-session
   // call with mode="beforeLastUser" BEFORE this run dispatches. The cloned
@@ -2432,6 +2570,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // `requireToolsBeforeSubmit` config can block an empty/short-circuited
   // structured delivery until the mandated data-gathering tools have run.
   if (structuredOutputRef) structuredOutputRef.toolsUsed = () => toolsUsed;
+  setCompactionSubmitTool(
+    structuredOutputRef ? "submit-result" : verifyResponsesRef ? "submit-response" : requiredTool?.name,
+  );
   let sandboxPreviewEmitted = false;
   const toolInvocations: ToolInvocation[] = [];
   const tokenUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -2446,6 +2587,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // "successful" empty completion — otherwise it dead-ends on this provider
   // instead of advancing to the configured fallback. See ProviderTerminalError.
   let lastTurnErrorDetail: string | null = null;
+  let compactedThisRun = false;
   const debugEvents: DebugEventRecord[] = [];
   let debugSeq = 0;
   // Set once the success-path debug write (near the end of the agent loop) has
@@ -3066,6 +3208,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     //   auto_compaction_end   → compaction_end
     // Other than the name, payload shape is unchanged for the fields we log.
     if (event.type === "compaction_start") {
+      compactedThisRun = true;
       log.info(`[agent] Auto-compaction started: reason=${(event as { reason?: string }).reason}`);
       pushDebugEvent("compaction_start", {
         reason: (event as { reason?: string }).reason,
@@ -3171,6 +3314,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // past the prelude check then sees the signal fire would emit twice. Used
   // by the debug panel to show "Cancelled" alongside session_start/session_end.
   let cancelDebugEmitted = false;
+  // The run-level abort signal fires for BOTH a genuine user cancel (/cancel,
+  // /stop) and the ordinary end-of-turn abort that terminal tools issue after
+  // they deliver (submit-response, respond-to-user, propose-plan, emit-brief).
+  // Labelling every abort "user-cancel" made successful deliveries look like
+  // someone had killed the run. Only handoff.isUserCancelled() — set solely by
+  // the /cancel endpoint — means a human actually cancelled.
+  const resolveAbortReason = (): string =>
+    handoff?.isUserCancelled?.() === true ? "user-cancel" : "terminal-tool-abort";
   const emitCancelDebugOnce = (reason: string) => {
     if (cancelDebugEmitted) return;
     cancelDebugEmitted = true;
@@ -3198,7 +3349,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     if (userSig?.aborted) {
       stopSession();
       if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();
-      emitCancelDebugOnce("signal-already-aborted");
+      emitCancelDebugOnce(`signal-already-aborted:${resolveAbortReason()}`);
       throw buildCancelledError();
     }
     if (stallSig.aborted) { stopSession(); throw buildProviderStallError(); }
@@ -3215,7 +3366,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           reject(buildHandoffError());
           return;
         }
-        emitCancelDebugOnce("user-cancel");
+        emitCancelDebugOnce(resolveAbortReason());
         reject(buildCancelledError());
       };
       const onStallAbort = () => { cleanup(); stopSession(); reject(buildProviderStallError()); };
@@ -3237,7 +3388,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const promptWithAbort = async (makePrompt: () => Promise<unknown>): Promise<void> => {
     if (abortSignal?.aborted) {
       if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();
-      emitCancelDebugOnce("signal-already-aborted");
+      emitCancelDebugOnce(`signal-already-aborted:${resolveAbortReason()}`);
       throw buildCancelledError();
     }
     if (handoff?.isRequested() === true && handoff?.isUserCancelled() !== true) throw buildHandoffError();
@@ -3636,7 +3787,41 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // For type "markdown" the captured value is already a string; for type
   // "json" it's the payload (run.ts may re-render it through a template before
   // posting to Spaces — this is the safe default / fallback).
-  const text = structuredOutputRef?.value !== undefined
+  // Post-compaction checkpoint guard. On a 128k-window model a fresh-start
+  // compaction can make the next turn rewrite its own summary as prose and stop
+  // — a checkpoint posted to the user as the final answer, with "Next Steps"
+  // listing work it never did. Detected by checkpoint headings + a final turn
+  // that called no tools; one nudge to continue, then suppressed so the
+  // existing empty-response path handles it instead of posting the checkpoint.
+  let checkpointSuppressed = false;
+  if (compactedThisRun && structuredOutputRef?.value === undefined) {
+    const endedWithoutTools = (): boolean => {
+      const msgs = (session as unknown as { messages?: Array<Record<string, unknown>> }).messages;
+      const last = msgs ? [...msgs].reverse().find((m) => m["role"] === "assistant") : undefined;
+      return !!last && last["stopReason"] !== "tool_use";
+    };
+    const isCheckpointAnswer = (): boolean =>
+      looksLikeCompactionCheckpoint(extractFinalAnswerText(session, opts.finalAnswerMaxTurns)) && endedWithoutTools();
+    if (isCheckpointAnswer()) {
+      metric.count("agent_summary_as_answer", { provider: provider ?? "spaces" });
+      log.warn("[agent] Final text looks like a compaction checkpoint, not an answer — nudging once to continue the task");
+      if (!abortSignal?.aborted) {
+        await promptWithAbort(() => session.prompt(
+          "<system>Your previous message was a checkpoint, not an answer. Continue the task now and deliver the final result.</system>",
+        ));
+        const cq = session as unknown as { _agentEventQueue?: Promise<void> };
+        if (cq._agentEventQueue) await withAbort(cq._agentEventQueue);
+      }
+      if (isCheckpointAnswer()) {
+        checkpointSuppressed = true;
+        log.warn("[agent] Compaction checkpoint persisted after the nudge — suppressing it as the final answer");
+      }
+    }
+  }
+
+  const text = checkpointSuppressed && structuredOutputRef?.value === undefined
+    ? ""
+    : structuredOutputRef?.value !== undefined
     ? (typeof structuredOutputRef.value === "string"
         ? structuredOutputRef.value
         : JSON.stringify(structuredOutputRef.value, null, 2))
@@ -3911,7 +4096,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       if (handoff?.isCapAborted() === true) {
         await waitForCapAbortIdle?.();
       }
-      if (sessionReadyForFinalArchive) {
+      if (isFencedSession(sessionId)) {
+        log.warn(`[agent] Skipping final archive for ${conversationId}; ownership lost to a newer runner`);
+        metric.count("run_stale_flush_suppressed", { session: sessionId });
+      } else if (sessionReadyForFinalArchive) {
         const archived = await flushSessionNow(conversationId);
         if (!archived) {
           log.error(`[agent] Final session archive failed for ${conversationId}; local session retained`);
@@ -3920,8 +4108,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         log.error(`[agent] Skipping final archive for ${conversationId}; session freshness was not established`);
       }
       markSessionIdle(conversationId);
+      stopSessionLockHeartbeat?.();
       await releaseSessionLock(conversationId);
     }
+    unregisterLiveSession([sessionId, conversationId]);
+    unregisterLivePrRunContext(sessionId);
     // Skills are materialized under session-skills/<sessionId> at the top of
     // each run and re-written on resume — delete them so they don't accumulate
     // on disk forever. (Re-created next turn; safe to remove here.)
