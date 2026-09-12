@@ -197,6 +197,15 @@ export function validateAgentModelConfig(config: Record<string, unknown> | undef
   if (!ms.ok) return ms;
   const fp = validateFastModeProfile(config["fastModeProfile"]);
   if (!fp.ok) return fp;
+  // verifyResponseRequireTools — deterministic process guard for the
+  // submit-response delivery tool: tool-name substrings that must have run
+  // before a verifyResponses agent may deliver. Mirrors
+  // outputFormat.requireToolsBeforeSubmit but for the verifyResponses path.
+  const vrt = validateStringArray(config["verifyResponseRequireTools"], "verifyResponseRequireTools");
+  if (!vrt.ok) return vrt;
+  if (Array.isArray(config["verifyResponseRequireTools"]) && config["verifyResponseRequireTools"].length > 50) {
+    return fail("verifyResponseRequireTools has too many entries (max 50)");
+  }
   return validateOutputFormat(config["outputFormat"]);
 }
 

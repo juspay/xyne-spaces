@@ -2570,6 +2570,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // `requireToolsBeforeSubmit` config can block an empty/short-circuited
   // structured delivery until the mandated data-gathering tools have run.
   if (structuredOutputRef) structuredOutputRef.toolsUsed = () => toolsUsed;
+  // verifyResponses: expose the same live tools-used list to the
+  // submit-response tool's deterministic required-tools gate.
+  if (verifyResponsesRef) verifyResponsesRef.toolsUsed = () => toolsUsed;
   setCompactionSubmitTool(
     structuredOutputRef ? "submit-result" : verifyResponsesRef ? "submit-response" : requiredTool?.name,
   );
