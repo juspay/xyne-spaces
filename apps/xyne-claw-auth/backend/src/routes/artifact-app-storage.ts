@@ -72,8 +72,8 @@ export const artifactAppStorageRouter: Router = Router();
  */
 export function storageBearerAuthBridge(req: Request, _res: Response, next: NextFunction): void {
   if (!req.headers.cookie) {
-    const match = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? "");
-    const token = match?.[1]?.trim();
+    const match = /^Bearer[ \t]+(\S+)$/i.exec((req.headers.authorization ?? "").trim());
+    const token = match?.[1];
     const workspaceId = token ? workspaceIdFromJwt(token) : undefined;
     if (token && workspaceId) {
       req.headers.cookie = `xyne_last_workspace=${workspaceId}; xyne_ws_${workspaceId}_token=${token}`;

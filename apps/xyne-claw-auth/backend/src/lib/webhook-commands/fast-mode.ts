@@ -35,7 +35,7 @@ export async function handleFastModeToggle(ctx: WebhookCommandCtx, enabled: bool
 // typos were already handled (ack-only) by the parseSlashCommand branch
 // above, so only the with-task shape reaches this regex. `/fast off <task>`
 // disables fast mode and still runs the task.
-const FAST_TASK_RE = /^\s*\/fast\s+([\s\S]+?)\s*$/i;
+const FAST_TASK_RE = /^\/fast\s([\s\S]+)$/i;
 
 export async function applyFastTaskCommand(
   ctx: WebhookCommandCtx,
@@ -43,7 +43,7 @@ export async function applyFastTaskCommand(
   task: string,
 ): Promise<string> {
   const { agent, payload, log } = ctx;
-  const fastTaskMatch = FAST_TASK_RE.exec(taskWithoutMentions);
+  const fastTaskMatch = FAST_TASK_RE.exec(taskWithoutMentions.trim());
   if (!fastTaskMatch) return task;
   let rest = fastTaskMatch[1]!.trim();
   let fastEnable = true;
