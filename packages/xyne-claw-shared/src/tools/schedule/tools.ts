@@ -125,7 +125,7 @@ export const scheduleTask: ToolDefinition = {
 
       const data = (await res.json()) as {
         success: boolean;
-        data?: { id: string; nextRunAt?: string; cronExpression?: string };
+        data?: { id: string; nextRunAt?: string; cronExpression?: string; status?: string; requiresApproval?: boolean };
         error?: string;
       };
 
@@ -134,6 +134,13 @@ export const scheduleTask: ToolDefinition = {
 
       const job = data.data!;
       const label = (params["label"] as string) ?? (params["task"] as string);
+
+      // A channel-broadcast job is NOT armed on creation. claw-auth persists it
+      // as pending_approval and posts an approval card to this thread; the job
+      // only starts running once the user taps Approve on that card.
+      if (job.requiresApproval || job.status === "pending_approval") {
+        return `"${label}" is set to post its result to a CHANNEL, so it needs approval before it will run. An approval card has been posted in this thread — the schedule activates only after you tap Approve (job ID: ${job.id}).`;
+      }
 
       if (type === "once" && job.nextRunAt) {
         return `Scheduled "${label}" to run at ${new Date(job.nextRunAt).toLocaleString()} (job ID: ${job.id})`;
@@ -206,7 +213,16 @@ export const scheduledJobControl: ToolDefinition = {
     }
 
     const requestedJobId = String(params["jobId"] ?? "").trim();
-    const currentScheduledJobId = meta["scheduledJobId"];
+    // meta.scheduledJobId is the primary signal, but it has been observed
+    // missing on genuinely scheduled runs (2026-08-29: run 9feed6bf,
+    // triggerSource=scheduled with scheduledJobId on the AgentRun row, still
+    // failed to resolve jobId='current'). The scheduler names every such run
+    // `scheduled_<jobId>_<firedAt>` (scheduled-jobs-worker.ts), so recover the
+    // id from the conversation when the meta key did not survive the dispatch.
+    const conversationJobId = /^scheduled_(.+)_\d+$/.exec(
+      String(meta["conversationId"] ?? ""),
+    )?.[1];
+    const currentScheduledJobId = meta["scheduledJobId"] ?? conversationJobId;
     const jobId =
       requestedJobId === "current" ? currentScheduledJobId : requestedJobId;
     if (!jobId) {

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowClockwiseIcon, DownloadSimpleIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, DownloadSimpleIcon, LockKeyIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import {
+  ApiError,
+  getLoginUrl,
   getPublicDesignArtifact,
   getPublicDesignArtifactHtml,
   type PublicDesignArtifact,
@@ -20,16 +22,19 @@ export function PublicDesignSharePage() {
   const [htmlBlob, setHtmlBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setAuthRequired(false);
     if (!token) {
       setError("This share link is incomplete.");
       return;
     }
-    Promise.all([getPublicDesignArtifact(token), getPublicDesignArtifactHtml(token)])
+    getPublicDesignArtifact(token)
+      .then(async (nextMetadata) => [nextMetadata, await getPublicDesignArtifactHtml(token)] as const)
       .then(([nextMetadata, blob]) => {
         if (cancelled) return;
         setMetadata(nextMetadata);
@@ -37,6 +42,10 @@ export function PublicDesignSharePage() {
       })
       .catch((err) => {
         if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401 && err.message === "auth_required") {
+          setAuthRequired(true);
+          return;
+        }
         setError(err instanceof Error ? err.message : "This shared design is unavailable.");
       });
     return () => { cancelled = true; };
@@ -51,6 +60,12 @@ export function PublicDesignSharePage() {
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [htmlBlob]);
+
+  const signIn = () => {
+    const loginUrl = getLoginUrl();
+    const separator = loginUrl.includes("?") ? "&" : "?";
+    window.location.href = `${loginUrl}${separator}redirect_to=${encodeURIComponent(window.location.href)}`;
+  };
 
   const download = () => {
     if (!htmlBlob) return;
@@ -106,6 +121,24 @@ export function PublicDesignSharePage() {
             referrerPolicy="no-referrer"
             className="h-full w-full rounded-xl border border-black/10 bg-white shadow-[0_18px_60px_rgba(0,0,0,.16)]"
           />
+        ) : authRequired ? (
+          <div className="absolute inset-0 flex items-center justify-center p-6">
+            <div className="max-w-md rounded-xl border border-xyne-border-subtle bg-xyne-surface p-6 text-center shadow-sm">
+              <LockKeyIcon size={30} className="mx-auto text-xyne-fg-secondary" />
+              <h1 className="mt-3 text-[16px] font-semibold">Sign in to open this review room</h1>
+              <p className="mt-1 text-[13px] leading-relaxed text-xyne-fg-muted">
+                This review room is restricted to members of the owner&apos;s organization. Sign in with your Xyne
+                account and you&apos;ll be brought straight back to this link.
+              </p>
+              <button
+                type="button"
+                onClick={signIn}
+                className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-xyne-fg-primary px-4 text-[12px] font-medium text-xyne-fg-inverse"
+              >
+                Sign in and continue
+              </button>
+            </div>
+          </div>
         ) : error ? (
           <div className="absolute inset-0 flex items-center justify-center p-6">
             <div className="max-w-md rounded-xl border border-xyne-error/25 bg-xyne-surface p-6 text-center shadow-sm">

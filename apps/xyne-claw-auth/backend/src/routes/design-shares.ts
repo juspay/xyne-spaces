@@ -4,14 +4,18 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { isOrgMember } from "./organizations.js";
 import { gcsService } from "../services/storageService.js";
 import { createLogger } from "../logger.js";
+import { publicShareLimiter } from "../middleware/rate-limiters.js";
 
 const log = createLogger("design-shares");
 const MAX_HTML_BYTES = 10 * 1024 * 1024;
 const TOKEN_HEADER = "x-design-share-token";
 const TOKEN_RE = /^[A-Za-z0-9_-]{40,80}$/;
 const ALLOWED_EXPIRY_DAYS = new Set([1, 7, 30, 90]);
+
+export type ArtifactShareKind = "design" | "review_room";
 
 export const designSharesRouter = Router();
 export const publicDesignSharesRouter = Router();
@@ -43,13 +47,13 @@ function sharePath(rawToken: string): string {
   return `/claw/v3/design/shared#${encodeURIComponent(rawToken)}`;
 }
 
-/** Build a browser URL whether FRONTEND_URL is origin-rooted or already `/claw`-rooted. */
+/** Build a browser URL from the canonical public Spaces origin. */
 export function designShareUrl(path: string): string {
-  const frontendBase = CONFIG.frontendUrl.replace(/\/+$/, "");
-  const relativePath = frontendBase.endsWith("/claw") && path.startsWith("/claw/")
+  const spacesBase = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  const relativePath = spacesBase.endsWith("/claw") && path.startsWith("/claw/")
     ? path.slice("/claw".length)
     : path;
-  return `${frontendBase}${relativePath}`;
+  return `${spacesBase}${relativePath}`;
 }
 
 function ownerResponse(
@@ -99,9 +103,11 @@ export async function upsertDesignShare(params: {
   attachmentId: string;
   title: string;
   expiresAt: Date | null;
+  kind?: ArtifactShareKind | undefined;
 }): Promise<{ id: string; sharePath: string; linkChanged: boolean }> {
   const { ownerUserId, orgId, conversationId, attachmentId, expiresAt } = params;
-  const title = params.title.slice(0, 160) || "Untitled design";
+  const kind: ArtifactShareKind = params.kind ?? "design";
+  const title = params.title.slice(0, 160) || (kind === "review_room" ? "Review room" : "Untitled design");
   const existing = await prisma.designArtifactShare.findUnique({
     where: { ownerUserId_conversationId: { ownerUserId, conversationId } },
   });
@@ -113,7 +119,7 @@ export async function upsertDesignShare(params: {
       rawToken = decryptToken(existing);
       const share = await prisma.designArtifactShare.update({
         where: { id: existing.id },
-        data: { attachmentId, title, expiresAt },
+        data: { attachmentId, title, expiresAt, kind },
       });
       return { id: share.id, sharePath: sharePath(rawToken), linkChanged: false };
     } catch {
@@ -127,6 +133,7 @@ export async function upsertDesignShare(params: {
           tokenAuthTag: token.authTag,
           attachmentId,
           title,
+          kind,
           expiresAt,
           revokedAt: null,
         },
@@ -146,6 +153,7 @@ export async function upsertDesignShare(params: {
           tokenAuthTag: token.authTag,
           attachmentId,
           title,
+          kind,
           expiresAt,
           revokedAt: null,
           viewCount: 0,
@@ -163,6 +171,7 @@ export async function upsertDesignShare(params: {
           conversationId,
           attachmentId,
           title,
+          kind,
           expiresAt,
         },
       });
@@ -352,13 +361,42 @@ async function resolvePublicShare(req: Request) {
   return share;
 }
 
-publicDesignSharesRouter.get("/metadata", async (req: Request, res: Response): Promise<void> => {
+type PublicShare = NonNullable<Awaited<ReturnType<typeof resolvePublicShare>>>;
+
+type PublicShareAccess =
+  | { ok: true; share: PublicShare }
+  | { ok: false; reason: "not_found" | "auth_required" };
+
+async function authorizePublicShare(req: Request): Promise<PublicShareAccess> {
+  const share = await resolvePublicShare(req);
+  if (!share) return { ok: false, reason: "not_found" };
+  if (share.kind !== "review_room") return { ok: true, share };
+
+  const requesterId = getRequesterId(req);
+  if (!requesterId) return { ok: false, reason: "auth_required" };
+  if (!(await isOrgMember(requesterId, share.orgId))) {
+    log.warn(`review room denied shareId=${share.id} userId=${requesterId} not an org member`);
+    return { ok: false, reason: "not_found" };
+  }
+  return { ok: true, share };
+}
+
+function denyPublicShare(res: Response, reason: "not_found" | "auth_required", signalAuth: boolean): void {
+  if (reason === "auth_required" && signalAuth) {
+    res.status(401).json({ success: false, error: "auth_required" });
+    return;
+  }
+  res.status(404).json({ success: false, error: "Shared design not found or no longer available" });
+}
+
+publicDesignSharesRouter.get("/metadata", publicShareLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const share = await resolvePublicShare(req);
-    if (!share) {
-      res.status(404).json({ success: false, error: "Shared design not found or no longer available" });
+    const access = await authorizePublicShare(req);
+    if (!access.ok) {
+      denyPublicShare(res, access.reason, true);
       return;
     }
+    const { share } = access;
     res.setHeader("Cache-Control", "no-store");
     res.json({
       success: true,
@@ -374,13 +412,14 @@ publicDesignSharesRouter.get("/metadata", async (req: Request, res: Response): P
   }
 });
 
-publicDesignSharesRouter.get("/content", async (req: Request, res: Response): Promise<void> => {
+publicDesignSharesRouter.get("/content", publicShareLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const share = await resolvePublicShare(req);
-    if (!share) {
-      res.status(404).json({ success: false, error: "Shared design not found or no longer available" });
+    const access = await authorizePublicShare(req);
+    if (!access.ok) {
+      denyPublicShare(res, access.reason, false);
       return;
     }
+    const { share } = access;
     if (share.attachment.size > MAX_HTML_BYTES) {
       res.status(413).json({ success: false, error: "Shared design is too large" });
       return;

@@ -594,13 +594,11 @@ router.delete("/provider-credentials/:id", requireClawAdmin, asyncHandler(async 
 
 // ── Agent Dashboard (single payload endpoint) ───────────────────────────────
 
-// Open to any authenticated user (not gated by requireClawAdmin) — DELIBERATE.
-// The org-wide agent dashboard is a core surface for everyone with a Spaces
-// login: /v3/home (insight strip, needs-attention, recent runs) and
-// /v3/dashboard are built on these endpoints for non-admins. Mount-level
-// requireAuth still applies. Restricting these to admins is a product
-// decision, not an auth fix — don't add requireClawAdmin here without also
-// reworking those frontend surfaces.
+// Admin-only: guarded by the router-level `requireClawAdmin` default-deny above
+// (WAPT PY-JP-004 — this org-wide dashboard exposed cross-user data to any
+// authenticated caller). The non-admin surfaces (/v3/home, /v3/dashboard) call
+// this too but degrade gracefully — the cards render "—" on the 403 (see
+// AgentsDashboardPageV3). Do NOT re-open this to non-admins.
 router.get("/dashboard", asyncHandler(async (req: Request, res: Response) => {
   const window = windowFromDays(req.query["days"] ?? "30");
   const cutoff = window?.start ?? null;
@@ -824,6 +822,17 @@ router.post("/error-pipeline/seed", requireClawAdmin, asyncHandler(async (req: R
   const total = await prisma.errorBucket.count();
   log.info(`[admin] error-pipeline buckets seeded by ${requesterId} (${ERROR_BUCKET_SEED.length} upserted, ${total} total)`);
   ok(res, { upserted: ERROR_BUCKET_SEED.length, total });
+}));
+
+router.post("/sdlc-agent/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req)!;
+  const apply = req.query["apply"] === "true";
+  const orgId = typeof req.query["orgId"] === "string" ? req.query["orgId"] : undefined;
+  const { syncSdlcAgent } = await import("../lib/sdlc-agent-sync.js");
+  const rows = await syncSdlcAgent(prisma, { apply, requesterId, ...(orgId ? { orgId } : {}) });
+  const changed = rows.reduce((total, row) => total + row.changes.length, 0);
+  log.info(`[admin] sdlc-agent sync by ${requesterId} apply=${apply} orgId=${orgId ?? "(all)"} rows=${rows.length} changes=${changed}`);
+  ok(res, { applied: apply, rows: rows.length, changes: changed, results: rows });
 }));
 
 router.get("/error-pipeline/buckets", asyncHandler(async (_req: Request, res: Response) => {

@@ -29,7 +29,7 @@ const router = Router();
 type OrgRole = "OWNER" | "ADMIN" | "MEMBER";
 
 /** True if `userId` is a current (non-left) member of `orgId`. */
-async function isOrgMember(userId: string, orgId: string): Promise<boolean> {
+export async function isOrgMember(userId: string, orgId: string): Promise<boolean> {
   const member = await prisma.orgMember.findUnique({
     where: { userId_orgId: { userId, orgId } },
     select: { leftAt: true },

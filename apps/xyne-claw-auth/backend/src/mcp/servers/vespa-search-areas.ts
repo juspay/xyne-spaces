@@ -1,9 +1,9 @@
 /**
  * Structured "search area" → YQL builder for the `spaces-vespa-search` MCP tool.
  *
- * This is the SAFE, structured alternative to the raw-YQL `spaces-vespa-query`
- * escape hatch: the agent declares WHAT it wants (a search area + a typed
- * operator-bag filter set) and CODE — never the LLM — assembles the YQL string.
+ * The agent never writes YQL: it declares WHAT it wants (a search area + a
+ * typed operator-bag filter set) and CODE — never the LLM — assembles the YQL
+ * string.
  * The built string is then handed to queryDirect() in ./vespa-direct.ts, which
  * still does dd/mm/yy→ms date conversion, (idempotent) ACL injection, rank-profile
  * selection and response/citation shaping.

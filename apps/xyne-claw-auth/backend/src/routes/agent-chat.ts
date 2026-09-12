@@ -1,7 +1,8 @@
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { isAgentInvocableBy } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -14,7 +15,6 @@ import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
-import { dispatchLocalHarnessRun, isLocalHarnessProvider, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -39,6 +39,14 @@ import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js"
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
@@ -264,23 +272,6 @@ interface PersistedAttachment {
   mimeType: string;
   originalFilename: string;
   size: number;
-  /**
-   * Client-facing filename. The client's completion handler reads `fileName`,
-   * so sending only `originalFilename` left it undefined on the live path.
-   */
-  fileName?: string;
-  /**
-   * The artifact manifest, ENRICHED with appId/versionId.
-   *
-   * This is the only channel that can carry them live. `attachArtifactToSessionApp`
-   * runs at persist time — after the tool returned — so the tool's own metadata
-   * has no appId, and without it a freshly generated app cannot address itself:
-   * the card shows Save (thinking it is unsaved), Expand falls back to the
-   * dialog, and App Creation mode never opens until a reload refetches
-   * /messages. Allowlisted to `reactArtifact` for the same reason that endpoint
-   * allowlists it — passing metadata wholesale would leak the GCS `url`.
-   */
-  metadata?: { reactArtifact?: unknown };
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -493,17 +484,11 @@ async function persistAssistantResult(args: {
             ...(attachmentMetadata ? { metadata: attachmentMetadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
-        const reactArtifactMeta =
-          attachmentMetadata && typeof attachmentMetadata === "object"
-            ? attachmentMetadata["reactArtifact"]
-            : undefined;
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,
           originalFilename: row.originalFilename,
-          fileName: row.originalFilename,
           size: row.size,
-          ...(reactArtifactMeta ? { metadata: { reactArtifact: reactArtifactMeta } } : {}),
         });
       } catch (e) {
         log.error("[agent-chat] failed to persist assistant attachment:", e);
@@ -666,6 +651,18 @@ router.post(
       const thumbnails = filesMap?.["thumbnails"];
       if (files.length === 0) {
         res.status(400).json({ success: false, error: "No files uploaded" });
+        return;
+      }
+
+      // Deny-by-default content screening: reject native executables / the EICAR
+      // test file (by magic bytes, regardless of filename) and executable
+      // extensions / MIME types, so an attachment can't be a malware carrier.
+      const rejected = screenUploadFiles([...files, ...(thumbnails ?? [])]);
+      if (rejected) {
+        res.status(400).json({
+          success: false,
+          error: `File "${rejected.filename}" was rejected: ${rejected.reason}`,
+        });
         return;
       }
 
@@ -856,7 +853,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
       res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
@@ -1471,10 +1468,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const rawPersonalProvider = userAgentConfig?.provider;
     // "spaces" is the platform-default sentinel, not a real personal credential —
     // saving it should not override the agent-level providerOrder/credentials.
-    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
-    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
     // Effective speed for THIS run: the composer toggle wins, else the agent
     // default. Fast mode may resolve against its own provider profile
     // (config.fastModeProfile) — same credential keys, possibly different
@@ -1485,10 +1481,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const rawProviderOrder = speedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
-      : [];
-    const rawConfiguredProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
-    const configuredProviderOrder: string[] = Array.isArray(rawConfiguredProviderOrder)
-      ? rawConfiguredProviderOrder.filter((p): p is string => typeof p === "string")
       : [];
     const userProvider = personalProvider ?? agentLevelProvider;
 
@@ -1687,16 +1679,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
     };
 
-    const localTarget = await resolveLocalHarnessTarget({
-      userId,
-      orgId: agent.orgId,
-      providerOrder: configuredProviderOrder,
-      personalProvider: rawPersonalProvider,
-    }).catch((err: unknown) => {
-      log.warn("[agent-chat] local-harness resolution failed — using server run:", err instanceof Error ? err.message : err);
-      return undefined;
-    });
-
     // SSE consumer path. We send Accept: text/event-stream so the /run proxy
     // routes us through SSE pass-through (one ordered TCP connection from
     // claw → claw-auth) instead of falling back to the legacy POST bridge,
@@ -1709,24 +1691,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // run-stream.ts — so all the finalize + persistAssistantResult + resolve
     // wiring stays in one place.
     let runBody: { success: boolean; sessionId?: string; error?: string; deferred?: boolean };
-    if (localTarget) {
-      const dispatched = await dispatchLocalHarnessRun({
-        target: localTarget,
-        userId,
-        orgId: agent.orgId,
-        conversationId,
-        agentSlug: slug,
-        agentName: agent.name,
-        systemPrompt: agent.systemPrompt,
-        model: pinnedModelForProvider(runAgentConfig, localTarget.provider),
-        task: message.trim(),
-        context: resolvedContext.promptPrefix || null,
-        progressUrl,
-        callbackUrl,
-        serverFallbackBody: forwardBody,
-      });
-      runBody = { success: true, sessionId: dispatched.sessionId };
-    } else if (CONFIG.clawSseTransport) {
+    if (CONFIG.clawSseTransport) {
       runBody = await runAgentChatViaSse({
         forwardBody,
         callbackId,
@@ -3153,12 +3118,12 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     });
 
     if (!result.ok) {
-      log.error(`[agent-chat] approve-action failed: ${action.tool} — ${result.error}`);
+      log.error(`[agent-chat] approve-action failed: ${sanitizeForLog(action.tool)} — ${sanitizeForLog(result.error)}`);
       res.status(400).json({ success: false, error: result.error ?? "Execution failed" });
       return;
     }
 
-    log.info(`[agent-chat] approve-action ok: ${action.tool} → ${result.content.slice(0, 100)}`);
+    log.info(`[agent-chat] approve-action ok: ${sanitizeForLog(action.tool)} → ${sanitizeForLog(result.content).slice(0, 100)}`);
     res.json({ success: true, data: { content: result.content } });
   } catch (err) {
     log.error("[agent-chat] approve-action error:", err);
