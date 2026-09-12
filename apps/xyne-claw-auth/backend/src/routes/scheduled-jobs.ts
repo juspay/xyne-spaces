@@ -825,10 +825,14 @@ router.post(
         );
       });
     }
-    if (row.type === "cron" && row.bullSchedulerId) {
-      await cancelCronJob(row.bullSchedulerId).catch((err) => {
+    if (row.type === "cron") {
+      // Fall back to the deterministic schedulerId when bullSchedulerId was
+      // never persisted (e.g. a create-time write failure); otherwise the
+      // Redis cron keeps firing after the row is paused.
+      const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
+      await cancelCronJob(schedulerId).catch((err) => {
         log.warn(
-          `[scheduled-jobs] Failed to remove scheduler ${row.bullSchedulerId} while pausing ${row.id}:`,
+          `[scheduled-jobs] Failed to remove scheduler ${schedulerId} while pausing ${row.id}:`,
           err instanceof Error ? err.message : err,
         );
       });
@@ -952,8 +956,18 @@ router.post(
     if (row.type === "once" && row.bullJobId) {
       await cancelJob(row.bullJobId).catch(() => {});
     }
-    if (row.type === "cron" && row.bullSchedulerId) {
-      await cancelCronJob(row.bullSchedulerId).catch(() => {});
+    if (row.type === "cron") {
+      // Fall back to the deterministic schedulerId when bullSchedulerId was
+      // never persisted, and surface Redis failures instead of swallowing
+      // them — a silent no-op here left the cron firing while the row flipped
+      // to "cancelled" (the orphaned-schedule incident).
+      const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
+      await cancelCronJob(schedulerId).catch((err) => {
+        log.warn(
+          `[scheduled-jobs] Failed to remove scheduler ${schedulerId} while cancelling ${row.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
     }
 
     const updated = await prisma.scheduledJob.update({
@@ -1049,8 +1063,17 @@ router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Res
   if (row.type === "once" && row.bullJobId) {
     await cancelJob(row.bullJobId).catch(() => {});
   }
-  if (row.type === "cron" && row.bullSchedulerId) {
-    await cancelCronJob(row.bullSchedulerId).catch(() => {});
+  if (row.type === "cron") {
+    // Fall back to the deterministic schedulerId when bullSchedulerId was
+    // never persisted, and log Redis failures — otherwise deleting the row
+    // leaves an orphaned cron that keeps firing the (now stale) prompt.
+    const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
+    await cancelCronJob(schedulerId).catch((err) => {
+      log.warn(
+        `[scheduled-jobs] Failed to remove scheduler ${schedulerId} while deleting ${row.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
   }
 
   await prisma.scheduledJob.update({
