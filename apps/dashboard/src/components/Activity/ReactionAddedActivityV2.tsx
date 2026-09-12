@@ -9,6 +9,8 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { parseReactionsMd, ReactionsData, getMostRecentEmoji } from '@xyne/shared';
 import { renderEmoji } from '../../utils/customEmojiUtils';
+import { useCustomEmojis } from '../../hooks/useCustomEmojis';
+import { useEmojiDataReady } from '../../hooks/useEmojiData';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
 export const ReactionAddedActivityV2 = ({
@@ -21,6 +23,10 @@ export const ReactionAddedActivityV2 = ({
   const message = activity.message;
   const actorUser = useUser(activity.actorId); // Most recent reactor
   const { baseRoute } = useRouteContext();
+  const { data: customEmojis } = useCustomEmojis();
+  // Re-render once the emoji-datasource cache is warm so unicode shortcodes
+  // resolve instead of showing the neutral fallback icon.
+  useEmojiDataReady();
 
   if (!message || !message.conversation) return null;
 
@@ -72,7 +78,7 @@ export const ReactionAddedActivityV2 = ({
       actorId={activity.actorId} // Most recent reactor
       actorName={getUserDisplayName(actorUser)}
       channelId={message.conversation?.channelId}
-      badgeIcon={renderEmoji(latestEmoji)}
+      badgeIcon={renderEmoji(latestEmoji, 'w-5 h-5', 'text-base', { customEmojis })}
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}

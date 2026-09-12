@@ -46,6 +46,9 @@ export function preloadEmojiData(): void {
 /** Load emoji metadata and resolve once sync native-emoji name lookups are ready. */
 export const loadEmojiData = (): Promise<void> => ensureEmojiData();
 
+/** Synchronous check for whether the emoji-datasource cache is already populated. */
+export const isEmojiDataReady = (): boolean => emojiDataCache !== null;
+
 /** Convert a native Unicode emoji to its canonical shortcode name. */
 export const findUnicodeEmojiName = (emoji: string): string | undefined =>
   nativeEmojiNames?.get(normalizeNativeEmoji(emoji));
