@@ -8,15 +8,17 @@ import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
+import { accountDeactivationService } from '../services/accountDeactivationService';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
   private userSessionService: UserSessionService;
-  private googleClient: OAuth2Client;
+  private googleClientId: string;
+  private googleClientSecret: string;
 
   constructor() {
     this.userSessionService = new UserSessionService();
-    
+
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
@@ -25,8 +27,90 @@ class AuthV2Middleware {
       throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
     }
 
-    this.googleClient = new OAuth2Client(clientId, clientSecret);
+    this.googleClientId = clientId;
+    this.googleClientSecret = clientSecret;
   }
+
+  /**
+   * Verify a Google refresh token is still valid against Google.
+   *
+   * A single shared OAuth2Client whose credentials are mutated on every request
+   * can surface a spurious `unauthorized_client` error under concurrency, which
+   * previously masked genuine account deactivations (they were treated as
+   * transient and the session was allowed). To avoid that, each check runs on a
+   * FRESH client and, if the first attempt reports `unauthorized_client`, we
+   * recreate the client and retry once so a real revocation surfaces as
+   * `invalid_grant`.
+   *
+   * Returns true only when Google definitively rejects the token — meaning the
+   * account is deactivated/revoked. This mirrors the PERMANENT_AUTH_ERROR
+   * convention used by the Gmail/Calendar workers
+   * (`invalid_grant` / `unauthorized_client` / `invalid_token`). Transient or
+   * system errors return false so the local session is allowed to continue.
+   */
+  private isGoogleRefreshTokenRevoked = async (
+    refreshToken: string,
+    user: { id: string; email: string },
+  ): Promise<boolean> => {
+    const PERMANENT_ERRORS = ['invalid_grant', 'unauthorized_client', 'invalid_token'];
+
+    const attempt = async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const client = new OAuth2Client(this.googleClientId, this.googleClientSecret);
+        client.setCredentials({ refresh_token: refreshToken });
+        // If the user has been deleted or suspended in Google, this throws.
+        await client.getAccessToken();
+        return { ok: true };
+      } catch (err) {
+        const googleError = err as gaxios.GaxiosError;
+        return { ok: false, error: googleError.response?.data?.error ?? googleError.message };
+      }
+    };
+
+    let result = await attempt();
+    if (result.ok) {
+      logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${user.email}`, {
+        userId: user.id,
+        email: user.email,
+      });
+      return false;
+    }
+
+    // `unauthorized_client` can come from a stale/reused client rather than a
+    // real revocation. Recreate a fresh client and retry once so a genuine
+    // deactivation surfaces as `invalid_grant`.
+    if (result.error === 'unauthorized_client') {
+      logger.info(`[AUTH] [Auto-Refresh] Google returned unauthorized_client for ${user.email}; recreating client and retrying`, {
+        userId: user.id,
+        email: user.email,
+      });
+      result = await attempt();
+      if (result.ok) {
+        logger.info(`[AUTH] [Auto-Refresh] Google verification successful on retry for user ${user.email}`, {
+          userId: user.id,
+          email: user.email,
+        });
+        return false;
+      }
+    }
+
+    if (result.error && PERMANENT_ERRORS.includes(result.error)) {
+      logger.warn(`[AUTH] [Auto-Refresh] Google rejected token (${result.error}) for ${user.email} — account revoked/deactivated. Session rejected.`, {
+        userId: user.id,
+        email: user.email,
+        googleError: result.error,
+      });
+      return true;
+    }
+
+    // Transient/system error (network, 5xx, etc.) — allow the local session.
+    logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${user.email}. Error: ${result.error}`, {
+      userId: user.id,
+      email: user.email,
+      error: result.error,
+    });
+    return false;
+  };
 
   /**
    * Helper to extract token from workspace-specific cookie
@@ -126,38 +210,19 @@ class AuthV2Middleware {
       // --- Provider Verification Step ---
       // Only verify with Google if the user authenticated via Google
       if (session.user.authProvider === AuthProvider.GOOGLE && session.refreshToken) {
-        try {
-          // Verify if the user is still valid in Google by checking their refresh token
-          this.googleClient.setCredentials({ refresh_token: session.refreshToken });
-
-          // Attempt to get a new access token.
-          // If the user has been deleted or suspended in Google, this should throw.
-          await this.googleClient.getAccessToken();
-          
-          logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${session.user.email}`, {
-                      userId: session.user.id,
-                      email: session.user.email,
-                    });
-        } catch (err) {
-          const googleError = err as gaxios.GaxiosError;
-          // Check if it's a user-related error vs system error
-          const isInvalidGrant = googleError.response?.data?.error === 'invalid_grant';
-
-          if (isInvalidGrant) {
-            logger.warn(`[AUTH] [Auto-Refresh] User token revoked for ${session.user.email}`, {
-              userId: session.user.id,
-              email: session.user.email,
-            });
-            return false;
-          } else {
-            // For system errors, allow the refresh but log the issue
-            logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError}`, {
-              userId: session.user.id,
-              email: session.user.email,
-              error: googleError.message,
-            });
-          }
-          // Proceed with local session if it's just a network/transient error
+        // Verify the user is still valid in Google. A fresh client is used per
+        // attempt and `unauthorized_client` triggers a recreate-and-retry so a
+        // genuine deactivation is confirmed via `invalid_grant` (see helper).
+        const revoked = await this.isGoogleRefreshTokenRevoked(session.refreshToken, {
+          id: session.user.id,
+          email: session.user.email,
+        });
+        if (revoked) {
+          await accountDeactivationService.handleDeactivatedUser({
+            userId: session.user.id,
+            email: session.user.email,
+          });
+          return false;
         }
       } else if (session.user.authProvider === AuthProvider.MICROSOFT) {
         // Verify if the user is still valid in Azure AD via Microsoft Graph API
@@ -196,11 +261,19 @@ class AuthV2Middleware {
                 logger.info(`[Auto-Refresh] Microsoft token refreshed for user ${session.user.email}`);
               } else {
                 logger.warn(`[Auto-Refresh] Microsoft token refresh failed for ${session.user.email}. User may be disabled in Azure AD.`);
+                await accountDeactivationService.handleDeactivatedUser({
+                  userId: session.user.id,
+                  email: session.user.email,
+                });
                 return false;
               }
             } else {
               // 403 or other error — user likely disabled/deleted in Azure AD
               logger.warn(`[Auto-Refresh] Microsoft Graph returned ${graphResponse.status} for ${session.user.email}. User may be disabled in Azure AD.`);
+              await accountDeactivationService.handleDeactivatedUser({
+                userId: session.user.id,
+                email: session.user.email,
+              });
               return false;
             }
           } catch (err) {
