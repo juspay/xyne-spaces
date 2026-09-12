@@ -1,15 +1,6 @@
 /**
- * Xyne Spaces automation-management tools.
- *
- * These are exposed by the xyne-spaces MCP server and call the backend's
- * /api/automations/claw/* routes, which accept both user Bearer tokens and
- * app Bearer tokens (authenticateUserOrApp). That makes them usable from
- * headless agent runs as well as interactive Claw sessions.
- *
- * Design: few, broad tools rather than many narrow ones. A read tool takes an
- * id for the full record or filters for a filtered page, and returns the whole
- * payload rather than a summary — an agent debugging an automation needs the
- * config and the run context, not a pretty line of text.
+ * Xyne Spaces automation-management tools. These call /api/automations/claw/*,
+ * which accepts both user and app Bearer tokens, so they work in headless runs.
  */
 
 import { errMsg } from "../../lib/errors.js";
@@ -37,8 +28,7 @@ function withToolErrors(
   };
 }
 
-/** Mirrors AutomationView on the backend — note `config` carries the whole
- *  trigger/conditions/steps tree, which is the part an agent actually needs. */
+/** Mirrors AutomationView; `config` carries the full trigger/steps tree. */
 type Automation = {
   id: string;
   workspaceId?: string;
@@ -62,9 +52,7 @@ type AutomationListResponse = {
   pagination?: { limit: number; nextCursor: string | null; hasMore: boolean };
 };
 
-/** Mirrors AutomationRunSummaryView. The backend field is `completedAt`,
- *  NOT `finishedAt` — an earlier revision guessed wrong and silently dropped
- *  the finish time from every run it printed. */
+/** Mirrors AutomationRunSummaryView — note `completedAt`, not `finishedAt`. */
 type RunSummary = {
   id: string;
   automationId: string;

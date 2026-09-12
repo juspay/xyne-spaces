@@ -7,12 +7,7 @@ import { AutomationRunStatus, AutomationStatus } from '../types/status';
 import { triggerTypeToEventType } from '../types/workflow-adapter';
 import { WorkflowEventType } from '@xyne/shared';
 
-/**
- * Valid `triggerType` filter values. Validated against the real enum rather
- * than run through triggerTypeToEventType, which maps anything unknown to
- * NO_OP — a typo would otherwise silently filter to "Manual / Other" instead
- * of reporting nothing matched.
- */
+/** Valid `triggerType` filter values. Unknown values are dropped, not mapped to NO_OP. */
 export const WORKFLOW_EVENT_TYPE_VALUES: ReadonlySet<string> = new Set(
   Object.values(WorkflowEventType),
 );
@@ -88,8 +83,7 @@ export const RUN_STATUS_FILTER_VALUES: ReadonlySet<string> = new Set(
   Object.values(AutomationRunStatus),
 );
 
-/** Accepted `status` values when filtering the automation list. Derived from
- *  the enum so a new status is filterable the moment it is added. */
+/** Accepted `status` filter values. */
 export const AUTOMATION_STATUS_VALUES: ReadonlySet<string> = new Set(
   Object.values(AutomationStatus),
 );
@@ -108,12 +102,7 @@ export function safeParseJson(s: string): unknown {
   }
 }
 
-/**
- * Statuses the dashboard shows by default (AutomationFiltersBar/filters.ts).
- * ARCHIVED / REJECTED / REVOKED / AUTO_REVOKED are lineage history and stay out
- * of the list unless asked for by name, so the claw list matches what a person
- * sees in the UI rather than inventing its own default.
- */
+/** Statuses the dashboard lists by default; history statuses only when named. */
 export const AUTOMATION_LIVE_STATUSES: readonly AutomationStatus[] = [
   AutomationStatus.DRAFT,
   AutomationStatus.PENDING_APPROVAL,
@@ -160,13 +149,7 @@ export function parseSortDirection(raw: unknown): 'asc' | 'desc' {
   return raw === 'asc' ? 'asc' : 'desc';
 }
 
-/**
- * Sort-aware keyset cursor.
- *
- * The old cursor hardcoded `createdAt`, so paging under any other sort silently
- * walked the wrong column. This carries the field it was built for and is
- * rejected on decode if the caller then changes sort mid-pagination.
- */
+/** Sort-aware keyset cursor: carries the field it was built for. */
 export function encodeAutomationListCursorFor(
   field: AutomationSortField,
   row: { id: string; createdAt: Date; updatedAt: Date; workflowName: string | null; status: string },
@@ -208,17 +191,8 @@ export function decodeAutomationListCursorFor(
 }
 
 /**
- * DRAFT and PENDING_APPROVAL rows belong to their author alone; every other
- * status is visible workspace-wide. The dashboard enforces this in
- * `isVisibleToUser`, but it is CLIENT-SIDE ONLY — neither the REST list nor the
- * Zero `WorkflowsACL` applies it, so a filtered API call could otherwise read
- * (or enumerate, via createdBy) another user's private drafts. Applied here as
- * a where-clause so no filter combination can escape it.
- *
- * createdById lives inside the `metadata` JSON string, written by
- * buildAutomationMetadata as {"description":...,"createdById":"..."} — matching
- * the quoted key/value pair, not a bare id, keeps it from matching a
- * description that happens to contain the id.
+ * DRAFT and PENDING_APPROVAL are visible only to their author; the dashboard
+ * enforces this client-side only, so it is applied here as a where-clause.
  */
 export function proposalVisibilityWhere(userId: string): {
   OR: Array<Record<string, unknown>>;
@@ -237,12 +211,8 @@ export function createdByWhere(userIds: string[]): Array<Record<string, unknown>
 }
 
 /**
- * Channel scoping lives at config.trigger.config.channelIds (an ARRAY — the
- * dashboard's getAutomationChannelIds reads the same path). `context` is a text
- * column holding the config JSON, so this matches the id as a substring.
- * Channel ids are cuids, so a false positive would need the id to appear
- * elsewhere in the same config — possible via a step config, and deliberately
- * accepted here to keep the query expressible in plain Prisma.
+ * Channel scoping lives at config.trigger.config.channelIds. `context` is text,
+ * so the id is matched as a substring — a step config using it also matches.
  */
 export function channelIdWhere(channelIds: string[]): Array<Record<string, unknown>> {
   return channelIds.map(id => ({ context: { contains: id } }));

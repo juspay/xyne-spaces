@@ -54,15 +54,9 @@ import { approvalService, ApprovalError } from '../services/approval.service';
 import type { AutomationConfig } from '../types/automation-config';
 
 /**
- * Claw-facing automation management routes.
- *
- * Mounted under /api/automations/claw and gated by authenticateUserOrApp,
- * so both regular user tokens and agent app tokens can manage automations
- * programmatically (headless / no UI required).
- *
- * This intentionally mirrors the create/list/get/update/run-history surface of
- * /api/automations, but strips out schema/metadata/template/webhook endpoints
- * that are not needed for headless CRUD.
+ * Claw-facing automation routes. Mounted at /api/automations/claw behind
+ * authenticateUserOrApp, so both user tokens and app tokens can manage
+ * automations headlessly.
  */
 
 const router = Router();
@@ -72,20 +66,9 @@ router.use((_req, res, next) => {
   next();
 });
 
-/* ── Schema discovery ──────────────────────────────────────────────────
- * An agent has to author `config` from nothing, so it needs the vocabulary
- * first: which triggers and steps exist, and what each one's parameters are.
- * These are registry-driven and read-only, so they need no workspace scoping.
- *
- * Registered before the parameterised routes below. Express only matches a
- * single path segment per ":param", so "/schema/triggers" could not collide
- * with "/:id" anyway — the ordering is for the reader, not the router.
- */
+// Schema discovery: registry-driven and read-only, so no workspace scoping.
 
-// GET /schema/operators — condition operators available to `conditions`.
-// Derived from the exported enum + VALUE_LESS_OPERATORS rather than copying
-// the label map that lives privately in automation.routes.ts: one source of
-// truth, and nothing here goes stale when an operator is added there.
+// GET /schema/operators — derived from the enum, not a copied label map.
 router.get('/schema/operators', (_req: Request, res: Response) => {
   const list = Object.values(ConditionOperator).map(value => ({
     value,
@@ -154,7 +137,6 @@ router.get('/schema/steps/:type', (req: Request<{ type: string }>, res: Response
 });
 
 // POST /validate — check a config without persisting anything.
-// Pure: lets an agent iterate on a config before it writes a DRAFT.
 router.post('/validate', (req: Request, res: Response) => {
   const body = req.body as { config?: AutomationConfig };
   if (!body?.config) {
@@ -230,9 +212,7 @@ router.get('/', async (req: Request, res: Response) => {
     const column = AUTOMATION_SORT_FIELDS[sortBy];
     const cursor = decodeAutomationListCursorFor(req.query['cursor'], sortBy);
 
-    // Filter vocabulary deliberately mirrors the dashboard's AutomationFilters
-    // (AutomationsList/AutomationFiltersBar/filters.ts) so an agent and a person
-    // narrow the same list the same way. All are multi-value.
+    // Filters mirror the dashboard's AutomationFilters. All are multi-value.
     const statuses = parseAllowedList(req.query['status'], AUTOMATION_STATUS_VALUES);
     const triggerTypes = parseAllowedList(req.query['triggerType'], WORKFLOW_EVENT_TYPE_VALUES);
     const channelIds = parseCsvList(req.query['channelId']);
@@ -243,8 +223,7 @@ router.get('/', async (req: Request, res: Response) => {
     const from = parseEpochMsParam(req.query['from']);
     const to = parseEpochMsParam(req.query['to']);
 
-    // Keyset pagination: strictly past the cursor on the sort column, with id
-    // breaking ties. Direction follows the sort so `asc` pages forward too.
+    // Keyset pagination: past the cursor on the sort column, id breaking ties.
     const beyond = sortDir === 'asc' ? 'gt' : 'lt';
 
     const and: Prisma.WorkflowWhereInput[] = [
@@ -254,8 +233,7 @@ router.get('/', async (req: Request, res: Response) => {
     if (createdBy.length > 0) and.push({ OR: createdByWhere(createdBy) as Prisma.WorkflowWhereInput[] });
     if (channelIds.length > 0) and.push({ OR: channelIdWhere(channelIds) as Prisma.WorkflowWhereInput[] });
     if (q) {
-      // The dashboard matches name, description and trigger type. Description
-      // lives in `metadata` and the trigger type in `context`, both JSON text.
+      // Description lives in `metadata`, trigger type in `context`.
       and.push({
         OR: [
           { workflowName: { contains: q, mode: 'insensitive' } },
@@ -276,8 +254,7 @@ router.get('/', async (req: Request, res: Response) => {
     const where: Prisma.WorkflowWhereInput = {
       workflowType: AUTOMATION_WORKFLOW_TYPE,
       workspaceId: auth.workspaceId,
-      // Default to the live set the dashboard shows; history statuses
-      // (ARCHIVED/REJECTED/REVOKED/AUTO_REVOKED) only when named explicitly.
+      // Live set by default; history statuses only when named explicitly.
       status: { in: statuses.length > 0 ? statuses : [...AUTOMATION_LIVE_STATUSES] },
       ...(triggerTypes.length > 0 ? { eventType: { in: triggerTypes } } : {}),
       ...(from || to
@@ -312,14 +289,8 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-/* GET /runs — runs across the WHOLE workspace, not scoped to one automation.
- *
- * Lets an agent answer "what failed in the last hour" without first listing
- * automations and fanning out per id. `automationId` narrows it back down.
- *
- * MUST stay above "GET /:id": both are a single path segment, so whichever is
- * registered first wins and "/runs" would otherwise be read as an id.
- */
+/* GET /runs — workspace-wide runs; `automationId` narrows to one automation.
+ * MUST stay above "GET /:id": both are one segment, first registered wins. */
 router.get('/runs', async (req: Request, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -340,8 +311,7 @@ router.get('/runs', async (req: Request, res: Response) => {
     const from = parseEpochMsParam(req.query['from']);
     const to = parseEpochMsParam(req.query['to']);
 
-    // Tenant scoping: executions carry a denormalised workspaceId, so this
-    // never leaks another workspace's runs even without an automation filter.
+    // Executions carry a denormalised workspaceId, so this stays tenant-scoped.
     const rows = await db.workflowExecution.findMany({
       where: {
         workspaceId: auth.workspaceId,
@@ -382,16 +352,9 @@ router.get('/runs', async (req: Request, res: Response) => {
   }
 });
 
-/* GET /agents — agents a RUN_AGENT step can call.
- *
- * The user-facing surface has this at /api/automations/claw/agents, which now
- * resolves into THIS router first. It would still fall through to the old
- * handler, but that one sits behind authMiddleware.authenticate and so would
- * reject an app token — the exact caller this route exists for. Declared here
- * so app-token runs get the same answer as user sessions.
- *
- * Single path segment, so it must stay above "GET /:id".
- */
+/* GET /agents — agents a RUN_AGENT step can call. Declared here because the
+ * existing handler sits behind authMiddleware.authenticate and would reject an
+ * app token. One segment, so it must stay above "GET /:id". */
 router.get('/agents', async (_req: Request, res: Response) => {
   try {
     const agents = await clawClient.listAgents();
@@ -441,9 +404,7 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
         workflowType: AUTOMATION_WORKFLOW_TYPE,
         workspaceId: auth.workspaceId,
         status: { not: AutomationStatus.ARCHIVED },
-        // Another user's private DRAFT / PENDING_APPROVAL must 404, not read —
-        // otherwise the guard on the list is cosmetic, since ids are guessable
-        // from a lineage or a run.
+        // Another user's private DRAFT / PENDING_APPROVAL must 404, not read.
         ...(proposalVisibilityWhere(auth.userId) as Prisma.WorkflowWhereInput),
       },
     });
@@ -557,15 +518,8 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
-/* PATCH /:id/config — targeted edits to the step tree.
- *
- * PUT /:id replaces the whole config, so an agent editing one step has to
- * reproduce the entire tree — expensive, easy to get wrong, and it silently
- * discards anything changed since it last read. This applies named operations
- * server-side instead (add/update/delete/move a step by id, set a CONDITIONAL
- * or SWITCH-case condition, set the trigger or schedule), then validates and
- * saves through exactly the same DRAFT-vs-new-version rules as PUT.
- */
+/* PATCH /:id/config — targeted step-tree edits, so an agent need not resend the
+ * whole config. Validated and saved under the same rules as PUT. */
 router.patch('/:id/config', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -618,8 +572,7 @@ router.patch('/:id/config', async (req: Request<{ id: string }>, res: Response) 
           : auth.userId,
     });
 
-    // Editing your own DRAFT changes it in place; editing anything live forks a
-    // new DRAFT version, exactly as PUT does.
+    // Own DRAFT edits in place; anything live forks a new DRAFT, as PUT does.
     if (existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId) {
       const updated = await db.$transaction(async tx => {
         await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
@@ -672,12 +625,8 @@ router.patch('/:id/config', async (req: Request<{ id: string }>, res: Response) 
   }
 });
 
-/* POST /:id/clone — copy an automation into a brand-new DRAFT.
- *
- * Deliberately starts its OWN lineage (automationSeriesId left null) rather
- * than joining the source's: a clone is a separate automation, not another
- * version of the original, so approving it must not touch the source's series.
- */
+/* POST /:id/clone — copy into a new DRAFT. Starts its own lineage
+ * (automationSeriesId null), so approving it never touches the source. */
 router.post('/:id/clone', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -748,13 +697,8 @@ function webhookEndpoint(): string {
   return `${config.backendUrl.replace(/\/$/, '')}/api/automation-webhooks`;
 }
 
-/* GET /:id/webhook — the webhook URL for a WEBHOOK-triggered automation.
- *
- * Read-only and never returns the secret: the token is shown once at creation,
- * so this reports only whether one has been issued. Minting a secret stays off
- * the claw surface deliberately — it was not requested, and handing an agent a
- * credential-minting endpoint deserves its own decision.
- */
+/* GET /:id/webhook — read-only. Reports whether a secret was issued, never the
+ * secret itself; minting one stays off the claw surface. */
 router.get('/:id/webhook', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -793,8 +737,6 @@ router.get('/:id/webhook', async (req: Request<{ id: string }>, res: Response) =
 });
 
 // GET /:id/versions — every version in this automation's lineage.
-// Each version is its own row with its own id, so an agent can list the
-// lineage here and then fetch any one of them in full via GET /:id.
 router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -815,8 +757,7 @@ router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) 
       return;
     }
 
-    // Re-filter by workspace: the lineage is looked up by series id, which is
-    // not itself tenant-scoped.
+    // Series id is not tenant-scoped, so re-filter by workspace.
     const seriesId = workflow.automationSeriesId ?? workflow.id;
     const versions = (await approvalService.listLineageVersions(seriesId)).filter(
       v => v.workspaceId === auth.workspaceId,
@@ -828,10 +769,8 @@ router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) 
   }
 });
 
-// POST /:id/submit — submit a DRAFT for approval.
-// The only transition out of DRAFT: create and update both leave an automation
-// in DRAFT. Approval itself stays a human/admin action, so this lands the
-// automation in PENDING_APPROVAL, never ACTIVE.
+// POST /:id/submit — the only transition out of DRAFT. Lands in
+// PENDING_APPROVAL; approval itself stays a human action.
 router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const auth = getAuthContext(req);
@@ -855,76 +794,6 @@ router.post('/:id/submit', async (req: Request<{ id: string }>, res: Response) =
   }
 });
 
-
-// GET /:automationId/runs — list runs for an automation
-router.get(
-  '/:automationId/runs',
-  async (req: Request<{ automationId: string }>, res: Response) => {
-    const auth = getAuthContext(req);
-    if (!auth) {
-      sendUnauthorized(res);
-      return;
-    }
-    const { automationId } = req.params;
-    const limitRaw = req.query['limit'];
-    const limit = Math.min(Math.max(Number.parseInt(String(limitRaw ?? 50), 10) || 50, 1), 200);
-    const cursor = typeof req.query['cursor'] === 'string' ? (req.query['cursor'] as string) : null;
-    const statusRaw = req.query['status'];
-    const status =
-      typeof statusRaw === 'string' && RUN_STATUS_FILTER_VALUES.has(statusRaw) ? statusRaw : null;
-    const from = parseEpochMsParam(req.query['from']);
-    const to = parseEpochMsParam(req.query['to']);
-
-    const workflow = await db.workflow.findFirst({
-      where: {
-        id: automationId,
-        workflowType: AUTOMATION_WORKFLOW_TYPE,
-        workspaceId: auth.workspaceId,
-      },
-    });
-    if (!workflow) {
-      res.status(404).json({ success: false, error: 'Automation not found' });
-      return;
-    }
-
-    const rows = await db.workflowExecution.findMany({
-      where: {
-        workflowId: automationId,
-        ...(status ? { status } : {}),
-        ...(from || to
-          ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
-          : {}),
-      },
-      select: {
-        id: true,
-        workflowId: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-    });
-
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
-
-    const stitched = await stitchExecutionContextMany(page);
-
-    res.json({
-      success: true,
-      data: {
-        runs: stitched.map(row =>
-          workflowExecutionToRunSummary(row, { context: row.context }),
-        ),
-        nextCursor,
-      },
-      timestamp: new Date().toISOString(),
-    });
-  },
-);
 
 // GET /runs/:executionId — fetch a single run
 router.get(

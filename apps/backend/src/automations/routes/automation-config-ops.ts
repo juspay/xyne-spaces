@@ -1,15 +1,6 @@
 /**
- * Targeted edits to an AutomationConfig's step tree.
- *
- * Why this exists: steps are NOT a flat list. A CONDITIONAL step holds
- * `config.if_true` / `config.if_false`, and a SWITCH step holds
- * `config.cases[].steps` and `config.default` — each of which holds more steps.
- * Without server-side operations an agent has to read the whole config, rebuild
- * the tree correctly and send it back, which both risks clobbering a concurrent
- * edit and puts the burden of exact reconstruction on a language model.
- *
- * Everything here is PURE: it takes a config, returns a new config or an error.
- * No database, no express — so it is unit-testable on its own.
+ * Pure, targeted edits to an AutomationConfig step tree. Steps nest: CONDITIONAL
+ * holds if_true/if_false, SWITCH holds cases[].steps and default.
  */
 import { ControlFlowStepType } from '../types/known-types';
 import type {
@@ -20,11 +11,7 @@ import type {
   SwitchStepConfig,
 } from '../types/automation-config';
 
-/**
- * Which list inside a control-flow step an add/move targets. Named explicitly:
- * deriving it from ConfigOperation with a conditional type collapses to `never`,
- * because ConfigOperation is a union and the check distributes over it.
- */
+/** Which list inside a control-flow step an add/move targets. */
 export type StepBranch = 'if_true' | 'if_false' | 'default' | { caseIndex: number };
 
 export type ConfigOperation =
@@ -154,11 +141,7 @@ function insertAt(list: AutomationStepConfig[], step: AutomationStepConfig, inde
   else list.splice(index, 0, step);
 }
 
-/**
- * Apply operations in order to a deep copy. Throws ConfigOpError on the first
- * invalid operation, leaving the caller's config untouched — operations are
- * all-or-nothing rather than half-applied.
- */
+/** Applies operations in order to a deep copy; throws on the first invalid one. */
 export function applyConfigOperations(
   config: AutomationConfig,
   operations: ConfigOperation[],
@@ -182,8 +165,7 @@ export function applyConfigOperations(
         const found = findStep(next, operation.stepId);
         if (!found) throw new ConfigOpError(`Step "${operation.stepId}" not found.`);
         if (operation.config) {
-          // Merge by default so an agent can change one field without
-          // restating the whole step; `replace` opts into a full swap.
+          // Merge by default; `replace` opts into a full swap.
           found.step.config = (
             operation.replace
               ? operation.config
