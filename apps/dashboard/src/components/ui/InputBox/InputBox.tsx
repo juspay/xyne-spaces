@@ -538,6 +538,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }
 
         const filesToValidate = filesArray.slice(0, availableSlots);
+
+        // Some files were dropped because they would exceed the per-message cap.
+        // Warn explicitly so users are not silently losing attachments.
+        const droppedForLimit = filesArray.length - filesToValidate.length;
+        if (droppedForLimit > 0) {
+          logger.warn(Event.ATTACHMENT_LIMIT_REACHED, {
+            maxFiles,
+            currentCount: allAttachments.length,
+            attemptedCount: filesArray.length,
+            addedCount: filesToValidate.length,
+            droppedCount: droppedForLimit,
+          });
+          toast.warning(`Only ${maxFiles} files can be attached`, {
+            description: `${droppedForLimit} file${droppedForLimit > 1 ? 's were' : ' was'} not added.`,
+          });
+        }
         const validFiles: File[] = [];
         const rejectedFiles: Array<{ name: string; reason: string }> = [];
 
