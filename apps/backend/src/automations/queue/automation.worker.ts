@@ -18,6 +18,11 @@ import { getAutomationPauseState } from '@/database/repositories/workflowExecuti
 import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
+import {
+  getAutomationQueueJobsGauge,
+  recordAutomationRunMetric,
+  type AutomationMetricLabels,
+} from '@/services/otel/automationMetrics';
 
 const EXECUTION_FETCH_MAX_RETRIES = 3;
 const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
@@ -42,6 +47,7 @@ class AutomationWorker {
       return this.processJob(job);
     });
 
+    getAutomationQueueJobsGauge();
     this.isInitialized = true;
     logger.info('[AUTOMATION-WORKER] Started');
   }
@@ -96,13 +102,14 @@ class AutomationWorker {
     }
 
     await runAsServiceActor('automation', workspaceId, () =>
-      this.runJob(job, execution),
+      this.runJob(job, execution, workspaceId),
     );
   }
 
   private async runJob(
     job: Bull.Job<AutomationJobData>,
     execution: NonNullable<Awaited<ReturnType<typeof db.workflowExecution.findUnique>>>,
+    workspaceId: string,
   ): Promise<void> {
     if (!this.executor) {
       throw new Error('[AUTOMATION-WORKER] Executor not initialized');
@@ -119,11 +126,19 @@ class AutomationWorker {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }
+    const config = parseAutomationConfig(workflow.context);
+    const metricLabels = {
+      automationId: workflow.id,
+      workspaceId,
+      triggerType: config.trigger.type,
+    };
+
     if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
       await db.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric('cancelled', metricLabels);
       logger.info(
         `[AUTOMATION-WORKER] workflow ${workflow.id} is ${workflow.status} (no longer live) — execution=${executionId} CANCELLED`,
       );
@@ -137,13 +152,12 @@ class AutomationWorker {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric('cancelled', metricLabels);
       logger.info(
         `[AUTOMATION-WORKER] cycle detected — workflow ${workflow.id} already in chain [${upstreamChain.join(' → ')}], execution=${executionId} CANCELLED`,
       );
       return;
     }
-
-    const config = parseAutomationConfig(workflow.context);
 
     const triggerType = config.trigger.type as TriggerType;
     const triggerImpl = triggerRegistry.has(triggerType)
@@ -167,6 +181,7 @@ class AutomationWorker {
           where: { id: executionId },
           data: { status: AutomationRunStatus.SKIPPED },
         });
+        recordAutomationRunMetric('skipped', metricLabels);
         logger.info(
           `[AUTOMATION-WORKER] filter mismatched at intake — execution=${executionId} automation=${workflow.id}, skipping`,
         );
@@ -175,7 +190,7 @@ class AutomationWorker {
     }
 
     if (config.schedule && config.schedule.type === 'SCHEDULED') {
-      const handled = await this.tryDefer(executionId, config.schedule, hydratedTriggerData);
+      const handled = await this.tryDefer(executionId, config.schedule, hydratedTriggerData, metricLabels);
       if (handled) return;
     }
 
@@ -215,6 +230,7 @@ class AutomationWorker {
     executionId: string,
     schedule: Extract<ReturnType<typeof parseAutomationConfig>['schedule'], { type: 'SCHEDULED' }>,
     triggerData: Record<string, unknown>,
+    metricLabels: AutomationMetricLabels,
   ): Promise<boolean> {
     const runAt = computeScheduleRunAt(schedule, triggerData);
     if (runAt === null) {
@@ -236,6 +252,7 @@ class AutomationWorker {
       where: { id: executionId },
       data: { status: AutomationRunStatus.SCHEDULED },
     });
+    recordAutomationRunMetric('scheduled', metricLabels);
     await automationScheduleQueue.enqueueScheduled({ executionId }, delayMs);
     logger.info(
       `[AUTOMATION-WORKER] execution=${executionId} SCHEDULED runAt=${new Date(runAt).toISOString()} delayMs=${delayMs}`,

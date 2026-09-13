@@ -2,6 +2,10 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { markAutomationFailed } from '@/database/repositories/workflowExecutionStateUtils';
+import {
+  getAutomationQueueJobsGauge,
+  recordAutomationRunMetricAsync,
+} from '@/services/otel/automationMetrics';
 
 export interface AutomationJobData {
   executionId: string;
@@ -38,6 +42,7 @@ class AutomationQueue {
       });
 
       this.setupEventListeners();
+      getAutomationQueueJobsGauge();
       this.isInitialized = true;
       logger.info('[AUTOMATION-QUEUE] Initialized');
     } catch (error) {
@@ -56,6 +61,7 @@ class AutomationQueue {
       logger.error(
         `[AUTOMATION-QUEUE] Job ${job.id} failed — execution ${executionId}: ${message}`,
       );
+      void recordAutomationRunMetricAsync('queue_failed', executionId);
       void markAutomationFailed(executionId, message)
         .then(result => {
           if (result === 'marked') {
@@ -71,6 +77,7 @@ class AutomationQueue {
     });
     this.queue.on('stalled', (job) => {
       logger.warn(`[AUTOMATION-QUEUE] Job ${job.id} stalled`);
+      void recordAutomationRunMetricAsync('stalled', job.data.executionId);
     });
     this.queue.on('error', (err) => {
       logger.error('[AUTOMATION-QUEUE] Queue error:', err);

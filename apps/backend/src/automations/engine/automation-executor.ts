@@ -32,6 +32,10 @@ import {
 } from '../types/workflow-adapter';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { logger } from '@/utils/logger';
+import {
+  recordAutomationRunMetric,
+  type AutomationMetricLabels,
+} from '@/services/otel/automationMetrics';
 
 type WalkResult =
   | { kind: 'completed' }
@@ -111,6 +115,14 @@ export class AutomationExecutor {
     this.resolver = options.variableResolver ?? new VariableResolver();
   }
 
+  private getMetricLabels(context: AutomationContext): AutomationMetricLabels {
+    return {
+      automationId: context.automation.id,
+      workspaceId: context.automation.workspaceId,
+      triggerType: context.trigger.type,
+    };
+  }
+
   async runExecution(executionId: string): Promise<unknown> {
     const existing = await this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
@@ -132,6 +144,11 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric('cancelled', {
+        automationId: existing.workflowId,
+        workspaceId: existing.workspaceId,
+        triggerType: 'unknown',
+      });
       logger.warn(
         `[automations] runExecution: workflow ${existing.workflowId} missing — run ${executionId} CANCELLED`,
       );
@@ -141,6 +158,11 @@ export class AutomationExecutor {
       await this.prisma.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
+      });
+      recordAutomationRunMetric('cancelled', {
+        automationId: workflow.id,
+        workspaceId: workflow.workspaceId,
+        triggerType: parseAutomationConfig(workflow.context).trigger.type,
       });
       logger.info(
         `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — run ${executionId} CANCELLED`,
@@ -178,6 +200,9 @@ export class AutomationExecutor {
       where: { id: executionId },
       data: { status: AutomationRunStatus.RUNNING },
     });
+    if (prep.label === 'STARTED') {
+      recordAutomationRunMetric('started', this.getMetricLabels(prep.ctx));
+    }
     await persistAutomationState(executionId, { context: JSON.stringify(prep.ctx) });
     logger.info(
       `[automations] run ${prep.label} runId=${executionId} automation=${workflow.id} startIndex=${prep.startIndex} steps=${config.steps.length}`,
@@ -298,6 +323,11 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.SKIPPED },
       });
+      recordAutomationRunMetric('skipped', {
+        automationId: workflow.id,
+        workspaceId: workflow.workspaceId,
+        triggerType: config.trigger.type,
+      });
       skeleton.__meta = { error: null, chain };
       await persistAutomationState(executionId, { context: JSON.stringify(skeleton) });
       logger.info(
@@ -404,6 +434,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.COMPLETED },
       });
+      recordAutomationRunMetric('completed', this.getMetricLabels(context));
       context.__meta = { error: null, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -417,6 +448,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', this.getMetricLabels(context));
       context.__meta = { error: errMessage, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -471,6 +503,7 @@ export class AutomationExecutor {
             where: { id: runId },
             data: { status: EXTERNAL_WAIT_STATUS },
           });
+          recordAutomationRunMetric('paused', this.getMetricLabels(context));
           return { kind: 'paused', atIndex: i, externalRef: err.externalRef };
         }
         const errMessage = err instanceof Error ? err.message : String(err);
