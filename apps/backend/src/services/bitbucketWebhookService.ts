@@ -10,9 +10,11 @@ import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhook
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { xyneCommentService } from '@/services/xyneCommentService';
+import { CommitAnalysisStatus } from '@/types/vcs';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
+import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
 import { runAsServiceActor } from '@/database/tenant/context';
 /**
  * Bitbucket Server webhook event types for pull requests
@@ -33,6 +35,7 @@ interface PREventContext {
   prId: number;
   prUrl: string;
   repoName: string;
+  repoSlug: string;
   repoUrl: string;
   projectName: string;
   workspace: string;
@@ -243,6 +246,7 @@ export class BitbucketWebhookService {
       prId: pr.id,
       prUrl,
       repoName,
+      repoSlug,
       repoUrl,
       projectName,
       workspace: workspaceId, // In Server, project key serves as workspace
@@ -435,7 +439,28 @@ export class BitbucketWebhookService {
       sourceBranchName: context.sourceBranch,
       destinationBranchName: context.destinationBranch,
       numberOfComments: context.numberOfComments,
+      commitAnalysisStatus: CommitAnalysisStatus.PENDING, // Mark for async analysis
     });
+
+    // Enqueue commit analysis job (async, non-blocking)
+    if (result?.pr) {
+      try {
+        await commitAnalysisQueue.enqueueAnalysis({
+          workspaceId: result.pr.workspaceId,
+          prId: context.prId,
+          prInternalId: result.pr.id,
+          repositoryUrl: context.repoUrl,
+          projectKey: context.projectName,
+          repositorySlug: context.repoSlug,
+          vcsProvider: 'bitbucket',
+        });
+
+        logger.info(`[Bitbucket-Webhook] Enqueued commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}`);
+      } catch (error) {
+        // Log but don't fail webhook - analysis can be retried
+        logger.error(`[Bitbucket-Webhook] Failed to enqueue commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}:`, error);
+      }
+    }
 
     if (result) {
       if (result.statusChanged) {

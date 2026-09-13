@@ -1,4 +1,5 @@
 
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -1277,13 +1278,50 @@ model PullRequests {
   status                  String
   ticketId                String?   // Ticket reference for prs raised by devs
 
+  // Commit authorship tracking (v4: Co-authored-by)
+  botCommitCount          Int?      // Commits with at least one bot in Co-authored-by
+  humanCommitCount        Int?      // Commits with no bots
+  unknownCommitCount      Int?      // Failed attribution
+  commitAnalysisStatus    String?   // 'PENDING' | 'COMPLETED' | 'FAILED'
+  commitAnalysisError     String?   // Error message if analysis failed
+  commitAnalyzedAt        DateTime? // When commit analysis completed
+
   // Relations
   workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
+  commits           Commit[]           // Individual commits in this PR
 
   @@index([workflowExecutionId])
   @@index([date])
   @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
+  @@index([commitAnalysisStatus])
   @@map("pull_requests")
+  @@schema("public")
+}
+
+/// Individual commits within a PR, with bot attribution parsed from Co-authored-by trailers
+model Commit {
+  id              String   @id @default(cuid())
+  workspaceId     String   // Denormalized tenant key (from parent pull_requests)
+
+  // Commit identifiers
+  commitSha       String
+  pullRequestId   String
+
+  // Bot attribution (parsed from xyne-bot-author trailer in commit message)
+  agentSlug       String?  // Single bot slug or null
+
+  // Git metadata from VCS API
+  authorName      String
+  authorEmail     String
+  committedAt     DateTime
+
+  createdAt       DateTime
+
+  // Relations
+  pullRequest PullRequests @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestId, commitSha])
+  @@map("commits")
   @@schema("public")
 }
 

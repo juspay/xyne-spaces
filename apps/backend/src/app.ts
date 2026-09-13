@@ -179,6 +179,7 @@ import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
+import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
@@ -957,6 +958,16 @@ export class App {
 
       logger.info('Initializing auto draft queue...');
       await autoDraftQueue.initialize();
+    }
+
+    logger.info('Initializing commit analysis queue (producer)...');
+    await commitAnalysisQueue.initialize();
+
+    if (config.enableCommitAnalysisWorker) {
+      logger.info('Starting commit analysis queue worker (consumer)...');
+      await commitAnalysisQueue.startWorker();
+    } else {
+      logger.info('Commit analysis worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false) - producer only');
     }
 
     logger.info('Initializing SDLC queue (producer)...');
