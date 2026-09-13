@@ -32,10 +32,7 @@ import {
 } from '../types/workflow-adapter';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { logger } from '@/utils/logger';
-import {
-  recordAutomationRunMetric,
-  type AutomationMetricLabels,
-} from '@/services/otel/automationMetrics';
+import { recordAutomationRunMetric } from '@/services/otel/automationMetrics';
 
 type WalkResult =
   | { kind: 'completed' }
@@ -115,14 +112,6 @@ export class AutomationExecutor {
     this.resolver = options.variableResolver ?? new VariableResolver();
   }
 
-  private getMetricLabels(context: AutomationContext): AutomationMetricLabels {
-    return {
-      automationId: context.automation.id,
-      workspaceId: context.automation.workspaceId,
-      triggerType: context.trigger.type,
-    };
-  }
-
   async runExecution(executionId: string): Promise<unknown> {
     const existing = await this.prisma.workflowExecution.findUnique({
       where: { id: executionId },
@@ -144,11 +133,8 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
-      recordAutomationRunMetric('cancelled', {
-        automationId: existing.workflowId,
-        workspaceId: existing.workspaceId,
-        triggerType: 'unknown',
-      });
+      // Workflow row is gone, so the trigger type is unknowable here.
+      recordAutomationRunMetric('cancelled');
       logger.warn(
         `[automations] runExecution: workflow ${existing.workflowId} missing — run ${executionId} CANCELLED`,
       );
@@ -159,11 +145,10 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
-      recordAutomationRunMetric('cancelled', {
-        automationId: workflow.id,
-        workspaceId: workflow.workspaceId,
-        triggerType: parseAutomationConfig(workflow.context).trigger.type,
-      });
+      recordAutomationRunMetric(
+        'cancelled',
+        parseAutomationConfig(workflow.context).trigger.type,
+      );
       logger.info(
         `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — run ${executionId} CANCELLED`,
       );
@@ -201,7 +186,7 @@ export class AutomationExecutor {
       data: { status: AutomationRunStatus.RUNNING },
     });
     if (prep.label === 'STARTED') {
-      recordAutomationRunMetric('started', this.getMetricLabels(prep.ctx));
+      recordAutomationRunMetric('started', prep.ctx.trigger.type);
     }
     await persistAutomationState(executionId, { context: JSON.stringify(prep.ctx) });
     logger.info(
@@ -239,6 +224,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', config.trigger.type);
       return null;
     }
     let initialCtx: AutomationContext;
@@ -257,6 +243,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', config.trigger.type);
       return null;
     }
     const chain: readonly string[] = readAutomationMeta(pauseState.context).chain;
@@ -323,11 +310,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.SKIPPED },
       });
-      recordAutomationRunMetric('skipped', {
-        automationId: workflow.id,
-        workspaceId: workflow.workspaceId,
-        triggerType: config.trigger.type,
-      });
+      recordAutomationRunMetric('skipped', config.trigger.type);
       skeleton.__meta = { error: null, chain };
       await persistAutomationState(executionId, { context: JSON.stringify(skeleton) });
       logger.info(
@@ -434,7 +417,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.COMPLETED },
       });
-      recordAutomationRunMetric('completed', this.getMetricLabels(context));
+      recordAutomationRunMetric('completed', context.trigger.type);
       context.__meta = { error: null, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -448,7 +431,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.FAILED },
       });
-      recordAutomationRunMetric('failed', this.getMetricLabels(context));
+      recordAutomationRunMetric('failed', context.trigger.type);
       context.__meta = { error: errMessage, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -503,7 +486,7 @@ export class AutomationExecutor {
             where: { id: runId },
             data: { status: EXTERNAL_WAIT_STATUS },
           });
-          recordAutomationRunMetric('paused', this.getMetricLabels(context));
+          recordAutomationRunMetric('paused', context.trigger.type);
           return { kind: 'paused', atIndex: i, externalRef: err.externalRef };
         }
         const errMessage = err instanceof Error ? err.message : String(err);
