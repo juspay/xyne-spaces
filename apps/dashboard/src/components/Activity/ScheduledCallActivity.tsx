@@ -3,6 +3,9 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import { dateToIso } from '../../utils/dateUtils';
+import { usePlatform } from '../../hooks/usePlatform';
+import { useRouteContext } from '../../hooks/useRouteContext';
 import { CalendarTimer, NotificationBellOn, CalendarCheck, CalendarCancel } from '@xyne/icons';
 
 export const ScheduledCallActivity = ({
@@ -13,6 +16,8 @@ export const ScheduledCallActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const actor = useUser(activity.actorId ?? '');
+  const { isMobile } = usePlatform();
+  const { baseRoute } = useRouteContext();
 
   if (!actor) return null;
 
@@ -20,9 +25,16 @@ export const ScheduledCallActivity = ({
   const isUpdated = activity.actorAction === 'call_updated';
   const isMeetingAccepted = activity.actorAction === 'meeting_accepted';
   const isMeetingDeclined = activity.actorAction === 'meeting_declined';
-  const targetPath = activity.callId
-    ? `/calls?tab=upcoming&callId=${activity.callId}`
-    : '/calls?tab=upcoming';
+
+  const dateParam = activity.call
+    ? dateToIso(new Date(activity.call.startsAt ?? activity.call.startedAt))
+    : null;
+  const targetPath =
+    !isMobile && activity.callId
+      ? `${baseRoute}/calendar?callId=${activity.callId}${dateParam ? `&date=${dateParam}` : ''}`
+      : activity.callId
+        ? `/calls?tab=upcoming&callId=${activity.callId}`
+        : '/calls?tab=upcoming';
 
   const description = isReminder ? (
     <span className='text-muted-foreground text-sm'>reminded you about a scheduled call in</span>

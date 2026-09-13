@@ -1,14 +1,57 @@
 import type React from 'react';
+import { RRule } from 'rrule';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import { Call } from './callHistoryItem.utils';
+import { Call, isScheduledCallJoinable } from './callHistoryItem.utils';
 import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
 import { formatDuration } from '../../utils/dateUtils';
+import type { XyneCalendarCallPillVariant } from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
 
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
 /** Inverse of topPxForMinutes: pixel offset → minutes since midnight (raw, not snapped) */
-export function minutesFromTopPx(px: number): number {
-  return (px / HOUR_HEIGHT) * 60;
+export function minutesFromTopPx(px: number, hourHeight: number = HOUR_HEIGHT): number {
+  return (px / hourHeight) * 60;
+}
+
+export interface CalendarCreateSlotOptions {
+  clampToDay?: boolean;
+  durationMins?: number;
+  hourHeight?: number;
+  snapMode?: 'floor' | 'nearest';
+  snapIntervalMins?: number;
+}
+
+export function snapMinutes(minutes: number, intervalMins: number): number {
+  return Math.round(minutes / intervalMins) * intervalMins;
+}
+
+export function getCalendarCreateSlot(
+  date: Date,
+  rawStartMins: number,
+  {
+    clampToDay = false,
+    durationMins = 60,
+    snapMode = 'floor',
+    snapIntervalMins = 30,
+  }: CalendarCreateSlotOptions = {},
+): { startsAt: Date; endsAt: Date; startMins: number; endMins: number } {
+  const latestStartMins = Math.max(0, 24 * 60 - durationMins);
+  const snappedStartMins =
+    snapMode === 'nearest'
+      ? snapMinutes(rawStartMins, snapIntervalMins)
+      : Math.floor(rawStartMins / snapIntervalMins) * snapIntervalMins;
+  const startMins = clampToDay
+    ? Math.max(0, Math.min(latestStartMins, snappedStartMins))
+    : snappedStartMins;
+  const endMins = clampToDay
+    ? Math.min(24 * 60, startMins + durationMins)
+    : startMins + durationMins;
+  const startsAt = new Date(date);
+  startsAt.setHours(Math.floor(startMins / 60), startMins % 60, 0, 0);
+  const endsAt = new Date(date);
+  endsAt.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
+
+  return { startsAt, endsAt, startMins, endMins };
 }
 
 /**
@@ -21,25 +64,20 @@ export function createSlotClickHandler(
   isPopoverOpen: boolean,
   consumeDragEnd: (() => boolean) | undefined,
   onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined,
+  options: CalendarCreateSlotOptions = {},
 ): (e: React.MouseEvent<HTMLDivElement>) => void {
   return (e: React.MouseEvent<HTMLDivElement>) => {
     if (isPopoverOpen || consumeDragEnd?.()) return;
     if (!onCreateCallAtSlot) return;
-    const rawMins = minutesFromTopPx(e.clientY - e.currentTarget.getBoundingClientRect().top);
-    const hour = Math.floor(rawMins / 60);
-    const snappedStart = hour * 60 + (rawMins % 60 < 30 ? 0 : 30);
-    const start = new Date(date);
-    start.setHours(Math.floor(snappedStart / 60), snappedStart % 60, 0, 0);
-    const end = new Date(date);
-    const snappedEnd = snappedStart + 60;
-    end.setHours(Math.floor(snappedEnd / 60), snappedEnd % 60, 0, 0);
-    onCreateCallAtSlot(start, end);
-  };
-}
+    if ((e.target as HTMLElement).closest('button')) return;
 
-/** Snap a minute value to the nearest 15-minute interval */
-export function snapTo15(minutes: number): number {
-  return Math.round(minutes / 15) * 15;
+    const rawMins = minutesFromTopPx(
+      e.clientY - e.currentTarget.getBoundingClientRect().top,
+      options.hourHeight,
+    );
+    const { startsAt, endsAt } = getCalendarCreateSlot(date, rawMins, options);
+    onCreateCallAtSlot(startsAt, endsAt);
+  };
 }
 
 /**
@@ -83,6 +121,89 @@ export const MIN_EVENT_HEIGHT = 28; // px
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+// Pill sizing thresholds shared by Day (XyneCalendarCallPill) and Week (WeekViewCallCard) views.
+export const ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE = 75;
+export const COMPACT_METADATA_MIN_WIDTH_PERCENTAGE = 75;
+
+// computeEventPositions: max side-by-side columns per overlap cluster before pills
+// start doubling up instead of shrinking further.
+const MAX_OVERLAP_COLUMNS = 4;
+
+/** Diagonal hatch used on a call pill's clipped edge when it continues from/to an adjacent day. */
+export const HATCH_BACKGROUND =
+  'repeating-linear-gradient(135deg, color-mix(in hsl, currentColor 55%, transparent) 0, color-mix(in hsl, currentColor 55%, transparent) 1px, transparent 1px, transparent 6px)';
+
+/**
+ * Whether a call has ended — either its status says so, or its endsAt has passed.
+ */
+export function hasCallEnded(call: Call, currentTime: Date): boolean {
+  return (
+    call.status === CallStatus.ENDED ||
+    (call.endsAt !== null &&
+      call.endsAt !== undefined &&
+      new Date(call.endsAt).getTime() < currentTime.getTime())
+  );
+}
+
+/**
+ * Classifies a call into the pill variant that drives its color/emphasis —
+ * shared by the Day pill (XyneCalendarCallPill) and Week/Month call cards.
+ */
+export function getCallPillVariant(
+  call: Call,
+  currentUserId: string | undefined,
+  currentTime: Date,
+): XyneCalendarCallPillVariant {
+  if (currentUserId && call.createdByUserId === currentUserId) {
+    return 'highlighted';
+  }
+
+  if (hasCallEnded(call, currentTime)) return 'past';
+
+  const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
+
+  if (meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN) {
+    return 'declined';
+  }
+
+  return isScheduledCallJoinable(call, currentTime.getTime()) ? 'joinable' : 'scheduled';
+}
+
+export function isCallJoinableNow(
+  call: Call,
+  variant: XyneCalendarCallPillVariant,
+  currentTime: Date,
+): boolean {
+  return (
+    !hasCallEnded(call, currentTime) &&
+    (variant === 'joinable' ||
+      (variant === 'highlighted' && isScheduledCallJoinable(call, currentTime.getTime())))
+  );
+}
+
+/**
+ * Border/background/text classes for a pill variant — shared by the Day pill
+ * (XyneCalendarCallPill) and Week call card, which render the same full-border style.
+ */
+export function getCallPillVariantClasses(variant: XyneCalendarCallPillVariant): string {
+  switch (variant) {
+    case 'past':
+      return 'border-border bg-muted/60 text-muted-foreground';
+    case 'highlighted':
+      return 'border-primary bg-primary text-primary-foreground';
+    case 'declined':
+      return 'border-border bg-background text-muted-foreground';
+    default:
+      return 'border-primary bg-background text-foreground';
+  }
+}
+
+export function mergeCallsById<T extends { id: string }>(calls: T[]): T[] {
+  const callsById = new Map<string, T>();
+  for (const call of calls) callsById.set(call.id, call);
+  return Array.from(callsById.values());
+}
+
 export const MAX_AVATARS_TO_SHOW = 3;
 export const RSVP_BADGE_BASE_CLASS =
   'absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-4 rounded-full border-2 border-background';
@@ -115,15 +236,16 @@ export function minutesSinceMidnight(date: Date): number {
 /**
  * Convert minutes since midnight to pixel position on the calendar
  */
-export function topPxForMinutes(minutes: number): number {
-  return (minutes * HOUR_HEIGHT) / 60;
+export function topPxForMinutes(minutes: number, hourHeight: number = HOUR_HEIGHT): number {
+  return (minutes * hourHeight) / 60;
 }
 
 /**
- * Format hour number to human readable label with AM/PM
+ * Format hour number to human readable label with AM/PM. 24 wraps to midnight,
+ * for callers (e.g. a 25-row hour grid) that label the trailing boundary too.
  */
 export function formatHourLabel(hour: number): string {
-  if (hour === 0) return '12 AM';
+  if (hour === 0 || hour === 24) return '12 AM';
   if (hour === 12) return '12 PM';
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
 }
@@ -205,6 +327,42 @@ export interface PositionableEvent {
 }
 
 /**
+ * Calls whose [startsAt, endsAt) interval overlaps `day` — includes calls
+ * that started the day before and spill past midnight into `day`, matching
+ * Google Calendar's day view (a cross-midnight call shows a clipped segment
+ * on both days it touches).
+ */
+export function getCallsOverlappingDay<
+  T extends { startsAt?: string | number | null; endsAt?: string | number | null },
+>(calls: T[], day: Date): T[] {
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+  return calls.filter(call => {
+    if (!call.startsAt) return false;
+    const startsAtMs = new Date(call.startsAt).getTime();
+    const endsAtMs = call.endsAt ? new Date(call.endsAt).getTime() : startsAtMs + 1;
+    return startsAtMs < dayEnd && endsAtMs > dayStart;
+  });
+}
+
+export function getVisibleMinutesForDay(
+  call: PositionableEvent,
+  referenceDay: Date,
+): { startMins: number; endMins: number } {
+  const startDate = new Date(call.startsAt!);
+  const startMins = isSameDay(startDate, referenceDay) ? minutesSinceMidnight(startDate) : 0;
+
+  const endDate = call.endsAt ? new Date(call.endsAt) : null;
+  const rawEnd = endDate
+    ? isSameDay(endDate, referenceDay)
+      ? minutesSinceMidnight(endDate)
+      : 24 * 60
+    : startMins + 60;
+
+  return { startMins, endMins: Math.max(rawEnd, startMins + 15) };
+}
+
+/**
  * Google Calendar-style cluster algorithm.
  * Groups overlapping events into clusters, assigns each event a column within
  * its cluster, then returns `leftPct` and `widthPct` (0–100) so events sit
@@ -212,18 +370,20 @@ export interface PositionableEvent {
  *
  * Returns a Map keyed by event.id for O(1) lookup in the renderer.
  */
-export function computeEventPositions(dayCalls: PositionableEvent[]): Map<string, EventPosition> {
+export function computeEventPositions(
+  dayCalls: PositionableEvent[],
+  referenceDay: Date,
+): Map<string, EventPosition> {
   const result = new Map<string, EventPosition>();
   const valid = dayCalls.filter(c => c.startsAt);
   if (valid.length === 0) return result;
 
   type Item = { id: string; startMins: number; endMins: number };
 
-  const items: Item[] = valid.map(call => {
-    const startMins = minutesSinceMidnight(new Date(call.startsAt!));
-    const rawEnd = call.endsAt ? minutesSinceMidnight(new Date(call.endsAt)) : startMins + 60;
-    return { id: call.id, startMins, endMins: Math.max(rawEnd, startMins + 15) };
-  });
+  const items: Item[] = valid.map(call => ({
+    id: call.id,
+    ...getVisibleMinutesForDay(call, referenceDay),
+  }));
 
   // Sort by start time; break ties by longest duration first
   items.sort((a, b) =>
@@ -254,7 +414,14 @@ export function computeEventPositions(dayCalls: PositionableEvent[]): Map<string
           break;
         }
       }
-      if (!placed) columns.push([item]);
+      // If no column was found, create a new one (or double up in the last column if maxed out)
+      if (!placed) {
+        if (columns.length < MAX_OVERLAP_COLUMNS) {
+          columns.push([item]);
+        } else {
+          columns[columns.length - 1]!.push(item);
+        }
+      }
     }
 
     const numCols = columns.length;
@@ -352,6 +519,24 @@ export function getCallEventProps(call: Call, currentUserId?: string) {
     isDeclined,
     isMaybe,
   };
+}
+
+/**
+ * Convert an RRULE string to a short human-readable label.
+ * e.g. "FREQ=WEEKLY;BYDAY=TU" → "Every week on Tuesday"
+ */
+export function formatRecurrenceRule(ruleStr: string | null | undefined): string {
+  if (!ruleStr) return 'This call repeats on a schedule';
+  try {
+    // Strip the "RRULE:" prefix if present, then parse
+    const cleaned = ruleStr.replace(/^RRULE:/i, '');
+    const options = RRule.parseString(cleaned);
+    const rule = new RRule(options);
+    const text = rule.toText();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  } catch {
+    return 'This call repeats on a schedule';
+  }
 }
 
 /**

@@ -12,6 +12,9 @@ import {
   isSameDay,
   formatTime,
   getCurrentUserMeetingStatus,
+  getCallPillVariant,
+  isCallJoinableNow,
+  HATCH_BACKGROUND,
 } from './CalenderViewUtils';
 import { usePlatform } from '../../hooks/usePlatform';
 import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
@@ -169,7 +172,7 @@ const CalendarMonthView = ({
   }
 
   return (
-    <div className='w-full  flex flex-col border border-border rounded-xl overflow-hidden'>
+    <div className='w-full h-full flex flex-col border border-border overflow-hidden'>
       {/* Day-of-week header */}
       <div className='grid grid-cols-7 bg-muted/20 border-b border-border shrink-0'>
         {DAYS_OF_WEEK.map(day => (
@@ -183,9 +186,12 @@ const CalendarMonthView = ({
       </div>
 
       {/* Weeks */}
-      <div className='overflow-y-auto' style={{ maxHeight: 'calc(100dvh - 278px)' }}>
+      <div
+        className='flex-1 min-h-0 grid'
+        style={{ gridTemplateRows: `repeat(${weeks.length}, minmax(0, 1fr))` }}
+      >
         {weeks.map((week, wi) => (
-          <div key={wi} className='grid grid-cols-7 border-b last:border-b-0 border-border'>
+          <div key={wi} className='grid grid-cols-7 min-h-0 border-b last:border-b-0 border-border'>
             {week.map((day, di) => {
               const isToday = day ? isSameDay(day, today) : false;
               const dayEvents = day ? (eventsByDay.get(day.getDate()) ?? []) : [];
@@ -199,7 +205,7 @@ const CalendarMonthView = ({
                   role={day && onCreateCall ? 'gridcell' : undefined}
                   tabIndex={day && onCreateCall ? 0 : undefined}
                   className={cn(
-                    'border-r last:border-r-0 border-border p-1.5 max-sm:p-0.5 min-h-[120px] flex flex-col overflow-hidden',
+                    'border-r last:border-r-0 border-border p-1.5 max-sm:p-0.5 min-h-0 flex flex-col overflow-hidden',
                     !day && 'bg-muted/10',
                     day && onCreateCall && 'cursor-pointer',
                   )}
@@ -226,8 +232,7 @@ const CalendarMonthView = ({
                 >
                   {day && (
                     <>
-                      {/* Events — own and other users' merged and sorted by time */}
-                      <div className='flex flex-col gap-0.5 flex-1'>
+                      <div className='flex flex-col gap-0.5 flex-1 min-h-0 overflow-hidden'>
                         {visible.map((event, ei) => {
                           if (event.kind === 'other') {
                             return (
@@ -241,10 +246,12 @@ const CalendarMonthView = ({
                           }
 
                           const { call } = event;
-                          const isEnded = call.status === CallStatus.ENDED;
-                          const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
-                          const isDeclined = meetingStatus === MeetingStatus.DECLINED;
-                          const isMaybe = meetingStatus === MeetingStatus.MAYBE;
+                          const variant = getCallPillVariant(call, currentUserId, today);
+                          const isDeclined = variant === 'declined';
+                          const isMaybe =
+                            getCurrentUserMeetingStatus(call, currentUserId) ===
+                            MeetingStatus.MAYBE;
+                          const joinable = isCallJoinableNow(call, variant, today);
 
                           return (
                             <PopoverPrimitive.Root
@@ -257,36 +264,45 @@ const CalendarMonthView = ({
                                   onClick={e => e.stopPropagation()}
                                   data-track-category='CALLS'
                                   data-track-name='calendar-month-call-pill'
-                                  className='relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-none'
-                                  style={{
-                                    backgroundColor:
-                                      meetingStatus === MeetingStatus.ACCEPTED
-                                        ? '#0077FF1A'
-                                        : 'transparent',
-                                  }}
+                                  className={cn(
+                                    'relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-none',
+                                    variant === 'past'
+                                      ? 'bg-muted/50 text-muted-foreground'
+                                      : variant === 'declined'
+                                        ? 'bg-transparent text-muted-foreground'
+                                        : 'bg-primary/10 text-foreground',
+                                  )}
                                 >
-                                  {isMaybe && !isEnded && (
+                                  {isMaybe && variant !== 'past' && (
                                     <div className='pointer-events-none absolute inset-0 overflow-hidden'>
                                       <div
-                                        className='absolute inset-0'
-                                        style={{
-                                          backgroundImage:
-                                            'repeating-linear-gradient(-18deg, rgba(0, 119, 255, 0.1) 0 2px, transparent 2px 4px)',
-                                        }}
+                                        className='absolute inset-0 text-primary'
+                                        style={{ backgroundImage: HATCH_BACKGROUND }}
                                       />
                                     </div>
                                   )}
-                                  <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary max-sm:mt-0.5 max-sm:hidden' />
+                                  <div
+                                    className={cn(
+                                      'w-0.5 h-3.5 rounded-full shrink-0 max-sm:mt-0.5 max-sm:hidden',
+                                      variant === 'past' || variant === 'declined'
+                                        ? 'bg-muted-foreground/50'
+                                        : 'bg-primary',
+                                    )}
+                                  />
                                   <div className='flex min-w-0 flex-1 items-baseline max-sm:flex-col max-sm:items-stretch gap-1 max-sm:gap-0'>
                                     <span
-                                      className='truncate min-w-0 leading-tight text-foreground max-sm:w-full'
-                                      style={{
-                                        fontSize: isMobile ? '8px' : '12px',
-                                        lineHeight: '18px',
-                                        fontWeight: 500,
-                                        textDecorationLine: isDeclined ? 'line-through' : 'none',
-                                      }}
+                                      className={cn(
+                                        'truncate min-w-0 leading-tight max-sm:w-full text-xs font-medium',
+                                        isDeclined && 'line-through',
+                                      )}
+                                      style={{ fontSize: isMobile ? '8px' : undefined }}
                                     >
+                                      {joinable && (
+                                        <span
+                                          className='mr-1 inline-block size-1.5 rounded-full bg-status-success motion-safe:animate-pulse align-middle'
+                                          aria-hidden='true'
+                                        />
+                                      )}
                                       {isGoogleCalendarCall(call) && (
                                         <span className='inline-block mr-0.5 mb-px'>
                                           <GoogleCalendarIcon size={isMobile ? 8 : 14} />
@@ -301,13 +317,10 @@ const CalendarMonthView = ({
                                     </span>
                                     {!isMobile && call.startsAt && (
                                       <span
-                                        className='shrink-0 tabular-nums text-muted-foreground'
-                                        style={{
-                                          fontSize: '10px',
-                                          lineHeight: '14px',
-                                          opacity: 0.7,
-                                          textDecorationLine: isDeclined ? 'line-through' : 'none',
-                                        }}
+                                        className={cn(
+                                          'shrink-0 tabular-nums text-xs text-muted-foreground opacity-70',
+                                          isDeclined && 'line-through',
+                                        )}
                                       >
                                         {formatTime(call.startsAt)}
                                       </span>
@@ -383,8 +396,7 @@ const CalendarMonthView = ({
                                 onClick={e => e.stopPropagation()}
                                 data-track-category='CALLS'
                                 data-track-name='calendar-month-overflow'
-                                className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left focus:outline-none'
-                                style={{ color: '#6276BE' }}
+                                className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left text-primary focus:outline-none'
                               >
                                 +{overflow} more
                               </button>
@@ -559,12 +571,12 @@ const CalendarMonthView = ({
                       </div>
 
                       {/* Date number */}
-                      <div className='flex justify-end mt-1'>
+                      <div className='flex shrink-0 justify-end mt-1'>
                         <span
                           className={cn(
                             'text-xs w-6 h-6 flex items-center justify-center font-medium',
                             isToday
-                              ? 'bg-action-primary text-action-primary-foreground rounded'
+                              ? 'bg-primary text-primary-foreground rounded'
                               : 'text-muted-foreground',
                           )}
                         >
