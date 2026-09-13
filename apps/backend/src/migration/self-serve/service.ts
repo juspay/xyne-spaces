@@ -204,6 +204,31 @@ export class SlackMigrationService {
     return toView(updated);
   }
 
+  /**
+   * Reset a finished job back to the approval gate so it can be re-ingested from its existing GCS dump via the normal
+   * Approve → ingest flow — recovers channels wiped by a prior ingest bug. Clears the done-set + finalize claim and
+   * empties the ingested checkpoint so Approve re-plans every conversation; dedup by externalId keeps it safe on
+   * channels that were only partially ingested. No re-collection happens — the dump on GCS is reused as-is.
+   */
+  async reingest(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if ([MigrationStatus.QUEUED, MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Migration is already active (current: ${job.status}) — stop it before re-ingesting.`);
+    }
+    await this.store.clearIngestState(id);
+    // Back to AWAITING_APPROVAL: the admin then hits Approve, which runs the untouched normal ingestion path.
+    const updated = await this.store.update(id, {
+      status: MigrationStatus.AWAITING_APPROVAL,
+      currentQueue: QueueName.INGESTION,
+      checkpoint: { ...job.checkpoint, ingestedConversationIds: [] },
+      stopRequested: false,
+      stopReason: undefined,
+      error: undefined,
+      completedAt: undefined,
+    });
+    return toView(updated);
+  }
+
   async remove(id: string, actor: Actor, requireOwner = false): Promise<void> {
     const job = await this.mustGet(id, actor);
     if (requireOwner) this.assertOwner(job, actor);

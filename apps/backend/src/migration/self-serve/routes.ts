@@ -73,6 +73,8 @@ export function buildRouter(service: SlackMigrationService): Router {
   router.post('/migration-jobs/:id/refresh', admin, wrap(async (req, res) => { res.json(ok(await service.refresh(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/stop', admin, wrap(async (req, res) => { res.json(ok(await service.stop(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
+  // Recover a wiped/finished channel: reset it to AWAITING_APPROVAL so Approve re-ingests from the existing GCS dump (no re-collect).
+  router.post('/migration-jobs/:id/reingest', admin, wrap(async (req, res) => { res.json(ok(await service.reingest(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
   router.post('/queues/:queue/pause', admin, wrap(async (req, res) => {
     await service.pauseQueue(req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));

@@ -192,6 +192,11 @@ export class MigrationStore {
     return (await this.redis.set(FINALIZE(id), '1', 'EX', TTL_SECONDS, 'NX')) === 'OK';
   }
 
+  /** Wipe the parallel-ingest bookkeeping (done-set + finalize claim) so a finished job can be re-ingested from scratch. */
+  async clearIngestState(id: string): Promise<void> {
+    await this.redis.del(INGESTED_SET(id), FINALIZE(id));
+  }
+
   // Atomic append to the issues JSON array (server-side), so parallel ingest workers appending at once never lose entries.
   private static readonly APPEND_ISSUE_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'issues')
