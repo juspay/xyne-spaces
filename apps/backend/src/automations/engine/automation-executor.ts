@@ -32,6 +32,7 @@ import {
 } from '../types/workflow-adapter';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { logger } from '@/utils/logger';
+import { recordAutomationRunMetric } from '@/services/otel/automationMetrics';
 
 type WalkResult =
   | { kind: 'completed' }
@@ -132,6 +133,8 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      // Workflow row is gone, so the trigger type is unknowable here.
+      recordAutomationRunMetric('cancelled');
       logger.warn(
         `[automations] runExecution: workflow ${existing.workflowId} missing — run ${executionId} CANCELLED`,
       );
@@ -142,6 +145,10 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric(
+        'cancelled',
+        parseAutomationConfig(workflow.context).trigger.type,
+      );
       logger.info(
         `[automations] runExecution: workflow ${workflow.id} is ${workflow.status} (no longer live) — run ${executionId} CANCELLED`,
       );
@@ -178,6 +185,9 @@ export class AutomationExecutor {
       where: { id: executionId },
       data: { status: AutomationRunStatus.RUNNING },
     });
+    if (prep.label === 'STARTED') {
+      recordAutomationRunMetric('running', prep.ctx.trigger.type);
+    }
     await persistAutomationState(executionId, { context: JSON.stringify(prep.ctx) });
     logger.info(
       `[automations] run ${prep.label} runId=${executionId} automation=${workflow.id} startIndex=${prep.startIndex} steps=${config.steps.length}`,
@@ -214,6 +224,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', config.trigger.type);
       return null;
     }
     let initialCtx: AutomationContext;
@@ -232,6 +243,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', config.trigger.type);
       return null;
     }
     const chain: readonly string[] = readAutomationMeta(pauseState.context).chain;
@@ -298,6 +310,7 @@ export class AutomationExecutor {
         where: { id: executionId },
         data: { status: AutomationRunStatus.SKIPPED },
       });
+      recordAutomationRunMetric('skipped', config.trigger.type);
       skeleton.__meta = { error: null, chain };
       await persistAutomationState(executionId, { context: JSON.stringify(skeleton) });
       logger.info(
@@ -404,6 +417,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.COMPLETED },
       });
+      recordAutomationRunMetric('completed', context.trigger.type);
       context.__meta = { error: null, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -417,6 +431,7 @@ export class AutomationExecutor {
         where: { id: runId },
         data: { status: AutomationRunStatus.FAILED },
       });
+      recordAutomationRunMetric('failed', context.trigger.type);
       context.__meta = { error: errMessage, chain };
       await persistAutomationState(runId, {
         context: JSON.stringify(context),
@@ -471,6 +486,7 @@ export class AutomationExecutor {
             where: { id: runId },
             data: { status: EXTERNAL_WAIT_STATUS },
           });
+          recordAutomationRunMetric('external_wait', context.trigger.type);
           return { kind: 'paused', atIndex: i, externalRef: err.externalRef };
         }
         const errMessage = err instanceof Error ? err.message : String(err);

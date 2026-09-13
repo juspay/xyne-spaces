@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { markAutomationFailed } from '@/database/repositories/workflowExecutionStateUtils';
+import { recordAutomationRunMetric } from '@/services/otel/automationMetrics';
 
 export interface AutomationJobData {
   executionId: string;
@@ -59,6 +60,10 @@ class AutomationQueue {
       void markAutomationFailed(executionId, message)
         .then(result => {
           if (result === 'marked') {
+            // Count only when this handler is the one that marked the run FAILED.
+            // A run the executor failed itself is already terminal ('skipped-terminal')
+            // and was counted there — emitting here too would double-count it.
+            recordAutomationRunMetric('failed');
             logger.info(`[AUTOMATION-QUEUE] reconciled execution=${executionId} → FAILED`);
           }
         })
@@ -71,6 +76,7 @@ class AutomationQueue {
     });
     this.queue.on('stalled', (job) => {
       logger.warn(`[AUTOMATION-QUEUE] Job ${job.id} stalled`);
+      recordAutomationRunMetric('stalled');
     });
     this.queue.on('error', (err) => {
       logger.error('[AUTOMATION-QUEUE] Queue error:', err);

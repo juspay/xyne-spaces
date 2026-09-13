@@ -14,6 +14,7 @@ import {
   parseAutomationMetadata,
 } from '../types/workflow-adapter';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
+import { recordAutomationRunMetric } from '@/services/otel/automationMetrics';
 
 const router = Router();
 
@@ -120,6 +121,7 @@ router.post(
         }),
     );
 
+    recordAutomationRunMetric('pending', WEBHOOK_EVENT);
     await automationQueue.enqueueRun({ executionId: execution.id });
     logger.info(
       `[webhook-trigger] automation=${workflow.id} execution=${execution.id} accepted`,
