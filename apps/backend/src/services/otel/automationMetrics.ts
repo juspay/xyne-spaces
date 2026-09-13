@@ -18,14 +18,18 @@ export function getAutomationRunsTotal(): Counter {
   return _automationRuns;
 }
 
+// Mirrors the AutomationRunStatus values the UI filters on (RunHistory.tsx), so a
+// Grafana status filter maps 1:1 onto the run-history filter. 'stalled' is the one
+// addition: a Bull-level event with no DB status of its own.
 export type AutomationRunMetricStatus =
-  | 'started'
+  | 'pending'
+  | 'scheduled'
+  | 'running'
+  | 'external_wait'
   | 'completed'
   | 'failed'
-  | 'skipped'
   | 'cancelled'
-  | 'paused'
-  | 'scheduled'
+  | 'skipped'
   | 'stalled';
 
 /** Single entry point so every emission carries the same label set — a partial

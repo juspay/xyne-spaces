@@ -186,7 +186,7 @@ export class AutomationExecutor {
       data: { status: AutomationRunStatus.RUNNING },
     });
     if (prep.label === 'STARTED') {
-      recordAutomationRunMetric('started', prep.ctx.trigger.type);
+      recordAutomationRunMetric('running', prep.ctx.trigger.type);
     }
     await persistAutomationState(executionId, { context: JSON.stringify(prep.ctx) });
     logger.info(
@@ -486,7 +486,7 @@ export class AutomationExecutor {
             where: { id: runId },
             data: { status: EXTERNAL_WAIT_STATUS },
           });
-          recordAutomationRunMetric('paused', context.trigger.type);
+          recordAutomationRunMetric('external_wait', context.trigger.type);
           return { kind: 'paused', atIndex: i, externalRef: err.externalRef };
         }
         const errMessage = err instanceof Error ? err.message : String(err);
