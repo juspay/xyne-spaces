@@ -42,8 +42,9 @@ interface ExistenceEntry {
 export interface RuleStatus {
   id: string;
   match: Rule['matchSpec'];
+  lane: string;
+  version?: string;
   bundle: string;
-  version: string;
   fingerprint?: string;
   cache: Rule['cache'];
   ttl?: number;
@@ -137,12 +138,15 @@ export class RulesStore {
       const rs: RuleStatus = {
         id: r.id,
         match: r.matchSpec,
+        lane: r.lane,
         bundle: r.bundle,
-        version: r.version,
         cache: r.cache,
         healthy: r.healthy,
         enabled: r.enabled,
       };
+      if (r.version !== undefined) {
+        rs.version = r.version;
+      }
       if (r.fingerprint !== undefined) {
         rs.fingerprint = r.fingerprint;
       }
@@ -364,8 +368,13 @@ export class RulesStore {
           rule.healthy = false;
           rule.error = reason;
           if (prev && prev.enabled) {
+            rule.lane = prev.lane;
             rule.bundle = prev.bundle;
-            rule.version = prev.version;
+            if (prev.version !== undefined) {
+              rule.version = prev.version;
+            } else {
+              delete rule.version;
+            }
             rule.cache = prev.cache;
             if (prev.ttl !== undefined) {
               rule.ttl = prev.ttl;
@@ -394,6 +403,7 @@ export class RulesStore {
       if (!changed) {
         changed =
           prev === undefined ||
+          prev.lane !== rule.lane ||
           prev.bundle !== rule.bundle ||
           prev.version !== rule.version ||
           prev.fingerprint !== rule.fingerprint ||
