@@ -266,7 +266,8 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
   // pending-auth window it holds a JSON blob.
   const cookie = req.headers.cookie ?? "";
   const readCookie = (name: string): string | undefined => {
-    const m = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = cookie.match(new RegExp(`(?:^|;[ \t]*)${escaped}=([^;]*)`));
     return m?.[1] ? decodeURIComponent(m[1]) : undefined;
   };
   const lastWorkspace = readCookie("xyne_last_workspace");

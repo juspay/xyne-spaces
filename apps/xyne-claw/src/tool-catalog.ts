@@ -21,7 +21,7 @@ export interface ToolCatalogEntry {
   source: string;
   /**
    * The catalog this tool belongs to — the user-facing grouping that
-   * `search-tools`/`load-tools` filter on, and that the system-prompt index
+   * `list-tools`/`load-tools` filter on, and that the system-prompt index
    * lists. Derived from `source` at build time so the two can diverge without
    * breaking the config filter above.
    */
@@ -44,7 +44,7 @@ export interface FastToolRuntimeController {
   }>;
 }
 
-const META_TOOL_NAMES = new Set(["search-tools", "load-tools"]);
+const META_TOOL_NAMES = new Set(["load-tools", "list-tools"]);
 
 function extractRuntimeToolName(name: string): string {
   const idx = name.lastIndexOf("__");
@@ -143,6 +143,7 @@ export function buildToolCatalog(params: {
 
   if (params.includeSubagentTools) {
     for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
       const def = findSubagentDefinitionForServer(group.serverType);
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
@@ -198,6 +199,7 @@ export function buildFastModeDirectTools(params: {
   const remainingCustomTools: ToolDefinition[] = [];
 
   for (const group of params.groups) {
+    if (group.sourceSubagent) continue;
     const def = findSubagentDefinitionForServer(group.serverType);
     if (!def) {
       directTools.push(...group.tools);
@@ -239,31 +241,23 @@ export function buildFastModeDirectTools(params: {
 export function buildFastModeMetaTools(options: {
   catalog: ToolCatalogEntry[];
   controller: FastToolRuntimeController;
+  /**
+   * Extra detail appended to the empty-catalog answer of list-tools/load-tools,
+   * e.g. which configured subagents resolved to zero tools. The runtime loader
+   * is only wired when the catalog has entries (see agent.ts), so without this
+   * an empty catalog answered load-tools with the internal-sounding
+   * "tool loader is not initialized".
+   */
+  emptyCatalogNote?: string;
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
+  const emptyCatalogMessage = [
+    "No loadable tools are configured for this agent.",
+    options.emptyCatalogNote?.trim(),
+  ]
+    .filter(Boolean)
+    .join(" ");
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
-  const renderList = (entries: ToolCatalogEntry[]): string =>
-    entries
-      .slice(0, 50)
-      .map((entry) => `- ${entry.name} (${entry.source}): ${entry.oneLineDescription}`)
-      .join("\n") + (entries.length > 50 ? `\n...and ${entries.length - 50} more. Narrow the query.` : "");
-  /**
-   * Never dead-end. A no-match search used to return a bare "No matching tools
-   * found.", which left the model with nothing to act on — it would just stop.
-   * Fall back to listing the pool instead, so it can still pick a name and call
-   * load-tools. (Search is a hint, not an access boundary.)
-   *
-   * `pool` is the SCOPED set, not the whole catalog: falling back to everything
-   * would quietly ignore the `catalog` filter the model just asked for.
-   */
-  const renderMatches = (matches: ToolCatalogEntry[], pool: ToolCatalogEntry[]): string => {
-    if (matches.length === 0) {
-      if (pool.length === 0) return "The tool catalog is empty — no loadable tools are configured for this agent.";
-      const scope = pool.length === catalog.length ? "the full catalog" : `catalog ${JSON.stringify(pool[0]!.catalog)}`;
-      return `No tool name/description matched that query. Showing ${scope} (${pool.length}) — pick the names you need and call load-tools:\n${renderList(pool)}`;
-    }
-    return renderList(matches);
-  };
 
   const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
   /** Resolve the optional `catalog` filter, or return an error string. */
@@ -278,51 +272,53 @@ export function buildFastModeMetaTools(options: {
 
   return [
     {
-      name: "search-tools",
-      label: "Search Tools",
+      name: "list-tools",
+      label: "List Tools",
       description:
-        "Search the tool catalog by name, catalog, or description. Use this before load-tools when you are unsure which tool you need. " +
-        `Pass \`catalog\` to search within one catalog only; omit it to search all of them. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
+        "List the full tool catalog: every loadable tool, grouped by catalog, each with a one-line description. " +
+        "Read the list, pick the exact names you need, then call load-tools to activate them. " +
+        `Pass \`catalog\` to list one catalog only; omit it to list all. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
         properties: {
-          query: { type: "string", description: "Case-insensitive keyword or substring to search for." },
           catalog: {
             type: "string",
             ...(catalogNames.length > 0 ? { enum: catalogNames } : {}),
-            description: "Optional. Restrict the search to one catalog. Omit to search every catalog.",
+            description: "Optional. Restrict the listing to one catalog. Omit to list every catalog.",
           },
         },
-        required: ["query"],
       }),
       async execute(_toolCallId: string, params: unknown) {
-        const input = params as { query?: unknown; catalog?: unknown } | undefined;
+        const input = params as { catalog?: unknown } | undefined;
         const scoped = scopeTo(input?.catalog);
         if ("error" in scoped) {
           return { content: [{ type: "text" as const, text: scoped.error }], details: {} };
         }
         const pool = scoped.entries;
-        const query = String(input?.query ?? "").trim().toLowerCase();
-        if (!query) {
-          return { content: [{ type: "text" as const, text: renderMatches(pool, pool) }], details: {} };
+        if (pool.length === 0) {
+          return {
+            content: [{ type: "text" as const, text: `The tool catalog is empty. ${emptyCatalogMessage}` }],
+            details: {},
+          };
         }
-        const tokens = query.split(/\s+/).filter(Boolean);
-        // Rank by how many query tokens each entry matches (OR, not AND). The
-        // old `tokens.every(...)` required EVERY word to appear in one tool's
-        // name+source+description, so a natural query like "grafana query loki
-        // clickhouse logs" matched nothing even when grafana tools existed.
-        // Now any overlap surfaces the tool, best matches first.
-        const matches = pool
-          .map((entry) => {
-            const haystack = `${entry.name} ${entry.catalog} ${entry.source} ${entry.oneLineDescription}`.toLowerCase();
-            const hits = tokens.reduce((n, token) => (haystack.includes(token) ? n + 1 : n), 0);
-            return { entry, hits };
-          })
-          .filter((s) => s.hits > 0)
-          .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
-          .map((s) => s.entry);
-        return { content: [{ type: "text" as const, text: renderMatches(matches, pool) }], details: {} };
+        const grouped = new Map<string, ToolCatalogEntry[]>();
+        for (const entry of pool) {
+          const list = grouped.get(entry.catalog) ?? [];
+          list.push(entry);
+          grouped.set(entry.catalog, list);
+        }
+        const sections = [...grouped.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, entries]) => {
+            const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
+            const lines = sorted.map((entry) => `  - ${entry.name}: ${entry.oneLineDescription}`);
+            return [`## ${name} (${sorted.length})`, ...lines].join("\n");
+          });
+        const header =
+          `Tool catalog — ${pool.length} tool${pool.length === 1 ? "" : "s"} across ${grouped.size} catalog${grouped.size === 1 ? "" : "s"}. ` +
+          `Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: \"<name>\" }) for a whole catalog.`;
+        return { content: [{ type: "text" as const, text: [header, ...sections].join("\n\n") }], details: {} };
       },
     },
     {
@@ -339,7 +335,7 @@ export function buildFastModeMetaTools(options: {
           names: {
             type: "array",
             items: { type: "string" },
-            description: "Exact tool names from search-tools or the catalog index.",
+            description: "Exact tool names from list-tools or the catalog index.",
           },
           catalog: {
             type: "string",
@@ -349,6 +345,9 @@ export function buildFastModeMetaTools(options: {
         },
       }),
       async execute(_toolCallId: string, params: unknown) {
+        if (catalog.length === 0) {
+          return { content: [{ type: "text" as const, text: emptyCatalogMessage }], details: {} };
+        }
         if (!options.controller?.loadTools) {
           return { content: [{ type: "text" as const, text: "Error: tool loader is not initialized." }], details: {} };
         }
@@ -393,7 +392,7 @@ export function buildFastModeMetaTools(options: {
 
 /**
  * Above this many entries a catalog is listed by name only and the model is
- * pointed at `search-tools`. At or below it, every tool is listed inline with
+ * pointed at `list-tools`. At or below it, every tool is listed inline with
  * its one-liner — for a 3-4 tool catalog that costs almost nothing and saves
  * the model a search round trip before it can act.
  */
@@ -431,7 +430,7 @@ export function renderToolCatalogForPrompt(
       const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
       const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
       if (sorted.length > INLINE_LISTING_MAX) {
-        return [`${header} — search this catalog to see its tools.`];
+        return [`${header} — call list-tools with this catalog to see its tools.`];
       }
       return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
     });
@@ -441,7 +440,7 @@ export function renderToolCatalogForPrompt(
     opts?.subagentDelegationDisabled
       ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
       : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
-    "Use `search-tools` to find a tool, then `load-tools` to activate it; both take an optional `catalog` filter, and `load-tools` accepts a whole `catalog` at once. Loaded tools are callable from your next turn, so batch everything you need in one call.",
+    "Call `list-tools` to see every tool (grouped by catalog, with one-line descriptions), then `load-tools` to activate the ones you need; both take an optional `catalog` filter, and `load-tools` accepts a whole `catalog` at once. Loaded tools are callable from your next turn, so batch everything you need in one call.",
     ...sections,
   ].join("\n");
 }

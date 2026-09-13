@@ -11,8 +11,11 @@
  *    its own locks; a different pod that grabbed the lock after a TTL expiry
  *    can't be released out from under it.
  *  - TTL-bounded: if this pod dies, the lock auto-frees so another pod (or a
- *    run-recovery refire) can take over. We refresh on every turn to keep it
- *    alive across long runs.
+ *    run-recovery refire) can take over. A background heartbeat (see
+ *    startSessionLockHeartbeat) refreshes it every LOCK_HEARTBEAT_INTERVAL_MS
+ *    independent of turn boundaries, so the TTL can stay short (~90s) without
+ *    a slow model turn expiring a live run's lock; the per-turn refresh in
+ *    agent.ts remains as belt-and-suspenders.
  *  - FAIL-CLOSED by default: if the lock service is unreachable, acquire()
  *    resolves false so claw-auth's queue/recovery layer can retry instead of
  *    risking a split-brain session. Set SESSION_LOCK_REQUIRED=false only for
@@ -23,7 +26,7 @@ import { SERVER } from "./config.js";
 import { metric } from "./metrics.js";
 
 const POD_ID = randomUUID();
-export const SESSION_LOCK_TTL_MS = Number(process.env["SESSION_LOCK_TTL_MS"] ?? 15 * 60 * 1000);
+export const SESSION_LOCK_TTL_MS = Number(process.env["SESSION_LOCK_TTL_MS"] ?? 90_000);
 // HTTP budget for a single lock acquire/refresh/release call to claw-auth.
 // 5s was too tight: under claw-auth S2S latency (prod 2026-07-07 saw multi-second
 // /mcp/tools responses), the acquire fetch timed out and — because acquisition
@@ -141,6 +144,18 @@ export async function refreshSessionLock(conversationId: string): Promise<void> 
   } catch {
     // best-effort
   }
+}
+
+const LOCK_HEARTBEAT_INTERVAL_MS = Number(
+  process.env["SESSION_LOCK_HEARTBEAT_MS"] ?? Math.max(10_000, Math.floor(SESSION_LOCK_TTL_MS / 3)),
+);
+
+export function startSessionLockHeartbeat(conversationId: string): () => void {
+  const timer = setInterval(() => {
+    void refreshSessionLock(conversationId);
+  }, LOCK_HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 /** Release the lock (compare-and-delete; only frees it if we still own it). */

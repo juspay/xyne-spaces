@@ -964,7 +964,7 @@ const spacesSearch: ToolDef = {
       // spaces-search ALWAYS goes through the Spaces backend /api/vespaSearch
       // (the canonical YqlBuilder). DIRECT_VESPA_SEARCH deliberately does NOT
       // reroute this tool through the hand-maintained vespa-direct.ts copy — that
-      // flag now only gates the spaces-vespa-query escape-hatch tool (registered
+      // flag now only gates the structured direct-Vespa tools (registered
       // below). The direct copy lagged the backend (no mail, no fuzzy fallback,
       // no personalization/threshold ranking, single-surface grouping dropped,
       // weaker workspace isolation), so routing the primary search tool through
@@ -4201,15 +4201,10 @@ const spacesCreateTicket: ToolDef = {
         description:
           "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
-      sdlcRepoId: {
-        type: "string",
-        description:
-          "Required with sourceCanvasId when creating an implementation ticket for an SDLC artifact. The SDLC repository ID from repository mode.",
-      },
       sourceCanvasId: {
         type: "string",
         description:
-          "Required with sdlcRepoId when creating an implementation ticket for an SDLC artifact. The artifact canvas ID to link to the new ticket.",
+          "Set when creating an implementation ticket for an SDLC artifact: the artifact canvas ID to link to the new ticket. The link is scoped to the SDLC Hub given by channelId — no repository is needed.",
       },
       priority: {
         type: "string",
@@ -4227,11 +4222,7 @@ const spacesCreateTicket: ToolDef = {
         return err("channelId is required.");
       }
 
-      const sdlcRepoId = String(args["sdlcRepoId"] ?? "").trim();
       const sourceCanvasId = String(args["sourceCanvasId"] ?? "").trim();
-      if (Boolean(sdlcRepoId) !== Boolean(sourceCanvasId)) {
-        return err("sdlcRepoId and sourceCanvasId must be provided together.");
-      }
 
       const attachConversationId = (args["attachConversationId"] as string | undefined)?.trim() || undefined;
 
@@ -4246,9 +4237,6 @@ const spacesCreateTicket: ToolDef = {
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
       if (args["tags"]) body["tags"] = args["tags"];
-      if (sdlcRepoId && sourceCanvasId) {
-        body["entityLinkContext"] = { sourceType: "CANVAS", sourceId: sourceCanvasId };
-      }
 
       // WORKAROUND for xyne-backend bug (ticketController.ts:500): when the
       // body omits createdBy, the conversationParticipant.upsert in the
@@ -4275,13 +4263,13 @@ const spacesCreateTicket: ToolDef = {
         status: string;
       };
 
-      if (sdlcRepoId && sourceCanvasId) {
+      if (sourceCanvasId) {
         try {
           await spacesFetch("/api/sdlc/claw/links", {
             method: "POST",
             headers: { "x-xyne-acting-user-id": ctx.userId },
             body: JSON.stringify({
-              repoId: sdlcRepoId,
+              channelId: args["channelId"],
               sourceType: "CANVAS",
               sourceId: sourceCanvasId,
               targetType: "TICKET",
@@ -5302,24 +5290,37 @@ function sdlcMutationVariant(
       ...(required.includes("sourcePaths") && action !== "archive" ? { sourcePaths: { minItems: 1 } } : {}),
       ...propertyOverrides,
     },
-    required: ["artifactType", "action", ...required],
+    required: ["artifactType", "action", "repoId", ...required],
   } as const;
 }
+
+const SDLC_CHANNEL_ID_HINT =
+  "Channel id of the SDLC Hub. This is the required scope — a hub covers several repositories and a repository sits in several hubs, so it cannot be inferred. Use the channelId returned alongside the repository by spaces-sdlc-list-repositories.";
+
+const SDLC_REPO_IDS_PARAM = {
+  type: "array" as const,
+  items: { type: "string" as const, minLength: 1 },
+  maxItems: 50,
+  description:
+    "Optional. Repositories to narrow to, from spaces-sdlc-list-repositories. Omit to use the run's pinned repository when one is pinned, or the whole hub when none is. Pass an empty array to force hub scope with no repository at all — the right choice when the work is about the hub itself rather than any repository in it.",
+};
 
 const spacesSdlcMutateArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.mutateArtifact,
   description:
-    "Create or mutate one trusted-repository SDLC artifact. Supports artifact create/update, incremental " +
+    "Create or mutate one SDLC artifact. Supports artifact create/update, incremental " +
     "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Artifact types are canvas " +
-    "folders on the repo's SDLC channel: PRD and Tech Docs are seeded built-in types, and users can add custom " +
-    "types; list them via spaces-sdlc-list-artifact-types. To create an artifact of any type, pass its folderId " +
-    "(from that tool) plus trackId (the SDLC track it belongs to). To update an artifact, pass its canvasId and " +
-    "markdown. Link related artifacts via relatedCanvasIds. Trusted repository and execution identity is " +
-    "injected by the platform.",
+    "folders on the SDLC Hub's channel and are shared by every repository in that hub: PRD and Tech Docs are seeded " +
+    "built-in types, and users can add custom types; list them via spaces-sdlc-list-artifact-types. To create an " +
+    "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to). To update " +
+    "an artifact, pass its canvasId and markdown. Link related artifacts via relatedCanvasIds. Trusted repository, " +
+    "hub, and execution identity is injected by the platform when the run has a repository pinned.",
   inputSchema: {
     type: "object",
     properties: {
       repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       workspaceId: { type: "string", minLength: 1 },
       actorUserId: { type: "string", minLength: 1 },
       executionId: { type: "string", minLength: 1 },
@@ -5572,16 +5573,18 @@ const sdlcArtifactSelectorSchema = {
 
 const spacesSdlcListArtifactVersions: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifactVersions,
-  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, or artifact (any type). Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
+  description: "List a bounded newest-first page of immutable versions for one SDLC Wiki page, Repo Knowledge document, or artifact (any type) in one hub. Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
       cursor: { type: "string", minLength: 1 },
       limit: { type: "integer", minimum: 1, maximum: 25 },
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
@@ -5589,15 +5592,17 @@ const spacesSdlcListArtifactVersions: ToolDef = {
 
 const spacesSdlcReadArtifactVersion: ToolDef = {
   name: SDLC_TOOL_NAMES.readArtifactVersion,
-  description: "Read exactly one immutable version previously listed for a trusted-repository SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
+  description: "Read exactly one immutable version previously listed for an SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
       versionId: { type: "string", minLength: 1 },
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector", "versionId"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector", "versionId"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
@@ -5621,6 +5626,50 @@ function sdlcSpacesAuth(): SpacesAuthContext | undefined {
   };
 }
 
+async function callSdlcRepositories(
+  args: Record<string, unknown>,
+  ctx: HandlerContext,
+): Promise<ToolResult> {
+  try {
+    const data = await spacesFetch("/api/sdlc/claw/repositories/list", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    }, sdlcSpacesAuth());
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC repositories error: ${errMsg(e)}`);
+  }
+}
+
+const spacesSdlcListRepositories: ToolDef = {
+  name: SDLC_TOOL_NAMES.listRepositories,
+  description:
+    "Resolve a Spaces channel to the SDLC repositories it covers. An SDLC Hub is a channel and repositories are its members. "
+    + "The conversation's channelId is supplied by the platform, so call this with no arguments to learn which repositories "
+    + "this hub works on. Returns repoId, channelId, name, clone url, and base branch per repository — pass the repoId and "
+    + "channelId together to every hub-scoped SDLC tool. An empty result means this channel is not an SDLC hub. "
+    + "Use it to orient yourself or to offer the user a choice; never use it to override a repository already pinned by trusted run context.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: {
+        type: "string",
+        minLength: 1,
+        description: "Channel id of the SDLC Hub. Supplied by the platform; omit it.",
+      },
+      query: { type: "string", maxLength: 120, description: "Optional case-insensitive filter on repository name or URL." },
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+    },
+  },
+  async handler(args, ctx) {
+    return callSdlcRepositories(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcRepositories(args, ctx);
+  },
+};
+
 async function callSdlcTracks(
   path: string,
   args: Record<string, unknown>,
@@ -5641,11 +5690,14 @@ async function callSdlcTracks(
 const spacesSdlcListTracks: ToolDef = {
   name: SDLC_TOOL_NAMES.listTracks,
   description:
-    "List the SDLC tracks (workstreams) in a trusted repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
+    "List the SDLC tracks (workstreams) in one SDLC Hub. Tracks belong to the hub and are shared by every repository in it, so this needs only the channelId — no repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
   inputSchema: {
     type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+    },
+    required: ["channelId"],
   },
   async handler(args, ctx) {
     return callSdlcTracks("/list", args, ctx);
@@ -5658,15 +5710,16 @@ const spacesSdlcListTracks: ToolDef = {
 const spacesSdlcCreateTrack: ToolDef = {
   name: SDLC_TOOL_NAMES.createTrack,
   description:
-    "Create a new SDLC track (workstream) in a trusted repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
+    "Create a new SDLC track (workstream) in one SDLC Hub. The track belongs to the hub and is visible to every repository in it, so this needs only the channelId — no repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
   inputSchema: {
     type: "object",
     properties: {
       repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
       name: { type: "string", minLength: 1, maxLength: 120 },
       description: { type: "string", maxLength: 2000 },
     },
-    required: ["repoId", "name"],
+    required: ["channelId", "name"],
   },
   async handler(args, ctx) {
     return callSdlcTracks("", args, ctx);
@@ -5696,11 +5749,14 @@ async function callSdlcArtifactTypes(
 const spacesSdlcListArtifactTypes: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifactTypes,
   description:
-    "List the SDLC artifact types (canvas folders) in a trusted repository. Each type is a folder on the repo's SDLC channel; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
+    "List the SDLC artifact types (canvas folders) in one SDLC Hub. Each type is a folder on the hub's channel and is shared by every repository in that hub, so this needs only the channelId — no repository; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
   inputSchema: {
     type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
+    properties: {
+      repoId: { type: "string", minLength: 1 },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+    },
+    required: ["channelId"],
   },
   async handler(args, ctx) {
     return callSdlcArtifactTypes("/list", args, ctx);
@@ -5712,16 +5768,18 @@ const spacesSdlcListArtifactTypes: ToolDef = {
 
 const spacesSdlcListArtifacts: ToolDef = {
   name: SDLC_TOOL_NAMES.listArtifacts,
-  description: "List current trusted-repository Wiki, Baseline, and artifact documents (every artifact type, seeded or custom). Returns bounded identity and current-state metadata without historical bodies.",
+  description: "List one repository's current Wiki, Baseline, and artifact documents (every artifact type, seeded or custom) within one SDLC Hub. Returns bounded identity and current-state metadata without historical bodies.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       executionId: { type: "string" }, sessionId: { type: "string" },
       kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "ARTIFACT", "PRD", "TECH_DOC"] }, description: "Filter by kind. ARTIFACT covers every artifact type (seeded or custom); PRD/TECH_DOC are accepted as legacy aliases for ARTIFACT." },
       includeArchived: { type: "boolean" },
     },
-    required: ["repoId", "workspaceId", "actorUserId"],
+    required: ["workspaceId", "actorUserId", "channelId"],
   },
   async handler(args, ctx) {
     return args["executionId"] && args["sessionId"]
@@ -5737,14 +5795,16 @@ const spacesSdlcListArtifacts: ToolDef = {
 
 const spacesSdlcReadArtifact: ToolDef = {
   name: SDLC_TOOL_NAMES.readArtifact,
-  description: "Read one current trusted-repository Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
+  description: "Read one current Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      workspaceId: { type: "string" }, actorUserId: { type: "string" },
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      repoIds: SDLC_REPO_IDS_PARAM,
       selector: sdlcArtifactSelectorSchema,
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+    required: ["workspaceId", "actorUserId", "channelId", "selector"],
   },
   async handler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
@@ -7183,68 +7243,6 @@ const userSendMessage: ToolDef = {
   },
 };
 
-// ── spaces-vespa-schema ──────────────────────────────────────────────────────
-
-const spacesVespaSchema: ToolDef = {
-  name: "spaces-vespa-schema",
-  description:
-    "Returns the field definitions for Vespa search schemas. " +
-    "Use this BEFORE building a direct YQL query to discover " +
-    "the exact field names, types, and whether each field is filterable (usable in WHERE) or searchable (usable in userInput/contains). " +
-    "Pass a schema name to get that schema's fields.\n\n" +
-    "## Schema name → YQL source name mapping\n" +
-    "The schema name you pass here (the .sd filename) is DIFFERENT from the source name used in `from sources` in YQL:\n" +
-    "- chat_message     → `from sources message`\n" +
-    "- chat_attachment  → `from sources attachment`\n" +
-    "- chat_container   → `from sources channel`\n" +
-    "- ticket           → `from sources ticket`\n" +
-    "- user             → `from sources user`\n" +
-    "- file             → `from sources file`\n" +
-    "- sam_transcript   → `from sources sam_transcript`\n\n" +
-    "Key fields by use case:\n" +
-    "- Filter by sender: chat_message.userId, ticket.createdBy\n" +
-    "- Filter by channel: chat_message.channelId, ticket.channelId\n" +
-    "- Filter by time: chat_message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
-    '- Access control: always include permissions contains "<userId>" for chat/ticket/file unless scoping by channelId\n' +
-    "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
-    "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)",
-  inputSchema: {
-    type: "object",
-    properties: {
-      schema: {
-        type: "string",
-        enum: [
-          "chat_message",
-          "chat_attachment",
-          "chat_container",
-          "attachment",
-          "ticket",
-          "user",
-          "file",
-          "sam_transcript",
-          "mail",
-          "mail_attachment",
-          "project",
-          "memory",
-        ],
-        description: "Schema name to fetch field definitions for.",
-      },
-    },
-    required: ["schema"],
-  },
-  handler: withToolErrors("vespa-schema error", async (args) => {
-      const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
-
-      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
-      // both user and app tokens (the bare /api/vespaSearch mount is
-      // user-session-only and 401s app-mode runs).
-      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
-      if (!text || !text.trim())
-        return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
-      return ok(text);
-    }),
-};
-
 /**
  * Entity ids for the DIRECT-VESPA tools only.
  *
@@ -7272,8 +7270,8 @@ function directEntityIdLines(r: SearchResult): string {
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
-// Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
-// spaces-vespa-search structured). Builds a routable Citation per result row —
+// Shared renderer for the direct-Vespa tools (spaces-vespa-search and the
+// bench search). Builds a routable Citation per result row —
 // mirrors spaces-search's harvest() so hits render as CLICKABLE chips instead of
 // dead tokens. harvest() returns whether it pushed a citation; the caller gates
 // the inline token on that (formatSearchResult(r, null) → no token), so a
@@ -7593,21 +7591,37 @@ const onyxBenchSearch: ToolDef = {
     const workspaceId = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
     if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
 
-    // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
+    // Build YQL — hybrid retrieval matching spaces-search:
     //   select * from sources chat_message, file, mail, ticket
-    //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
+    //   where (userInput(@query) or nearestNeighbor(text_embeddings, e) or nearestNeighbor(chunk_embeddings, e) or nearestNeighbor(combined_embeddings, e)) and workspaceId contains "..."
+    //
+    // userInput defaults to weakAnd (partial token match — fewer false
+    // negatives than grammar:"tokenize" which required ALL tokens). The
+    // nearestNeighbor ORs add semantic retrieval: queryDirect already sends
+    // input.query(e)=embed(hf-embedder, @query) via defaultNativeInputs, so
+    // the embedding vector is available. Each schema has its own embedding
+    // field name (chat_message→text_embeddings, file/mail→chunk_embeddings,
+    // ticket→combined_embeddings); OR-ing all three ensures the NN clause
+    // fires on whichever schema the relevant doc lives in.
     //
     // sourceType narrowing: each source type gets its own channel container
     // (bench-ch-<workspaceId>-<sourceType>), and channelId is imported from
     // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
     // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
     // jira→"ticket", fireflies→"file").
+    const targetHits = Math.max(hits, 20);
+    const nnClauses = [
+      `({targetHits:${targetHits}} nearestNeighbor(text_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(chunk_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(combined_embeddings, e))`,
+    ].join(" or ");
+    const retrieval = `(userInput(@query) or ${nnClauses})`;
     const clauses: string[] = [`workspaceId contains "${esc(workspaceId)}"`];
     if (sourceType) {
       const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
       clauses.push(`channelId contains "${esc(benchChannelId)}"`);
     }
-    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ${retrieval} and ${clauses.join(" and ")}`;
 
     try {
       const data = await queryDirect(
@@ -7644,133 +7658,6 @@ const onyxBenchSearch: ToolDef = {
       return directError("onyx-bench-search error", e);
     }
   }),
-};
-
-// ── spaces-vespa-query ───────────────────────────────────────────────────────
-
-const spacesVespaQuery: ToolDef = {
-  name: "spaces-vespa-query",
-  description:
-    "Execute a raw YQL query directly against Vespa. " +
-    "Use this when spaces-search doesn't support the exact filter combination you need.\n\n" +
-    "## Workflow\n" +
-    "1. Call **spaces-vespa-schema** with the schema name to discover exact field names and types.\n" +
-    "2. Write your YQL using those field names.\n" +
-    "3. Call this tool with the YQL.\n\n" +
-    "## ACL — include the correct guard per schema\n" +
-    "Always include the access control condition for the schema you query. ACL is auto-injected if omitted, but you should write it explicitly.\n" +
-    '- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains "<userId>"`\n' +
-    '- file: `(ownerId contains "<userId>" or permissions contains "<userId>" or isPrivate contains "false")` for CANVAS; `(ownerId contains "<userId>" or channelPermissions contains "<userId>" or isPrivate contains "false")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n' +
-    "- user / channel: no ACL needed (public)\n" +
-    "Use the `userId` field from **spaces-whoami** if you need your own id.\n\n" +
-    "## YQL examples (use the YQL source name, NOT the schema name from spaces-vespa-schema)\n" +
-    "```\n" +
-    "-- tickets assigned to a user, open only (source: ticket)\n" +
-    'select * from sources ticket where userInput(@query) and status contains "OPEN" and assignedTo contains "<userId>" and permissions contains "<userId>"\n\n' +
-    "-- messages in a channel since a date (source: message) — write dates as dd/mm/yy, NOT epoch ms\n" +
-    'select * from sources message where channelId contains "<channelId>" and createdAtTimestamp > 01/06/26 and permissions contains "<userId>"\n\n' +
-    "-- files of subApp CANVAS owned by user (source: file)\n" +
-    'select * from sources file where subApp contains "CANVAS" and ownerId contains "<userId>"\n\n' +
-    "-- channels by name (source: channel, no ACL needed)\n" +
-    "select * from sources channel where userInput(@query)\n" +
-    "```\n\n" +
-    "## YQL source names\n" +
-    "message, attachment, channel, ticket, user, file, sam_transcript\n" +
-    "(These differ from the schema names passed to spaces-vespa-schema — see that tool's description for the mapping.)\n\n" +
-    "## Ranking (rankProfile / rankInputs)\n" +
-    "Relevance scoring is driven by a Vespa rank profile that must EXIST in every schema your YQL touches.\n" +
-    "- For a filter-only or grouping/count query (no relevance order needed) leave both unset — the tool uses the built-in `unranked` profile.\n" +
-    "- For free-text relevance, read the target schema's .sd `rank-profile <name> { ... }` blocks and pass `rankProfile` (e.g. `default_native` for general relevance, `default_fuzzy` for typo-tolerant, `semantic_ranking` for vector-only). If unset, free-text defaults to `default_native`.\n" +
-    "- When you set a scoring `rankProfile`, also pass `rankInputs` taken from that profile's `inputs { query(...) }` block. If unset, the standard default_native inputs are used.\n\n" +
-    "## Notes\n" +
-    "- Only available when DIRECT_VESPA_SEARCH is enabled.\n" +
-    "- Pass free-text as `query` (bound to `@query` in YQL via `userInput(@query)`), not embedded in the YQL string.\n" +
-    '- Write date filters as dd/mm/yy (e.g. `createdAtTimestamp > 01/06/26`) — do NOT compute epoch ms yourself. The tool converts each literal to milliseconds before running the query. A bare date is treated as IST midnight of that day; to filter on a specific IST time add `HH:MM` (or `HH:MM:SS`), e.g. `createdAtTimestamp > "01/06/26 14:30"`. dd/mm/yyyy is also accepted. Dates are only converted when they follow a comparison operator (> < >= <=), so a date inside a text match stays literal.\n' +
-    "- Result rows come back citation-ready: each routable row (message/thread, ticket, channel, canvas, chat file, desk mail, RCA) is auto-tagged with a clickable source token. You do NOT need to project specific columns for this — the tool normalizes your `select` list to `select *` and returns a curated field set, so just write the `from`/`where`/`order by` you need.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      yql: {
-        type: "string",
-        description: "Raw Vespa YQL query string. Use field names from spaces-vespa-schema.",
-      },
-      query: {
-        type: "string",
-        description:
-          "Free-text query bound to @query in the YQL. Pass this separately — do not embed it in the yql string.",
-      },
-      hits: {
-        type: "number",
-        minimum: 0,
-        maximum: 100,
-        default: 20,
-        description:
-          "Max document hits to return (default 20, max 100). Pass 0 for grouping/count queries that only need the group aggregation, not the documents themselves.",
-      },
-      offset: {
-        type: "number",
-        minimum: 0,
-        default: 0,
-        description: "Pagination offset.",
-      },
-      rankProfile: {
-        type: "string",
-        description:
-          "Optional Vespa rank profile to score with, read from the schema's .sd `rank-profile` blocks. Must exist in EVERY source in your YQL. " +
-          "Common: `default_native` (general relevance), `default_fuzzy` (typo-tolerant), `semantic_ranking` (vector-only), `unranked` (no scoring). " +
-          "If omitted: `unranked` for grouping/count or no-text queries, `default_native` otherwise.",
-      },
-      rankInputs: {
-        type: "object",
-        additionalProperties: true,
-        description:
-          "Optional inputs for the chosen rank profile, read from its `inputs { query(...) }` block in the .sd. " +
-          "Keys may be bare (`alpha`) or wrapped (`query(alpha)`); each is sent as `input.query(<name>)`. " +
-          'For an embedding input use `{ "e": "embed(hf-embedder, @query)" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.',
-      },
-    },
-    required: ["yql"],
-  },
-  async handler(args, ctx) {
-    if (!CONFIG.directVespaSearch) {
-      return err("spaces-vespa-query requires DIRECT_VESPA_SEARCH=true.");
-    }
-    try {
-      const yql = String(args["yql"] ?? "").trim();
-      if (!yql) return err("yql is required.");
-      const query = String(args["query"] ?? "").trim();
-      const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
-      const offset = Math.max(Number(args["offset"] ?? 0), 0);
-      const rankProfile = args["rankProfile"] != null ? String(args["rankProfile"]) : undefined;
-      const rankInputs =
-        args["rankInputs"] && typeof args["rankInputs"] === "object" && !Array.isArray(args["rankInputs"])
-          ? (args["rankInputs"] as Record<string, unknown>)
-          : undefined;
-
-      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
-      if (!workspaceId) {
-        log.error(
-          `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
-        );
-        return err("Could not resolve your workspaceId — cannot run a workspace-scoped raw Vespa query.");
-      }
-
-      const data = await queryDirect(
-        yql,
-        query,
-        aclUserId,
-        hits,
-        offset,
-        CONFIG.vespaQueryEndpoint,
-        rankProfile,
-        rankInputs,
-        workspaceId,
-      );
-      return renderDirectResult(data, hits, offset, workspaceId);
-    } catch (e) {
-      return directError("vespa-query error", e);
-    }
-  },
 };
 
 /**
@@ -9180,7 +9067,7 @@ const spacesDeskMetrics: ToolDef = {
 
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
   onyxBenchSearch,
   spacesSearch,
   spacesSearchV2,
@@ -9217,6 +9104,7 @@ export const tools: ToolDef[] = [
   spacesCreateCanvas,
   spacesSdlcListArtifacts,
   spacesSdlcReadArtifact,
+  spacesSdlcListRepositories,
   spacesSdlcListTracks,
   spacesSdlcCreateTrack,
   spacesSdlcListArtifactTypes,
