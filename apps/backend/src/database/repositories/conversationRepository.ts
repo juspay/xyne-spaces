@@ -602,4 +602,35 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       },
     });
   }
+
+  /**
+   * Ghost-thread cleanup for a single channel: an interrupted migration can leave conversation rows whose own initial
+   * message never committed, surfacing as broken empty threads. Candidates are message-less conversations; of those,
+   * a ghost is one whose initialMessageId doesn't resolve to a real message. This preserves legitimately message-less
+   * conversations whose initial message lives elsewhere (a showInChannel broadcast child's message sits under the
+   * parent; call threads). Scoped strictly to the given channelId. dryRun reports without deleting.
+   */
+  async cleanupGhostConversations(channelId: string, dryRun: boolean): Promise<{ channelId: string; count: number; sampleIds: string[]; deleted: number }> {
+    const empty = await this.db.conversation.findMany({
+      where: { channelId, messages: { none: {} } },
+      select: { conversationId: true, initialMessageId: true },
+    });
+    const present = new Set<string>();
+    const initIds = empty.map((c) => c.initialMessageId);
+    for (let i = 0; i < initIds.length; i += 20000) { // chunk the IN list — Postgres caps prepared-statement params at 32767
+      const rows = await this.db.message.findMany({ where: { messageId: { in: initIds.slice(i, i + 20000) } }, select: { messageId: true } });
+      for (const r of rows) present.add(r.messageId);
+    }
+    const ghostIds = empty.filter((c) => !present.has(c.initialMessageId)).map((c) => c.conversationId);
+    const result = { channelId, count: ghostIds.length, sampleIds: ghostIds.slice(0, 20), deleted: 0 };
+    if (dryRun || ghostIds.length === 0) return result;
+    for (let i = 0; i < ghostIds.length; i += 20000) {
+      const chunk = ghostIds.slice(i, i + 20000);
+      await this.db.conversationParticipant.deleteMany({ where: { conversationId: { in: chunk } } });
+      const res = await this.db.conversation.deleteMany({ where: { conversationId: { in: chunk } } });
+      result.deleted += res.count;
+    }
+    logger.warn('[GhostCleanup] removed ghost conversations (initial message missing)', { channelId, deleted: result.deleted });
+    return result;
+  }
 }

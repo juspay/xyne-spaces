@@ -216,10 +216,12 @@ export class SlackMigrationService {
       throw new HttpError(409, 'INVALID_STATE', `Migration is already active (current: ${job.status}) — stop it before re-ingesting.`);
     }
     await this.store.clearIngestState(id);
-    // Back to AWAITING_APPROVAL: the admin then hits Approve, which runs the untouched normal ingestion path.
+    // Restore the exact post-collection state: AWAITING_APPROVAL on the COLLECTION queue (phase 'collect'), so the
+    // dashboard shows the Approve button. Approve then sets currentQueue=INGESTION AND enqueues — the normal path.
+    // (Leaving currentQueue=INGESTION here makes the UI read 'approved · waiting to ingest' while nothing is enqueued.)
     const updated = await this.store.update(id, {
       status: MigrationStatus.AWAITING_APPROVAL,
-      currentQueue: QueueName.INGESTION,
+      currentQueue: QueueName.COLLECTION,
       checkpoint: { ...job.checkpoint, ingestedConversationIds: [] },
       stopRequested: false,
       stopReason: undefined,
@@ -227,6 +229,21 @@ export class SlackMigrationService {
       completedAt: undefined,
     });
     return toView(updated);
+  }
+
+  /**
+   * Remove ghost threads left in this channel by an interrupted prior ingest (empty conversations whose initial
+   * message never committed). Only runnable when the job is idle — never mid-ingest — so it can't race a writer.
+   * dryRun (default at the route) reports the count + sample without deleting; pass dryRun=false to delete.
+   */
+  async cleanupGhostConversations(id: string, actor: Actor, dryRun: boolean): Promise<{ channelId: string; count: number; sampleIds: string[]; deleted: number }> {
+    const job = await this.mustGet(id, actor);
+    const channelId = job.channelInput?.xyneChannelId;
+    if (!channelId) throw new HttpError(400, 'NOT_A_CHANNEL', 'Ghost cleanup applies to channel migrations only.');
+    if ([MigrationStatus.QUEUED, MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Wait until the migration is idle before cleaning ghosts (current: ${job.status}).`);
+    }
+    return repositories.conversations.cleanupGhostConversations(channelId, dryRun);
   }
 
   async remove(id: string, actor: Actor, requireOwner = false): Promise<void> {

@@ -75,6 +75,12 @@ export function buildRouter(service: SlackMigrationService): Router {
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
   // Recover a wiped/finished channel: reset it to AWAITING_APPROVAL so Approve re-ingests from the existing GCS dump (no re-collect).
   router.post('/migration-jobs/:id/reingest', admin, wrap(async (req, res) => { res.json(ok(await service.reingest(req.params.id, actorOf(req)))); }));
+  // Post-migration cleanup of ghost threads (empty conversations from an interrupted run). Defaults to a dry run;
+  // deletes only when explicitly called with ?dryRun=false. Run when the migration is idle.
+  router.post('/migration-jobs/:id/cleanup-ghosts', admin, wrap(async (req, res) => {
+    const dryRun = req.query.dryRun !== 'false';
+    res.json(ok(await service.cleanupGhostConversations(req.params.id, actorOf(req), dryRun)));
+  }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
   router.post('/queues/:queue/pause', admin, wrap(async (req, res) => {
     await service.pauseQueue(req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
