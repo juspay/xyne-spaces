@@ -161,18 +161,40 @@ export const CanvasSuggestionsPanel = ({
         void resolveRow(row, btn.getAttribute('data-suggestion-action') === 'accept');
         return;
       }
-      // A move's source chip and destination ghost jump to each other.
-      const jump = target.closest?.('[data-suggestion-jump]');
-      const jumpId = jump?.getAttribute('data-suggestion-jump');
-      if (jumpId) {
+      const jumpId = target
+        .closest?.('[data-suggestion-jump]')
+        ?.getAttribute('data-suggestion-jump');
+      if (jumpId && !jumpId.startsWith('widget:')) {
         e.preventDefault();
         container
           .querySelector(`[data-id="${CSS.escape(jumpId)}"]`)
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     };
+    let pendingJump: string | null = null;
+    const onDown = (e: MouseEvent): void => {
+      if (e.button !== 0) return;
+      const jumpId = (e.target as HTMLElement)
+        .closest?.('[data-suggestion-pair][data-suggestion-jump]')
+        ?.getAttribute('data-suggestion-jump');
+      pendingJump = jumpId?.startsWith('widget:') ? jumpId.slice('widget:'.length) : null;
+    };
+    const onUp = (): void => {
+      const rowId = pendingJump;
+      pendingJump = null;
+      if (!rowId) return;
+      container
+        .querySelector(`[data-suggestion-widget="${CSS.escape(rowId)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
     container.addEventListener('click', onClick);
-    return (): void => container.removeEventListener('click', onClick);
+    container.addEventListener('mousedown', onDown);
+    container.addEventListener('mouseup', onUp);
+    return (): void => {
+      container.removeEventListener('click', onClick);
+      container.removeEventListener('mousedown', onDown);
+      container.removeEventListener('mouseup', onUp);
+    };
   }, [editorContainerRef, canEdit, resolveRow]);
 
   useEffect(() => {

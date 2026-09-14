@@ -36,14 +36,9 @@ export const suggestionDecorationsKey = new PluginKey('canvasSuggestionDecoratio
 
 const CLASSES = {
   removed: 'rounded-sm bg-red-50 line-through decoration-red-400 dark:bg-red-950/30',
-  moveSource: 'rounded-sm bg-sky-50 dark:bg-sky-950/30',
   proposal:
     'my-1 whitespace-pre-wrap rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
   deleteActions: 'my-1 w-fit',
-  ghost:
-    'my-1 cursor-pointer rounded-md border border-dashed border-sky-400 px-3 py-1 text-xs text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/30',
-  moveChip:
-    'my-0.5 w-fit cursor-pointer rounded-sm bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-900 hover:bg-sky-200 dark:bg-sky-950/40 dark:text-sky-200',
   stale:
     'my-0.5 w-fit rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground',
   actions: 'mt-1.5 flex gap-1.5',
@@ -55,11 +50,6 @@ const CLASSES = {
 
 const markdownOf = (row: InlineSuggestionRow): string =>
   ((row.afterContent as { markdown?: string } | null)?.markdown ?? '').trim();
-
-const snippet = (text: string): string => {
-  const t = text.trim().replace(/\s+/g, ' ');
-  return t.length > 50 ? `${t.slice(0, 50)}…` : t;
-};
 
 /** Actions rendered on a widget: full accept/reject, dismiss-only, or none (read-only). */
 type WidgetActions = 'full' | 'dismiss' | null;
@@ -208,30 +198,19 @@ function buildDecorations(
       if (!source) return;
       const anchor = resolveAnchor(row);
       if (anchor === null) return;
-      decos.push(Decoration.node(source.pos, source.end, { class: CLASSES.moveSource }));
-      // Each end quotes the other, and clicking either scrolls to its partner.
-      const anchorText = anchor.id ? snippet(blocks.get(anchor.id)?.text ?? '') : '';
-      const chipText = anchorText
-        ? `⤵ moves below “${anchorText}”`
-        : '⤵ moves to the top of the document';
       decos.push(
-        Decoration.widget(
-          source.pos,
-          widget(CLASSES.moveChip, chipText, row.id, null, anchor.id ?? undefined),
-          { side: -1, key: `${row.id}-src` },
-        ),
+        Decoration.node(source.pos, source.end, {
+          class: CLASSES.removed,
+          'data-suggestion-pair': row.id,
+          'data-suggestion-jump': `widget:${row.id}`,
+          title: 'Moves elsewhere — see the highlighted card',
+        }),
       );
-      const sourceText = snippet(source.text);
+      const shown = markdownOf(row) || source.text.trim();
       decos.push(
         Decoration.widget(
           anchor.end,
-          widget(
-            CLASSES.ghost,
-            sourceText ? `⤵ moves here: “${sourceText}”` : '⤵ a block moves here',
-            row.id,
-            act,
-            row.blockId ?? undefined,
-          ),
+          widget(CLASSES.proposal, shown, row.id, act, row.blockId ?? undefined),
           { side: i + 1, key: row.id },
         ),
       );

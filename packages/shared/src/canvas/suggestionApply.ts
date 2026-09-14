@@ -173,7 +173,16 @@ export async function applyOps<TBlock extends { id?: string }>(
         continue;
       }
       const [block] = working.splice(srcIdx, 1); // same object: id + content survive
-      placeAfter(block as TBlock, anchor.anchorId, row.orderIndex);
+      const md = markdownOf(row);
+      const parsed = md ? await toBlocks(md) : [];
+      if (parsed[0]) {
+        const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
+        const moved = { ...(first as object), id: (block as TBlock).id } as TBlock;
+        placeAfter(moved, anchor.anchorId, row.orderIndex);
+        working.splice(findIdx(moved.id ?? null) + 1, 0, ...rest);
+      } else {
+        placeAfter(block as TBlock, anchor.anchorId, row.orderIndex);
+      }
       applied.push(row.id);
     } else {
       // An insert's row id doubles as its block id — if that block already
