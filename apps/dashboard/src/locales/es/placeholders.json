@@ -668,5 +668,35 @@
     "workspaceSwitcher": {
       "namePlaceholder": "Nombre del espacio de trabajo"
     }
+  },
+  "call": {
+    "aiInvite": {
+      "messagePlaceholder": "Agregar un mensaje para la invitación..."
+    },
+    "inviteToCall": {
+      "searchPlaceholder": "Buscar usuarios para invitar...",
+      "label": "Seleccionar usuarios",
+      "hint": "Busca por nombre o correo para encontrar usuarios a invitar"
+    },
+    "participantsSelection": {
+      "selectParticipants": "Seleccionar participantes"
+    },
+    "invitationPreview": {
+      "messagePlaceholder": "Escribe una nota para tus invitados — agrega enlaces, listas, texto en negrita…",
+      "titlePlaceholder": "Usa el título de la llamada por defecto",
+      "organizerNameFallback": "Organizador",
+      "organizerEmailFallback": "tu@empresa.com",
+      "orgNamePlaceholder": "Aparece sobre el título"
+    },
+    "schedule": {
+      "titlePlaceholder": "Ingresar título de la llamada",
+      "selectStartDate": "Seleccionar fecha de inicio",
+      "selectEndDate": "Seleccionar fecha de fin",
+      "selectStartTime": "Seleccionar hora de inicio",
+      "selectEndTime": "Seleccionar hora de fin",
+      "pickEndDate": "Elegir fecha de fin",
+      "searchToChangeChannel": "Buscar para cambiar de canal",
+      "selectChannel": "Seleccionar canal"
+    }
   }
 }

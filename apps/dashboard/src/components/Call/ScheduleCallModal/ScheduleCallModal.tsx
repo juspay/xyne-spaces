@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
@@ -92,6 +93,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   externalInviteDelivery = 'standalone',
   initialParticipants,
 }) => {
+  const { t } = useTranslation('placeholders');
   const user = useSelf();
   const zero = useZero();
   // Full roster — read only by the bulk-paste matcher (`handleBulkUserEntry`), which
@@ -1053,7 +1055,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       {...field}
                       id='call-title'
                       type='text'
-                      placeholder='Enter call title'
+                      placeholder={t('call.schedule.titlePlaceholder')}
                       disabled={participantsOnly}
                       tabIndex={0}
                       className={cn(
@@ -1124,7 +1126,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                 validateTimes(merged, shiftedEnd);
                               }
                             }}
-                            placeholder='Select start date'
+                            placeholder={t('call.schedule.selectStartDate')}
                             minDate={new Date(new Date().setHours(0, 0, 0, 0))}
                             inputClassName={cn(
                               'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
@@ -1163,7 +1165,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               }
                               onChange={handleRecurringStartTimeChange}
                               onClose={validateTimes}
-                              placeholder='Start time'
+                              placeholder={t('ui.dateRangeFilter.startTime')}
                               disabled={false}
                             />
                           )}
@@ -1184,7 +1186,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               }
                               onChange={handleRecurringEndTimeChange}
                               onClose={validateTimes}
-                              placeholder='End time'
+                              placeholder={t('ui.dateRangeFilter.endTime')}
                               disabled={false}
                             />
                           )}
@@ -1234,7 +1236,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                   validateTimes(merged, shiftedEnd);
                                 }
                               }}
-                              placeholder='Select start date'
+                              placeholder={t('call.schedule.selectStartDate')}
                               minDate={new Date(new Date().setHours(0, 0, 0, 0))}
                               inputClassName={cn(
                                 'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
@@ -1259,7 +1261,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               }
                               onChange={handleStartTimeChange}
                               onClose={validateTimes}
-                              placeholder='Select start time'
+                              placeholder={t('call.schedule.selectStartTime')}
                               disabled={false}
                             />
                           )}
@@ -1292,7 +1294,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                   validateTimes(startsAt, merged);
                                 }
                               }}
-                              placeholder='Select end date'
+                              placeholder={t('call.schedule.selectEndDate')}
                               minDate={
                                 startsAt
                                   ? new Date(new Date(startsAt).setHours(0, 0, 0, 0))
@@ -1321,7 +1323,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                               }
                               onChange={handleEndTimeChange}
                               onClose={validateTimes}
-                              placeholder='Select end time'
+                              placeholder={t('call.schedule.selectEndTime')}
                               disabled={false}
                             />
                           )}
@@ -1684,7 +1686,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                                             setSeriesEndsOn(date ?? null);
                                             if (date) setSeriesEndsType('on');
                                           }}
-                                          placeholder='Pick end date'
+                                          placeholder={t('call.schedule.pickEndDate')}
                                           minDate={startsAt ?? new Date()}
                                           // The recurrence panel is a DropdownMenuContent at
                                           // z-[60]; without this the calendar popover (z-50)
@@ -2009,7 +2011,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                             value={selectedChannelItem}
                             queryString={channelSearchQuery}
                             placeholder={
-                              selectedChannelItem ? 'Search to change channel' : 'Select channel'
+                              selectedChannelItem
+                                ? t('call.schedule.searchToChangeChannel')
+                                : t('call.schedule.selectChannel')
                             }
                             onInputValueChange={setChannelSearchQuery}
                             onValueChange={value => {

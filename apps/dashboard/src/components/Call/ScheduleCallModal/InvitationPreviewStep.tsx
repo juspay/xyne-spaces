@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -57,6 +58,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
   onSend,
   isSubmitting,
 }) => {
+  const { t } = useTranslation('placeholders');
   // Lets the prop-sync effect ignore the user's own typing echoing back.
   const lastEmittedHtmlRef = useRef<string>(messageHtml ?? '');
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -77,7 +79,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
         HTMLAttributes: { class: 'text-blue-600 underline cursor-pointer' },
       }),
       Placeholder.configure({
-        placeholder: 'Write a note for your invitees — add links, lists, bold accents…',
+        placeholder: t('call.invitationPreview.messagePlaceholder'),
       }),
     ],
     editorProps: {
@@ -203,20 +205,24 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
             <div className='flex flex-col gap-2'>
               <LabeledInput
                 label='Title'
-                placeholder='Falls back to call title'
+                placeholder={t('call.invitationPreview.titlePlaceholder')}
                 value={editableTitle}
                 onChange={onEditableTitleChange}
               />
               <div className='grid grid-cols-2 gap-2'>
                 <LabeledInput
                   label='Your name'
-                  placeholder={data.organizerName || 'Organizer'}
+                  placeholder={
+                    data.organizerName || t('call.invitationPreview.organizerNameFallback')
+                  }
                   value={editableOrganizerName}
                   onChange={onEditableOrganizerNameChange}
                 />
                 <LabeledInput
                   label='Your email'
-                  placeholder={data.organizerEmail || 'you@company.com'}
+                  placeholder={
+                    data.organizerEmail || t('call.invitationPreview.organizerEmailFallback')
+                  }
                   value={editableOrganizerEmail}
                   onChange={onEditableOrganizerEmailChange}
                   inputMode='email'
@@ -224,7 +230,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
               </div>
               <LabeledInput
                 label='Team / organization (optional)'
-                placeholder='Appears above the title'
+                placeholder={t('call.invitationPreview.orgNamePlaceholder')}
                 value={editableOrgName}
                 onChange={onEditableOrgNameChange}
               />

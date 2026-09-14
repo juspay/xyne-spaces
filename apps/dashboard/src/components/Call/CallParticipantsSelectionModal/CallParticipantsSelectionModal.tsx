@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useUsers } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -30,6 +31,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   conversationId,
   onCallInitiated,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const hasAutoInitiatedRef = useRef(false);
@@ -305,8 +307,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                   hasUserModifiedRef.current = true;
                   setSelectedParticipants(values);
                 }}
-                placeholder='Select participants'
-                searchPlaceholder='Select participants'
+                placeholder={t('call.participantsSelection.selectParticipants')}
+                searchPlaceholder={t('call.participantsSelection.selectParticipants')}
                 onSearchChange={setSearchQuery}
                 disableClientFiltering
                 variant='inline'

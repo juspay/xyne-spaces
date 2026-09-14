@@ -668,5 +668,35 @@
     "workspaceSwitcher": {
       "namePlaceholder": "Workspace name"
     }
+  },
+  "call": {
+    "aiInvite": {
+      "messagePlaceholder": "Add a message for the invite..."
+    },
+    "inviteToCall": {
+      "searchPlaceholder": "Search users to invite...",
+      "label": "Select Users",
+      "hint": "Search by name or email to find users to invite"
+    },
+    "participantsSelection": {
+      "selectParticipants": "Select participants"
+    },
+    "invitationPreview": {
+      "messagePlaceholder": "Write a note for your invitees — add links, lists, bold accents…",
+      "titlePlaceholder": "Falls back to call title",
+      "organizerNameFallback": "Organizer",
+      "organizerEmailFallback": "you@company.com",
+      "orgNamePlaceholder": "Appears above the title"
+    },
+    "schedule": {
+      "titlePlaceholder": "Enter call title",
+      "selectStartDate": "Select start date",
+      "selectEndDate": "Select end date",
+      "selectStartTime": "Select start time",
+      "selectEndTime": "Select end time",
+      "pickEndDate": "Pick end date",
+      "searchToChangeChannel": "Search to change channel",
+      "selectChannel": "Select channel"
+    }
   }
 }
