@@ -1,3 +1,10 @@
+## [1.317.3](https://github.com/juspay/xyne-spaces/compare/v1.317.2...v1.317.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* fixed rules topology for bundles ([#1832](https://github.com/juspay/xyne-spaces/issues/1832)) ([bbc5557](https://github.com/juspay/xyne-spaces/commit/bbc55576dce9d34df300a15dc8c44dd43511567f))
+
 ## [1.317.2](https://github.com/juspay/xyne-spaces/compare/v1.317.1...v1.317.2) (2026-09-14)
 
 
