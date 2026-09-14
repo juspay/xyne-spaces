@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { Prisma } from '@prisma/client';
 import { TicketStatusV2 } from '@xyne/shared';
 import {
   Ticket,
@@ -24,6 +25,25 @@ import {
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
+
+function getDescriptionFromTicketUpdateInput(
+  description: Prisma.TicketUpdateInput['description'],
+): string | undefined {
+  if (typeof description === 'string') {
+    return description;
+  }
+
+  if (
+    description &&
+    typeof description === 'object' &&
+    'set' in description &&
+    typeof description.set === 'string'
+  ) {
+    return description.set;
+  }
+
+  return undefined;
+}
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -95,6 +115,21 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
       where: { id },
       data,
     });
+
+    const description = getDescriptionFromTicketUpdateInput(data.description);
+    if (description !== undefined) {
+      await this.db.ticketDescription.upsert({
+        where: { ticketId: updatedTicket.id },
+        update: { description },
+        create: {
+          ticketId: updatedTicket.id,
+          workspaceId: updatedTicket.workspaceId,
+          channelId: updatedTicket.channelId,
+          description,
+          createdAt: updatedTicket.updatedAt,
+        },
+      });
+    }
 
     await syncConversationTicketMdFromPrismaTicket(this.db, updatedTicket);
     return updatedTicket;
