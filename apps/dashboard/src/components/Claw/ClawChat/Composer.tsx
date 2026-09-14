@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, Square } from 'lucide-react';
 
 import { cn } from '../../../utils/classNames';
@@ -12,6 +13,7 @@ interface ComposerProps {
 }
 
 export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,7 +60,7 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
           value={value}
           onChange={e => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder='Ask Claw...'
+          placeholder={t('claw.composer.placeholder')}
           rows={1}
           data-track-category='CLAW_CHAT'
           data-track-name='COMPOSER_INPUT'

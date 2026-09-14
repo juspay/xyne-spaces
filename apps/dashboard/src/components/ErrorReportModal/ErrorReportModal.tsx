@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 import { Dialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
@@ -81,6 +82,7 @@ export const ErrorReportModal = ({
   onSubmitSuccess,
   onDiscard,
 }: ErrorReportModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { isElectron } = usePlatform();
   const zero = useZero();
   const { user } = useAuth();
@@ -416,7 +418,7 @@ export const ErrorReportModal = ({
                       el.style.height = `${el.scrollHeight}px`;
                     }
                   }}
-                  placeholder='Give it a short title so we know where to look'
+                  placeholder={t('errorReport.titlePlaceholder')}
                   maxLength={140}
                   className='min-h-0 py-2 overflow-hidden'
                   data-track-category='ERROR_REPORT'
@@ -435,7 +437,7 @@ export const ErrorReportModal = ({
                   id='error-report-description'
                   value={description}
                   onChange={event => setDescription(event.target.value)}
-                  placeholder='Tell us what happened, what you expected to see, and any steps that led here. Every detail helps!'
+                  placeholder={t('errorReport.descriptionPlaceholder')}
                   className='min-h-[140px]'
                   data-track-category='ERROR_REPORT'
                   data-track-name='DescriptionChanged'

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
@@ -25,6 +26,7 @@ const navClass = (disabled: boolean): string =>
  * show it.
  */
 export const FindBar: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const search = useFileSearchContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState('');
@@ -99,7 +101,7 @@ export const FindBar: React.FC = () => {
         value={draft}
         onChange={event => setDraft(event.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder='Find in file'
+        placeholder={t('fileViewer.findBar.placeholder')}
         aria-label='Find in file'
         spellCheck={false}
         autoComplete='off'

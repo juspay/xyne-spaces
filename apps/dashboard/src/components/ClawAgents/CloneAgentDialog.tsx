@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -22,6 +23,7 @@ export const CloneAgentDialog = ({
   submitting,
   onConfirm,
 }: CloneAgentDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [name, setName] = useState('');
 
   // Reset the suggested name each time the dialog opens.
@@ -59,7 +61,7 @@ export const CloneAgentDialog = ({
             autoFocus
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder='New agent name'
+            placeholder={t('clawAgents.cloneDialog.namePlaceholder')}
           />
         </div>
 
