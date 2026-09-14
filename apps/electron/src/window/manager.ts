@@ -262,6 +262,55 @@ let isCompactMode = false;
 let isReloading = false;
 let normalBounds: { width: number; height: number } | null = null;
 
+// --- Main-window renderer crash / load-failure recovery ------------------
+// The overlay and recording-pill windows already self-reload when their
+// renderer dies; the main window previously did not, so an overnight renderer
+// crash (OS reclaiming a backgrounded renderer / GPU process after sleep) left
+// a blank white window that only a full app relaunch could clear. These
+// helpers reload the main window with capped exponential backoff.
+const MAX_RENDERER_RECOVERY_ATTEMPTS = 3;
+let rendererRecoveryAttempts = 0;
+let rendererRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resetRendererRecovery(): void {
+  rendererRecoveryAttempts = 0;
+  if (rendererRecoveryTimer) {
+    clearTimeout(rendererRecoveryTimer);
+    rendererRecoveryTimer = null;
+  }
+}
+
+function scheduleRendererRecovery(window: BrowserWindow, reason: string): void {
+  // A recovery is already queued; don't stack reloads.
+  if (rendererRecoveryTimer) return;
+
+  if (rendererRecoveryAttempts >= MAX_RENDERER_RECOVERY_ATTEMPTS) {
+    log.error(
+      `[WindowManager] Main-window recovery gave up after ${rendererRecoveryAttempts} attempts (${reason})`,
+    );
+    // Don't leave the user on a blank window — show the bundled error page.
+    const errorPage = path.join(__dirname, '..', '..', 'assets', 'load-error.html');
+    void window.loadFile(errorPage).catch(() => {});
+    return;
+  }
+
+  const attempt = ++rendererRecoveryAttempts;
+  const delayMs = Math.min(1000 * 2 ** (attempt - 1), 8000); // 1s, 2s, 4s (cap 8s)
+  log.warn(
+    `[WindowManager] Scheduling main-window recovery attempt ${attempt}/${MAX_RENDERER_RECOVERY_ATTEMPTS} in ${delayMs}ms (${reason})`,
+  );
+
+  rendererRecoveryTimer = setTimeout(() => {
+    rendererRecoveryTimer = null;
+    if (!window || window.isDestroyed()) return;
+    log.warn(`[WindowManager] Reloading main window (recovery attempt ${attempt}, ${reason})`);
+    void loadApp(window).catch((err) => {
+      log.error('[WindowManager] Recovery reload failed:', err);
+      scheduleRendererRecovery(window, reason);
+    });
+  }, delayMs);
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
 }
@@ -429,12 +478,52 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
 
   // Register RBAC check before loading the app
   mainWindow.webContents.on('did-finish-load', async () => {
+    // A successful load means we're healthy again — clear any recovery backoff.
+    resetRendererRecovery();
     const bodyText = await mainWindow?.webContents.executeJavaScript('document.body.innerText').catch(() => '');
     if (bodyText && bodyText.includes('RBAC: access denied')) {
       const errorPage = path.join(__dirname, '..', '..', 'assets', 'vpn-error.html');
       void mainWindow?.loadFile(errorPage);
     }
   });
+
+  // Recover the main window from renderer death, hangs, and load failures.
+  // Without these, an overnight renderer crash leaves a blank white window that
+  // only quit-and-reopen can fix (see RCA).
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit') return;
+    log.error(
+      `[WindowManager] Main renderer gone: ${details.reason} (exitCode=${details.exitCode})`,
+    );
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      scheduleRendererRecovery(mainWindow, `render-process-gone:${details.reason}`);
+    }
+  });
+
+  mainWindow.webContents.on('unresponsive', () => {
+    log.error('[WindowManager] Main window became unresponsive');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      scheduleRendererRecovery(mainWindow, 'unresponsive');
+    }
+  });
+
+  // If it recovers on its own before the reload fires, cancel the pending reload.
+  mainWindow.webContents.on('responsive', () => {
+    log.info('[WindowManager] Main window responsive again — cancelling pending recovery');
+    resetRendererRecovery();
+  });
+
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      // ERR_ABORTED (-3) fires on normal in-app navigations; ignore sub-frames too.
+      if (!isMainFrame || errorCode === -3) return;
+      log.error(`[WindowManager] Main frame load failed (${errorCode}): ${errorDescription}`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        scheduleRendererRecovery(mainWindow, `did-fail-load:${errorCode}`);
+      }
+    },
+  );
 
   await loadApp(mainWindow);
 
