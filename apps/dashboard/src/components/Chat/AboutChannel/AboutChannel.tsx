@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { flushSync } from 'react-dom';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -42,6 +43,7 @@ const AboutChannel = ({
   isDM = false,
   dmUserId,
 }: AboutChannelProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState(channel.description || '');
   const [isEditingName, setIsEditingName] = useState(initialEditingName);
@@ -254,7 +256,7 @@ const AboutChannel = ({
                     onChange={handleNameChange}
                     onKeyDown={handleNameKeyDown}
                     className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
-                    placeholder='channel-name'
+                    placeholder={t('chat.aboutChannel.channelName')}
                     maxLength={80}
                     data-track-event='blur'
                     data-track-category='ABOUT_CHANNEL_FORM'
@@ -323,7 +325,7 @@ const AboutChannel = ({
                   onKeyDown={handleKeyDown}
                   className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
-                  placeholder='Add a description...'
+                  placeholder={t('chat.aboutChannel.addDescription')}
                   data-track-event='blur'
                   data-track-category='ABOUT_CHANNEL_FORM'
                   data-track-name='Edit_Description_Input'

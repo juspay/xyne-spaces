@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, X, Search, ArrowLeft, MoreVertical, Loader2 } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
@@ -79,6 +80,7 @@ export const ConversationHistory = ({
   isLoading = false,
   agentSelectorDisabled = false,
 }: ConversationHistoryProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -115,7 +117,7 @@ export const ConversationHistory = ({
             <div className='flex-1 flex items-center gap-2 bg-popover rounded-lg h-8 border border-border px-3 py-2'>
               <input
                 type='text'
-                placeholder='Search chats...'
+                placeholder={t('chat.xyneAiSidebar.searchChats')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"

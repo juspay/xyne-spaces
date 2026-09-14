@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
@@ -41,6 +42,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   embedded = false,
   onContextChange,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [step, setStep] = useState<AddPeopleStep>('people');
@@ -295,7 +297,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           excludeUserIds={existingUserIds}
           selectedUsers={selectedUsers}
           onUsersChange={setSelectedUsers}
-          placeholder='Search users to add to channel...'
+          placeholder={t('chat.addPeopleForm.searchUsersToAdd')}
           label='Search Users'
           hintText='Search by name or email to find users to add'
           autoFocus={!isMobile}

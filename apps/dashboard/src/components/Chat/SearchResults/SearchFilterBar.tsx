@@ -7,6 +7,7 @@ import {
   useCallback,
   KeyboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { ArrowUpDown, Check, ChevronDown, Hash, SlidersHorizontal, User, X } from 'lucide-react';
 import { Button } from '../../ui/Button';
@@ -265,6 +266,7 @@ export function SearchFilterBar({
   query,
   onQueryChange,
 }: SearchFilterBarProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
   const [typeOpen, setTypeOpen] = useState(false);
   const [fromOpen, setFromOpen] = useState(false);
@@ -535,7 +537,7 @@ export function SearchFilterBar({
                     fromNav.setActiveIndex(-1);
                   }}
                   onKeyDown={fromNav.handleInputKeyDown}
-                  placeholder='Search people…'
+                  placeholder={t('chat.search.searchPeople')}
                   className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='FROM_SEARCH_INPUT'
@@ -630,7 +632,7 @@ export function SearchFilterBar({
                     inNav.setActiveIndex(-1);
                   }}
                   onKeyDown={inNav.handleInputKeyDown}
-                  placeholder='Search channels…'
+                  placeholder={t('chat.search.searchChannels')}
                   className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='IN_SEARCH_INPUT'

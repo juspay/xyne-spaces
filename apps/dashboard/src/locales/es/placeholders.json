@@ -71,5 +71,90 @@
       "slackRefreshTokenExample": "xoxe-1-…",
       "searchMembers": "Buscar miembros"
     }
+  },
+  "chat": {
+    "aboutChannel": {
+      "channelName": "nombre-del-canal",
+      "addDescription": "Agrega una descripción..."
+    },
+    "addChannelForm": {
+      "whatIsChannelAbout": "¿De qué trata este canal?",
+      "typeTagEnter": "Escribe una etiqueta y presiona Enter o agrega una coma",
+      "selectSource": "Selecciona una fuente",
+      "selectSlackChannel": "Selecciona un canal de Slack",
+      "selectXyneApp": "Selecciona una app de Xyne",
+      "xynePlaceholder": "Xyne",
+      "appIdExample": "com.example.app",
+      "channelNameExamples": "ej. general, desarrollo, soporte"
+    },
+    "addDmForm": {
+      "sayHelloToStart": "Escribe algo para iniciar la conversación...",
+      "typeToFindPeople": "Escribe para encontrar personas..."
+    },
+    "addPeopleForm": {
+      "searchUsersToAdd": "Buscar usuarios para agregar al canal..."
+    },
+    "sectionName": {
+      "example": "Ej: Proyecto Beta"
+    },
+    "bookmark": {
+      "selectDate": "Seleccionar fecha",
+      "selectTime": "Seleccionar hora"
+    },
+    "browseChannels": {
+      "searchChannels": "Buscar canales..."
+    },
+    "callSummary": {
+      "describeChange": "Describe qué quieres cambiar aquí"
+    },
+    "channelSettings": {
+      "selectPolicy": "Seleccionar política"
+    },
+    "bubble": {
+      "editMessage": "Editar mensaje…"
+    },
+    "manageSectionChannels": {
+      "filterByName": "Filtrar por nombre…"
+    },
+    "delayedMessage": {
+      "editYourMessage": "Edita tu mensaje..."
+    },
+    "dms": {
+      "searchDms": "Buscar mensajes directos (Cmd+K)"
+    },
+    "emailRefetch": {
+      "startDate": "Fecha de inicio",
+      "endDate": "Fecha de fin"
+    },
+    "info": {
+      "findMembers": "Buscar miembros"
+    },
+    "linksTab": {
+      "urlExample": "https://example.com",
+      "linkTitle": "Título del enlace",
+      "optionalDescription": "Descripción opcional"
+    },
+    "search": {
+      "dateExample": "Ej. 2026-08-25",
+      "fieldExample": "ej. Plataforma",
+      "anyTime": "Cualquier momento",
+      "searchPeople": "Buscar personas…",
+      "searchChannels": "Buscar canales…"
+    },
+    "thread": {
+      "replyToThread": "Responder a este hilo..."
+    },
+    "transcript": {
+      "searchTranscript": "Buscar en la transcripción..."
+    },
+    "xyneAiSidebar": {
+      "enterDisplayName": "Ingresa el nombre visible",
+      "enterDisplayCategory": "Ingresa la categoría visible",
+      "searchAgents": "Buscar agentes…",
+      "searchChats": "Buscar chats...",
+      "enterSkillName": "Ingresa el nombre de la habilidad",
+      "skillDescription": "Breve descripción de lo que hace esta habilidad",
+      "skillInstructions": "Instrucciones detalladas sobre cómo debe comportarse la IA al usar esta habilidad"
+    }
   }
 }

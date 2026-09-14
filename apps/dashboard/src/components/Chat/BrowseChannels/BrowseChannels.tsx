@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Hash,
@@ -23,6 +24,7 @@ const PAGE_SIZE = 10;
 type SortMode = 'alphabetical' | 'memberCount';
 
 const BrowseChannels = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -157,7 +159,7 @@ const BrowseChannels = (): ReactElement => {
                 className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'
               />
               <Input
-                placeholder='Search channels...'
+                placeholder={t('chat.browseChannels.searchChannels')}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className='pl-9'

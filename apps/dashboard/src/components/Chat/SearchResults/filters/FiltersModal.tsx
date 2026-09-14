@@ -4,6 +4,7 @@
  * a new filter appears here without touching this file.
  */
 import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SlidersHorizontal, X } from 'lucide-react';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useAllVisibleChannels } from '../../../../hooks/useChannels';
@@ -58,6 +59,7 @@ export function FiltersModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [draft, setDraft] = useState<SearchResultsFilters>(filters);
   // Text controls stay uncommitted while typing, keyed by entry id.
   const [textDrafts, setTextDrafts] = useState<Record<string, string>>({});
@@ -241,7 +243,7 @@ export function FiltersModal({
               id={`filter-${entry.id}`}
               value={dateMode || draft.dateRange}
               options={[...DATE_RANGE_OPTIONS, ...DATE_MODES]}
-              placeholder='Any time'
+              placeholder={t('chat.search.anyTime')}
               onPick={picked => {
                 const asMode = DATE_MODES.find(m => m.value === picked)?.value ?? '';
                 // A preset and explicit bounds are alternatives, never a combination:

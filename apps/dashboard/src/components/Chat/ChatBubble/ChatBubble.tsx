@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -172,6 +173,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   afterTextContent,
   isThreadTicketSubTicket = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -1274,7 +1276,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               ? (parseForwardedMessageXml(message.content)?.optionalText ?? '')
               : message.content
           }
-          placeholder='Edit message…'
+          placeholder={t('chat.bubble.editMessage')}
           className='ml-12'
           showTypingIndicator={false}
           onEditComplete={finishEditing}
@@ -1582,7 +1584,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 id={customReminderDatePickerId}
                 selectedDate={customReminderDate}
                 onSelect={setCustomReminderDate}
-                placeholder='Select date'
+                placeholder={t('chat.bookmark.selectDate')}
                 minDate={new Date(new Date().setHours(0, 0, 0, 0))}
                 inputClassName='w-full !h-9'
                 showClearButton={false}
@@ -1601,7 +1603,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onValueChange={value => setCustomReminderTime(value)}
               >
                 <SelectTrigger id={customReminderTimeSelectId} className='w-full'>
-                  <SelectValue placeholder='Select time' />
+                  <SelectValue placeholder={t('chat.bookmark.selectTime')} />
                 </SelectTrigger>
                 <SelectContent showScrollButtons={false}>
                   {REMINDER_TIME_OPTIONS.map(option => (

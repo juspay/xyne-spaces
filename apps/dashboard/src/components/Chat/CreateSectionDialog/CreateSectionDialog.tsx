@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type ReactElement,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Hash, Lock, MessageCircle, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ChannelVisibility } from '@xyne/shared';
@@ -75,6 +76,7 @@ export const CreateSectionDialog = ({
   prioritizeType = 'channel',
   onClose,
 }: CreateSectionDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState('');
@@ -274,7 +276,7 @@ export const CreateSectionDialog = ({
                   setEmoji('');
                 }
               }}
-              placeholder='Ex: Project Beta'
+              placeholder={t('chat.sectionName.example')}
               maxLength={50}
               autoFocus
               autoComplete='off'
@@ -328,7 +330,7 @@ export const CreateSectionDialog = ({
         <input
           value={filter}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
-          placeholder='Filter by name…'
+          placeholder={t('chat.manageSectionChannels.filterByName')}
           autoComplete='off'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='CREATE_SECTION_FILTER_CHANNELS'

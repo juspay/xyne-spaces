@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, PenBox, X } from 'lucide-react';
 import { QuestionMarkCircle, EnvelopeDefault, Star, UserTwo, PencilEditBox } from '@xyne/icons';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
@@ -156,6 +157,7 @@ const getDmFilterEmptyCopy = (activeTab: DmFilterTab): { title: string; descript
 };
 
 const DmsPage = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { channelId } = useParams<{ channelId: string }>();
@@ -544,7 +546,7 @@ const DmsPage = (): ReactElement => {
               ref={dmSearchInputRef}
               type='text'
               className='w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0'
-              placeholder='Search DMs (Cmd+K)'
+              placeholder={t('chat.dms.searchDms')}
               autoFocus={!isMobile}
               value={dmSearchQuery}
               onChange={e => {
@@ -725,7 +727,7 @@ const DmsPage = (): ReactElement => {
                     type='text'
                     autoFocus
                     className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
-                    placeholder='Search DMs (Cmd+K)'
+                    placeholder={t('chat.dms.searchDms')}
                     value={dmSearchQuery}
                     onChange={e => {
                       setDmSearchQuery(e.target.value);

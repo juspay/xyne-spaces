@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
@@ -77,6 +78,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   onConfirm,
   isPending = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [mode, setMode] = useState<Mode>('last-7d');
   const [customStart, setCustomStart] = useState<Date | null>(null);
   const [customEnd, setCustomEnd] = useState<Date | null>(null);
@@ -177,7 +179,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 value={customStart}
                 rangeForVisual={{ start: customStart, end: customEnd }}
                 onPick={d => setCustomStart(d)}
-                placeholder='Start date'
+                placeholder={t('chat.emailRefetch.startDate')}
                 maxDate={customEnd ?? new Date()}
                 trackName='FetchRangeFromTrigger'
               />
@@ -186,7 +188,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 value={customEnd}
                 rangeForVisual={{ start: customStart, end: customEnd }}
                 onPick={d => setCustomEnd(d)}
-                placeholder='End date'
+                placeholder={t('chat.emailRefetch.endDate')}
                 {...(customStart && { minDate: customStart })}
                 maxDate={new Date()}
                 trackName='FetchRangeToTrigger'

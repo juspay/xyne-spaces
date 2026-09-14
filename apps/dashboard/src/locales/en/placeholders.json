@@ -71,5 +71,90 @@
       "slackRefreshTokenExample": "xoxe-1-…",
       "searchMembers": "Search members"
     }
+  },
+  "chat": {
+    "aboutChannel": {
+      "channelName": "channel-name",
+      "addDescription": "Add a description..."
+    },
+    "addChannelForm": {
+      "whatIsChannelAbout": "What is this channel about?",
+      "typeTagEnter": "Type a tag and press Enter or add comma",
+      "selectSource": "Select a source",
+      "selectSlackChannel": "Select a Slack channel",
+      "selectXyneApp": "Select a Xyne App",
+      "xynePlaceholder": "Xyne",
+      "appIdExample": "com.example.app",
+      "channelNameExamples": "e.g. general, development, support"
+    },
+    "addDmForm": {
+      "sayHelloToStart": "Say something to start the conversation...",
+      "typeToFindPeople": "Type to find people..."
+    },
+    "addPeopleForm": {
+      "searchUsersToAdd": "Search users to add to channel..."
+    },
+    "sectionName": {
+      "example": "Ex: Project Beta"
+    },
+    "bookmark": {
+      "selectDate": "Select date",
+      "selectTime": "Select time"
+    },
+    "browseChannels": {
+      "searchChannels": "Search channels..."
+    },
+    "callSummary": {
+      "describeChange": "Describe what you want to change here"
+    },
+    "channelSettings": {
+      "selectPolicy": "Select policy"
+    },
+    "bubble": {
+      "editMessage": "Edit message…"
+    },
+    "manageSectionChannels": {
+      "filterByName": "Filter by name…"
+    },
+    "delayedMessage": {
+      "editYourMessage": "Edit your message..."
+    },
+    "dms": {
+      "searchDms": "Search DMs (Cmd+K)"
+    },
+    "emailRefetch": {
+      "startDate": "Start date",
+      "endDate": "End date"
+    },
+    "info": {
+      "findMembers": "Find members"
+    },
+    "linksTab": {
+      "urlExample": "https://example.com",
+      "linkTitle": "Link title",
+      "optionalDescription": "Optional description"
+    },
+    "search": {
+      "dateExample": "E.g. 2026-08-25",
+      "fieldExample": "e.g. Platform",
+      "anyTime": "Any time",
+      "searchPeople": "Search people…",
+      "searchChannels": "Search channels…"
+    },
+    "thread": {
+      "replyToThread": "Reply to this thread..."
+    },
+    "transcript": {
+      "searchTranscript": "Search transcript..."
+    },
+    "xyneAiSidebar": {
+      "enterDisplayName": "Enter display name",
+      "enterDisplayCategory": "Enter display category",
+      "searchAgents": "Search agents…",
+      "searchChats": "Search chats...",
+      "enterSkillName": "Enter skill name",
+      "skillDescription": "Brief description of what this skill does",
+      "skillInstructions": "Detailed instructions for how the AI should behave when using this skill"
+    }
   }
 }

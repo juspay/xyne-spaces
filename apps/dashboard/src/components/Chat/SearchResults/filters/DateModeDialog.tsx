@@ -3,6 +3,7 @@
  * modes ("before", "after"/range) that sit alongside the presets in the Date select.
  */
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { Button } from '../../../ui/Button';
 import { cn } from '../../../../utils/classNames';
@@ -73,6 +74,7 @@ export function DateModeDialog({
   onCancel: () => void;
   onSave: (next: { after: string; before: string }) => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const isRange = mode === '__range__';
   // Before… edits the upper bound; the rest start from the lower one.
   const [start, setStart] = useState(mode === '__before__' ? initial.before : initial.after);
@@ -109,7 +111,7 @@ export function DateModeDialog({
             commit();
           }
         }}
-        placeholder='E.g. 2026-08-25'
+        placeholder={t('chat.search.dateExample')}
         aria-label={isRange ? label : title}
         className={cn(FIELD_BOX, 'focus:border-primary')}
         data-track-category='SEARCH_FILTERS'

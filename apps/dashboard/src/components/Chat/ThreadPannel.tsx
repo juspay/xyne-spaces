@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
 import {
@@ -170,6 +171,7 @@ export const ThreadMessages = ({
   overflowActionsOnly = false,
   tabbedView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const {
     channelId: paramChannelId,
     conversationId: paramConversationId,
@@ -1146,7 +1148,7 @@ export const ThreadMessages = ({
                   ref={inputRef}
                   channelId={derivedChannelId}
                   conversation={conversation ?? undefined}
-                  placeholder='Reply to this thread...'
+                  placeholder={t('chat.thread.replyToThread')}
                   hasTicket={hasTicketInMessages}
                   threadParticipantIds={threadParticipantIds}
                   dockSlot={twinDock}
@@ -1719,7 +1721,7 @@ export const ThreadMessages = ({
                         ref={inputRef}
                         channelId={derivedChannelId}
                         conversation={conversation ?? undefined}
-                        placeholder='Reply to this thread...'
+                        placeholder={t('chat.thread.replyToThread')}
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
                         dockSlot={twinDock}
@@ -1887,7 +1889,7 @@ export const ThreadMessages = ({
                       ref={inputRef}
                       channelId={derivedChannelId}
                       conversation={conversation ?? undefined}
-                      placeholder='Reply to this thread...'
+                      placeholder={t('chat.thread.replyToThread')}
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
                       dockSlot={twinDock}

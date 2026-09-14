@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link as LinkIcon, Trash2, Plus, Globe, Lock, Pencil } from 'lucide-react';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -21,6 +22,7 @@ interface LinksTabProps {
 }
 
 const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const context = useAuthContextValues();
   const [links, linksDetails] = useCachedQuery(queries.channelLinks({ channelId }));
@@ -264,7 +266,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   type='url'
                   value={formData.url}
                   onChange={e => setFormData({ ...formData, url: e.target.value })}
-                  placeholder='https://example.com'
+                  placeholder={t('chat.linksTab.urlExample')}
                   required
                   disabled={!!linkToEdit}
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground disabled:bg-muted disabled:cursor-not-allowed'
@@ -293,7 +295,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   type='text'
                   value={formData.title}
                   onChange={e => setFormData({ ...formData, title: e.target.value })}
-                  placeholder='Link title'
+                  placeholder={t('chat.linksTab.linkTitle')}
                   required
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground'
                   data-track-category='CHANNEL_LINKS'
@@ -316,7 +318,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   id='link-description'
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
-                  placeholder='Optional description'
+                  placeholder={t('chat.linksTab.optionalDescription')}
                   rows={3}
                   className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground resize-none'
                   data-track-category='CHANNEL_LINKS'

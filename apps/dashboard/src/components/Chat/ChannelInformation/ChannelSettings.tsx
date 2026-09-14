@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,6 +41,7 @@ interface PolicySelectProps {
 }
 
 const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disabled }) => {
+  const { t } = useTranslation('placeholders');
   return (
     <Select.Root
       value={value}
@@ -57,7 +59,7 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
       disabled={disabled}
     >
       <Select.Trigger className='flex w-full items-center justify-between rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-muted-foreground select-none disabled:cursor-not-allowed disabled:opacity-70 focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent hover:bg-accent data-[popup-open]:ring-1 data-[popup-open]:ring-primary'>
-        <Select.Value placeholder='Select policy' />
+        <Select.Value placeholder={t('chat.channelSettings.selectPolicy')} />
         <Select.Icon className='flex'>
           <ChevronDown className='h-4 w-4 text-muted-foreground' />
         </Select.Icon>

@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, AlertTriangle, Pencil } from 'lucide-react';
 
 interface ActivityConfigDialogProps {
@@ -29,6 +30,7 @@ export const ActivityConfigDialog = ({
   isBlacklisted: initialBlacklisted = false,
   onSave,
 }: ActivityConfigDialogProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const [newEventName, setNewEventName] = useState('');
   const [newEventCategory, setNewEventCategory] = useState('');
   const [isBlacklisted, setIsBlacklisted] = useState(false);
@@ -168,7 +170,7 @@ export const ActivityConfigDialog = ({
                     id='newName'
                     value={newEventName}
                     onChange={e => setNewEventName(e.target.value)}
-                    placeholder='Enter display name'
+                    placeholder={t('chat.xyneAiSidebar.enterDisplayName')}
                     className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
@@ -185,7 +187,7 @@ export const ActivityConfigDialog = ({
                     id='newCategory'
                     value={newEventCategory}
                     onChange={e => setNewEventCategory(e.target.value)}
-                    placeholder='Enter display category'
+                    placeholder={t('chat.xyneAiSidebar.enterDisplayCategory')}
                     className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>

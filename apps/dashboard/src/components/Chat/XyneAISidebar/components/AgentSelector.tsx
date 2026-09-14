@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Bot, SearchDefault } from '@xyne/icons';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
@@ -49,6 +50,7 @@ export const AgentSelector = ({
   compact = false,
   label,
 }: AgentSelectorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const { isMobile } = usePlatform();
@@ -136,7 +138,7 @@ export const AgentSelector = ({
               type='text'
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Search agents…'
+              placeholder={t('chat.xyneAiSidebar.searchAgents')}
               className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
               autoFocus
               data-track-category='XyneAI'

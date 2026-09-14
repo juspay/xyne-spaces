@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { format } from 'date-fns';
 import { Clock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,6 +23,7 @@ export const DelayedMessageEditModal = ({
   onClose,
   message,
 }: DelayedMessageEditModalProps): React.ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [isSaving, setIsSaving] = useState(false);
   const [editorContent, setEditorContent] = useState(message.content);
@@ -111,7 +113,7 @@ export const DelayedMessageEditModal = ({
             }}
             onCancel={handleCancel}
             ref={inputBoxRef}
-            placeholder='Edit your message...'
+            placeholder={t('chat.delayedMessage.editYourMessage')}
             disabled={isSaving}
             disableEnterToSend
             features={{

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
   ChevronDown,
@@ -69,6 +70,7 @@ export function TranscriptSidePanel({
   onClose,
   className = '',
 }: TranscriptSidePanelProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const lineRefs = useRef(new Map<number, HTMLDivElement>());
   const lines = useMemo(() => parseTranscript(transcript), [transcript]);
   const targetIndex = useMemo(
@@ -193,7 +195,7 @@ export function TranscriptSidePanel({
             onFocus={search.open}
             onChange={event => search.setQuery(event.target.value)}
             onKeyDown={search.handleKeyDown}
-            placeholder='Search transcript...'
+            placeholder={t('chat.transcript.searchTranscript')}
             aria-label='Search transcript'
             className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='TranscriptPanel'
