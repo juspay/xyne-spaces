@@ -696,5 +696,43 @@
   },
   "labels": {
     "searchOrCreate": "Buscar o crear..."
+  },
+  "memory": {
+    "compareCard": {
+      "tagsPlaceholder": "etiqueta1, etiqueta2, etiqueta3"
+    },
+    "header": {
+      "searchInQueryAndSummary": "Buscar en consulta y resumen...",
+      "searchInQuery": "Buscar en consulta...",
+      "searchInSummary": "Buscar en resumen...",
+      "searchContext": "Buscar contexto...",
+      "repoUrlPlaceholder": "https://github.com/org/repo",
+      "scope": "Alcance",
+      "docType": "Tipo de documento",
+      "filterByTag": "Filtrar por etiqueta...",
+      "filterByRepoUrl": "Filtrar por URL del repositorio...",
+      "filterByCommitId": "Filtrar por ID de commit...",
+      "filterBySessionId": "Filtrar por ID de sesión...",
+      "filterByFile": "Filtrar por archivo...",
+      "filterByTicketId": "Filtrar por ID de ticket..."
+    }
+  },
+  "project": {
+    "form": {
+      "namePlaceholder": "Ingresar nombre del proyecto",
+      "codePlaceholder": "ej., EUL, PROJ, PRO1, XY2",
+      "descriptionPlaceholder": "Ingresar descripción del proyecto (opcional)"
+    },
+    "sidebar": {
+      "searchProjectsBoards": "Buscar proyectos/tableros...",
+      "searchGroups": "Buscar grupos...",
+      "searchPersons": "Buscar personas..."
+    },
+    "viewsSection": {
+      "viewNamePlaceholder": "Nombre de la vista"
+    },
+    "shareView": {
+      "searchUsers": "Buscar usuarios…"
+    }
   }
 }

@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Check, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,6 +32,7 @@ export const ShareViewDialog = ({
   viewId,
   viewName,
 }: ShareViewDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
@@ -116,7 +118,7 @@ export const ShareViewDialog = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search users…'
+            placeholder={t('project.shareView.searchUsers')}
             className='pl-9 h-9'
           />
         </div>

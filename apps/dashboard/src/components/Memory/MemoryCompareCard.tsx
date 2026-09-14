@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { MemoryDocument, MemoryUpdateRequest } from '../../types/memory';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Markdown from 'react-markdown';
@@ -125,6 +126,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
   isUpdating = false,
   isDeleting = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [editingField, setEditingField] = useState<EditableField | null>(null);
   const [editValue, setEditValue] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -351,7 +353,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               value={editValue}
               onChange={e => setEditValue(e.target.value)}
               className={inputClass}
-              placeholder='tag1, tag2, tag3'
+              placeholder={t('memory.compareCard.tagsPlaceholder')}
               data-track-category='Memory'
               data-track-name='TagsInput'
             />
