@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { cn } from '../../utils/classNames';
 import {
@@ -166,6 +167,7 @@ function collectSubtreeFolderIds(
 }
 
 export const KnowledgeBaseV2Screen: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const location = useLocation();
   // This screen is a leaf under both /knowledge-base and /ai/knowledge; the
@@ -1472,7 +1474,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             : 'Adds a folder at the top of this collection.'
         }
         label='Folder name'
-        placeholder='e.g. Drafts'
+        placeholder={t('knowledgeBaseV2.newFolder.namePlaceholder')}
         helper='Up to 255 characters.'
         submitLabel='Create folder'
         onSubmit={submitNewFolder}

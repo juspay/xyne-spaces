@@ -661,5 +661,40 @@
       "typeAnswer": "Type your answer…",
       "typeCustomAnswer": "Type your own answer…"
     }
+  },
+  "form": {
+    "namePlaceholder": "Enter form name",
+    "descriptionPlaceholder": "Enter form description (optional)",
+    "loadingProjects": "Loading projects...",
+    "noProjectsAvailable": "No projects available",
+    "searchProjects": "Search projects",
+    "fieldNamePlaceholder": "e.g., Priority, Due Date",
+    "selectContextType": "Select a context type",
+    "selectEntityType": "Select an entity type",
+    "selectFieldType": "Select a field type"
+  },
+  "knowledgeBase": {
+    "createCollection": {
+      "namePlaceholder": "e.g. Product docs",
+      "channelPlaceholder": "No channel — visible to the whole workspace",
+      "searchChannels": "Search channels..."
+    }
+  },
+  "knowledgeBaseV2": {
+    "driveLink": {
+      "placeholder": "https://drive.google.com/file/d/…"
+    },
+    "searchField": {
+      "default": "Search"
+    },
+    "kbContents": {
+      "searchByName": "Search by name"
+    },
+    "newFolder": {
+      "namePlaceholder": "e.g. Drafts"
+    }
+  },
+  "labels": {
+    "searchOrCreate": "Search or create..."
   }
 }

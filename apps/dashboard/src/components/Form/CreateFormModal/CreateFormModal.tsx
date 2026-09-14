@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { arrayMove } from '@dnd-kit/sortable';
@@ -83,6 +84,7 @@ export const CreateFormModal = ({
   projectId,
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [fields, setFields] = useState<FormField[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
@@ -698,10 +700,10 @@ export const CreateFormModal = ({
                       }}
                       placeholder={
                         projects === undefined
-                          ? 'Loading projects...'
+                          ? t('form.loadingProjects')
                           : projects.length === 0
-                            ? 'No projects available'
-                            : 'Search projects'
+                            ? t('form.noProjectsAvailable')
+                            : t('form.searchProjects')
                       }
                     />
                   </div>
@@ -732,7 +734,7 @@ export const CreateFormModal = ({
                     id='formName'
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    placeholder='Enter form name'
+                    placeholder={t('form.namePlaceholder')}
                     required
                     disabled={isEditMode || createFormMutation.isPending}
                   />
@@ -763,7 +765,7 @@ export const CreateFormModal = ({
                     className='text-foreground'
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    placeholder='Enter form description (optional)'
+                    placeholder={t('form.descriptionPlaceholder')}
                     rows={3}
                     disabled={(isEditMode && isReadOnly) || createFormMutation.isPending}
                   />
@@ -801,7 +803,7 @@ export const CreateFormModal = ({
                       data-track-category='Forms'
                       data-track-name='SelectContextType'
                     >
-                      <SelectValue placeholder='Select a context type' />
+                      <SelectValue placeholder={t('form.selectContextType')} />
                     </SelectTrigger>
                     <SelectContent>
                       {FORM_CONTEXT_TYPES.map(context => (
@@ -845,7 +847,7 @@ export const CreateFormModal = ({
                       data-track-category='Forms'
                       data-track-name='SelectEntityType'
                     >
-                      <SelectValue placeholder='Select an entity type' />
+                      <SelectValue placeholder={t('form.selectEntityType')} />
                     </SelectTrigger>
                     <SelectContent>
                       {getEntityTypesForContext(selectedContextType).map(entity => (
@@ -899,7 +901,7 @@ export const CreateFormModal = ({
                               id={`fieldName-${index}`}
                               value={field.fieldName}
                               onChange={e => updateField(index, { fieldName: e.target.value })}
-                              placeholder='e.g., Priority, Due Date'
+                              placeholder={t('form.fieldNamePlaceholder')}
                               disabled={createFormMutation.isPending}
                               className='h-11 rounded-[12px] px-2 py-3'
                             />
@@ -955,7 +957,7 @@ export const CreateFormModal = ({
                               data-track-category='Forms'
                               data-track-name='SelectFieldType'
                             >
-                              <SelectValue placeholder='Select a field type' />
+                              <SelectValue placeholder={t('form.selectFieldType')} />
                             </SelectTrigger>
                             <SelectContent>
                               {Object.values(FormFieldType).map(type => (

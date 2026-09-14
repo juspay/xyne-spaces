@@ -661,5 +661,40 @@
       "typeAnswer": "Escribe tu respuesta…",
       "typeCustomAnswer": "Escribe tu propia respuesta…"
     }
+  },
+  "form": {
+    "namePlaceholder": "Ingresar nombre del formulario",
+    "descriptionPlaceholder": "Ingresar descripción del formulario (opcional)",
+    "loadingProjects": "Cargando proyectos...",
+    "noProjectsAvailable": "No hay proyectos disponibles",
+    "searchProjects": "Buscar proyectos",
+    "fieldNamePlaceholder": "ej., Prioridad, Fecha de vencimiento",
+    "selectContextType": "Seleccionar un tipo de contexto",
+    "selectEntityType": "Seleccionar un tipo de entidad",
+    "selectFieldType": "Seleccionar un tipo de campo"
+  },
+  "knowledgeBase": {
+    "createCollection": {
+      "namePlaceholder": "ej. Documentos del producto",
+      "channelPlaceholder": "Sin canal — visible para todo el espacio de trabajo",
+      "searchChannels": "Buscar canales..."
+    }
+  },
+  "knowledgeBaseV2": {
+    "driveLink": {
+      "placeholder": "https://drive.google.com/file/d/…"
+    },
+    "searchField": {
+      "default": "Buscar"
+    },
+    "kbContents": {
+      "searchByName": "Buscar por nombre"
+    },
+    "newFolder": {
+      "namePlaceholder": "ej. Borradores"
+    }
+  },
+  "labels": {
+    "searchOrCreate": "Buscar o crear..."
   }
 }
