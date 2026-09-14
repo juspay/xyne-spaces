@@ -169,6 +169,31 @@ class RedisService {
     return await this.redis.smembers(key);
   }
 
+  // Device-aware mobile routing: timestamp (epoch ms) of the user's last
+  // desktop activity. Updated when a web/electron socket connects or emits.
+  // Guards fail open (no-op / null) so notification delivery never breaks.
+  async setDesktopActiveAt(userId: string): Promise<void> {
+    if (!this.redis) return;
+
+    const key = `user:${userId}:desktopActiveAt`;
+    await this.redis.set(key, String(Date.now()), 'EX', 86400);
+  }
+
+  async getDesktopActiveAt(userId: string): Promise<number | null> {
+    if (!this.redis) return null;
+
+    const key = `user:${userId}:desktopActiveAt`;
+    const value = await this.redis.get(key);
+    return value ? Number(value) : null;
+  }
+
+  async getSocketPlatform(userId: string, socketId: string): Promise<string | null> {
+    if (!this.redis) return null;
+
+    const platformKey = `user:${userId}:socket:${socketId}:platform`;
+    return await this.redis.get(platformKey);
+  }
+
   // Cross-workspace broadcast registry. Keyed on orgMemberId — the person-level
   // identity that stays constant across per-workspace User rows.
   async addOrgMemberConnection(orgMemberId: string, socketId: string, platform: string = 'web'): Promise<void> {

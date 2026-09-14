@@ -64,6 +64,7 @@ import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal'
 import HuddleIcon from '../../icons/HuddleIcon';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords';
+import { MobileRoutingCard } from '../MobileRoutingCard';
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
@@ -383,6 +384,9 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
           </div>
         </div>
       </div>
+
+      {/* Device-aware mobile routing */}
+      <MobileRoutingCard />
 
       {/* Toggle settings */}
       <div className='space-y-2'>
