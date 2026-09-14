@@ -9,12 +9,14 @@
 // no plugin state, no dispatched transactions, no registerPlugin reconfigure.
 // All three were tried and broke the collaborative undo stack (Ctrl+Z).
 import { Plugin, PluginKey, type EditorState } from 'prosemirror-state';
+import { suggestionGroupOf } from '@xyne/shared';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 
 export interface InlineSuggestionRow {
   id: string;
   op: string; // insert | replace | delete | move
   status: string;
+  batchId?: string;
   blockId?: string | null;
   proposedAnchorId?: string | null;
   currentAnchorId?: string | null;
@@ -108,16 +110,42 @@ function buildDecorations(
   canEdit: boolean,
 ): DecorationSet {
   const blocks = new Map<string, { pos: number; end: number; text: string }>();
+  const order: string[] = [];
   let firstBlockPos = 0;
   doc.descendants((node, pos) => {
     const id = (node.attrs as { id?: string }).id;
     if (node.type.name === 'blockContainer' && id && !blocks.has(id)) {
       if (!blocks.size) firstBlockPos = pos;
       blocks.set(id, { pos, end: pos + node.nodeSize, text: node.textContent });
+      order.push(id);
     }
     return true;
   });
   if (!blocks.size) return DecorationSet.empty;
+
+  // An accepted row can span several blocks (head + followers). The engine
+  // places anything anchored on the head after the last follower, so the
+  // preview must sit there too. Same rule as suggestionSiblingOrder: the group
+  // exists only while its head is an insert row of the SAME batch as the row
+  // being placed, and only rowless followers belong to it.
+  const insertHeads = new Set(
+    rows.filter(r => r.op === 'insert').map(r => `${r.batchId ?? ''}:${r.id}`),
+  );
+  const addressed = new Set(rows.map(r => r.blockId).filter((b): b is string => Boolean(b)));
+  const groupEnd = (id: string, batchId: string | undefined): number => {
+    let i = order.indexOf(id);
+    let end = blocks.get(id)!.end;
+    if (!insertHeads.has(`${batchId ?? ''}:${id}`)) return end;
+    while (
+      i + 1 < order.length &&
+      suggestionGroupOf(order[i + 1] as string) === id &&
+      !addressed.has(order[i + 1] as string)
+    ) {
+      i++;
+      end = blocks.get(order[i] as string)!.end;
+    }
+    return end;
+  };
 
   // Same resolution as the apply engine, current-first: currentAnchorId is the
   // live pointer (forwarded by deletions and sibling accepts); the frozen
@@ -126,10 +154,10 @@ function buildDecorations(
   const resolveAnchor = (row: InlineSuggestionRow): { id: string | null; end: number } | null => {
     const current = row.currentAnchorId ?? null;
     if (current === null) return { id: null, end: firstBlockPos };
-    if (blocks.has(current)) return { id: current, end: blocks.get(current)!.end };
+    if (blocks.has(current)) return { id: current, end: groupEnd(current, row.batchId) };
     const proposed = row.proposedAnchorId ?? null;
     if (proposed === null) return { id: null, end: firstBlockPos };
-    if (blocks.has(proposed)) return { id: proposed, end: blocks.get(proposed)!.end };
+    if (blocks.has(proposed)) return { id: proposed, end: groupEnd(proposed, row.batchId) };
     return null;
   };
 

@@ -15,7 +15,7 @@ import { readFromYSweetOrNull, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { createBlockRenderer } from './blockRender';
 import type { DerivedOp } from './blockLabels';
-import { applyOps, type SuggestionRowLike } from '@xyne/shared';
+import { applyOps, suggestionSiblingOrder, type SuggestionRowLike } from '@xyne/shared';
 import { computeDeletionEvents } from '@xyne/shared';
 
 function stableStringify(value: unknown): string {
@@ -145,11 +145,7 @@ export async function applySuggestionChanges(
         where: { batchId: { in: batchIds }, op: { in: ['insert', 'move'] } },
         select: { id: true, op: true, blockId: true, orderIndex: true },
       });
-      const siblingOrder = new Map<string, number>();
-      for (const s of siblings) {
-        const blockId = s.op === 'insert' ? s.id : s.blockId;
-        if (blockId) siblingOrder.set(blockId, s.orderIndex);
-      }
+      const siblingOrder = suggestionSiblingOrder(current, siblings);
 
       const outcome = await applyOps(current, rows as SuggestionRowLike[], renderer.toBlocks, siblingOrder);
 

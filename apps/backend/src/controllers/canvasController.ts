@@ -15,7 +15,7 @@ import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeYSweetDoc, readFromYSweetStrict } from '../utils/ysweetUtils.js';
-import { labelBlocks, buildHandleMap, parseLabelledMarkdown, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
+import { labelBlocks, buildHandleMap, parseLabelledMarkdown, canonicalizeEntries, deriveOps, LABEL_INSTRUCTION } from '@/services/canvas/blockLabels.js';
 import { createBlockRenderer } from '@/services/canvas/blockRender.js';
 import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.js';
 import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
@@ -538,7 +538,7 @@ export class CanvasController {
       // (S2S, spaces-edit-canvas) and NEVER touches the document itself — every
       // change parks for human review.
       const renderer = await createBlockRenderer(current);
-      const entries = parseLabelledMarkdown(markdown);
+      const entries = await canonicalizeEntries(parseLabelledMarkdown(markdown), renderer.canonical);
       const handleMap = buildHandleMap(current);
 
       const receipt = await getReadReceipt(canvas.id, userId);

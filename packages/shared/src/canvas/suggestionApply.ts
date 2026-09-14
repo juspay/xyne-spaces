@@ -31,6 +31,38 @@ export interface ApplyOutcome<TBlock> {
 
 const createdAtMs = (v: Date | number): number => (typeof v === 'number' ? v : v.getTime());
 
+/** Separator between a row id and the index of a follower block it produced. */
+const FOLLOWER_SEP = '__';
+
+/**
+ * The row a block belongs to: a follower block resolves to the head that
+ * produced it, any other block to itself. The editor preview uses this to
+ * draw pending cards after a whole group, where the engine will place them.
+ */
+export function suggestionGroupOf(blockId: string): string {
+  const at = blockId.indexOf(FOLLOWER_SEP);
+  return at < 0 ? blockId : blockId.slice(0, at);
+}
+
+export function suggestionSiblingOrder<TBlock extends { id?: string }>(
+  current: TBlock[],
+  rows: Array<{ id: string; op: string; blockId: string | null; orderIndex: number }>
+): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const row of rows) {
+    if (row.op === 'insert') {
+      order.set(row.id, row.orderIndex);
+      for (const block of current) {
+        const id = block.id;
+        if (id && id !== row.id && suggestionGroupOf(id) === row.id) order.set(id, row.orderIndex);
+      }
+    } else if (row.op === 'move' && row.blockId) {
+      order.set(row.blockId, row.orderIndex);
+    }
+  }
+  return order;
+}
+
 export async function applyOps<TBlock extends { id?: string }>(
   current: TBlock[],
   rows: SuggestionRowLike[],
@@ -40,6 +72,8 @@ export async function applyOps<TBlock extends { id?: string }>(
   const working: TBlock[] = [...current];
   const applied: string[] = [];
   const stale: string[] = [];
+  // Followers minted during this call join the map under their row's order.
+  const order = new Map(siblingOrder);
 
   const findIdx = (id: string | null): number =>
     id === null ? -1 : working.findIndex(b => b.id === id);
@@ -48,6 +82,18 @@ export async function applyOps<TBlock extends { id?: string }>(
     const c = row.afterContent as { markdown?: string } | null;
     return c?.markdown ?? null;
   };
+
+  // One row can parse into several blocks — a list, or a heading and its
+  // paragraph, returned by the agent without a blank line between. The first
+  // block carries the row's identity; the followers get ids derived from it
+  // and the row's sibling order, so a later sibling lands after the group.
+  const followerId = (base: string, i: number): string => `${base}${FOLLOWER_SEP}${i + 1}`;
+  const withIds = (blocks: TBlock[], base: string, orderIndex: number): TBlock[] =>
+    blocks.map((b, i) => {
+      const id = i === 0 ? base : followerId(base, i - 1);
+      if (i > 0) order.set(id, orderIndex);
+      return { ...(b as object), id } as TBlock;
+    });
 
   // ── phase 1: replaces — in place, by id, block id kept. Applies over
   // whatever the block currently holds: the human's accept is the authority. ──
@@ -59,12 +105,14 @@ export async function applyOps<TBlock extends { id?: string }>(
     }
     const md = markdownOf(row);
     const parsed = md ? await toBlocks(md) : [];
-    const next = parsed[0];
-    if (!next) {
+    if (!parsed[0]) {
       stale.push(row.id);
       continue;
     }
-    working[idx] = { ...(next as object), id: row.blockId } as TBlock;
+    // Replaced block keeps its id; extra blocks follow it under the row's id.
+    const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
+    working[idx] = { ...(first as object), id: row.blockId } as TBlock;
+    working.splice(idx + 1, 0, ...rest);
     applied.push(row.id);
   }
 
@@ -105,7 +153,7 @@ export async function applyOps<TBlock extends { id?: string }>(
     let at = anchorId === null ? 0 : findIdx(anchorId) + 1;
     for (;;) {
       const id = at < working.length ? (working[at] as TBlock).id : undefined;
-      const siblingIndex = id === undefined ? undefined : siblingOrder.get(id);
+      const siblingIndex = id === undefined ? undefined : order.get(id);
       if (siblingIndex === undefined || siblingIndex >= orderIndex) break;
       at++;
     }
@@ -142,12 +190,13 @@ export async function applyOps<TBlock extends { id?: string }>(
       }
       const md = markdownOf(row);
       const parsed = md ? await toBlocks(md) : [];
-      const next = parsed[0];
-      if (!next) {
+      if (!parsed[0]) {
         stale.push(row.id);
         continue;
       }
-      placeAfter({ ...(next as object), id: row.id } as TBlock, anchor.anchorId, row.orderIndex);
+      const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
+      placeAfter(first as TBlock, anchor.anchorId, row.orderIndex);
+      working.splice(findIdx(row.id) + 1, 0, ...rest);
       applied.push(row.id);
     }
   }
