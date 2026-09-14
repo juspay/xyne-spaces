@@ -313,6 +313,7 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   id: string;
   orgId: string;
   slug: string;
+  name: string;
   spacesAppToken: string | null;
   spacesAppUserId: string | null;
   spacesAppId: string | null;
@@ -2437,6 +2438,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               conversationId: planConversationId,
               channelId: planChannelId,
               agentSlug: planAgentSlug,
+              agentName: agent.name,
               spacesAppUserId: agent.spacesAppUserId ?? undefined,
               appToken,
               toolLabel: "Starting the plan…",
