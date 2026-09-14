@@ -27,7 +27,8 @@ const ruleSchema = z
   .object({
     id: z.string().regex(/^[A-Za-z0-9_.-]+$/, 'id must match [A-Za-z0-9_.-]+'),
     match: matchSchema,
-    bundle: z.string().min(1),
+    lane: z.string().min(1).optional(),
+    bundle: z.string().min(1).optional(),
     version: z.union([z.string(), z.number()]).optional(),
     cache: z.enum(['versioned', 'never', 'ttl']).default('versioned'),
     ttl: z.union([z.string(), z.number()]).optional(),
@@ -59,8 +60,9 @@ export interface Rule {
   match: Matchers;
   /** The match block as written, for /_edge/status. */
   matchSpec: RawMatch;
+  lane: string;
+  version?: string;
   bundle: string;
-  version: string;
   cache: CacheMode;
   ttl?: number;
   stripPrefix?: string;
@@ -169,16 +171,22 @@ function normaliseRule(raw: RawRule): Rule | string {
     match.userAgent = { regex: re };
   }
 
-  const bundle = raw.bundle;
-  if (
-    !/^[A-Za-z0-9._$/-]+$/.test(bundle) ||
-    bundle.includes('..') ||
-    bundle.startsWith('/') ||
-    bundle.endsWith('/')
-  ) {
-    return `${where}: bundle ${JSON.stringify(bundle)} is not a valid bucket prefix`;
+  if (raw.lane !== undefined && raw.bundle !== undefined) {
+    return `${where}: give lane (bundle is the older name for it), not both`;
   }
-  const refs = [...bundle.matchAll(/\$(\d)/g)].map((x) => Number(x[1]));
+  const lane = raw.lane ?? raw.bundle;
+  if (lane === undefined) {
+    return `${where}: lane is required`;
+  }
+  if (
+    !/^[A-Za-z0-9._$/-]+$/.test(lane) ||
+    lane.includes('..') ||
+    lane.startsWith('/') ||
+    lane.endsWith('/')
+  ) {
+    return `${where}: lane ${JSON.stringify(lane)} is not a valid bucket prefix`;
+  }
+  const refs = [...lane.matchAll(/\$(\d)/g)].map((x) => Number(x[1]));
   if (refs.length > 0) {
     const hasRegex =
       match.pathRegex !== undefined ||
@@ -186,16 +194,23 @@ function normaliseRule(raw: RawRule): Rule | string {
       match.cookie?.regex !== undefined ||
       match.userAgent !== undefined;
     if (!hasRegex) {
-      return `${where}: bundle uses $${Math.max(...refs)} but no regex matcher provides captures`;
+      return `${where}: lane uses $${Math.max(...refs)} but no regex matcher provides captures`;
     }
   }
 
-  let version = '1';
-  if (typeof raw.version === 'number') {
-    version = String(Math.floor(raw.version));
-  } else if (typeof raw.version === 'string') {
+  let version: string | undefined;
+  if (raw.version !== undefined) {
+    if (typeof raw.version === 'number' || /^\d+$/.test(raw.version)) {
+      return (
+        `${where}: version must name a pinned build, "<version.json version>-<commit>" ` +
+        `e.g. "1.295.0-release-20260909.1-ccbb8c2e78"; a bare number was the old cache label, which no longer exists: remove it`
+      );
+    }
     if (!/^[A-Za-z0-9._-]+$/.test(raw.version)) {
-      return `${where}: version must be a number or [A-Za-z0-9._-]+`;
+      return `${where}: version may contain only letters, digits and . _ -`;
+    }
+    if (isDynamicBundle(lane)) {
+      return `${where}: version cannot be combined with a lane that uses captures`;
     }
     version = raw.version;
   }
@@ -204,12 +219,15 @@ function normaliseRule(raw: RawRule): Rule | string {
     id: raw.id,
     match,
     matchSpec: m,
-    bundle,
-    version,
+    lane,
+    bundle: version === undefined ? lane : `${lane}/${version}`,
     cache: raw.cache,
     enabled: true,
     healthy: true,
   };
+  if (version !== undefined) {
+    rule.version = version;
+  }
 
   if (raw.cache === 'ttl') {
     const ttl = raw.ttl === undefined ? undefined : parseDuration(raw.ttl);
