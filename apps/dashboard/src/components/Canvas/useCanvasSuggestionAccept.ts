@@ -5,7 +5,7 @@
 // server-side apply (correct result, just not undoable).
 import { useCallback, type RefObject } from 'react';
 import { BlockNoteEditor, type PartialBlock } from '@blocknote/core';
-import { applyOps, type SuggestionRowLike } from '@xyne/shared';
+import { applyOps, suggestionSiblingOrder, type SuggestionRowLike } from '@xyne/shared';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -69,12 +69,17 @@ export const useCanvasSuggestionAccept = (
       const current = editor.getBlocks();
 
       const batchIds = new Set(pending.map(r => r.batchId));
-      const siblingOrder = new Map<string, number>();
-      for (const row of placementRows as unknown as AcceptableRow[]) {
-        if (!batchIds.has(row.batchId)) continue;
-        const blockId = row.op === 'insert' ? row.id : row.blockId;
-        if (blockId) siblingOrder.set(blockId, row.orderIndex);
-      }
+      const siblingOrder = suggestionSiblingOrder(
+        current as Array<{ id?: string }>,
+        (placementRows as unknown as AcceptableRow[])
+          .filter(row => batchIds.has(row.batchId))
+          .map(row => ({
+            id: row.id,
+            op: row.op,
+            blockId: row.blockId ?? null,
+            orderIndex: row.orderIndex,
+          })),
+      );
 
       // Headless parser, same as chat paste handling; agent markdown only uses
       // standard blocks, so the default schema matches the server renderer.

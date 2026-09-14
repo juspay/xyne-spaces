@@ -22,6 +22,7 @@ export interface ParsedEntry {
   handle: string | null;
   isNew: boolean;
   markdown: string;
+  canonical?: string;
 }
 
 /**
@@ -124,6 +125,13 @@ export function parseLabelledMarkdown(text: string): ParsedEntry[] {
     });
 }
 
+export async function canonicalizeEntries(
+  entries: ParsedEntry[],
+  canonical: (markdown: string) => Promise<string>
+): Promise<ParsedEntry[]> {
+  return Promise.all(entries.map(async entry => ({ ...entry, canonical: await canonical(entry.markdown) })));
+}
+
 export interface DerivedOp {
   op: 'insert' | 'replace' | 'delete' | 'move';
   /** Stable key within one reply. */
@@ -205,7 +213,7 @@ export function deriveOps({
   for (const { entry, id } of resolved) {
     if (id) {
       const block = byId.get(id) as BlockNoteBlock;
-      if (render(block).trim() !== entry.markdown.trim()) {
+      if (render(block).trim() !== (entry.canonical ?? entry.markdown).trim()) {
         ops.push({
           op: 'replace', key: `op${order}`, blockId: id,
           beforeContent: block, afterMarkdown: entry.markdown, orderIndex: order++,

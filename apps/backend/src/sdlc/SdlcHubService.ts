@@ -40,7 +40,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { readFromYSweetOrNull, syncToYSweet } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { buildHandleMap, deriveOps, parseLabelledMarkdown } from '@/services/canvas/blockLabels';
+import { buildHandleMap, canonicalizeEntries, deriveOps, parseLabelledMarkdown } from '@/services/canvas/blockLabels';
 import { deriveDiffOps } from '@/services/canvas/blockDiff';
 import { createBlockRenderer } from '@/services/canvas/blockRender';
 import { createSuggestionBatch } from '@/services/canvas/suggestions';
@@ -1478,7 +1478,7 @@ export class SdlcHubService implements SdlcHub {
     }
     const nextBlocks = content as unknown as BlockNoteBlock[];
     const renderer = await createBlockRenderer([...live, ...nextBlocks]);
-    const entries = parseLabelledMarkdown(resolved.markdown);
+    const entries = await canonicalizeEntries(parseLabelledMarkdown(resolved.markdown), renderer.canonical);
     const receipt = await getReadReceipt(existing.id, actor.userId);
     const labelled = entries.some(e => e.handle !== null || e.isNew);
     if (labelled && !receipt && live.length > 0) {

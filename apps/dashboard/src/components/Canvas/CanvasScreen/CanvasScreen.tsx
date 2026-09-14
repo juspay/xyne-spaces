@@ -973,6 +973,21 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     queries.canvasSuggestionChanges({ canvasId: selectedCanvas?.id ?? '' }),
     { enabled: Boolean(selectedCanvas?.id) },
   );
+  // Accepted insert rows too: the inline preview needs them to draw a pending
+  // sibling behind the whole group its batch-mate inserted, as the engine will.
+  const [placementRows = []] = useCachedQuery(
+    queries.canvasSuggestionPlacementOrder({ canvasId: selectedCanvas?.id ?? '' }),
+    { enabled: Boolean(selectedCanvas?.id) },
+  );
+  const paintedSuggestionRows = useMemo(
+    () => [
+      ...(suggestionRows as unknown as InlineSuggestionRow[]),
+      ...(placementRows as unknown as InlineSuggestionRow[]).filter(
+        r => r.status === 'ACCEPTED' && r.op === 'insert',
+      ),
+    ],
+    [suggestionRows, placementRows],
+  );
 
   // Suggestion anchors: when a block is deleted by a human, report it so pending
   // suggestion anchors forward to the deleted block's predecessor. Emits only
@@ -1892,11 +1907,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
-                    suggestions={
-                      suggestionReviewMode
-                        ? (suggestionRows as unknown as InlineSuggestionRow[])
-                        : NO_SUGGESTIONS
-                    }
+                    suggestions={suggestionReviewMode ? paintedSuggestionRows : NO_SUGGESTIONS}
                   />
                 ) : (
                   <CanvasEditor

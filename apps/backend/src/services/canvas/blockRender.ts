@@ -12,6 +12,7 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 export interface BlockRenderer {
   render: (block: BlockNoteBlock) => string;
   toBlocks: (markdown: string) => Promise<BlockNoteBlock[]>;
+  canonical: (markdown: string) => Promise<string>;
 }
 
 export async function createBlockRenderer(
@@ -37,6 +38,14 @@ export async function createBlockRenderer(
     },
     toBlocks: async markdown =>
       (await editor.tryParseMarkdownToBlocks(markdown)) as unknown as BlockNoteBlock[],
+    canonical: async markdown => {
+      try {
+        const parsed = await editor.tryParseMarkdownToBlocks(markdown);
+        return (await editor.blocksToMarkdownLossy(parsed as never)).trim() || markdown;
+      } catch {
+        return markdown;
+      }
+    },
   };
 }
 
