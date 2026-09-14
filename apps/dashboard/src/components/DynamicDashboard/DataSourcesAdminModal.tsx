@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
@@ -61,6 +62,7 @@ const FormField = ({ label, required, className, children }: FormFieldProps): Re
 );
 
 export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -287,7 +289,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
               <Input
                 value={form.name}
                 onChange={e => setField('name', e.target.value)}
-                placeholder='Enter your source name'
+                placeholder={t('dashboard.dataSource.enterSourceName')}
                 className={INPUT_CLASS}
               />
             </FormField>
@@ -297,7 +299,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                 value={form.description}
                 onChange={e => setField('description', e.target.value)}
                 rows={3}
-                placeholder='Enter your descriptions'
+                placeholder={t('dashboard.dataSource.enterDescriptions')}
                 className={INPUT_CLASS}
               />
             </FormField>
@@ -307,7 +309,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                 <Input
                   value={form.host}
                   onChange={e => setField('host', e.target.value)}
-                  placeholder='Enter host name'
+                  placeholder={t('dashboard.dataSource.enterHostName')}
                   className={INPUT_CLASS}
                 />
               </FormField>
@@ -318,7 +320,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                   max={65535}
                   value={form.port}
                   onChange={e => setField('port', e.target.value)}
-                  placeholder='Enter port number'
+                  placeholder={t('dashboard.dataSource.enterPortNumber')}
                   className={INPUT_CLASS}
                 />
               </FormField>
@@ -329,7 +331,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                 <Input
                   value={form.user}
                   onChange={e => setField('user', e.target.value)}
-                  placeholder='Enter username'
+                  placeholder={t('dashboard.dataSource.enterUsername')}
                   className={INPUT_CLASS}
                   name='ds-conn-user'
                   autoComplete='new-password'
@@ -342,7 +344,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
                   type='text'
                   value={form.password}
                   onChange={e => setField('password', e.target.value)}
-                  placeholder='Enter password'
+                  placeholder={t('dashboard.dataSource.enterPassword')}
                   className={INPUT_CLASS}
                   style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
                   name='ds-conn-secret'
@@ -357,7 +359,7 @@ export const DataSourcesAdminModal = ({ onClose }: DataSourcesAdminModalProps): 
               <Input
                 value={form.database}
                 onChange={e => setField('database', e.target.value)}
-                placeholder='Enter database'
+                placeholder={t('dashboard.dataSource.enterDatabase')}
                 className={INPUT_CLASS}
               />
             </FormField>

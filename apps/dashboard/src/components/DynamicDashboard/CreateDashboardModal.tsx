@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2, Plus } from 'lucide-react';
@@ -17,6 +18,7 @@ interface CreateDashboardModalProps {
 }
 
 export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const navigate = useNavigate();
   const { create } = useDashboardMutations();
@@ -98,7 +100,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
             id='create-dash-name'
             value={name}
             onChange={handleNameChange}
-            placeholder='e.g. Q4 sales overview'
+            placeholder={t('dashboard.create.nameExample')}
             autoFocus
             onKeyDown={handleNameKeyDown}
           />
@@ -114,7 +116,7 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
             id='create-dash-description'
             value={description}
             onChange={handleDescriptionChange}
-            placeholder='Optional. One line describing the dashboard.'
+            placeholder={t('dashboard.create.descriptionOptional')}
             rows={2}
           />
         </div>

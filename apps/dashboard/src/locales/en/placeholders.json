@@ -516,5 +516,49 @@
     "untitledFolder1": "Untitled folder 1",
     "versionName": "Version name",
     "filterRows": "Filter rows"
+  },
+  "dashboard": {
+    "askAnything": "Ask anything…",
+    "searchDataSources": "Search data sources…",
+    "searchDatabases": "Search databases…",
+    "filterTables": "Filter tables…",
+    "visualBuilder": {
+      "revenueExample": "e.g: Revenue by Status",
+      "chooseDataSource": "Choose your data source",
+      "selectTable": "Select a table…",
+      "column": "Column…",
+      "bucket": "bucket",
+      "listExample": "a, b, c",
+      "value": "value",
+      "noLimit": "no limit",
+      "none": "(none)"
+    },
+    "table": {
+      "searchAllColumns": "Search all columns…",
+      "contains": "Contains…",
+      "min": "Min",
+      "max": "Max"
+    },
+    "create": {
+      "nameExample": "e.g. Q4 sales overview",
+      "descriptionOptional": "Optional. One line describing the dashboard."
+    },
+    "share": {
+      "searchUsersToAdd": "Search users to add..."
+    },
+    "variables": {
+      "statusKeyExample": "e.g. status",
+      "statusLabelExample": "e.g. Status",
+      "openClosedPendingExample": "open, closed, pending"
+    },
+    "dataSource": {
+      "enterSourceName": "Enter your source name",
+      "enterDescriptions": "Enter your descriptions",
+      "enterHostName": "Enter host name",
+      "enterPortNumber": "Enter port number",
+      "enterUsername": "Enter username",
+      "enterPassword": "Enter password",
+      "enterDatabase": "Enter database"
+    }
   }
 }

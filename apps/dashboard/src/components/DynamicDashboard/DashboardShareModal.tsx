@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { DashboardRole, DashboardVisibility } from '@xyne/shared';
 import type { User } from '@xyne/shared';
@@ -42,6 +43,7 @@ export const DashboardShareModal = ({
   isEditor,
   preloadedParticipants,
 }: DashboardShareModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { user: currentUser } = useAuth();
   const { isMobile } = usePlatform();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -205,7 +207,7 @@ export const DashboardShareModal = ({
               excludeUserIds={participantUserIds}
               selectedUsers={selectedUsers}
               onUsersChange={setSelectedUsers}
-              placeholder='Search users to add...'
+              placeholder={t('dashboard.share.searchUsersToAdd')}
               label=''
               hintText=''
               autoFocus={!isMobile}

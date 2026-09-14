@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
   AlertTriangle,
@@ -192,6 +193,7 @@ export const IngestionProgressDialog = ({
   onDismiss,
   progress,
 }: IngestionProgressDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [filter, setFilter] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { total, done, failed, elapsedMs, finished, pending, status } = progress;
@@ -293,7 +295,7 @@ export const IngestionProgressDialog = ({
               <input
                 value={filter}
                 onChange={e => setFilter(e.target.value)}
-                placeholder='Filter tables…'
+                placeholder={t('dashboard.filterTables')}
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Filter_Ingestion_Tables'
                 className='w-full h-8 pl-8 pr-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] text-xyne-gray-900 placeholder:text-xyne-gray-400 outline-none focus:border-xyne-gray-400 transition-colors'

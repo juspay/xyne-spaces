@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowDown,
   ArrowUp,
@@ -76,6 +77,7 @@ function pickKind(column: Column<Row_, unknown>, typeHint?: string): FilterKind 
 }
 
 const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const safeData: TableData = useMemo(() => {
     if (!data || typeof data !== 'object') return { columns: [], rows: [] };
     const d = data as Partial<TableData>;
@@ -139,7 +141,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
           type='text'
           value={globalFilterValue}
           onChange={e => table.setGlobalFilter(e.target.value || undefined)}
-          placeholder='Search all columns…'
+          placeholder={t('dashboard.table.searchAllColumns')}
           className='flex-1 text-xs bg-transparent focus:outline-none placeholder:text-muted-foreground'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Global_Search_Change'
@@ -406,6 +408,7 @@ interface FilterEditorProps {
 }
 
 const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const value = column.getFilterValue();
 
   if (kind === 'enum') {
@@ -452,7 +455,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
         onChange={e =>
           column.setFilterValue(e.target.value.trim() === '' ? undefined : e.target.value)
         }
-        placeholder='Contains…'
+        placeholder={t('dashboard.table.contains')}
         className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-ring'
         data-track-category='DASHBOARD_TABLE'
         data-track-name='Filter_Contains_Change'
@@ -476,7 +479,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           type='number'
           value={min ?? ''}
           onChange={e => commit(e.target.value === '' ? undefined : Number(e.target.value), max)}
-          placeholder={placeholder(dataMin) || 'Min'}
+          placeholder={placeholder(dataMin) || t('dashboard.table.min')}
           className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Min_Change'
@@ -486,7 +489,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           type='number'
           value={max ?? ''}
           onChange={e => commit(min, e.target.value === '' ? undefined : Number(e.target.value))}
-          placeholder={placeholder(dataMax) || 'Max'}
+          placeholder={placeholder(dataMax) || t('dashboard.table.max')}
           className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Max_Change'

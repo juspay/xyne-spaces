@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronsUpDown, Database, Search } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
 import type { DataSourceListItem } from '../../../services/DynamicDashboard/dataSourcesService';
@@ -25,6 +26,7 @@ export function DataSourcePicker({
   selectedId,
   onSelect,
 }: DataSourcePickerProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const selected = sources.find(s => s.id === selectedId) ?? sources[0] ?? null;
@@ -81,7 +83,7 @@ export function DataSourcePicker({
               autoFocus
               value={q}
               onChange={e => setQ(e.target.value)}
-              placeholder='Search databases…'
+              placeholder={t('dashboard.searchDatabases')}
               aria-label='Search databases'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Source_Search'

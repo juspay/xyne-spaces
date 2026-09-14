@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Database, Search } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
 import type { DataSourceListItem } from '../../../services/DynamicDashboard/dataSourcesService';
@@ -23,6 +24,7 @@ export function DataSourceChip({
   dataSources,
   trackName,
 }: DataSourceChipProps): ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
 
@@ -73,7 +75,7 @@ export function DataSourceChip({
               autoFocus
               value={q}
               onChange={e => setQ(e.target.value)}
-              placeholder='Search data sources…'
+              placeholder={t('dashboard.searchDataSources')}
               aria-label='Search data sources'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name={`${trackName}-search`}

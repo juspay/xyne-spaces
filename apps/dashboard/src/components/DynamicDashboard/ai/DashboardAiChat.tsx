@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, Loader2, RotateCcw, Trash2, X } from 'lucide-react';
 import type { DashboardPlan } from '@xyne/shared';
 import { GlassStar } from '../../icons/xyne-ai';
@@ -48,6 +49,7 @@ export const DashboardAiChat = ({
   onDashboardMutated,
   onDrillResult,
 }: DashboardAiChatProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { turns, isStreaming, send, abort, suggestion, reset } = useDashboardAiStream({
     dataSourceId,
     ...(dashboardId ? { dashboardId } : {}),
@@ -196,7 +198,7 @@ export const DashboardAiChat = ({
               submit();
             }
           }}
-          placeholder='Ask anything…'
+          placeholder={t('dashboard.askAnything')}
           rows={2}
           disabled={isStreaming}
           data-track-category={trackCategory}

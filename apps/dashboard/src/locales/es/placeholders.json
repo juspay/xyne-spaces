@@ -516,5 +516,49 @@
     "untitledFolder1": "Carpeta sin título 1",
     "versionName": "Nombre de la versión",
     "filterRows": "Filtrar filas"
+  },
+  "dashboard": {
+    "askAnything": "Pregunta lo que quieras…",
+    "searchDataSources": "Buscar fuentes de datos…",
+    "searchDatabases": "Buscar bases de datos…",
+    "filterTables": "Filtrar tablas…",
+    "visualBuilder": {
+      "revenueExample": "ej: Ingresos por estado",
+      "chooseDataSource": "Elige tu fuente de datos",
+      "selectTable": "Selecciona una tabla…",
+      "column": "Columna…",
+      "bucket": "grupo",
+      "listExample": "a, b, c",
+      "value": "valor",
+      "noLimit": "sin límite",
+      "none": "(ninguno)"
+    },
+    "table": {
+      "searchAllColumns": "Buscar en todas las columnas…",
+      "contains": "Contiene…",
+      "min": "Mín",
+      "max": "Máx"
+    },
+    "create": {
+      "nameExample": "ej. Resumen de ventas Q4",
+      "descriptionOptional": "Opcional. Una línea que describa el panel."
+    },
+    "share": {
+      "searchUsersToAdd": "Buscar usuarios para agregar..."
+    },
+    "variables": {
+      "statusKeyExample": "ej. estado",
+      "statusLabelExample": "ej. Estado",
+      "openClosedPendingExample": "abierto, cerrado, pendiente"
+    },
+    "dataSource": {
+      "enterSourceName": "Ingresa el nombre de la fuente",
+      "enterDescriptions": "Ingresa la descripción",
+      "enterHostName": "Ingresa el nombre del host",
+      "enterPortNumber": "Ingresa el número de puerto",
+      "enterUsername": "Ingresa el nombre de usuario",
+      "enterPassword": "Ingresa la contraseña",
+      "enterDatabase": "Ingresa la base de datos"
+    }
   }
 }
