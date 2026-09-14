@@ -498,5 +498,23 @@
       "kycExample": "e.g. KYC documents verified against the registry",
       "groupName": "Group name"
     }
+  },
+  "canvas": {
+    "editComment": "Edit comment",
+    "addComment": "Add a comment",
+    "startWriting": "Start writing your canvas...",
+    "addPageTitle": "Add page title",
+    "searchOrCreateLabelDot": "Search or create a label.",
+    "searchCanvases": "Search canvases",
+    "filterChannels": "Filter channels",
+    "search": "Search...",
+    "folderName": "Folder name",
+    "findParticipants": "Find participants",
+    "untitledCanvas": "Untitled Canvas",
+    "searchInCanvas": "Search in canvas...",
+    "enterEmailAddress": "Enter email address...",
+    "untitledFolder1": "Untitled folder 1",
+    "versionName": "Version name",
+    "filterRows": "Filter rows"
   }
 }

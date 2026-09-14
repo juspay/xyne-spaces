@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePath } from '../../../hooks/usePath';
@@ -161,6 +162,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onToggleFullscreen,
   showAskAiAction = true,
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
   const navigate = useNavigate();
@@ -1332,7 +1334,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           'h-auto min-w-0 flex-1 border-none bg-transparent px-0 py-0 text-base font-semibold text-foreground shadow-none focus:ring-0 focus-visible:border-none focus-visible:ring-0',
                           !canEdit && 'cursor-default',
                         )}
-                        placeholder='Untitled Canvas'
+                        placeholder={t('canvas.untitledCanvas')}
                       />
                     </div>
                   </div>
@@ -1760,7 +1762,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     ref={editorRef}
                     content={displayedContent}
                     editable={false}
-                    placeholder='Start writing your canvas...'
+                    placeholder={t('canvas.startWriting')}
                     channelId={selectedCanvas?.channelId || state?.channelId}
                     canvasId={selectedCanvas?.id}
                     canvasTitle={currentTitle}
@@ -1782,7 +1784,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     channelId={selectedCanvas.channelId || state?.channelId}
                     title={currentTitle}
                     editable={canEdit}
-                    placeholder='Start writing your canvas...'
+                    placeholder={t('canvas.startWriting')}
                     className={cn(isCallDetailedSummaryCanvas && 'recording-summary-canvas-editor')}
                     trackEditedRecordingSummaryBlocks={Boolean(isCallDetailedSummaryCanvas)}
                     onFileUpload={handleFileUpload}
@@ -1806,7 +1808,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     onSave={handleSave}
                     onFileUpload={handleFileUpload}
                     editable={canEdit}
-                    placeholder='Start writing your canvas...'
+                    placeholder={t('canvas.startWriting')}
                     channelId={selectedCanvas?.channelId || state?.channelId}
                     canvasId={selectedCanvas?.id}
                     canvasTitle={currentTitle}

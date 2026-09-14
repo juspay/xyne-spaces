@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { differenceInCalendarDays } from 'date-fns';
 import {
   FileText,
@@ -927,6 +928,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   onlyArchived = false,
   onToggleStar,
 }) => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const allUsers = useUsers();
@@ -2185,7 +2187,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               type='text'
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-              placeholder='Search canvases'
+              placeholder={t('canvas.searchCanvases')}
               className='h-8 w-full rounded-md border-sidebar-border-muted bg-background pl-9 pr-14 text-[13px]'
             />
             <DropdownMenu modal={false} open={scopeMenuOpen} onOpenChange={setScopeMenuOpen}>
@@ -2244,7 +2246,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         }
                         onClick={event => event.stopPropagation()}
                         onKeyDown={event => event.stopPropagation()}
-                        placeholder='Filter channels'
+                        placeholder={t('canvas.filterChannels')}
                         className='h-8 w-full rounded-lg border-sidebar-border-muted bg-muted/40 pl-8 text-[13px]'
                         data-testid='canvas-search-scope-channel-filter'
                       />
@@ -2452,7 +2454,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       }
                       onClick={event => event.stopPropagation()}
                       onKeyDown={event => event.stopPropagation()}
-                      placeholder='Search...'
+                      placeholder={t('canvas.search')}
                       className='h-8 rounded-lg border-sidebar-border-muted bg-background pl-8 text-[13px]'
                       data-testid='canvas-shared-by-search'
                     />

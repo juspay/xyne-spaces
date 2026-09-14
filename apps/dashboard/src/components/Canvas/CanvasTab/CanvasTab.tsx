@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { CollaborativeCanvasEditor } from '../CollaborativeCanvasEditor/CollaborativeCanvasEditor';
@@ -121,6 +122,7 @@ const getStrongestCanvasRole = (
   }, undefined);
 
 const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -942,7 +944,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 id='channel-folder-name'
                 value={newFolderName}
                 onChange={event => setNewFolderName(event.target.value)}
-                placeholder='Untitled folder 1'
+                placeholder={t('canvas.untitledFolder1')}
                 className='h-10'
                 onKeyDown={event => {
                   if (event.key === 'Enter') {
@@ -1052,7 +1054,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
             className={`text-base md:text-xl font-semibold flex-1 border-none shadow-none focus:ring-0 focus-visible:ring-0 focus-visible:border-none px-2 py-1 h-auto rounded min-w-0 ${
               canEdit ? 'hover:bg-accent' : 'cursor-default'
             }`}
-            placeholder='Untitled Canvas'
+            placeholder={t('canvas.untitledCanvas')}
             data-testid='canvas-title-input'
             data-track-category='CANVAS'
             data-track-name='EDIT_CANVAS_TITLE'
@@ -1255,7 +1257,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 ref={editorRef}
                 content={displayedContent}
                 editable={false}
-                placeholder='Start writing your canvas...'
+                placeholder={t('canvas.startWriting')}
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
@@ -1269,7 +1271,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 channelId={channelId}
                 title={currentTitle}
                 editable={canEdit}
-                placeholder='Start writing your canvas...'
+                placeholder={t('canvas.startWriting')}
                 onFileUpload={handleFileUpload}
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
@@ -1284,7 +1286,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onSave={handleSave}
                 onFileUpload={handleFileUpload}
                 editable={canEdit}
-                placeholder='Start writing your canvas...'
+                placeholder={t('canvas.startWriting')}
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
@@ -61,6 +62,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   onToggleStar,
   loading = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
@@ -188,7 +190,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setSearchQuery(e.target.value)
                 }
-                placeholder='Search canvases'
+                placeholder={t('canvas.searchCanvases')}
                 className='pl-9 w-full sm:w-48 md:w-64'
               />
             </div>

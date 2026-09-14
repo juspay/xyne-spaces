@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, X, Users, AlertTriangle, Hash } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import Input from '../../ui/Input';
@@ -43,6 +44,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
   isCollaborative = false,
   isOwner = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [showCollaborativeWarning, setShowCollaborativeWarning] = useState(false);
   const { isMobile } = usePlatform();
@@ -152,7 +154,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           <Input
             type='text'
             autoFocus={!isMobile}
-            placeholder='Find participants'
+            placeholder={t('canvas.findParticipants')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className='pl-10'

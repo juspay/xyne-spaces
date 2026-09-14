@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Plus, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import Input from '../ui/Input';
@@ -30,6 +31,7 @@ export const CanvasLabelManager = ({
   canEdit,
   revealTriggerOnParentHover = false,
 }: CanvasLabelManagerProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -287,7 +289,7 @@ export const CanvasLabelManager = ({
                 value={search}
                 onChange={event => setSearch(event.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder='Search or create a label.'
+                placeholder={t('canvas.searchOrCreateLabelDot')}
                 className='h-8 rounded-lg bg-muted/40 pl-8 pr-2 text-xs'
               />
             </div>

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bot,
@@ -57,6 +58,7 @@ export type CanvasPanelOutletContext = {
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 const CanvasPanel = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
@@ -467,7 +469,7 @@ const CanvasPanel = (): ReactElement => {
                 onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                   setGroupedSearchQuery(event.target.value)
                 }
-                placeholder='Search canvases'
+                placeholder={t('canvas.searchCanvases')}
                 className='pl-9 w-full'
                 data-testid='canvas-grouped-search-input'
               />
