@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Mail,
   Phone,
@@ -64,6 +65,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   isOwnProfile,
   headerLayout = 'stacked',
 }) => {
+  const { t } = useTranslation('placeholders');
   const isInlineHeader = headerLayout === 'inline';
   const headerAvatarSize: 'xl' | 'big' = isInlineHeader ? 'xl' : 'big';
   const zero = useZero();
@@ -416,7 +418,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     if (e.key === 'Enter') handleSaveEdit();
                     if (e.key === 'Escape') handleCancelEdit();
                   }}
-                  placeholder='Enter team name'
+                  placeholder={t('ui.userProfile.teamNamePlaceholder')}
                   maxLength={20}
                   className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring bg-background text-foreground'
                   autoFocus={!isMobile}
@@ -616,7 +618,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       setSelectedManagerUsers(users);
                     }
                   }}
-                  placeholder='Search for a manager...'
+                  placeholder={t('ui.userProfile.managerSearchPlaceholder')}
                   hintText=''
                   label=''
                   autoFocus={!isMobile}
@@ -756,7 +758,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                           if (e.key === 'Enter') handleSaveEdit();
                           if (e.key === 'Escape') handleCancelEdit();
                         }}
-                        placeholder='Enter display name'
+                        placeholder={t('ui.userProfile.displayNamePlaceholder')}
                         maxLength={50}
                         className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
                         autoFocus={!isMobile}
@@ -830,7 +832,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                           if (e.key === 'Enter') handleSaveEdit();
                           if (e.key === 'Escape') handleCancelEdit();
                         }}
-                        placeholder='Enter phone number'
+                        placeholder={t('ui.userProfile.phoneNumberPlaceholder')}
                         maxLength={15}
                         className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
                         autoFocus={!isMobile}

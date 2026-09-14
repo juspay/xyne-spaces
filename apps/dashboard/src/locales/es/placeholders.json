@@ -560,5 +560,63 @@
       "enterPassword": "Ingresa la contraseña",
       "enterDatabase": "Ingresa la base de datos"
     }
+  },
+  "ui": {
+    "common": {
+      "searchEllipsis": "Buscar..."
+    },
+    "linkDialog": {
+      "linkText": "Texto del enlace",
+      "url": "https://ejemplo.com"
+    },
+    "editorToolbar": {
+      "imageUrl": "https://ejemplo.com/imagen.png"
+    },
+    "emojiPicker": {
+      "customEmojiName": ":loro_fiesta:"
+    },
+    "timePicker": {
+      "selectTime": "Seleccionar hora"
+    },
+    "pulseModal": {
+      "searchOrganisation": "Buscar organización alternativa…",
+      "actionableTitle": "Título de la acción",
+      "addMoreContext": "Agregar más contexto (opcional)",
+      "searchAssignee": "Buscar por nombre o correo electrónico…"
+    },
+    "datePicker": {
+      "selectDate": "Seleccionar fecha"
+    },
+    "searchUser": {
+      "placeholder": "Buscar y agregar usuarios...",
+      "label": "Agregar usuarios",
+      "hint": "Buscar usuario por correo o nombre"
+    },
+    "searchUserGroups": {
+      "placeholder": "Buscar grupos de usuarios..."
+    },
+    "dateRangeFilter": {
+      "startTime": "Hora de inicio",
+      "endTime": "Hora de fin"
+    },
+    "dateTimePicker": {
+      "selectDateTime": "Seleccionar fecha y hora"
+    },
+    "filterMultiSelect": {
+      "selectPlaceholder": "Seleccionar..."
+    },
+    "userProfile": {
+      "teamNamePlaceholder": "Ingresar nombre del equipo",
+      "displayNamePlaceholder": "Ingresar nombre para mostrar",
+      "phoneNumberPlaceholder": "Ingresar número de teléfono",
+      "managerSearchPlaceholder": "Buscar un gerente..."
+    },
+    "multiSelect": {
+      "selectOptions": "Seleccionar opciones",
+      "searchOptions": "Buscar opciones..."
+    },
+    "inputBox": {
+      "typeMessage": "Escribe un mensaje..."
+    }
   }
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, X, UsersRound } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import Input from '../Input/Input';
@@ -35,7 +36,7 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
   excludeGroupIds = [],
   selectedGroups,
   onGroupsChange,
-  placeholder = 'Search user groups...',
+  placeholder,
   label = '',
   hintText = '',
   width = '100%',
@@ -44,6 +45,8 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
   inputTestId = 'user-group-search-input',
   trackMetadata = {},
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.searchUserGroups.placeholder');
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -171,7 +174,7 @@ export const SearchUserGroups: React.FC<SearchUserGroupsProps> = ({
               aria-expanded={isOpen}
               aria-controls='search-user-groups-listbox'
               className={cn('pl-10', disabled.value && 'cursor-not-allowed opacity-50')}
-              placeholder={placeholder}
+              placeholder={resolvedPlaceholder}
               data-testid={inputTestId}
               value={searchValue}
               onChange={handleSearchChange}

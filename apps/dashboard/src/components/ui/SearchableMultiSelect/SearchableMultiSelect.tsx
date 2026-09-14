@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckTickSingle, PlusDefault, SearchBig } from '@xyne/icons';
 import Input from '../Input';
 import { Popover } from '../Popover';
@@ -37,7 +38,7 @@ export function SearchableMultiSelect({
   trigger,
   isOpen,
   onOpenChange,
-  searchPlaceholder = 'Search...',
+  searchPlaceholder,
   searchMaxLength,
   searchAriaLabel,
   listAriaLabel,
@@ -48,6 +49,8 @@ export function SearchableMultiSelect({
   trackCategory,
   trackName,
 }: SearchableMultiSelectProps): ReactElement {
+  const { t } = useTranslation('placeholders');
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t('ui.common.searchEllipsis');
   const [searchValue, setSearchValue] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const listboxId = useId();
@@ -157,7 +160,7 @@ export function SearchableMultiSelect({
           value={searchValue}
           onChange={event => setSearchValue(event.target.value)}
           onKeyDown={handleSearchKeyDown}
-          placeholder={searchPlaceholder}
+          placeholder={resolvedSearchPlaceholder}
           maxLength={searchMaxLength}
           className='h-auto min-w-0 flex-1 rounded-none border-0 p-0 text-sm shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0'
           aria-label={searchAriaLabel}

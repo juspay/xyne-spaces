@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { User } from '@xyne/shared';
@@ -35,15 +36,19 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   excludeUserIds = [],
   selectedUsers,
   onUsersChange,
-  placeholder = 'Search and add users...',
-  label = 'Add Users',
-  hintText = 'Search user by email or name',
+  placeholder,
+  label,
+  hintText,
   width = '100%',
   disabled = { value: false, reason: undefined },
   channelId,
   autoFocus = false,
   allowedUserIds,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.searchUser.placeholder');
+  const resolvedLabel = label ?? t('ui.searchUser.label');
+  const resolvedHintText = hintText ?? t('ui.searchUser.hint');
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -179,7 +184,9 @@ export const SearchUser: React.FC<SearchUserProps> = ({
 
   return (
     <div style={{ width }} className='w-full'>
-      {label && <label className='block text-sm font-medium text-foreground mb-1.5'>{label}</label>}
+      {resolvedLabel && (
+        <label className='block text-sm font-medium text-foreground mb-1.5'>{resolvedLabel}</label>
+      )}
 
       {/* Selected users as badges */}
       {selectedUsers.length > 0 && (
@@ -220,7 +227,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                 selectedIndex >= 0 ? `search-option-${selectedIndex}` : undefined
               }
               className={cn('pl-10', disabled.value && 'cursor-not-allowed opacity-50')}
-              placeholder={placeholder}
+              placeholder={resolvedPlaceholder}
               data-testid='user-search-input'
               value={searchValue}
               onChange={handleSearchChange}
@@ -335,8 +342,8 @@ export const SearchUser: React.FC<SearchUserProps> = ({
         </Popover.Portal>
       </Popover.Root>
 
-      {hintText && !disabled.value && (
-        <p className='text-xs text-muted-foreground mt-1.5'>{hintText}</p>
+      {resolvedHintText && !disabled.value && (
+        <p className='text-xs text-muted-foreground mt-1.5'>{resolvedHintText}</p>
       )}
       {disabled.reason && <p className='text-red-600 text-sm mt-1'>{disabled.reason}</p>}
     </div>

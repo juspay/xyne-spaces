@@ -560,5 +560,63 @@
       "enterPassword": "Enter password",
       "enterDatabase": "Enter database"
     }
+  },
+  "ui": {
+    "common": {
+      "searchEllipsis": "Search..."
+    },
+    "linkDialog": {
+      "linkText": "Link text",
+      "url": "https://example.com"
+    },
+    "editorToolbar": {
+      "imageUrl": "https://example.com/image.png"
+    },
+    "emojiPicker": {
+      "customEmojiName": ":party_parrot:"
+    },
+    "timePicker": {
+      "selectTime": "Select time"
+    },
+    "pulseModal": {
+      "searchOrganisation": "Search alternative organisation…",
+      "actionableTitle": "Actionable title",
+      "addMoreContext": "Add more context (optional)",
+      "searchAssignee": "Search by name or email…"
+    },
+    "datePicker": {
+      "selectDate": "Select date"
+    },
+    "searchUser": {
+      "placeholder": "Search and add users...",
+      "label": "Add Users",
+      "hint": "Search user by email or name"
+    },
+    "searchUserGroups": {
+      "placeholder": "Search user groups..."
+    },
+    "dateRangeFilter": {
+      "startTime": "Start time",
+      "endTime": "End time"
+    },
+    "dateTimePicker": {
+      "selectDateTime": "Select date and time"
+    },
+    "filterMultiSelect": {
+      "selectPlaceholder": "Select..."
+    },
+    "userProfile": {
+      "teamNamePlaceholder": "Enter team name",
+      "displayNamePlaceholder": "Enter display name",
+      "phoneNumberPlaceholder": "Enter phone number",
+      "managerSearchPlaceholder": "Search for a manager..."
+    },
+    "multiSelect": {
+      "selectOptions": "Select options",
+      "searchOptions": "Search options..."
+    },
+    "inputBox": {
+      "typeMessage": "Type a message..."
+    }
   }
 }

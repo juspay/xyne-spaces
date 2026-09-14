@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import { useTranslation } from 'react-i18next';
 import { CheckIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 
@@ -21,10 +22,12 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
   options,
   selectedValues,
   onChange,
-  placeholder = 'Select...',
+  placeholder,
   disabled = false,
   className,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.filterMultiSelect.selectPlaceholder');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -148,7 +151,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                 )}
               </span>
             ) : (
-              <span className='text-muted-foreground'>{placeholder}</span>
+              <span className='text-muted-foreground'>{resolvedPlaceholder}</span>
             )}
           </span>
           <ChevronDownIcon
@@ -188,7 +191,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                 setFocusedIndex(-1);
               }}
               onKeyDown={handleKeyDown}
-              placeholder='Search...'
+              placeholder={t('ui.common.searchEllipsis')}
               className='w-full h-7 px-2 text-sm bg-transparent border border-input rounded-sm outline-none focus:border-ring placeholder:text-muted-foreground'
             />
           </div>

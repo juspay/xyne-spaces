@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Tooltip } from '../Tooltip';
 import {
   Bold,
@@ -25,6 +26,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   rightSlot,
   variant = 'default',
 }) => {
+  const { t } = useTranslation('placeholders');
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
@@ -430,7 +432,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                           value={imageUrl}
                           onChange={e => setImageUrl(e.target.value)}
                           onKeyDown={e => e.key === 'Enter' && insertImageFromUrl()}
-                          placeholder='https://example.com/image.png'
+                          placeholder={t('ui.editorToolbar.imageUrl')}
                           autoFocus // eslint-disable-line jsx-a11y/no-autofocus
                           className='w-full px-2.5 py-1.5 text-xs border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring'
                         />
