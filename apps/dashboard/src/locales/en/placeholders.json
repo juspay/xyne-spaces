@@ -656,5 +656,17 @@
     "alias": "alias",
     "selectDirection": "Select direction...",
     "searchDirections": "Search directions..."
+  },
+  "appSidebar": {
+    "updateStatus": {
+      "placeholder": "Update your status",
+      "searchEmoji": "Search emoji..."
+    },
+    "workspaceInvite": {
+      "emailsPlaceholder": "jane@acme.com, jhon@acme.com"
+    },
+    "workspaceSwitcher": {
+      "namePlaceholder": "Workspace name"
+    }
   }
 }

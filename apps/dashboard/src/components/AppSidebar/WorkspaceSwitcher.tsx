@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
@@ -44,6 +45,7 @@ interface CreateWorkspaceResponse {
 }
 
 export const WorkspaceSwitcher: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const canCreateWorkspace = useCanCreateWorkspace();
 
@@ -469,7 +471,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                   <p className='text-xs font-medium text-foreground'>{createLabel}</p>
                   <input
                     type='text'
-                    placeholder='Workspace name'
+                    placeholder={t('appSidebar.workspaceSwitcher.namePlaceholder')}
                     value={workspaceName}
                     onChange={e => setWorkspaceName(e.target.value)}
                     data-track-category='Workspace_Switcher'
