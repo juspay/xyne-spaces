@@ -438,6 +438,9 @@ importers:
       postgres:
         specifier: ^3.4.7
         version: 3.4.9
+      posthog-node:
+        specifier: ^5.52.2
+        version: 5.52.2(rxjs@7.8.2)
       pptxgenjs:
         specifier: ^4.0.1
         version: 4.0.1
@@ -7059,8 +7062,14 @@ packages:
   '@posthog/core@1.46.8':
     resolution: {integrity: sha512-WQTSwlFhsWk09xngTimHiTyhFU8QZHFZEGSm+6brY3acwYdvTLcTxpIhgl/qOCgn/XoqlCFTZqU1ldWLxNntfA==}
 
+  '@posthog/core@1.53.3':
+    resolution: {integrity: sha512-ioBDeZtsFZej4vfX2bGGBud3DNCvSlmUUdk2KtQWOlpGytbdirMHVxG2iAFkxqemiukqcvf/Do6BtZb5hp9MYw==}
+
   '@posthog/types@1.402.1':
     resolution: {integrity: sha512-4PZ9wMYI8m8AqJuZ9YR1IAHGVtSnYbBVBgTevrKpzZbcSe/OUwhEV2Ks//rJh/L8eMTU8R5DrD4D/hlrOwaAiQ==}
+
+  '@posthog/types@1.412.0':
+    resolution: {integrity: sha512-EP+lSTnEmftW/slhGXsuGcYAygO4oho3hjWqObP+GeceZ+6qcwK9qZwVRqJjsiZAl0xLPy5s0U0SZqGKayFyeQ==}
 
   '@preact/signals-core@1.14.4':
     resolution: {integrity: sha512-HNB6HYeYKhQbJ1aKl+YRjrS4+QWHLKX6qKoUsfS/m0vqzsVaEBiZiaKbG/e+NKk2ch5ALQr/ihWaMHxiCuuWHA==}
@@ -17411,6 +17420,15 @@ packages:
   posthog-js@1.413.2:
     resolution: {integrity: sha512-LddTVMdYFd0jB+p5h3ZHcho9mWNjgKn9QySCQt74iISKrmC3b7KzW2Q7W7aOF6m/NwK7NubIHqLujCER64gSRw==}
 
+  posthog-node@5.52.2:
+    resolution: {integrity: sha512-era2ptMcl8nQBT1apUMeoagLSgU1IfR5IwW4v0gudjzkV7IZbr+slG7I4IPiEG0WmsqrLjKnYz/t75vdveTbFA==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      rxjs: ^7.0.0
+    peerDependenciesMeta:
+      rxjs:
+        optional: true
+
   postject@1.0.0-alpha.6:
     resolution: {integrity: sha512-b9Eb8h2eVqNE8edvKdwqkrY6O7kAwmI8kcnBv1NScolYJbo59XUF0noFq+lxbC1yN20bmC0WBEbDC5H/7ASb0A==}
     engines: {node: '>=14.0.0'}
@@ -26734,7 +26752,13 @@ snapshots:
     dependencies:
       '@posthog/types': 1.402.1
 
+  '@posthog/core@1.53.3':
+    dependencies:
+      '@posthog/types': 1.412.0
+
   '@posthog/types@1.402.1': {}
+
+  '@posthog/types@1.412.0': {}
 
   '@preact/signals-core@1.14.4': {}
 
@@ -39492,6 +39516,12 @@ snapshots:
       web-vitals-soft-navs: web-vitals@6.0.0
     transitivePeerDependencies:
       - preact-render-to-string
+
+  posthog-node@5.52.2(rxjs@7.8.2):
+    dependencies:
+      '@posthog/core': 1.53.3
+    optionalDependencies:
+      rxjs: 7.8.2
 
   postject@1.0.0-alpha.6:
     dependencies:
