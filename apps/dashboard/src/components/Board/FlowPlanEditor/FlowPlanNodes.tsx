@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import {
   AlertTriangle,
@@ -83,6 +84,7 @@ export const StepAssigneePicker: React.FC<{
   value: string | null;
   onChange: (userId: string | null) => void;
 }> = ({ value, onChange }) => {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const users = useActiveUsers();
@@ -144,7 +146,7 @@ export const StepAssigneePicker: React.FC<{
             <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground' />
             <input
               type='text'
-              placeholder='Search users...'
+              placeholder={t('board.flow.searchUsers')}
               value={search}
               onChange={event => setSearch(event.target.value)}
               className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
@@ -208,6 +210,7 @@ export const StepAssigneePicker: React.FC<{
 };
 
 const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => {
+  const { t } = useTranslation('placeholders');
   const { planNode, onUpdate, onDelete, onAddStep, onConfigure, readOnly } = data;
   const isRoot = planNode === null;
   const warning =
@@ -303,7 +306,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
               value={planNode.title}
               readOnly={readOnly}
               onChange={e => onUpdate({ title: e.target.value })}
-              placeholder='Step title...'
+              placeholder={t('board.flow.stepTitle')}
               data-track-category='flow_plan_editor'
               data-track-name='input_step_title'
               className='nodrag w-full text-[13px] font-medium text-foreground bg-transparent border-none focus:outline-none'

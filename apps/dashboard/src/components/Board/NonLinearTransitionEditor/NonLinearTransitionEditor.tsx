@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -511,6 +512,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
   setEtaValue,
   onClose,
 }) => {
+  const { t } = useTranslation('placeholders');
   const statusOption = getStatusOption(stage.defaultTicketStatusV2);
 
   return (
@@ -543,7 +545,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
             type='text'
             value={stage.name}
             onChange={e => onUpdate({ name: e.target.value })}
-            placeholder='Stage name...'
+            placeholder={t('board.stageNameEllipsis')}
             data-track-category='board_stage_config'
             data-track-name='input_stage_name'
             className='w-full text-[12px] font-medium text-foreground bg-background border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#6276be]'
@@ -598,7 +600,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
                   if (e.key === 'Enter') onSaveEta();
                   if (e.key === 'Escape') onCancelEta();
                 }}
-                placeholder='Hours'
+                placeholder={t('board.hours')}
                 data-track-category='board_stage_config'
                 data-track-name='input_stage_eta'
                 className='flex-1 text-[12px] text-foreground bg-transparent border-none focus:outline-none p-0'
@@ -697,6 +699,7 @@ type EdgeSettingsPanelProps = {
 );
 
 const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
+  const { t } = useTranslation('placeholders');
   const {
     toStage,
     meta,
@@ -981,7 +984,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   <input
                     type='number'
                     min='1'
-                    placeholder='Hours'
+                    placeholder={t('board.hours')}
                     data-track-category='transition_config'
                     data-track-name='input_fixed_eta_hours'
                     className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'

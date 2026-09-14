@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, X } from 'lucide-react';
 import { BoardType, FormContextType, FormEntityType, PRStatusEvent } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -52,6 +53,7 @@ const BoardConfigCopyScreen = ({
   onClose,
   onDone,
 }: BoardConfigCopyScreenProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const zero = useZero();
 
@@ -401,8 +403,8 @@ const BoardConfigCopyScreen = ({
                   options={sourceOptions}
                   selectedValue={sourceBoardId}
                   onSelect={setSourceBoardId}
-                  placeholder='Select source board'
-                  searchPlaceholder='Search boards...'
+                  placeholder={t('board.selectSourceBoard')}
+                  searchPlaceholder={t('board.searchBoards')}
                   showSearch={true}
                   width='100%'
                   testId='copy-config-source-board-picker'

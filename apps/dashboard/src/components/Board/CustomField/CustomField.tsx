@@ -1,4 +1,5 @@
 import { ReactElement, useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { GripVertical, Trash2, CornerDownLeft, Check, ChevronDown, Plus } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import type { TicketField } from '../BoardEditScreen/BoardEditScreen.types';
@@ -63,6 +64,7 @@ export const CustomField = ({
   onSaveBranchField,
   onDeleteBranchField,
 }: CustomFieldProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [fieldName, setFieldName] = useState(field?.label || '');
   const [fieldType, setFieldType] = useState<FieldType>((field?.type as FieldType) || 'text');
   const [fieldRequired, setFieldRequired] = useState(field?.required || false);
@@ -401,7 +403,9 @@ export const CustomField = ({
             onChange={setFieldName}
             projectId={projectId}
             inputRef={inputRef}
-            placeholder={mode === 'create' ? 'Custom Field' : 'Field name'}
+            placeholder={
+              mode === 'create' ? t('board.form.customField') : t('board.form.fieldName')
+            }
             className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
             onSelectExisting={suggestion => {
               setFieldName(suggestion.fieldName);
@@ -531,7 +535,7 @@ export const CustomField = ({
                 value={bulkDraft}
                 onChange={e => setBulkDraft(e.target.value)}
                 onBlur={() => tryApplyBulkDraft()}
-                placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
+                placeholder={t('board.form.onePerLineOptions')}
                 rows={8}
                 className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
                 data-track-category='form'

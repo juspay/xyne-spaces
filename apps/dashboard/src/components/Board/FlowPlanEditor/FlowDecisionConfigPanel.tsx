@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   FormFieldType,
   type FlowPlanDecision,
@@ -53,6 +54,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
   onCreateTarget,
   onClose,
 }) => {
+  const { t } = useTranslation('placeholders');
   const sourceGroupId = source.groupId ?? null;
   const sourceGroup = sourceGroupId ? groups.find(group => group.id === sourceGroupId) : undefined;
   const availableNodes = nodes.filter(node => {
@@ -99,7 +101,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               data-track-name='select_decision_field'
               className='w-full bg-background text-[12px] text-foreground'
             >
-              <SelectValue placeholder='Choose a field…' />
+              <SelectValue placeholder={t('board.flow.chooseAField')} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={UNSELECTED_VALUE} className='text-[12px] text-muted-foreground'>
@@ -147,7 +149,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               onChange={event => onUpdate({ comparisonValue: event.target.value })}
               data-track-category='flow_plan_editor'
               data-track-name='input_decision_comparison'
-              placeholder='Comparison text'
+              placeholder={t('board.flow.comparisonText')}
               className='rounded-lg border border-border bg-background px-3 py-2 text-[12px] outline-none focus:border-amber-500'
             />
           </div>
@@ -187,7 +189,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
                         data-track-name='select_decision_target'
                         className='w-full bg-background text-[11px]'
                       >
-                        <SelectValue placeholder='Choose next step…' />
+                        <SelectValue placeholder={t('board.flow.chooseNextStep')} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem

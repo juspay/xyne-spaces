@@ -445,5 +445,58 @@
       "selectCallDesk": "Selecciona una mesa de llamadas",
       "searchCallDesks": "Buscar mesas de llamadas"
     }
+  },
+  "board": {
+    "selectSourceBoard": "Selecciona un tablero de origen",
+    "searchBoards": "Buscar tableros...",
+    "selectNewStage": "Selecciona una nueva etapa",
+    "searchStages": "Buscar etapas...",
+    "searchRoles": "Buscar roles...",
+    "eta": "ETA",
+    "hours": "Horas",
+    "stageNameEllipsis": "Nombre de la etapa...",
+    "search": "Buscar...",
+    "select": "Seleccionar...",
+    "optional": "Opcional",
+    "searchForms": "Buscar formularios...",
+    "roles": {
+      "addStageToStandardPath": "Agregar etapa a la ruta estándar",
+      "addTicketControlRole": "Agregar rol de control de tickets",
+      "addRoleToAutoAssign": "Agregar rol para autoasignación",
+      "selectRole": "Selecciona un rol"
+    },
+    "condition": {
+      "chooseField": "Elige un campo",
+      "chooseCondition": "Elige una condición",
+      "chooseValue": "Elige un valor"
+    },
+    "form": {
+      "enterQuestion": "Ingresa la pregunta",
+      "onePerLineOptions": "Una opción por línea. Pega desde una hoja de cálculo, lista separada por comas, etc.",
+      "customField": "Campo personalizado",
+      "fieldName": "Nombre del campo",
+      "formTitle": "Título del formulario",
+      "addDescription": "Agregar descripción",
+      "enterBoardName": "Ingresa el nombre del tablero",
+      "selectBoardType": "Selecciona el tipo de tablero",
+      "enterBoardDescription": "Ingresa la descripción del tablero (opcional)",
+      "stageName": "Nombre de la etapa",
+      "etaHours": "ETA (hrs)",
+      "seqNumber": "N.º de secuencia",
+      "selectPrStatuses": "Selecciona los estados de PR..."
+    },
+    "editScreen": {
+      "enterBoardName": "Ingresa el nombre del tablero"
+    },
+    "flow": {
+      "customerOnboardingExample": "ej. Incorporación de clientes",
+      "chooseAField": "Elige un campo…",
+      "comparisonText": "Texto de comparación",
+      "chooseNextStep": "Elige el siguiente paso…",
+      "searchUsers": "Buscar usuarios...",
+      "stepTitle": "Título del paso...",
+      "kycExample": "ej. Documentos KYC verificados contra el registro",
+      "groupName": "Nombre del grupo"
+    }
   }
 }

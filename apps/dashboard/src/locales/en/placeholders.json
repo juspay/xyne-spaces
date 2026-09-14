@@ -445,5 +445,58 @@
       "selectCallDesk": "Select call desk",
       "searchCallDesks": "Search call desks"
     }
+  },
+  "board": {
+    "selectSourceBoard": "Select source board",
+    "searchBoards": "Search boards...",
+    "selectNewStage": "Select new stage",
+    "searchStages": "Search stages...",
+    "searchRoles": "Search roles...",
+    "eta": "ETA",
+    "hours": "Hours",
+    "stageNameEllipsis": "Stage name...",
+    "search": "Search...",
+    "select": "Select...",
+    "optional": "Optional",
+    "searchForms": "Search forms...",
+    "roles": {
+      "addStageToStandardPath": "Add stage to Standard Path",
+      "addTicketControlRole": "Add ticket control role",
+      "addRoleToAutoAssign": "Add role to auto-assign",
+      "selectRole": "Select role"
+    },
+    "condition": {
+      "chooseField": "Choose field",
+      "chooseCondition": "Choose condition",
+      "chooseValue": "Choose value"
+    },
+    "form": {
+      "enterQuestion": "Enter question",
+      "onePerLineOptions": "One option per line. Paste from a spreadsheet, comma-separated list, etc.",
+      "customField": "Custom Field",
+      "fieldName": "Field name",
+      "formTitle": "Form Title",
+      "addDescription": "Add description",
+      "enterBoardName": "Enter board name",
+      "selectBoardType": "Select board type",
+      "enterBoardDescription": "Enter board description (optional)",
+      "stageName": "Stage name",
+      "etaHours": "ETA (hrs)",
+      "seqNumber": "Seq #",
+      "selectPrStatuses": "Select PR statuses..."
+    },
+    "editScreen": {
+      "enterBoardName": "Enter Board Name"
+    },
+    "flow": {
+      "customerOnboardingExample": "e.g. Customer Onboarding",
+      "chooseAField": "Choose a field…",
+      "comparisonText": "Comparison text",
+      "chooseNextStep": "Choose next step…",
+      "searchUsers": "Search users...",
+      "stepTitle": "Step title...",
+      "kycExample": "e.g. KYC documents verified against the registry",
+      "groupName": "Group name"
+    }
   }
 }

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, Plus, Search } from 'lucide-react';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -30,6 +31,7 @@ const BoardCreateScreen = ({
   onCreateNew,
   onDuplicate,
 }: BoardCreateScreenProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const [showBoardForm, setShowBoardForm] = useState(false);
   const [selectedBoard, setSelectedBoard] = useState<BoardRow | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,7 +215,7 @@ const BoardCreateScreen = ({
                     />
                     <input
                       type='text'
-                      placeholder='Search boards...'
+                      placeholder={t('board.searchBoards')}
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
                       className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'

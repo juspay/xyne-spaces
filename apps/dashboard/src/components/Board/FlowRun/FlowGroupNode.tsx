@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import {
   AlertTriangle,
@@ -122,6 +123,7 @@ const coverFlowHandles = (color: string): React.ReactNode => (
 
 /** React Flow cover that makes a step group one outer-DAG entity. */
 export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, selected }) => {
+  const { t } = useTranslation('placeholders');
   const {
     name,
     memberCount,
@@ -304,7 +306,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             type='text'
             value={name}
             onChange={e => onRename(e.target.value)}
-            placeholder='Group name'
+            placeholder={t('board.flow.groupName')}
             data-track-category='flow_plan_editor'
             data-track-name='input_group_name'
             className='nodrag min-w-0 flex-1 bg-transparent text-[12px] font-semibold placeholder:opacity-50 focus:outline-none'

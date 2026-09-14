@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ChevronLeft, GitBranch } from 'lucide-react';
@@ -46,6 +47,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
   editBoard,
   cloneBoard,
 }) => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const zero = useZero();
   const isEdit = !!editBoard;
@@ -306,7 +308,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
                 type='text'
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder='e.g. Customer Onboarding'
+                placeholder={t('board.flow.customerOnboardingExample')}
                 data-track-category={trackCategory}
                 data-track-name='input_board_name'
                 aria-invalid={nameCollision || undefined}
@@ -330,7 +332,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
                 id='flow-board-description'
                 value={description}
                 onChange={e => setDescription(e.target.value)}
-                placeholder='Optional'
+                placeholder={t('board.optional')}
                 rows={3}
                 data-track-category={trackCategory}
                 data-track-name='input_board_description'

@@ -1,4 +1,5 @@
 import { ReactElement, ReactNode, useState, useEffect, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, X, Ticket, UserCheck, GitPullRequest, GitBranch, GitMerge } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
@@ -157,6 +158,7 @@ const BoardRolesConfigScreen = ({
   onSave,
   onBack,
 }: BoardRolesConfigScreenProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
 
   const [boardFromQuery] = useCachedQuery(queries.boardFullDetailById({ boardId: boardId || '' }), {
@@ -621,8 +623,8 @@ const BoardRolesConfigScreen = ({
               onSelect={value => {
                 if (value) spAdd(value);
               }}
-              placeholder='Add stage to Standard Path'
-              searchPlaceholder='Search stages...'
+              placeholder={t('board.roles.addStageToStandardPath')}
+              searchPlaceholder={t('board.searchStages')}
               showSearch={true}
               width='100%'
               testId='standard-path-stage-picker'
@@ -670,8 +672,8 @@ const BoardRolesConfigScreen = ({
                 onSelect={value => {
                   if (value) setTicketControlRoleIds(prev => [...prev, value]);
                 }}
-                placeholder='Add ticket control role'
-                searchPlaceholder='Search roles...'
+                placeholder={t('board.roles.addTicketControlRole')}
+                searchPlaceholder={t('board.searchRoles')}
                 showSearch={true}
                 width='100%'
                 testId='ticket-control-roles-picker'
@@ -705,8 +707,8 @@ const BoardRolesConfigScreen = ({
                 onSelect={value => {
                   if (value) aarAdd(value);
                 }}
-                placeholder='Add role to auto-assign'
-                searchPlaceholder='Search roles...'
+                placeholder={t('board.roles.addRoleToAutoAssign')}
+                searchPlaceholder={t('board.searchRoles')}
                 showSearch={true}
                 width='100%'
                 testId='auto-assign-roles-picker'
@@ -734,8 +736,8 @@ const BoardRolesConfigScreen = ({
                     options={roleOptions}
                     selectedValue={prOpenedRoleId}
                     onSelect={setPrOpenedRoleId}
-                    placeholder='Select role'
-                    searchPlaceholder='Search roles...'
+                    placeholder={t('board.roles.selectRole')}
+                    searchPlaceholder={t('board.searchRoles')}
                     showSearch={true}
                     width='100%'
                     showClearButton
@@ -754,8 +756,8 @@ const BoardRolesConfigScreen = ({
                     options={roleOptions}
                     selectedValue={prMergedRoleId}
                     onSelect={setPrMergedRoleId}
-                    placeholder='Select role'
-                    searchPlaceholder='Search roles...'
+                    placeholder={t('board.roles.selectRole')}
+                    searchPlaceholder={t('board.searchRoles')}
                     showSearch={true}
                     width='100%'
                     showClearButton

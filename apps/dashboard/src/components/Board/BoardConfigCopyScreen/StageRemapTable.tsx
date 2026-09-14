@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TicketStatusV2 } from '@xyne/shared';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
@@ -38,6 +39,7 @@ export const StageRemapTable = ({
   value,
   onChange,
 }: StageRemapTableProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // A ticket may only land on a new stage of the SAME status category it's already in
   // (e.g. a ticket in a STARTED-category old stage may only be mapped to a STARTED-category
   // new stage) — so each row gets its own filtered option list, not the full new-stage set.
@@ -95,8 +97,8 @@ export const StageRemapTable = ({
                       onSelect={newStageId => {
                         if (newStageId) onChange(row.oldStageId, newStageId);
                       }}
-                      placeholder='Select new stage'
-                      searchPlaceholder='Search stages...'
+                      placeholder={t('board.selectNewStage')}
+                      searchPlaceholder={t('board.searchStages')}
                       showSearch={true}
                       width='220px'
                       testId={`stage-remap-${row.oldStageId}`}

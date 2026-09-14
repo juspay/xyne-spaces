@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
@@ -28,6 +29,7 @@ export const TransitionFormPicker = ({
   allStages,
   className,
 }: TransitionFormPickerProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const entityOptions = useMemo<SelectorOption[]>(() => {
     return (allForms ?? []).map(form => {
       let label = form.formName;
@@ -55,7 +57,7 @@ export const TransitionFormPicker = ({
           if (selected) onSelectForm(selected);
         }}
         placeholder={placeholder}
-        searchPlaceholder='Search forms...'
+        searchPlaceholder={t('board.searchForms')}
         showSearch
         width='100%'
         inputClassName={triggerInputClassName}
