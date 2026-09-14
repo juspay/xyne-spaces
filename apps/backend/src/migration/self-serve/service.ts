@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { WebClient } from '@slack/web-api';
 import { AccessType } from '@xyne/shared';
 import { encrypt } from '@/services/encryptionService';
+import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
@@ -155,12 +156,14 @@ export class SlackMigrationService {
   }
 
   async approve(id: string, actor: Actor): Promise<MigrationJobView> {
+    this.assertIngestControlEnabled(); // approve always moves the job into ingestion
     const job = await this.mustGet(id, actor);
     if (job.status !== MigrationStatus.AWAITING_APPROVAL) {
       throw new HttpError(409, 'INVALID_STATE', `Only a migration awaiting approval can be approved (current: ${job.status})`);
     }
     const updated = await this.store.update(id, { currentQueue: QueueName.INGESTION });
     await this.queues.enqueue(QueueName.INGESTION, id, 'end');
+    logger.info('[SlackMigration][audit] job approved for ingestion', { id, by: actor.userId, name: actor.name, email: actor.email });
     return toView(updated);
   }
 
@@ -197,10 +200,14 @@ export class SlackMigrationService {
     if (![MigrationStatus.STOPPED, MigrationStatus.FAILED].includes(job.status)) {
       throw new HttpError(409, 'INVALID_STATE', `Only a stopped or failed migration can be resumed (current: ${job.status})`);
     }
+    // Resuming an ingest-phase job re-enqueues it onto the ingestion queue, so it's gated like the other ingestion
+    // actions; a collection-phase resume is unaffected.
+    if (job.currentQueue === QueueName.INGESTION) this.assertIngestControlEnabled();
     // Admin-stopped ⇒ front (resumes next); failed/pod-killed ⇒ end (don't block others). §5.9
     const position = job.status === MigrationStatus.STOPPED ? 'front' : 'end';
     const updated = await this.store.update(id, { status: MigrationStatus.QUEUED, stopRequested: false, stopReason: undefined });
     await this.queues.enqueue(job.currentQueue, id, position);
+    logger.info('[SlackMigration][audit] job resumed', { id, queue: job.currentQueue, by: actor.userId, name: actor.name, email: actor.email });
     return toView(updated);
   }
 
@@ -211,6 +218,7 @@ export class SlackMigrationService {
    * channels that were only partially ingested. No re-collection happens — the dump on GCS is reused as-is.
    */
   async reingest(id: string, actor: Actor): Promise<MigrationJobView> {
+    this.assertIngestControlEnabled(); // stages the job for re-ingestion
     const job = await this.mustGet(id, actor);
     if ([MigrationStatus.QUEUED, MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
       throw new HttpError(409, 'INVALID_STATE', `Migration is already active (current: ${job.status}) — stop it before re-ingesting.`);
@@ -228,6 +236,7 @@ export class SlackMigrationService {
       error: undefined,
       completedAt: undefined,
     });
+    logger.info('[SlackMigration][audit] job reset for re-ingestion', { id, by: actor.userId, name: actor.name, email: actor.email });
     return toView(updated);
   }
 
@@ -243,7 +252,9 @@ export class SlackMigrationService {
     if ([MigrationStatus.QUEUED, MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
       throw new HttpError(409, 'INVALID_STATE', `Wait until the migration is idle before cleaning ghosts (current: ${job.status}).`);
     }
-    return repositories.conversations.cleanupGhostConversations(channelId, dryRun);
+    const result = await repositories.conversations.cleanupGhostConversations(channelId, dryRun);
+    logger.info('[SlackMigration][audit] ghost cleanup', { id, channelId, dryRun, found: result.count, deleted: result.deleted, by: actor.userId, name: actor.name, email: actor.email });
+    return result;
   }
 
   async remove(id: string, actor: Actor, requireOwner = false): Promise<void> {
@@ -290,6 +301,13 @@ export class SlackMigrationService {
   // `approve` only stages onto the paused ingestion queue; starting/stopping it
   // requires the SLACK-MIGRATION-INGEST grant — the admin role is not enough.
 
+  /** Ingestion kill-switch: any action that moves a job toward or through ingestion is blocked when the flag is off. */
+  private assertIngestControlEnabled(): void {
+    if (!config.slackMigration.ingestControlEnabled) {
+      throw new HttpError(403, 'INGEST_DISABLED', 'Ingestion is disabled (set MIGRATION_INGEST_CONTROL=true to enable).');
+    }
+  }
+
   /** True if the user holds the ingestion permission (drives the UI + guards start/stop). */
   async canIngest(userId: string): Promise<boolean> {
     // Env kill-switch: when off, the start/stop-ingestion routes are disabled and the dashboard hides the button.
@@ -321,17 +339,19 @@ export class SlackMigrationService {
     return { canIngest, running: !paused };
   }
 
-  async startIngestion(userId: string): Promise<{ running: boolean }> {
-    await this.assertCanIngest(userId);
+  async startIngestion(actor: Actor): Promise<{ running: boolean }> {
+    await this.assertCanIngest(actor.userId);
     await this.queues.resume(QueueName.INGESTION);
     await this.queues.resume(QueueName.CONV_INGEST); // fan-out: the conversation workers must resume too, not just the planner
+    logger.info('[SlackMigration][audit] ingestion queue enabled', { by: actor.userId, name: actor.name, email: actor.email });
     return { running: true };
   }
 
-  async stopIngestion(userId: string): Promise<{ running: boolean }> {
-    await this.assertCanIngest(userId);
+  async stopIngestion(actor: Actor): Promise<{ running: boolean }> {
+    await this.assertCanIngest(actor.userId);
     await this.queues.pause(QueueName.INGESTION);
     await this.queues.pause(QueueName.CONV_INGEST); // pausing the planner alone wouldn't halt already-fanned-out conversations
+    logger.info('[SlackMigration][audit] ingestion queue disabled', { by: actor.userId, name: actor.name, email: actor.email });
     return { running: false };
   }
 

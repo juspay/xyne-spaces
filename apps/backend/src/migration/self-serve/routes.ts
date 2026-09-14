@@ -63,10 +63,10 @@ export function buildRouter(service: SlackMigrationService): Router {
     res.json(ok(await service.ingestionStatus(actorOf(req).userId)));
   }));
   router.post('/ingestion/start', wrap(async (req, res) => {
-    res.json(ok(await service.startIngestion(actorOf(req).userId)));
+    res.json(ok(await service.startIngestion(actorOf(req))));
   }));
   router.post('/ingestion/stop', wrap(async (req, res) => {
-    res.json(ok(await service.stopIngestion(actorOf(req).userId)));
+    res.json(ok(await service.stopIngestion(actorOf(req))));
   }));
 
   router.post('/migration-jobs/:id/approve', admin, wrap(async (req, res) => { res.json(ok(await service.approve(req.params.id, actorOf(req)))); }));
