@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
@@ -11,6 +12,7 @@ const DELETE_COPY =
   'This removes it from Hindsight and marks all related review rows as rejected. Recall-hit history is retained.';
 
 const DigitalTwinMemoriesTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data, isLoading } = useClawDigitalTwinMemories();
   const deleteMutation = useDeleteDigitalTwinMemory();
   const [search, setSearch] = useState('');
@@ -66,7 +68,7 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
             onChange={e => setSearch(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin search memories'
-            placeholder='Search memories…'
+            placeholder={t('clawAgents.digitalTwin.searchMemories')}
             className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
           />
         </div>

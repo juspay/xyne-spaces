@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Check, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -64,6 +65,7 @@ const FieldLabel = ({ children }: { children: React.ReactNode }): ReactElement =
 );
 
 const ClawSubagentCreateScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const create = useCreateClawSubagent();
   const { data: subagents = [] } = useClawSubagents();
@@ -171,7 +173,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                         .replace(/--+/g, '-'),
                     })
                   }
-                  placeholder='deploy-checker'
+                  placeholder={t('clawAgents.subagent.handleExample')}
                   aria-invalid={Boolean(nameError)}
                 />
                 {nameError && (
@@ -191,7 +193,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                 id='sa-description'
                 value={state.description}
                 onChange={e => update({ description: e.target.value })}
-                placeholder='What this specialist does and when it should be called'
+                placeholder={t('clawAgents.subagent.whatSpecialistDoesCreate')}
               />
             </label>
 
@@ -202,7 +204,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                   id='sa-param-name'
                   value={state.paramName}
                   onChange={e => update({ paramName: e.target.value })}
-                  placeholder='question'
+                  placeholder={t('clawAgents.subagent.questionExample')}
                 />
               </label>
               <label htmlFor='sa-param-desc' className='flex flex-col gap-1.5 sm:col-span-2'>
@@ -211,7 +213,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                   id='sa-param-desc'
                   value={state.paramDescription}
                   onChange={e => update({ paramDescription: e.target.value })}
-                  placeholder='What the parent agent passes in'
+                  placeholder={t('clawAgents.subagent.parentPasses')}
                 />
               </label>
             </div>
@@ -232,7 +234,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
               autoFocus
               value={state.systemPrompt}
               onChange={e => update({ systemPrompt: e.target.value })}
-              placeholder='You are a focused specialist that…'
+              placeholder={t('clawAgents.subagent.focusedSpecialist')}
               className='min-h-80 font-mono text-xs leading-relaxed'
             />
           </label>
@@ -306,7 +308,7 @@ const ClawSubagentCreateScreen = (): ReactElement => {
                         ),
                       })
                     }
-                    placeholder='Working…'
+                    placeholder={t('clawAgents.subagent.working')}
                   />
                   <Button
                     type='button'

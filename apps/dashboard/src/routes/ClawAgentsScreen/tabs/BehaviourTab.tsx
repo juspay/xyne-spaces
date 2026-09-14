@@ -1,4 +1,5 @@
 import { ReactElement, ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eye } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Input } from '@/components/ui/Input';
@@ -71,6 +72,7 @@ const Labeled = ({
  * disabled / read-only when `!permissions.canEdit`.
  */
 const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const canEdit = permissions.canEdit;
   const readOnlyCls = cn(!canEdit && 'cursor-default bg-muted/40 text-muted-foreground');
 
@@ -90,7 +92,7 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
           value={value.promptInjection}
           onChange={e => onChange({ promptInjection: e.target.value })}
           readOnly={!canEdit}
-          placeholder='e.g. Always respond in the user’s language.'
+          placeholder={t('clawAgents.behaviour.respondLanguage')}
           className={cn('min-h-[96px]', readOnlyCls)}
         />
         <p className='text-xs text-muted-foreground'>
@@ -149,7 +151,7 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
             value={value.verifyResponseCriteria}
             onChange={e => onChange({ verifyResponseCriteria: e.target.value })}
             readOnly={!canEdit}
-            placeholder='e.g. Must include a link to the source PR.'
+            placeholder={t('clawAgents.behaviour.mustIncludeLink')}
             className={cn('min-h-[72px]', readOnlyCls)}
           />
         </Labeled>
@@ -234,7 +236,7 @@ const BehaviourTab = ({ permissions, value, onChange }: BehaviourTabProps): Reac
             value={value.outputRequireTools}
             onChange={e => onChange({ outputRequireTools: e.target.value })}
             readOnly={!canEdit}
-            placeholder='e.g. search, fetch'
+            placeholder={t('clawAgents.behaviour.searchFetchExample')}
             className={readOnlyCls}
           />
         </Labeled>

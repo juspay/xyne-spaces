@@ -229,5 +229,71 @@
       "searchDefault": "Buscar...",
       "searchAssignees": "Buscar responsables..."
     }
+  },
+  "clawAgents": {
+    "emailExample": "jane@example.com",
+    "useDefault": "Usar predeterminado",
+    "pasteCode": "Pega el código o la URL de retorno",
+    "maskedKey": "••••••••",
+    "apiKeyDotsExample": "sk-...",
+    "skill": {
+      "whatCoversNoEllipsis": "Qué hace esta habilidad y cuándo deberían usarla los agentes",
+      "whatCoversEllipsis": "Qué hace esta habilidad y cuándo deberían usarla los agentes…",
+      "playbook": "Guía en markdown que el agente consulta mientras trabaja…",
+      "nameExample": "ej. Pautas de revisión de PR",
+      "name": "Nombre de la habilidad"
+    },
+    "subagent": {
+      "handleExample": "deploy-checker",
+      "whatSpecialistDoesCreate": "Qué hace este especialista y cuándo debería llamársele",
+      "whatSubagentDoesDetail": "Qué hace este subagente y cuándo debería llamársele",
+      "questionExample": "pregunta",
+      "parentPasses": "Qué le pasa el agente principal",
+      "focusedSpecialist": "Eres un especialista enfocado que…",
+      "working": "Trabajando…",
+      "emailOrUserId": "Correo electrónico o ID de usuario"
+    },
+    "identity": {
+      "whatDoes": "¿Qué hace este agente?",
+      "nameExample": "ej. Revisor de PR, Guía de incorporación"
+    },
+    "persona": {
+      "describeAgentDo": "Describe qué debe hacer este agente…",
+      "youAre": "Eres un…",
+      "agentName": "Nombre del agente",
+      "describeBehavior": "Describe cómo debería comportarse este agente…"
+    },
+    "agentsTab": {
+      "searchAgents": "Buscar agentes"
+    },
+    "behaviour": {
+      "mustIncludeLink": "ej. Debe incluir un enlace al PR de origen.",
+      "searchFetchExample": "ej. search, fetch",
+      "respondLanguage": "ej. Responde siempre en el idioma del usuario."
+    },
+    "digitalTwin": {
+      "searchMemories": "Buscar recuerdos…",
+      "askQuestion": "Haz una pregunta que tu Gemelo podría responder…",
+      "sentByTwin": "— Enviado por mi Gemelo Digital · puede contener errores"
+    },
+    "knowledge": {
+      "searchSkills": "Buscar habilidades…"
+    },
+    "mcp": {
+      "searchIntegrations": "Buscar integraciones"
+    },
+    "modelProvider": {
+      "providerDefault": "predeterminado del proveedor",
+      "maxTokensExample": "16384"
+    },
+    "people": {
+      "addByNameOrEmail": "Agregar personas por nombre o correo electrónico"
+    },
+    "skillsTab": {
+      "searchSkills": "Buscar habilidades"
+    },
+    "subagentsTab": {
+      "searchSubagents": "Buscar subagentes"
+    }
   }
 }

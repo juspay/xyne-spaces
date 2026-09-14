@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { Switch } from '@/components/ui/Switch';
@@ -13,6 +14,7 @@ const MAX_SCORE = 1;
 const SCORE_STEP = 0.05;
 
 const DigitalTwinSettingsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data: status, isLoading } = useClawDigitalTwinStatus();
   const updateMutation = useUpdateDigitalTwinSettings();
 
@@ -71,7 +73,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
         <textarea
           value={suffix}
           onChange={e => setSuffix(e.target.value.slice(0, MAX_SUFFIX_LEN))}
-          placeholder='— Sent by my Digital Twin · may contain mistakes'
+          placeholder={t('clawAgents.digitalTwin.sentByTwin')}
           rows={3}
           maxLength={MAX_SUFFIX_LEN}
           data-track-category='Claw Agents'

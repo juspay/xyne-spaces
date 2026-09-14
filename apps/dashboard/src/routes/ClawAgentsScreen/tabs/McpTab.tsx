@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { cn } from '@/utils/classNames';
@@ -97,6 +98,7 @@ const serverMatchesSearch = (server: McpServer, q: string): boolean =>
   `${server.name} ${server.description ?? ''}`.toLowerCase().includes(q);
 
 const McpTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data, isLoading, isError, refetch } = useClawMcp();
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const connections = useMemo(() => data?.connections ?? [], [data]);
@@ -216,7 +218,7 @@ const McpTab = (): ReactElement => {
                 onChange={e => setQuery(e.target.value)}
                 data-track-category='Claw Agents'
                 data-track-name='Search MCP integrations'
-                placeholder='Search integrations'
+                placeholder={t('clawAgents.mcp.searchIntegrations')}
                 className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
               />
             </div>

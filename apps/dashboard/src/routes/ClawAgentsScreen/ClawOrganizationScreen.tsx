@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Building2, Trash2, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
@@ -46,6 +47,7 @@ const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => (
 );
 
 const ClawOrganizationScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data: organization, isLoading, error, refetch } = useClawOrganization();
   const orgId = organization?.detail.id ?? '';
   const addMember = useAddClawOrganizationMember(orgId);
@@ -188,7 +190,7 @@ const ClawOrganizationScreen = (): ReactElement => {
                 onKeyDown={event => {
                   if (event.key === 'Enter') void submitMember();
                 }}
-                placeholder='jane@example.com'
+                placeholder={t('clawAgents.emailExample')}
                 disabled={addMember.isPending}
               />
             </div>

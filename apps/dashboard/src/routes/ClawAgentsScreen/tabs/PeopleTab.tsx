@@ -1,4 +1,5 @@
 import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Crown, Loader2, Search, X } from 'lucide-react';
@@ -80,6 +81,7 @@ const MemberRow = ({
  * read-only roster.
  */
 const PeopleTab = ({ agent, permissions }: PeopleTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
@@ -175,7 +177,7 @@ const PeopleTab = ({ agent, permissions }: PeopleTabProps): ReactElement => {
               <Input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder='Add people by name or email'
+                placeholder={t('clawAgents.people.addByNameOrEmail')}
                 className='pl-8'
               />
               {showResults && (

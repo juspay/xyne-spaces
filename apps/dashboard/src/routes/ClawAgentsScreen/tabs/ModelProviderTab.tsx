@@ -1,4 +1,5 @@
 import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
@@ -112,6 +113,7 @@ const iconBtn =
  * Non-owners see a read-only note, mirroring the reference.
  */
 const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const isOwner = isActualOwner;
 
@@ -402,7 +404,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
             <Input
               value={draft.temperature}
               onChange={e => set({ temperature: e.target.value })}
-              placeholder='provider default'
+              placeholder={t('clawAgents.modelProvider.providerDefault')}
               inputMode='decimal'
             />
             {temperatureConflict ? (
@@ -421,7 +423,7 @@ const ModelProviderTab = ({ agent, isActualOwner }: ModelProviderTabProps): Reac
             <Input
               value={draft.maxTokens}
               onChange={e => set({ maxTokens: e.target.value })}
-              placeholder='16384'
+              placeholder={t('clawAgents.modelProvider.maxTokensExample')}
               inputMode='numeric'
             />
             <span className='text-xs text-muted-foreground'>

@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { SectionCaption } from '@/components/ClawAgents/SectionCaption';
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { name, description, color, slugManual } = state;
   const { checking, nameError, slugError, nameValid } = nameCheck;
 
@@ -38,7 +40,7 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
                   ...(slugManual ? {} : { slug: slugify(e.target.value) }),
                 })
               }
-              placeholder='e.g. PR Reviewer, Onboarding Guide'
+              placeholder={t('clawAgents.identity.nameExample')}
               autoFocus
               data-track-category='Claw Agents'
               data-track-name='Agent name input'
@@ -108,7 +110,7 @@ export function IdentityStep({ state, slug, nameCheck, update }: Props): ReactEl
           id='claw-agent-description'
           value={description}
           onChange={e => update({ description: e.target.value })}
-          placeholder='What does this agent do?'
+          placeholder={t('clawAgents.identity.whatDoes')}
           data-track-category='Claw Agents'
           data-track-name='Agent description input'
           className='w-full rounded-lg border border-border bg-card px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30'

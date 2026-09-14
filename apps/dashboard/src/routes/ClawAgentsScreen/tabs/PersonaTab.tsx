@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eye, Lock, Pencil } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Input } from '@/components/ui/Input';
@@ -56,6 +57,7 @@ const PersonaTab = ({
   isActualOwner,
   onRenameRequested,
 }: PersonaTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const canEdit = permissions.canEdit;
   const readOnlyCls = cn(!canEdit && 'cursor-default bg-muted/40 text-muted-foreground');
 
@@ -73,7 +75,7 @@ const PersonaTab = ({
           value={draftName}
           onChange={e => onDraftNameChange(e.target.value)}
           readOnly={!canEdit}
-          placeholder='Agent name'
+          placeholder={t('clawAgents.persona.agentName')}
           className={readOnlyCls}
         />
       </Field>
@@ -112,7 +114,7 @@ const PersonaTab = ({
           value={draftDescription}
           onChange={e => onDraftDescriptionChange(e.target.value)}
           readOnly={!canEdit}
-          placeholder='What does this agent do?'
+          placeholder={t('clawAgents.identity.whatDoes')}
           className={readOnlyCls}
         />
       </Field>
@@ -123,7 +125,7 @@ const PersonaTab = ({
             value={prompt}
             onChange={e => onPromptChange(e.target.value)}
             readOnly={!canEdit}
-            placeholder='Describe how this agent should behave…'
+            placeholder={t('clawAgents.persona.describeBehavior')}
             className={cn('min-h-[240px] font-mono text-[13px] leading-relaxed', readOnlyCls)}
           />
           <span className='self-end text-xs tabular-nums text-muted-foreground'>

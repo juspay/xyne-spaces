@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Plus, Search } from 'lucide-react';
 import { cn } from '@/utils/classNames';
@@ -125,6 +126,7 @@ const skillMatchesSearch = (skill: Skill, q: string): boolean =>
   `${skill.name} ${skill.slug} ${skill.description ?? ''}`.toLowerCase().includes(q);
 
 const SkillsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data, isLoading, isError, refetch } = useClawSkills();
   const skills = useMemo(() => data ?? [], [data]);
 
@@ -244,7 +246,7 @@ const SkillsTab = (): ReactElement => {
                   onChange={e => setQuery(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Search skills'
-                  placeholder='Search skills'
+                  placeholder={t('clawAgents.skillsTab.searchSkills')}
                   className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                 />
               </div>

@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useId, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -568,6 +569,7 @@ const GenericProviderConfigForm = ({
   onMutate: () => Promise<void>;
   onClose: () => void;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isClaude = provider === 'claude';
   const isCodex = provider === 'codex';
   const isLitellm = provider === 'litellm';
@@ -818,7 +820,7 @@ const GenericProviderConfigForm = ({
                   <Input
                     value={claudeCode}
                     onChange={event => setClaudeCode(event.target.value)}
-                    placeholder='Paste code or callback URL'
+                    placeholder={t('clawAgents.pasteCode')}
                   />
                   <div className='flex gap-2'>
                     <Button
@@ -877,7 +879,7 @@ const GenericProviderConfigForm = ({
                   <Input
                     value={codexCode}
                     onChange={event => setCodexCode(event.target.value)}
-                    placeholder='Paste code or callback URL'
+                    placeholder={t('clawAgents.pasteCode')}
                   />
                   <div className='flex gap-2'>
                     <Button
@@ -915,7 +917,7 @@ const GenericProviderConfigForm = ({
           label={isOauth && isClaude ? 'OAuth Token' : 'API Key'}
           value={apiKey}
           onChange={setApiKey}
-          placeholder={hasKey ? '••••••••' : 'sk-...'}
+          placeholder={hasKey ? t('clawAgents.maskedKey') : t('clawAgents.apiKeyDotsExample')}
           hint={hasKey ? 'Leave blank to keep current' : undefined}
         />
       )}
@@ -931,7 +933,7 @@ const GenericProviderConfigForm = ({
             onValueChange={value => setModel(value === DEFAULT_MODEL_VALUE ? '' : value)}
           >
             <SelectTrigger className='w-full'>
-              <SelectValue placeholder='Use default' />
+              <SelectValue placeholder={t('clawAgents.useDefault')} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={DEFAULT_MODEL_VALUE}>Use default</SelectItem>
@@ -1317,27 +1319,30 @@ const LabeledSelect = ({
   options: Array<{ value: string; label: string }>;
   disabled?: boolean | undefined;
   onValueChange: (value: string) => void | Promise<void>;
-}): ReactElement => (
-  <div>
-    <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>{label}</span>
-    <Select
-      value={value}
-      onValueChange={value => void onValueChange(value)}
-      disabled={disabled ?? false}
-    >
-      <SelectTrigger className='w-full'>
-        <SelectValue placeholder='Use default' />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map(option => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  </div>
-);
+}): ReactElement => {
+  const { t } = useTranslation('placeholders');
+  return (
+    <div>
+      <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>{label}</span>
+      <Select
+        value={value}
+        onValueChange={value => void onValueChange(value)}
+        disabled={disabled ?? false}
+      >
+        <SelectTrigger className='w-full'>
+          <SelectValue placeholder={t('clawAgents.useDefault')} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(option => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+};
 
 async function listProviderCredentialsForDialog(
   userId: string,

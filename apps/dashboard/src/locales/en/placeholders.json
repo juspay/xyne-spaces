@@ -229,5 +229,71 @@
       "searchDefault": "Search...",
       "searchAssignees": "Search assignees..."
     }
+  },
+  "clawAgents": {
+    "emailExample": "jane@example.com",
+    "useDefault": "Use default",
+    "pasteCode": "Paste code or callback URL",
+    "maskedKey": "••••••••",
+    "apiKeyDotsExample": "sk-...",
+    "skill": {
+      "whatCoversNoEllipsis": "What this skill does and when agents should use it",
+      "whatCoversEllipsis": "What this skill does and when agents should use it…",
+      "playbook": "Markdown playbook the agent consults while working…",
+      "nameExample": "e.g. PR Review Guidelines",
+      "name": "Skill name"
+    },
+    "subagent": {
+      "handleExample": "deploy-checker",
+      "whatSpecialistDoesCreate": "What this specialist does and when it should be called",
+      "whatSubagentDoesDetail": "What this subagent does and when it should be called",
+      "questionExample": "question",
+      "parentPasses": "What the parent agent passes in",
+      "focusedSpecialist": "You are a focused specialist that…",
+      "working": "Working…",
+      "emailOrUserId": "Email or user ID"
+    },
+    "identity": {
+      "whatDoes": "What does this agent do?",
+      "nameExample": "e.g. PR Reviewer, Onboarding Guide"
+    },
+    "persona": {
+      "describeAgentDo": "Describe what this agent should do…",
+      "youAre": "You are a…",
+      "agentName": "Agent name",
+      "describeBehavior": "Describe how this agent should behave…"
+    },
+    "agentsTab": {
+      "searchAgents": "Search agents"
+    },
+    "behaviour": {
+      "mustIncludeLink": "e.g. Must include a link to the source PR.",
+      "searchFetchExample": "e.g. search, fetch",
+      "respondLanguage": "e.g. Always respond in the user’s language."
+    },
+    "digitalTwin": {
+      "searchMemories": "Search memories…",
+      "askQuestion": "Ask a question your Twin might answer…",
+      "sentByTwin": "— Sent by my Digital Twin · may contain mistakes"
+    },
+    "knowledge": {
+      "searchSkills": "Search skills…"
+    },
+    "mcp": {
+      "searchIntegrations": "Search integrations"
+    },
+    "modelProvider": {
+      "providerDefault": "provider default",
+      "maxTokensExample": "16384"
+    },
+    "people": {
+      "addByNameOrEmail": "Add people by name or email"
+    },
+    "skillsTab": {
+      "searchSkills": "Search skills"
+    },
+    "subagentsTab": {
+      "searchSubagents": "Search subagents"
+    }
   }
 }

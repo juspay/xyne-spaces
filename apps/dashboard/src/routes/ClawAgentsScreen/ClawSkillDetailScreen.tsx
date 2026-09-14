@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, FolderOpen, Globe, Lock, Trash2, Upload } from 'lucide-react';
@@ -279,6 +280,7 @@ const FilesSection = ({
 };
 
 const ClawSkillDetailScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { skillSlug } = useParams<{ skillSlug: string }>();
   const { data: skills, isLoading } = useClawSkills();
   const skill = skills?.find(s => s.slug === skillSlug);
@@ -616,7 +618,7 @@ const ClawSkillDetailScreen = (): ReactElement => {
                             onChange={e => setDraftName(e.target.value)}
                             data-track-category='Claw Agents'
                             data-track-name='Edit skill name'
-                            placeholder='Skill name'
+                            placeholder={t('clawAgents.skill.name')}
                             aria-label='Skill name'
                             className={cn(seamlessField, 'font-medium')}
                           />
@@ -626,7 +628,7 @@ const ClawSkillDetailScreen = (): ReactElement => {
                           <AutoTextarea
                             value={descriptionValue}
                             onChange={e => setDraftDescription(e.target.value)}
-                            placeholder='What this skill does and when agents should use it…'
+                            placeholder={t('clawAgents.skill.whatCoversEllipsis')}
                             aria-label='Skill description'
                             className={cn(seamlessField, 'resize-none leading-relaxed')}
                           />
@@ -712,7 +714,7 @@ const ClawSkillDetailScreen = (): ReactElement => {
                         value={contentValue}
                         maxHeight={520}
                         onChange={e => setDraftContent(e.target.value)}
-                        placeholder='Markdown playbook the agent consults while working…'
+                        placeholder={t('clawAgents.skill.playbook')}
                         className={cn(codeField, 'min-h-[200px]')}
                       />
                       {contentDirty && (
