@@ -1,3 +1,10 @@
+## [1.317.2](https://github.com/juspay/xyne-spaces/compare/v1.317.1...v1.317.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* XYNE resolve shared channel-email mailbox in manual refetch ([#1833](https://github.com/juspay/xyne-spaces/issues/1833)) ([dd7521d](https://github.com/juspay/xyne-spaces/commit/dd7521d17c319ec29c499696e7909d40b27cf3ef))
+
 ## [1.317.1](https://github.com/juspay/xyne-spaces/compare/v1.317.0...v1.317.1) (2026-09-12)
 
 
