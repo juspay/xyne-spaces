@@ -166,6 +166,10 @@ export default function RecordingDetailV2Screen(): ReactElement {
     () => new URLSearchParams(location.search).get('tab'),
     [location.search],
   );
+  const openedFromActivity = useMemo(
+    () => new URLSearchParams(location.search).has('selectedActivity'),
+    [location.search],
+  );
   const navState = location.state as RecordingNavState | null;
   const justStopped = navState?.justStopped === true;
   const stoppedAtMs = navState?.endedAtMs ?? null;
@@ -1083,30 +1087,33 @@ export default function RecordingDetailV2Screen(): ReactElement {
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
           {/* The only pinned row — the rest of the page scrolls under it. */}
           <div className='sticky top-0 z-20 -mx-4 -mt-6 flex items-center justify-between gap-3 bg-background px-4 pb-3 pt-6'>
-            <nav aria-label='Breadcrumb' className='min-w-0'>
-              <ol className='flex items-center gap-1.5 text-sm'>
-                <li>
-                  <button
-                    type='button'
-                    onClick={() => void navigate(backTo)}
-                    className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='breadcrumb_recordings'
-                  >
-                    Recordings
-                  </button>
-                </li>
-                <li aria-hidden='true' className='text-muted-foreground'>
-                  /
-                </li>
-                {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
-                <li className='truncate text-foreground'>
-                  {isGeneratingTitle ? 'Generating title…' : breadcrumbTitle}
-                </li>
-              </ol>
-            </nav>
+            {!openedFromActivity && (
+              <nav aria-label='Breadcrumb' className='min-w-0'>
+                <ol className='flex items-center gap-1.5 text-sm'>
+                  <li>
+                    <button
+                      type='button'
+                      onClick={() => void navigate(backTo)}
+                      className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='breadcrumb_recordings'
+                    >
+                      Recordings
+                    </button>
+                  </li>
+                  <li aria-hidden='true' className='text-muted-foreground'>
+                    /
+                  </li>
+                  {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
+                  <li className='truncate text-foreground'>
+                    {isGeneratingTitle ? 'Generating title…' : breadcrumbTitle}
+                  </li>
+                </ol>
+              </nav>
+            )}
 
-            <div className='flex shrink-0 items-center gap-1'>
+            {/* ml-auto keeps the actions right-aligned when the breadcrumb is gone. */}
+            <div className='ml-auto flex shrink-0 items-center gap-1'>
               {canShare && (
                 <Tooltip content='Share' side='bottom'>
                   <Button
