@@ -92,6 +92,7 @@
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^2.10.3",
     "@xyne/shared": "workspace:*",
+    "@xyne/kata-sdk": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
     "@xyne/workflow-sdk": "3.2.37",
