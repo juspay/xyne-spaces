@@ -292,6 +292,8 @@ export class SlackMigrationService {
 
   /** True if the user holds the ingestion permission (drives the UI + guards start/stop). */
   async canIngest(userId: string): Promise<boolean> {
+    // Env kill-switch: when off, the start/stop-ingestion routes are disabled and the dashboard hides the button.
+    if (!config.slackMigration.ingestControlEnabled) return false;
     const resource = await repositories.resources.findByName('SLACK-MIGRATION-INGEST');
     if (!resource) return false;
     return repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
