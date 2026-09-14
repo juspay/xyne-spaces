@@ -213,16 +213,22 @@ export function deriveOps({
   for (const { entry, id } of resolved) {
     if (id) {
       const block = byId.get(id) as BlockNoteBlock;
-      if (render(block).trim() !== (entry.canonical ?? entry.markdown).trim()) {
-        ops.push({
-          op: 'replace', key: `op${order}`, blockId: id,
-          beforeContent: block, afterMarkdown: entry.markdown, orderIndex: order++,
-        });
-      }
+      const changed = render(block).trim() !== (entry.canonical ?? entry.markdown).trim();
       if (stationary.has(id)) {
+        if (changed) {
+          ops.push({
+            op: 'replace', key: `op${order}`, blockId: id,
+            beforeContent: block, afterMarkdown: entry.markdown, orderIndex: order++,
+          });
+        }
         lastStationary = id;
       } else {
-        ops.push({ op: 'move', key: `op${order}`, blockId: id, anchor: lastStationary, orderIndex: order++ });
+        // Relocated, and possibly reworded on the way: one move, one decision.
+        // The new text rides on the move so the review shows it at the destination.
+        ops.push({
+          op: 'move', key: `op${order}`, blockId: id, anchor: lastStationary, orderIndex: order++,
+          ...(changed ? { beforeContent: block, afterMarkdown: entry.markdown } : {}),
+        });
       }
     } else {
       ops.push({
