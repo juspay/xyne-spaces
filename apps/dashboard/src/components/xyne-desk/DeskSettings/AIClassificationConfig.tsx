@@ -1,5 +1,6 @@
 import { ArrowLeft, Users, Trash2, Plus, CircleHelp } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Select,
   SelectContent,
@@ -56,6 +57,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
   error,
   validationError,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [showNewRuleForm, setShowNewRuleForm] = useState(false);
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState('');
@@ -169,7 +171,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           type='text'
           value={categoryField}
           onChange={e => setCategoryField(e.target.value)}
-          placeholder='eg. Query Type'
+          placeholder={t('desk.classification.queryTypeExample')}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
           className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
@@ -187,7 +189,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           type='text'
           value={subCategoryField}
           onChange={e => setSubCategoryField(e.target.value)}
-          placeholder='eg. Feature Request Type'
+          placeholder={t('desk.classification.featureRequestTypeExample')}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
           className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
@@ -252,7 +254,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           id='classification-prompt'
           value={classificationPrompt}
           onChange={e => setClassificationPrompt(e.target.value)}
-          placeholder='Enter AI classification prompt'
+          placeholder={t('desk.classification.enterPrompt')}
           spellCheck={false}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
@@ -358,7 +360,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     type='text'
                     value={editCategory}
                     onChange={e => setEditCategory(e.target.value)}
-                    placeholder='eg. Feature Request'
+                    placeholder={t('desk.featureRequestExample')}
                     className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleCategory'
@@ -367,14 +369,14 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     type='text'
                     value={editSubCategory}
                     onChange={e => setEditSubCategory(e.target.value)}
-                    placeholder='eg. UPI (empty = catch all)'
+                    placeholder={t('desk.classification.upiEmptyExample')}
                     className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleSubCategory'
                   />
                   <Select value={editUserGroup} onValueChange={setEditUserGroup}>
                     <SelectTrigger className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'>
-                      <SelectValue placeholder='Choose user group' />
+                      <SelectValue placeholder={t('desk.chooseUserGroup')} />
                     </SelectTrigger>
                     <SelectContent className='rounded-[10px]'>
                       {userGroups.map(group => (
@@ -470,7 +472,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                   type='text'
                   value={newCategory}
                   onChange={e => setNewCategory(e.target.value)}
-                  placeholder='eg. Feature Request'
+                  placeholder={t('desk.featureRequestExample')}
                   className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                   data-track-category='DeskSettings'
                   data-track-name='NewRuleCategory'
@@ -486,7 +488,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     id='new-rule-user-group'
                     className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                   >
-                    <SelectValue placeholder='Choose user group' />
+                    <SelectValue placeholder={t('desk.chooseUserGroup')} />
                   </SelectTrigger>
                   <SelectContent className='rounded-[10px]'>
                     {userGroups.map(group => (
@@ -509,7 +511,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 type='text'
                 value={newSubCategory}
                 onChange={e => setNewSubCategory(e.target.value)}
-                placeholder='eg. UPI, mWeb Intent, UPI QR'
+                placeholder={t('desk.classification.upiExamplesList')}
                 className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
                 data-track-category='DeskSettings'
                 data-track-name='NewRuleSubCategory'

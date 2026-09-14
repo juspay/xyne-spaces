@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
 import { Plug, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
@@ -37,6 +38,7 @@ export const SocialMediaDeskIntegrationCard = ({
   channelId,
   canManage,
 }: SocialMediaDeskIntegrationCardProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const [showAddApps, setShowAddApps] = useState(false);
   const [applications, setApplications] = useState<GooglePlayApplicationInput[]>([
     createGooglePlayApplication(),
@@ -272,7 +274,7 @@ export const SocialMediaDeskIntegrationCard = ({
                     onChange={event => updateApplication(index, 'displayName', event.target.value)}
                     data-track-category='social-media-desk-integration'
                     data-track-name='app-name-input'
-                    placeholder='My Android app'
+                    placeholder={t('desk.integration.androidAppExample')}
                     maxLength={120}
                   />
                 </label>
@@ -287,7 +289,7 @@ export const SocialMediaDeskIntegrationCard = ({
                     onChange={event => updateApplication(index, 'packageName', event.target.value)}
                     data-track-category='social-media-desk-integration'
                     data-track-name='package-name-input'
-                    placeholder='com.example.app'
+                    placeholder={t('desk.integration.appIdExample')}
                     aria-invalid={
                       application.packageName.length > 0 &&
                       !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName.trim())

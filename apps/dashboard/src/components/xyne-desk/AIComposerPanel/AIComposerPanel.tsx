@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wand2,
@@ -42,6 +43,7 @@ export const AIComposerPanel = ({
   onClose,
   disabled = false,
 }: AIComposerPanelProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,7 +149,7 @@ export const AIComposerPanel = ({
                 }
               }}
               disabled={disabled}
-              placeholder='What do you need?'
+              placeholder={t('desk.composer.whatDoYouNeed')}
               rows={1}
               className='flex-1 bg-transparent text-sm outline-none resize-none leading-snug placeholder:text-muted-foreground/50 min-h-[20px] max-h-[120px] py-0.5'
               data-track-category='Support'

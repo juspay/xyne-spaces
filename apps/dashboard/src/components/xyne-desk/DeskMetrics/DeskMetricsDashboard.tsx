@@ -1,4 +1,5 @@
 import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
 import {
@@ -970,6 +971,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   availableStages = [],
   onTicketClick,
 }) => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   // Guests see a trimmed view: overview only, created vs resolved chart, basic ticket table.
   const isGuest = user?.role === WorkspaceRole.GUEST;
@@ -1510,7 +1512,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           value={deskSearch}
                           onChange={e => setDeskSearch(e.target.value)}
                           onKeyDown={e => e.stopPropagation()}
-                          placeholder='Search desks…'
+                          placeholder={t('desk.metrics.searchDesks')}
                           className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchDesks'
@@ -1680,7 +1682,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           value={filterSearch}
                           onChange={e => setFilterSearch(e.target.value)}
                           onKeyDown={e => e.stopPropagation()}
-                          placeholder='Search filters…'
+                          placeholder={t('desk.metrics.searchFilters')}
                           className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchFilters'

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertCircle, Plug, Plus, Unplug } from 'lucide-react';
@@ -20,6 +21,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
   channelId,
   canManage,
 }) => {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const [selectedInstalledAppId, setSelectedInstalledAppId] = useState('');
   // Disconnecting stops ticket intake and reply delivery for that app, so it is
@@ -192,7 +194,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
           <div className='flex w-full max-w-[480px] items-center gap-2'>
             <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
               <SelectTrigger className='w-full'>
-                <SelectValue placeholder='Select a Xyne App' />
+                <SelectValue placeholder={t('desk.settings.selectXyneApp')} />
               </SelectTrigger>
               <SelectContent>
                 {connectableApps.map(app => (

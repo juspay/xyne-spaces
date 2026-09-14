@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useEditor,
   EditorContent,
@@ -125,7 +126,7 @@ export const EmailEditor = ({
   onBlur,
   onFocus,
   onEditorReady,
-  placeholder = 'Compose email...',
+  placeholder,
   disabled = false,
   readOnly = false,
   className = '',
@@ -140,6 +141,7 @@ export const EmailEditor = ({
   onDropAttachmentIntoEditor,
   onFileDropHandled,
 }: EmailEditorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const cb = useRef({
     onChange,
     onAddFiles,
@@ -275,7 +277,7 @@ export const EmailEditor = ({
         link: false,
       }),
       LinkExtension.extend({ inclusive: false }).configure({ openOnClick: false }),
-      Placeholder.configure({ placeholder }),
+      Placeholder.configure({ placeholder: placeholder ?? t('desk.email.composeDefault') }),
       InlineImage.configure({
         inline: true,
         allowBase64: false,

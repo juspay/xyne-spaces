@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Phone, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { ChannelType } from '@xyne/shared';
@@ -56,6 +57,7 @@ function validateAgentMapping(value: unknown): string | null {
 }
 
 export const WorkspaceOzonetelCard = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const allChannels = useAllChannels();
   const callDeskChannels = allChannels
@@ -326,7 +328,11 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setApiKey(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditApiKey'
-                      placeholder={data?.configured ? '•••••••• (unchanged)' : 'Ozonetel API key'}
+                      placeholder={
+                        data?.configured
+                          ? t('desk.ozonetel.apiKeyUnchanged')
+                          : t('desk.ozonetel.apiKeyExample')
+                      }
                       className={inputClass}
                     />
                   </Field>
@@ -360,7 +366,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       onChange={e => setToolbarUrl(e.target.value)}
                       data-track-category='workspace-ozonetel'
                       data-track-name='EditToolbarUrl'
-                      placeholder='https://agent.ccaas.ozonetel.com/toolbar_widget/index.html'
+                      placeholder={t('desk.ozonetel.widgetUrlExample')}
                       className={inputClass}
                     />
                   </Field>
@@ -373,7 +379,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       value={data?.postCallWebhookURL}
                       onCopy={() => void copyValue(data?.postCallWebhookURL, 'post-call')}
                       copied={copiedField === 'post-call'}
-                      placeholder='Save the workspace source to generate this URL.'
+                      placeholder={t('desk.ozonetel.saveWorkspaceFirst')}
                     />
                   </Field>
 
@@ -423,7 +429,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                         }
                       >
                         <SelectTrigger className='w-full'>
-                          <SelectValue placeholder='Select a default call desk' />
+                          <SelectValue placeholder={t('desk.ozonetel.selectDefaultCallDesk')} />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value='__none__'>No default desk</SelectItem>
@@ -586,8 +592,8 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                     ),
                                   )
                                 }
-                                placeholder='Select Ozonetel campaign'
-                                searchPlaceholder='Search campaigns'
+                                placeholder={t('desk.ozonetel.selectCampaign')}
+                                searchPlaceholder={t('desk.ozonetel.searchCampaigns')}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />
@@ -603,8 +609,8 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                     ),
                                   )
                                 }
-                                placeholder='Select call desk'
-                                searchPlaceholder='Search call desks'
+                                placeholder={t('desk.ozonetel.selectCallDesk')}
+                                searchPlaceholder={t('desk.ozonetel.searchCallDesks')}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />

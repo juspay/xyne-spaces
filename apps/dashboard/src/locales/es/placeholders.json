@@ -375,5 +375,75 @@
     "list": {
       "searchAutomations": "Buscar automatizaciones…"
     }
+  },
+  "desk": {
+    "chooseUserGroup": "Elige un grupo de usuarios",
+    "featureRequestExample": "ej. Solicitud de función",
+    "composer": {
+      "whatDoYouNeed": "¿Qué necesitas?"
+    },
+    "label": {
+      "searchOrCreateArticle": "Buscar o crear una etiqueta…",
+      "searchOrCreate": "Buscar o crear etiqueta…",
+      "name": "Nombre de la etiqueta"
+    },
+    "integration": {
+      "androidAppExample": "Mi app de Android",
+      "appIdExample": "com.example.app"
+    },
+    "metrics": {
+      "searchDesks": "Buscar mesas de trabajo…",
+      "searchFilters": "Buscar filtros…",
+      "hourPlaceholder": "HH",
+      "minutePlaceholder": "MM"
+    },
+    "settings": {
+      "searchAgents": "Buscar agentes…",
+      "selectXyneApp": "Selecciona una app de Xyne",
+      "signatureName": "Nombre de la firma"
+    },
+    "classification": {
+      "queryTypeExample": "ej. Tipo de consulta",
+      "featureRequestTypeExample": "ej. Tipo de solicitud de función",
+      "enterPrompt": "Ingresa el prompt de clasificación por IA",
+      "upiEmptyExample": "ej. UPI (vacío = capturar todo)",
+      "upiExamplesList": "ej. UPI, mWeb Intent, UPI QR"
+    },
+    "priorityClassification": {
+      "enterPrompt": "Ingresa el prompt de clasificación de prioridad por IA..."
+    },
+    "inbox": {
+      "emailExample": "soporte@tuempresa.com"
+    },
+    "tagGeneration": {
+      "topicExample": "ej. tema",
+      "describeHowToChoose": "Describe cómo elegir etiquetas para esta categoría",
+      "categoryExamplesList": "ej. facturación, acceso, solicitud-de-función",
+      "spamExample": "ej. spam",
+      "numberExample": "ej. 3"
+    },
+    "draft": {
+      "refineSelectedText": "Refina el texto seleccionado (ej., hazlo más cálido, más claro...)"
+    },
+    "email": {
+      "subject": "Asunto",
+      "composeDefault": "Redactar correo...",
+      "linkText": "Texto del enlace",
+      "urlExample": "https://example.com"
+    },
+    "refine": {
+      "default": "Refinar: hazlo más breve, agrega contexto..."
+    },
+    "ozonetel": {
+      "apiKeyUnchanged": "•••••••• (sin cambios)",
+      "apiKeyExample": "Clave API de Ozonetel",
+      "widgetUrlExample": "https://agent.ccaas.ozonetel.com/toolbar_widget/index.html",
+      "saveWorkspaceFirst": "Guarda la fuente del espacio de trabajo para generar esta URL.",
+      "selectDefaultCallDesk": "Selecciona una mesa de llamadas predeterminada",
+      "selectCampaign": "Selecciona una campaña de Ozonetel",
+      "searchCampaigns": "Buscar campañas",
+      "selectCallDesk": "Selecciona una mesa de llamadas",
+      "searchCallDesks": "Buscar mesas de llamadas"
+    }
   }
 }

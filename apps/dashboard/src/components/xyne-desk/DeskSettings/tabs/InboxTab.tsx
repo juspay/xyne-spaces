@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,6 +42,7 @@ interface InboxTabProps {
 }
 
 export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures }) => {
+  const { t } = useTranslation('placeholders');
   const allUsers = useUsers();
   const zero = useZero();
   const {
@@ -154,7 +156,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             type='text'
             value={sendAsAlias}
             onChange={e => setSendAsAlias(e.target.value)}
-            placeholder='support@yourcompany.com'
+            placeholder={t('desk.inbox.emailExample')}
             readOnly={!canManage}
             disabled={!canManage}
             aria-invalid={!!sendAsAliasError}

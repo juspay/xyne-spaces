@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Plus, Trash2, Pencil } from 'lucide-react';
 import {
   Select,
@@ -111,6 +112,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
   sourceType = 'desk-email',
   channelId,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [editingName, setEditingName] = useState<string | null>(null);
   const [form, setForm] = useState<CategoryFormState | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -424,7 +426,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   }}
                   onFocus={() => setShowNameSuggestions(true)}
                   onBlur={() => setShowNameSuggestions(false)}
-                  placeholder='eg. topic'
+                  placeholder={t('desk.tagGeneration.topicExample')}
                   disabled={fieldDisabled}
                   autoComplete='off'
                   className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
@@ -512,7 +514,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   id='tag-category-prompt'
                   value={form.prompt}
                   onChange={e => setForm({ ...form, prompt: e.target.value })}
-                  placeholder='Describe how to choose tags for this category'
+                  placeholder={t('desk.tagGeneration.describeHowToChoose')}
                   spellCheck={false}
                   disabled={fieldDisabled}
                   className='h-[100px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
@@ -537,7 +539,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 value={form.tags}
                 onChange={tags => setForm({ ...form, tags })}
                 onDuplicate={tag => setLocalError(`Tag "${tag}" already exists in Allowed tags`)}
-                placeholder='eg. billing, login, feature-request'
+                placeholder={t('desk.tagGeneration.categoryExamplesList')}
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'
                 data-track-name='TagCategoryAllowedTags'
@@ -557,7 +559,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   onDuplicate={tag =>
                     setLocalError(`Tag "${tag}" already exists in Blacklisted tags`)
                   }
-                  placeholder='eg. spam'
+                  placeholder={t('desk.tagGeneration.spamExample')}
                   disabled={fieldDisabled}
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryBlacklist'
@@ -581,7 +583,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   onKeyDown={e => {
                     if (['.', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
                   }}
-                  placeholder='eg. 3'
+                  placeholder={t('desk.tagGeneration.numberExample')}
                   disabled={fieldDisabled}
                   className='w-full max-w-[120px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'

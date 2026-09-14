@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Plus } from 'lucide-react';
@@ -16,6 +17,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
   onOpenChange,
   onSelectAgent,
 }) => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
 
@@ -67,7 +69,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
               type='text'
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Search agents…'
+              placeholder={t('desk.settings.searchAgents')}
               autoFocus
               className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
               data-track-category='DeskSettings'

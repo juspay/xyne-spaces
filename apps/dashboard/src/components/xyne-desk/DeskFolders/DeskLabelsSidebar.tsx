@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { Loader2, Tag, Plus, X, Trash2 } from 'lucide-react';
@@ -56,6 +57,7 @@ export const DeskLabelsSidebar = ({
   onSelectLabel,
   onDeletedLabel,
 }: DeskLabelsSidebarProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const queryClient = useQueryClient();
   const [labels] = useCachedQuery(
@@ -247,7 +249,7 @@ export const DeskLabelsSidebar = ({
                   void handleCreate();
                 }
               }}
-              placeholder='Label name'
+              placeholder={t('desk.label.name')}
               className='w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Support'
               data-track-name='NewLabelNameInput'
