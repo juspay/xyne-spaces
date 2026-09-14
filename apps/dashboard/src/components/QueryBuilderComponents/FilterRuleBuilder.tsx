@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, Users, LayoutGrid, Folder, Hash } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { DatePicker } from '../ui/DatePicker/DatePicker';
@@ -60,6 +61,7 @@ const UserSelectEditor: React.FC<{
   onChange: (value: unknown) => void;
   operator: string;
 }> = ({ value, onChange, operator }) => {
+  const { t } = useTranslation('placeholders');
   const isMultiSelect = operator === 'in' || operator === 'notIn';
   const [searchQuery, setSearchQuery] = useState('');
   const users = useUsers();
@@ -100,8 +102,8 @@ const UserSelectEditor: React.FC<{
           options={options}
           selectedValue={selectedIds[0] || null}
           onSelect={val => onChange(val || '')}
-          placeholder='Select user...'
-          searchPlaceholder='Search users...'
+          placeholder={t('queryBuilder.selectUser')}
+          searchPlaceholder={t('queryBuilder.searchUsers')}
           onSearchChange={setSearchQuery}
           showSearch={true}
           width='100%'
@@ -118,7 +120,7 @@ const UserSelectEditor: React.FC<{
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder='Search users...'
+          placeholder={t('queryBuilder.searchUsers')}
           className='w-full'
         />
       </div>
@@ -164,6 +166,7 @@ const UserGroupSelectEditor: React.FC<{
   onChange: (value: unknown) => void;
   operator: string;
 }> = ({ value, onChange, operator }) => {
+  const { t } = useTranslation('placeholders');
   const isMultiSelect = operator === 'in' || operator === 'notIn';
   const [searchQuery, setSearchQuery] = useState('');
   const allGroups = useUserGroups();
@@ -208,8 +211,8 @@ const UserGroupSelectEditor: React.FC<{
           options={options}
           selectedValue={selectedIds[0] || null}
           onSelect={val => onChange(val || '')}
-          placeholder='Select user group...'
-          searchPlaceholder='Search groups...'
+          placeholder={t('queryBuilder.selectUserGroup')}
+          searchPlaceholder={t('project.sidebar.searchGroups')}
           onSearchChange={setSearchQuery}
           showSearch={true}
           width='100%'
@@ -226,7 +229,7 @@ const UserGroupSelectEditor: React.FC<{
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder='Search groups...'
+          placeholder={t('project.sidebar.searchGroups')}
           className='w-full'
         />
       </div>
@@ -270,6 +273,7 @@ const BoardSelectEditor: React.FC<{
   onChange: (value: unknown) => void;
   operator: string;
 }> = ({ value, onChange, operator }) => {
+  const { t } = useTranslation('placeholders');
   const isMultiSelect = operator === 'in' || operator === 'notIn';
   const [searchQuery, setSearchQuery] = useState('');
   const [allBoards] = useCachedQuery(queries.getAllBoardsList());
@@ -319,8 +323,8 @@ const BoardSelectEditor: React.FC<{
           options={options}
           selectedValue={selectedIds[0] || null}
           onSelect={val => onChange(val || '')}
-          placeholder='Select board...'
-          searchPlaceholder='Search boards...'
+          placeholder={t('queryBuilder.selectBoard')}
+          searchPlaceholder={t('queryBuilder.searchBoards')}
           onSearchChange={setSearchQuery}
           showSearch={true}
           width='100%'
@@ -337,7 +341,7 @@ const BoardSelectEditor: React.FC<{
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder='Search boards...'
+          placeholder={t('queryBuilder.searchBoards')}
           className='w-full'
         />
       </div>
@@ -380,6 +384,7 @@ const ProjectSelectEditor: React.FC<{
   onChange: (value: unknown) => void;
   operator: string;
 }> = ({ value, onChange, operator }) => {
+  const { t } = useTranslation('placeholders');
   const isMultiSelect = operator === 'in' || operator === 'notIn';
   const [searchQuery, setSearchQuery] = useState('');
   const [allProjects] = useCachedQuery(queries.getAllProjects());
@@ -431,8 +436,8 @@ const ProjectSelectEditor: React.FC<{
           options={options}
           selectedValue={selectedIds[0] || null}
           onSelect={val => onChange(val || '')}
-          placeholder='Select project...'
-          searchPlaceholder='Search projects...'
+          placeholder={t('queryBuilder.selectProject')}
+          searchPlaceholder={t('chat.addChannelForm.searchProjects')}
           onSearchChange={setSearchQuery}
           showSearch={true}
           width='100%'
@@ -449,7 +454,7 @@ const ProjectSelectEditor: React.FC<{
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder='Search projects...'
+          placeholder={t('chat.addChannelForm.searchProjects')}
           className='w-full'
         />
       </div>
@@ -492,6 +497,7 @@ const ChannelSelectEditor: React.FC<{
   onChange: (value: unknown) => void;
   operator: string;
 }> = ({ value, onChange, operator }) => {
+  const { t } = useTranslation('placeholders');
   const isMultiSelect = operator === 'in' || operator === 'notIn';
   const [searchQuery, setSearchQuery] = useState('');
   const allChannels = useAllChannels();
@@ -543,8 +549,8 @@ const ChannelSelectEditor: React.FC<{
           options={options}
           selectedValue={selectedIds[0] || null}
           onSelect={val => onChange(val || '')}
-          placeholder='Select channel...'
-          searchPlaceholder='Search channels...'
+          placeholder={t('queryBuilder.selectChannel')}
+          searchPlaceholder={t('knowledgeBase.createCollection.searchChannels')}
           onSearchChange={setSearchQuery}
           showSearch={true}
           width='100%'
@@ -561,7 +567,7 @@ const ChannelSelectEditor: React.FC<{
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder='Search channels...'
+          placeholder={t('knowledgeBase.createCollection.searchChannels')}
           className='w-full'
         />
       </div>
@@ -603,6 +609,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
   onChange,
   fields,
 }): React.ReactElement => {
+  const { t } = useTranslation('placeholders');
   const updateCondition = useCallback(
     (conditionId: string, updates: Partial<FilterCondition>): void => {
       if (!filters) return;
@@ -701,7 +708,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
               value: transformValueForOperator(condition.operator, e.target.value),
             })
           }
-          placeholder='Value'
+          placeholder={t('queryBuilder.value')}
           className='flex-1 px-2 py-1 text-sm border rounded'
           data-track-category='QueryBuilder'
           data-track-name='EnterValue'
@@ -855,7 +862,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
                   value: [date ? date.toISOString() : '', dateRange[1] || ''],
                 })
               }
-              placeholder='Start date'
+              placeholder={t('queryBuilder.startDate')}
             />
             <span className='text-sm text-gray-500'>to</span>
             <DatePicker
@@ -865,7 +872,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
                   value: [dateRange[0] || '', date ? date.toISOString() : ''],
                 })
               }
-              placeholder='End date'
+              placeholder={t('queryBuilder.endDate')}
             />
           </div>
         );
@@ -888,7 +895,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
               value: date ? date.toISOString() : '',
             })
           }
-          placeholder='Select date'
+          placeholder={t('ui.datePicker.selectDate')}
           inputClassName='flex-1'
         />
       );
@@ -904,7 +911,7 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
             value: transformValueForOperator(condition.operator, e.target.value),
           })
         }
-        placeholder='Value'
+        placeholder={t('queryBuilder.value')}
         className='flex-1 px-2 py-1 text-sm border rounded'
         data-track-category='QueryBuilder'
         data-track-name='EnterValue'
@@ -935,8 +942,8 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
               });
             }
           }}
-          placeholder='Select field...'
-          searchPlaceholder='Search fields...'
+          placeholder={t('analyticsDashboard.selectField')}
+          searchPlaceholder={t('analyticsDashboard.searchFields')}
           showSearch={true}
           width='100%'
         />
@@ -959,8 +966,8 @@ export const FilterRuleBuilder: React.FC<FilterRuleBuilderProps> = ({
               });
             }
           }}
-          placeholder='Select operator...'
-          searchPlaceholder='Search operators...'
+          placeholder={t('queryBuilder.selectOperator')}
+          searchPlaceholder={t('queryBuilder.searchOperators')}
           showSearch={true}
           width='auto'
         />

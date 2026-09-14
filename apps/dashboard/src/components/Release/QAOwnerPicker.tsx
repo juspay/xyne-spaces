@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { useZero } from '../../hooks/useZero';
@@ -24,6 +25,7 @@ export const QAOwnerPicker = ({
   testedBy,
   currentUserName,
 }: QAOwnerPickerProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -79,7 +81,7 @@ export const QAOwnerPicker = ({
       <input
         ref={searchInputRef}
         className='w-full px-3 py-2 text-xs border-b border-border outline-none bg-transparent'
-        placeholder='Search users…'
+        placeholder={t('project.shareView.searchUsers')}
         value={search}
         onChange={e => setSearch(e.target.value)}
       />

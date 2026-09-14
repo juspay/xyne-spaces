@@ -734,5 +734,40 @@
     "shareView": {
       "searchUsers": "Buscar usuarios…"
     }
+  },
+  "queryBuilder": {
+    "selectUser": "Seleccionar usuario...",
+    "searchUsers": "Buscar usuarios...",
+    "selectUserGroup": "Seleccionar grupo de usuarios...",
+    "selectBoard": "Seleccionar tablero...",
+    "searchBoards": "Buscar tableros...",
+    "selectProject": "Seleccionar proyecto...",
+    "selectChannel": "Seleccionar canal...",
+    "value": "Valor",
+    "selectOperator": "Seleccionar operador...",
+    "searchOperators": "Buscar operadores...",
+    "startDate": "Fecha de inicio",
+    "endDate": "Fecha de fin"
+  },
+  "radar": {
+    "searchPeople": "Buscar personas",
+    "teamNamePlaceholder": "ej. Equipo Plataforma",
+    "searchChannels": "Buscar canales",
+    "debugThreadId": "Depurar un ID de hilo… ⏎"
+  },
+  "recap": {
+    "customPromptPlaceholder": "ej. \"Enfócate en errores y bloqueos. Destaca los elementos de acción.\""
+  },
+  "release": {
+    "wizard": {
+      "selectOwnerTeam": "Seleccionar equipo responsable",
+      "searchUserGroups": "Buscar grupos de usuarios…",
+      "appNamePlaceholder": "ej., backend",
+      "appRegexPlaceholder": "ej., ^backend/",
+      "envPathsPlaceholder": "config/env.yml, .env.prod",
+      "migrationPathsPlaceholder": "migrations/, db/migrate/",
+      "repoUrlPlaceholder": "https://bitbucket.example.com/scm/PROJECT/repo.git",
+      "searchSelectChannel": "Buscar y seleccionar un canal..."
+    }
   }
 }

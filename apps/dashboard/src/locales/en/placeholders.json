@@ -734,5 +734,40 @@
     "shareView": {
       "searchUsers": "Search users…"
     }
+  },
+  "queryBuilder": {
+    "selectUser": "Select user...",
+    "searchUsers": "Search users...",
+    "selectUserGroup": "Select user group...",
+    "selectBoard": "Select board...",
+    "searchBoards": "Search boards...",
+    "selectProject": "Select project...",
+    "selectChannel": "Select channel...",
+    "value": "Value",
+    "selectOperator": "Select operator...",
+    "searchOperators": "Search operators...",
+    "startDate": "Start date",
+    "endDate": "End date"
+  },
+  "radar": {
+    "searchPeople": "Search people",
+    "teamNamePlaceholder": "e.g. Platform Pod",
+    "searchChannels": "Search channels",
+    "debugThreadId": "Debug a thread id… ⏎"
+  },
+  "recap": {
+    "customPromptPlaceholder": "e.g. \"Focus on bugs and blockers. Highlight action items.\""
+  },
+  "release": {
+    "wizard": {
+      "selectOwnerTeam": "Select owner team",
+      "searchUserGroups": "Search user groups…",
+      "appNamePlaceholder": "e.g., backend",
+      "appRegexPlaceholder": "e.g., ^backend/",
+      "envPathsPlaceholder": "config/env.yml, .env.prod",
+      "migrationPathsPlaceholder": "migrations/, db/migrate/",
+      "repoUrlPlaceholder": "https://bitbucket.example.com/scm/PROJECT/repo.git",
+      "searchSelectChannel": "Search and select a channel..."
+    }
   }
 }

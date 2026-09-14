@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/Button/Button';
 import Input from '../ui/Input/Input';
 import { toast } from 'sonner';
@@ -60,6 +61,7 @@ const ChannelListItem = ({
   customPrompt: string;
   onCustomPromptChange: (prompt: string) => void;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { displayName } = useChannelDisplayName(channel, currentUserId || '');
   const channelStats = (channel as VisibleChannel).channelStats;
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -152,7 +154,7 @@ const ChannelListItem = ({
                 <span className='text-sm font-semibold text-foreground'>Custom Recap Prompt</span>
               </div>
               <textarea
-                placeholder='e.g. "Focus on bugs and blockers. Highlight action items."'
+                placeholder={t('recap.customPromptPlaceholder')}
                 value={localDraft}
                 onChange={e => setLocalDraft(e.target.value.slice(0, MAX_CUSTOM_PROMPT_LENGTH))}
                 rows={3}
@@ -205,6 +207,7 @@ const ChannelListItem = ({
 };
 
 const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   // Get channels where user is a participant and filter by scopeType DEFAULT
   const visibleChannels = useAllVisibleChannels();
   const channels = useMemo(
@@ -398,7 +401,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
             />
             <Input
               type='text'
-              placeholder='Search channels...'
+              placeholder={t('knowledgeBase.createCollection.searchChannels')}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='pl-10'

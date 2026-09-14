@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronUp, ChevronDown, Search } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { CHART_COLORS } from './constants';
@@ -93,6 +94,7 @@ export const DataTable: React.FC<DataTableProps> = ({
   onRowClick,
   referenceLabels,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{
     key: string;
@@ -235,7 +237,7 @@ export const DataTable: React.FC<DataTableProps> = ({
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50' />
           <input
             type='text'
-            placeholder='Search...'
+            placeholder={t('ui.common.searchEllipsis')}
             value={searchQuery}
             onChange={e => {
               setSearchQuery(e.target.value);
