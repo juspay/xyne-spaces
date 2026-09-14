@@ -458,7 +458,8 @@ export function fetchClawAgents(): Promise<ClawAgent[]> {
 export interface AutomationTemplateAttachment {
   attachmentId: string;
   originalFilename: string;
-  mimetype: 'text/plain' | 'text/markdown' | 'text/html';
+  /** One of the text template types, or any type accepted for a plain file attachment. */
+  mimetype: string;
   size: number;
   templatePaths: string[];
 }

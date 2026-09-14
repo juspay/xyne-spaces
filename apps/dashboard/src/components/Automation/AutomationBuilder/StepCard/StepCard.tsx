@@ -26,6 +26,7 @@ import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
 import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
 import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
+import { SendEmailToUserStepForm } from './SendEmailToUserStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -246,6 +247,17 @@ export function StepCard({
                 step.type === 'NOTIFY_GROUP' ? (
                 <NotifyStepForm
                   recipient={step.type === 'NOTIFY_GROUP' ? 'group' : 'user'}
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
+              ) : step.type === 'SEND_EMAIL_TO_USER' ? (
+                <SendEmailToUserStepForm
+                  schema={schema.configSchema}
+                  stepId={step.id}
+                  readOnly={readOnly}
                   value={step.config}
                   onChange={onConfigChange}
                   issues={issues ?? null}
