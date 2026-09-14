@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -45,6 +46,7 @@ export function AgentBehaviourTabV2({
   agent: Agent;
   canEdit: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
@@ -129,7 +131,7 @@ export function AgentBehaviourTabV2({
               value={reminders}
               readOnly={!editable}
               onChange={e => setReminders(e.target.value)}
-              placeholder="eg. Always respond in the user's language"
+              placeholder={t('aiScreen.library.agents.languagePrompt')}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: reminders'
               className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground read-only:opacity-70 focus:outline-none focus:ring-1 focus:ring-ring'
@@ -380,7 +382,7 @@ export function AgentBehaviourTabV2({
         title='Delivery criteria'
         description='Extra conditions the verifier checks before an answer is delivered.'
         label='Criteria'
-        placeholder='eg. Every number must come from a tool result, never from memory.'
+        placeholder={t('aiScreen.library.agents.toolResultPrompt')}
         testId='verify-criteria-dialog'
         value={behaviour.verifyResponseCriteria}
         saving={busy}

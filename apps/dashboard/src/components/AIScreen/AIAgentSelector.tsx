@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Bot, Search } from 'lucide-react';
 import { Popover } from '../ui/Popover';
@@ -37,6 +38,7 @@ export function AIAgentSelector({
   onOpenChange,
   hideTrigger = false,
 }: AIAgentSelectorProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
@@ -133,7 +135,7 @@ export function AIAgentSelector({
               type='text'
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Search agents…'
+              placeholder={t('aiScreen.chat.searchAgentsInline')}
               className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
               autoFocus
               data-track-category='XyneAI'

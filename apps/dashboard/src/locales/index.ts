@@ -3,6 +3,7 @@ import { initReactI18next } from 'react-i18next';
 
 import enCommon from './en/common.json';
 import enSidebar from './en/sidebar.json';
+import enPlaceholders from './en/placeholders.json';
 
 export const SUPPORTED_UI_LOCALES = ['en', 'es'] as const;
 export type UiLocale = (typeof SUPPORTED_UI_LOCALES)[number];
@@ -20,6 +21,7 @@ const NON_DEFAULT_LOCALE_LOADERS: Record<NonDefaultLocale, () => Promise<Record<
     es: async () => ({
       common: (await import('./es/common.json')).default,
       sidebar: (await import('./es/sidebar.json')).default,
+      placeholders: (await import('./es/placeholders.json')).default,
     }),
   };
 
@@ -27,9 +29,9 @@ void i18next.use(initReactI18next).init({
   lng: DEFAULT_UI_LOCALE,
   fallbackLng: DEFAULT_UI_LOCALE,
   defaultNS: 'common',
-  ns: ['common', 'sidebar'],
+  ns: ['common', 'sidebar', 'placeholders'],
   resources: {
-    en: { common: enCommon, sidebar: enSidebar },
+    en: { common: enCommon, sidebar: enSidebar, placeholders: enPlaceholders },
   },
   interpolation: {
     // React already escapes interpolated values; i18next's own escaping on

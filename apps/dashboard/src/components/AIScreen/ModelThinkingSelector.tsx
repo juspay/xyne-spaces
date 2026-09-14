@@ -6,6 +6,7 @@
  * Recommended row.
  */
 import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Brain, Check, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
@@ -66,6 +67,7 @@ export function ModelThinkingSelector({
   /** Render only the popover, anchored to a zero-size element in the toolbar. */
   hideTrigger?: boolean;
 }) {
+  const { t } = useTranslation('placeholders');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
@@ -191,7 +193,7 @@ export function ModelThinkingSelector({
               <input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder='Search models…'
+                placeholder={t('aiScreen.chat.searchModels')}
                 data-id='model-search'
                 data-track-category='XyneAI'
                 data-track-name='SEARCH_MODELS'

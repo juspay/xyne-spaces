@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
@@ -32,6 +33,7 @@ export function AddOrgMemberDialog({
   saving,
   onAdd,
 }: AddOrgMemberDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [role, setRole] = useState<AddableOrgRole>('MEMBER');
@@ -114,7 +116,7 @@ export function AddOrgMemberDialog({
           <Input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder='Search by name or email'
+            placeholder={t('aiScreen.searchByNameOrEmail')}
             aria-label='Search people'
             data-track-category='Claw Organization'
             data-track-name='Organization: search people'

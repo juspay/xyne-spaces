@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
@@ -28,6 +29,7 @@ export function AddMemberDialog({
   saving,
   onAdd,
 }: AddMemberDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -82,7 +84,7 @@ export function AddMemberDialog({
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder='Search by name or email'
+            placeholder={t('aiScreen.searchByNameOrEmail')}
             aria-label='Search people'
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: search people'

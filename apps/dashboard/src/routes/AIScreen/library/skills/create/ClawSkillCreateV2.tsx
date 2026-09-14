@@ -1,4 +1,5 @@
 import { useCallback, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AtMark, PencilEditLine } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
@@ -13,6 +14,7 @@ import { readSkillPick } from './skillFilePick';
 const LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground';
 
 const ClawSkillCreateV2 = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
@@ -80,7 +82,7 @@ const ClawSkillCreateV2 = (): ReactElement => {
                     setName(next);
                     if (!slugManual) setSlug(slugify(next));
                   }}
-                  placeholder='Name your skill'
+                  placeholder={t('aiScreen.library.skills.nameYourSkill')}
                   aria-label='Skill name'
                   autoFocus
                   data-track-category='Claw Agents'
@@ -100,7 +102,7 @@ const ClawSkillCreateV2 = (): ReactElement => {
                       setSlugManual(next.length > 0);
                       setSlug(next);
                     }}
-                    placeholder='skill-handle'
+                    placeholder={t('aiScreen.library.skills.skillHandle')}
                     aria-label='Skill handle'
                     data-track-category='Claw Agents'
                     data-track-name='Create skill v2: handle'
@@ -125,7 +127,7 @@ const ClawSkillCreateV2 = (): ReactElement => {
                 id='skill-v2-description'
                 value={description}
                 onChange={e => setDescription(e.target.value)}
-                placeholder='What this skill covers and when agents should reach for it.'
+                placeholder={t('aiScreen.library.skills.whatCovers')}
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: description'
                 className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
@@ -140,7 +142,7 @@ const ClawSkillCreateV2 = (): ReactElement => {
                 id='skill-v2-content'
                 value={content}
                 onChange={e => setContent(e.target.value)}
-                placeholder='The markdown playbook an agent reads while working…'
+                placeholder={t('aiScreen.library.skills.playbook')}
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: content'
                 className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'

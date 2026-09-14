@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Bot, CheckTickCircle, DeleteDustbin01, UserDefault } from '@xyne/icons';
@@ -49,6 +50,7 @@ export function ScheduledTab({
   orgNamesById: Record<string, string>;
   showOrgLabels: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState('');
@@ -118,8 +120,8 @@ export function ScheduledTab({
       <AdminSearchField
         value={query}
         onChange={setQuery}
-        placeholder='Search scheduled jobs'
-        ariaLabel='Search scheduled jobs'
+        placeholder={t('aiScreen.library.admin.searchScheduledJobs')}
+        ariaLabel={t('aiScreen.library.admin.searchScheduledJobs')}
         trackName='Admin: search scheduled jobs'
         className='w-full'
       />

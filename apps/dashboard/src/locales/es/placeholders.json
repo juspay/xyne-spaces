@@ -1,0 +1,75 @@
+{
+  "aiScreen": {
+    "searchByNameOrEmail": "Buscar por nombre o correo electrónico",
+    "searchAgents": "Buscar agentes",
+    "chat": {
+      "whatWentWrong": "¿qué salió mal?",
+      "searchModels": "Buscar modelos…",
+      "searchAgentsInline": "Buscar agentes…",
+      "writeMessage": "Escribe un mensaje..."
+    },
+    "digitalTwin": {
+      "searchHotMemories": "Buscar recuerdos recientes",
+      "searchMemories": "Buscar recuerdos",
+      "searchProposals": "Buscar propuestas",
+      "askQuestion": "Haz una pregunta que tu Gemelo podría responder…",
+      "sentByTwin": "Enviado por mi Gemelo Digital · puede contener errores"
+    },
+    "library": {
+      "admin": {
+        "searchAuditLog": "Buscar registro de auditoría",
+        "searchMcpServers": "Buscar servidores MCP",
+        "searchRequests": "Buscar solicitudes",
+        "searchScheduledJobs": "Buscar tareas programadas"
+      },
+      "agents": {
+        "nameYourAgent": "Nombra tu agente",
+        "agentHandle": "Identificador del agente",
+        "description": "Agrega una descripción para que las personas y los agentes entiendan cuándo usarlo.",
+        "aiDraftedInstructions": "Las instrucciones redactadas por la IA se actualizarán aquí...",
+        "describeAgent": "Describe qué debe hacer este agente…",
+        "filterSchedules": "Filtrar programaciones",
+        "filterRuns": "Filtrar ejecuciones",
+        "schedulePrompt": "ej. Resume los errores de ayer y publica los tres principales",
+        "scheduleLabelOptional": "Opcional — se muestra en la lista de programaciones",
+        "cronExpression": "0 9 * * 1-5",
+        "timeoutSeconds": "60",
+        "languagePrompt": "ej. Responde siempre en el idioma del usuario",
+        "toolResultPrompt": "ej. Cada número debe provenir de un resultado de herramienta, nunca de la memoria.",
+        "structuredOutline": "Esquema opcional que debería seguir la respuesta",
+        "toolsExample": "search, read-file",
+        "filterMembers": "Filtrar miembros",
+        "providerDefault": "Predeterminado del proveedor",
+        "pasteCode": "Pega el código o la URL completa de retorno",
+        "leaveBlankApiKey": "Deja en blanco para conservar la clave guardada",
+        "apiKeyExample": "sk-…"
+      },
+      "shared": {
+        "whyCallAgent": "¿Por qué es necesario llamar a este agente?",
+        "search": "Buscar"
+      },
+      "skills": {
+        "skillHandle": "skill-handle",
+        "whatCovers": "Qué cubre esta habilidad y cuándo deberían usarla los agentes.",
+        "playbook": "La guía en markdown que un agente lee mientras trabaja…",
+        "nameYourSkill": "Nombra tu habilidad"
+      },
+      "subagents": {
+        "nameYourSubagent": "Nombra tu subagente",
+        "whatSpecialistDoes": "Qué hace este especialista y cuándo deberían llamarlo los agentes.",
+        "parentPasses": "Qué le pasa el agente principal",
+        "focusedSpecialist": "Eres un especialista enfocado que…",
+        "workingProgress": "Trabajando…",
+        "filterContributors": "Filtrar colaboradores"
+      }
+    },
+    "organization": {
+      "productionBillingWorker": "Worker de facturación de producción",
+      "searchMembersByNameOrEmail": "Buscar miembros por nombre o correo electrónico",
+      "filterAgents": "Filtrar agentes",
+      "slackTokenExample": "xoxe.xoxp-…",
+      "slackRefreshTokenExample": "xoxe-1-…",
+      "searchMembers": "Buscar miembros"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { DeleteDustbin01, KeySlant } from '@xyne/icons';
@@ -137,6 +138,7 @@ function CredentialsForm({
 }
 
 export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const [openForm, setOpenForm] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminMcpServerSummary | null>(null);
@@ -184,8 +186,8 @@ export function GlobalMcpTab({ userId }: { userId: string }): ReactElement {
       <AdminSearchField
         value={query}
         onChange={setQuery}
-        placeholder='Search MCP servers'
-        ariaLabel='Search MCP servers'
+        placeholder={t('aiScreen.library.admin.searchMcpServers')}
+        ariaLabel={t('aiScreen.library.admin.searchMcpServers')}
         trackName='Admin: search global MCP servers'
         className='w-full'
       />

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { Textarea } from '@/components/ui/Textarea';
@@ -48,6 +49,7 @@ export function CredentialOauthFlow({
   provider: OauthProvider;
   onConnected: () => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [flow, setFlow] = useState<AgentOauthFlow | null>(null);
   const [device, setDevice] = useState<AgentCopilotDeviceCode | null>(null);
   const [code, setCode] = useState('');
@@ -192,7 +194,7 @@ export function CredentialOauthFlow({
           <Textarea
             value={code}
             onChange={event => setCode(event.target.value)}
-            placeholder='Paste the code, or the full callback URL'
+            placeholder={t('aiScreen.library.agents.pasteCode')}
             rows={3}
           />
           <div className='flex items-center gap-2'>

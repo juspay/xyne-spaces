@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronBigLeft, FilterLines, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Dialog } from '@/components/ui/Dialog/index';
@@ -146,6 +147,7 @@ export function BrowseDialog({
   emptyMessage,
   children,
 }: BrowseDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   return (
     <Dialog
       open={open}
@@ -205,7 +207,7 @@ export function BrowseDialog({
                   <input
                     value={query}
                     onChange={event => onQueryChange(event.target.value)}
-                    placeholder='Search'
+                    placeholder={t('aiScreen.library.shared.search')}
                     aria-label={`Search ${title}`}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: browse search'

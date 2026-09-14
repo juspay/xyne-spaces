@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
 import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
@@ -13,6 +14,7 @@ const DELETE_COPY =
   'This removes it from Hindsight and marks all related review rows as rejected. Recall-hit history is retained.';
 
 const DigitalTwinMemoriesTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data, isLoading } = useClawDigitalTwinMemories();
   const deleteMutation = useDeleteDigitalTwinMemory();
   const [search, setSearch] = useState('');
@@ -41,8 +43,8 @@ const DigitalTwinMemoriesTab = (): ReactElement => {
         <AdminSearchField
           value={search}
           onChange={setSearch}
-          placeholder='Search memories'
-          ariaLabel='Search memories'
+          placeholder={t('aiScreen.digitalTwin.searchMemories')}
+          ariaLabel={t('aiScreen.digitalTwin.searchMemories')}
           trackCategory='Claw Agents'
           trackName='Digital Twin: search memories'
           className='w-full'

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Crown, Loader2, ShieldCheck, UserRound } from 'lucide-react';
@@ -56,6 +57,7 @@ const displayDate = (value: string): string => {
 };
 
 const OrganizationV2 = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = resolveOrganizationTab(searchParams.get('tab'));
   const query = searchParams.get('q') ?? '';
@@ -251,7 +253,7 @@ const OrganizationV2 = (): ReactElement => {
             <AdminSearchField
               value={query}
               onChange={setQuery}
-              placeholder='Search members'
+              placeholder={t('aiScreen.organization.searchMembers')}
               ariaLabel='Search members'
               trackCategory='Claw Organization'
               trackName='Organization: search members'

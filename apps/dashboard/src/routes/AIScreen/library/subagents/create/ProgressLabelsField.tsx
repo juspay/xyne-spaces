@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { SubagentSectionLabel } from './SectionHeading';
 
@@ -10,6 +11,7 @@ interface ProgressLabelsFieldProps {
 }
 
 export function ProgressLabelsField({ labels, onChange }: ProgressLabelsFieldProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const atMax = labels.length >= MAX_LABELS;
   const isOnly = labels.length === 1;
 
@@ -48,7 +50,7 @@ export function ProgressLabelsField({ labels, onChange }: ProgressLabelsFieldPro
               onChange={e =>
                 onChange(labels.map((item, i) => (i === index ? e.target.value : item)))
               }
-              placeholder='Working…'
+              placeholder={t('aiScreen.library.subagents.workingProgress')}
               aria-label={`Progress label ${index + 1}`}
               data-track-category='Claw Agents'
               data-track-name='Create subagent v2: progress label'

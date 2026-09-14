@@ -1,0 +1,75 @@
+{
+  "aiScreen": {
+    "searchByNameOrEmail": "Search by name or email",
+    "searchAgents": "Search agents",
+    "chat": {
+      "whatWentWrong": "what went wrong?",
+      "searchModels": "Search models…",
+      "searchAgentsInline": "Search agents…",
+      "writeMessage": "Write a message..."
+    },
+    "digitalTwin": {
+      "searchHotMemories": "Search hot memories",
+      "searchMemories": "Search memories",
+      "searchProposals": "Search proposals",
+      "askQuestion": "Ask a question your Twin might answer…",
+      "sentByTwin": "Sent by my Digital Twin · may contain mistakes"
+    },
+    "library": {
+      "admin": {
+        "searchAuditLog": "Search audit log",
+        "searchMcpServers": "Search MCP servers",
+        "searchRequests": "Search requests",
+        "searchScheduledJobs": "Search scheduled jobs"
+      },
+      "agents": {
+        "nameYourAgent": "Name your agent",
+        "agentHandle": "Agent handle",
+        "description": "Add a description so people and agents understand when to use it.",
+        "aiDraftedInstructions": "Ai drafted instructions will be updated here...",
+        "describeAgent": "Describe what this agent should do…",
+        "filterSchedules": "Filter schedules",
+        "filterRuns": "Filter runs",
+        "schedulePrompt": "eg. Summarise yesterday’s error buckets and post the top three",
+        "scheduleLabelOptional": "Optional — shown in the schedules list",
+        "cronExpression": "0 9 * * 1-5",
+        "timeoutSeconds": "60",
+        "languagePrompt": "eg. Always respond in the user's language",
+        "toolResultPrompt": "eg. Every number must come from a tool result, never from memory.",
+        "structuredOutline": "Optional outline the answer should follow",
+        "toolsExample": "search, read-file",
+        "filterMembers": "Filter members",
+        "providerDefault": "Provider default",
+        "pasteCode": "Paste the code, or the full callback URL",
+        "leaveBlankApiKey": "Leave blank to keep the stored key",
+        "apiKeyExample": "sk-…"
+      },
+      "shared": {
+        "whyCallAgent": "Why does this agent need to be called?",
+        "search": "Search"
+      },
+      "skills": {
+        "skillHandle": "skill-handle",
+        "whatCovers": "What this skill covers and when agents should reach for it.",
+        "playbook": "The markdown playbook an agent reads while working…",
+        "nameYourSkill": "Name your skill"
+      },
+      "subagents": {
+        "nameYourSubagent": "Name your subagent",
+        "whatSpecialistDoes": "What this specialist does and when agents should call it.",
+        "parentPasses": "What the parent agent passes in",
+        "focusedSpecialist": "You are a focused specialist that…",
+        "workingProgress": "Working…",
+        "filterContributors": "Filter contributors"
+      }
+    },
+    "organization": {
+      "productionBillingWorker": "Production billing worker",
+      "searchMembersByNameOrEmail": "Search members by name or email",
+      "filterAgents": "Filter agents",
+      "slackTokenExample": "xoxe.xoxp-…",
+      "slackRefreshTokenExample": "xoxe-1-…",
+      "searchMembers": "Search members"
+    }
+  }
+}

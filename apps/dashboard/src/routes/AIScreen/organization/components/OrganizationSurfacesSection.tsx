@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Slack } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button/index';
@@ -25,6 +26,7 @@ export function OrganizationSurfacesSection({
   orgId,
   canManage,
 }: OrganizationSurfacesSectionProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [accessToken, setAccessToken] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
   const surfaces = useClawOrganizationSurfaces(orgId, canManage);
@@ -110,7 +112,7 @@ export function OrganizationSurfacesSection({
                   id='slack-config-access-token'
                   type='password'
                   autoComplete='off'
-                  placeholder='xoxe.xoxp-…'
+                  placeholder={t('aiScreen.organization.slackTokenExample')}
                   value={accessToken}
                   onChange={event => setAccessToken(event.target.value)}
                   disabled={storeToken.isPending}
@@ -128,7 +130,7 @@ export function OrganizationSurfacesSection({
                   id='slack-config-refresh-token'
                   type='password'
                   autoComplete='off'
-                  placeholder='xoxe-1-…'
+                  placeholder={t('aiScreen.organization.slackRefreshTokenExample')}
                   value={refreshToken}
                   onChange={event => setRefreshToken(event.target.value)}
                   disabled={storeToken.isPending}

@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
 
 import { cn } from '../../utils/classNames';
@@ -39,6 +40,7 @@ export function AskAiRatingButtons({
   onChange?: ((feedback: FeedbackNum, comment?: string | null) => void) | undefined;
   className?: string | undefined;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [current, setCurrent] = useState<FeedbackNum>(feedback ?? 0);
   const [saving, setSaving] = useState(false);
   const [showComment, setShowComment] = useState(false);
@@ -135,7 +137,7 @@ export function AskAiRatingButtons({
           <input
             value={commentText}
             onChange={(e): void => setCommentText(e.target.value.slice(0, MAX_COMMENT_LEN))}
-            placeholder='what went wrong?'
+            placeholder={t('aiScreen.chat.whatWentWrong')}
             maxLength={MAX_COMMENT_LEN}
             autoFocus
             data-track-category='XyneAI'

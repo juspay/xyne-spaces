@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CalendarClock, Loader2, Workflow } from 'lucide-react';
@@ -66,6 +67,7 @@ export function AgentActivityTabV2({
   agent: Agent;
   canEdit: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -209,7 +211,7 @@ export function AgentActivityTabV2({
                   ref={scheduleSearchRef}
                   value={scheduleQuery}
                   onChange={e => setScheduleQuery(e.target.value)}
-                  placeholder='Filter schedules'
+                  placeholder={t('aiScreen.library.agents.filterSchedules')}
                   aria-label='Filter schedules'
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: filter schedules'
@@ -294,7 +296,7 @@ export function AgentActivityTabV2({
                 ref={runSearchRef}
                 value={runQuery}
                 onChange={e => setRunQuery(e.target.value)}
-                placeholder='Filter runs'
+                placeholder={t('aiScreen.library.agents.filterRuns')}
                 aria-label='Filter runs'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: filter runs input'

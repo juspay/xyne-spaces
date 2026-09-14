@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Select,
   SelectContent,
@@ -53,6 +54,7 @@ export function CredentialFormFields({
   slug,
   onOauthConnected,
 }: CredentialFormFieldsProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const set = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]): void =>
     onChange({ ...form, [key]: value });
 
@@ -97,7 +99,11 @@ export function CredentialFormFields({
             value={form.apiKey}
             onChange={e => set('apiKey', e.target.value)}
             type='password'
-            placeholder={editing ? 'Leave blank to keep the stored key' : 'sk-…'}
+            placeholder={
+              editing
+                ? t('aiScreen.library.agents.leaveBlankApiKey')
+                : t('aiScreen.library.agents.apiKeyExample')
+            }
             aria-label='API key'
             autoComplete='off'
             autoFocus
@@ -112,7 +118,7 @@ export function CredentialFormFields({
         <input
           value={form.model}
           onChange={e => set('model', e.target.value)}
-          placeholder='Provider default'
+          placeholder={t('aiScreen.library.agents.providerDefault')}
           aria-label='Model'
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: credential model'
