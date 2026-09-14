@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as LucideIcons from 'lucide-react';
 import { Plus, Search, Zap, type LucideIcon } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
@@ -11,6 +12,7 @@ export function AddStepRow({
   onPick,
   variant = 'full',
 }: AddStepRowProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -77,7 +79,7 @@ export function AddStepRow({
             aria-label='Search steps'
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder='Search steps…'
+            placeholder={t('automation.addStep.searchSteps')}
             data-track-category='automation-builder'
             data-track-name='add-step-search'
             className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'

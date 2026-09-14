@@ -295,5 +295,85 @@
     "subagentsTab": {
       "searchSubagents": "Search subagents"
     }
+  },
+  "automation": {
+    "whyRejecting": "Why are you rejecting this?",
+    "pickConversation": "Pick a conversation",
+    "pickBot": "Pick a bot (defaults to the automations bot)",
+    "value": "Value",
+    "approvals": {
+      "searchProposals": "Search proposals…"
+    },
+    "addStep": {
+      "searchSteps": "Search steps…"
+    },
+    "builder": {
+      "addDescription": "Add a description (optional)",
+      "nameRequired": "Give this automation a name (required)"
+    },
+    "condition": {
+      "operator": "Operator",
+      "select": "Select…",
+      "category": "Category…"
+    },
+    "schedule": {
+      "pickDateField": "Pick a date field…"
+    },
+    "entity": {
+      "searchUsers": "Search users…",
+      "searchGroups": "Search groups…",
+      "searchChannels": "Search channels…",
+      "searchBoards": "Search boards…",
+      "searchBots": "Search bots…",
+      "searchStages": "Search stages…",
+      "searchProjects": "Search projects…"
+    },
+    "schemaForm": {
+      "key": "key"
+    },
+    "applyLabel": {
+      "channelIdOrPrefix": "Channel id or",
+      "labelExample": "e.g. VIP / Refunds"
+    },
+    "emailDraft": {
+      "writeDraft": "Write the draft…"
+    },
+    "call": {
+      "pickUsersToInvite": "Pick users to invite",
+      "pickGroupsToInvite": "Pick user groups to invite"
+    },
+    "notify": {
+      "pickUser": "Pick a user",
+      "pickUserGroup": "Pick a user group",
+      "title": "Notification title",
+      "message": "Notification message"
+    },
+    "reply": {
+      "typeReplyMention": "Type your reply… use @ to mention someone"
+    },
+    "runAgent": {
+      "searchAgents": "Search agents by name or slug…",
+      "summarizePrompt": "Summarize this ticket and classify its urgency…"
+    },
+    "sendMessage": {
+      "typeMessageMention": "Type your message… use @ to mention someone",
+      "pickUsersToDm": "Pick users to DM"
+    },
+    "webhook": {
+      "urlExample": "https://example.com/webhook",
+      "timeoutExample": "10000",
+      "header": "Header",
+      "requestBody": "Request body…"
+    },
+    "trigger": {
+      "valueContains": "Value contains…",
+      "searchTriggers": "Search triggers…"
+    },
+    "variablePicker": {
+      "searchVariables": "Search variables…"
+    },
+    "list": {
+      "searchAutomations": "Search automations…"
+    }
   }
 }

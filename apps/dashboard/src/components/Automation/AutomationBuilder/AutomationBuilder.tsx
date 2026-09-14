@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import {
@@ -166,6 +167,7 @@ export function AutomationBuilder({
   onCancelFork,
   readOnlyPreview = false,
 }: AutomationBuilderProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [name, setName] = useState(automation?.name ?? initialName ?? '');
   const [description, setDescription] = useState(
     automation?.description ?? initialDescription ?? '',
@@ -831,7 +833,7 @@ export function AutomationBuilder({
           <InlineEditableText
             value={name}
             onChange={setName}
-            placeholder='Give this automation a name (required)'
+            placeholder={t('automation.builder.nameRequired')}
             readOnly={!editMode}
             invalid={editMode && !!nameError}
             className='flex-1 text-base font-semibold text-foreground'
@@ -1118,7 +1120,7 @@ export function AutomationBuilder({
           <InlineEditableText
             value={description}
             onChange={setDescription}
-            placeholder='Add a description (optional)'
+            placeholder={t('automation.builder.addDescription')}
             readOnly={!editMode}
             className='text-sm text-muted-foreground'
             multiline
@@ -1456,7 +1458,7 @@ export function AutomationBuilder({
           <Textarea
             value={rejectNote}
             onChange={e => setRejectNote(e.target.value)}
-            placeholder='Why are you rejecting this?'
+            placeholder={t('automation.whyRejecting')}
             rows={4}
             data-track-category='automation-builder'
             data-track-name='reject-note'

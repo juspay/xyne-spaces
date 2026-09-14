@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ConfigChannelField } from '../SchemaForm/ConfigChannelField';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
@@ -27,6 +28,7 @@ export function CreateEmailDraftStepForm({
   pathPrefix,
   variableSources,
 }: CreateEmailDraftStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as CreateEmailDraftConfigShape;
 
   const issuesAt = useMemo(() => {
@@ -67,7 +69,7 @@ export function CreateEmailDraftStepForm({
           onChange={next => setField('conversationId', next)}
           variableSources={variableSources}
           targetEntityKind={EntityKind.CONVERSATION}
-          placeholder='Pick a conversation'
+          placeholder={t('automation.pickConversation')}
         />
       </FieldRow>
 
@@ -81,7 +83,7 @@ export function CreateEmailDraftStepForm({
           value={cfg.draftContent ?? ''}
           onChange={next => setField('draftContent', next)}
           variableSources={variableSources}
-          placeholder='Write the draft…'
+          placeholder={t('automation.emailDraft.writeDraft')}
         />
       </FieldRow>
     </div>

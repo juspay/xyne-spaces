@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, Zap } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
@@ -87,6 +88,7 @@ export function ScheduleCard({
   triggerSchema,
   onChange,
 }: ScheduleCardProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const mode: 'IMMEDIATE' | 'SCHEDULED' =
     schedule?.type === 'SCHEDULED' ? 'SCHEDULED' : 'IMMEDIATE';
 
@@ -195,7 +197,7 @@ export function ScheduleCard({
                   onValueChange={v => onChange({ ...sched, field: v })}
                 >
                   <SelectTrigger className='h-9 w-72'>
-                    <SelectValue placeholder='Pick a date field…' />
+                    <SelectValue placeholder={t('automation.schedule.pickDateField')} />
                   </SelectTrigger>
                   <SelectContent>
                     {dateFields.map(f => (

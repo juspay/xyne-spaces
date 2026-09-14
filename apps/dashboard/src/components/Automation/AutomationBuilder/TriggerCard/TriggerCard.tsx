@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as LucideIcons from 'lucide-react';
 import {
   Zap,
@@ -336,6 +337,7 @@ function TriggerPickerContent({
   currentType: string;
   onPick: (type: string) => void;
 }): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -382,7 +384,7 @@ function TriggerPickerContent({
           aria-label='Search triggers'
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder='Search triggers…'
+          placeholder={t('automation.trigger.searchTriggers')}
           data-track-category='automation-builder'
           data-track-name='trigger-picker-search'
           className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'

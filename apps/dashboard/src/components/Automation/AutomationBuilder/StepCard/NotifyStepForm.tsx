@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
 import { EntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
@@ -67,6 +68,7 @@ export function NotifyStepForm({
   pathPrefix,
   variableSources,
 }: NotifyStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as NotifyConfigShape;
   const linkType: LinkType = cfg.linkType ?? 'NONE';
 
@@ -97,7 +99,7 @@ export function NotifyStepForm({
             onChange={next => setField('userId', next)}
             variableSources={variableSources}
             entityKind={EntityKind.USER}
-            placeholder='Pick a user'
+            placeholder={t('automation.notify.pickUser')}
           />
         </FieldRow>
       ) : (
@@ -107,7 +109,7 @@ export function NotifyStepForm({
             onChange={next => setField('groupId', next)}
             variableSources={variableSources}
             entityKind={EntityKind.USER_GROUP}
-            placeholder='Pick a user group'
+            placeholder={t('automation.notify.pickUserGroup')}
           />
         </FieldRow>
       )}
@@ -117,7 +119,7 @@ export function NotifyStepForm({
           value={cfg.title}
           onChange={next => setField('title', next)}
           variableSources={variableSources}
-          placeholder='Notification title'
+          placeholder={t('automation.notify.title')}
         />
       </FieldRow>
 
@@ -132,7 +134,7 @@ export function NotifyStepForm({
           onChange={next => setField('message', next)}
           variableSources={variableSources}
           channelId={null}
-          placeholder='Notification message'
+          placeholder={t('automation.notify.message')}
         />
       </FieldRow>
 

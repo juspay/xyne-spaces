@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
@@ -134,6 +135,7 @@ export function WebhookStepForm({
   variableSources,
   readOnly = false,
 }: WebhookStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const responseSchemaRaw = value['responseSchema'];
   const responseSchema: SchemaTree =
     responseSchemaRaw && typeof responseSchemaRaw === 'object' && !Array.isArray(responseSchemaRaw)
@@ -223,7 +225,7 @@ export function WebhookStepForm({
             value={url}
             onChange={next => update({ url: next })}
             sources={variableSources}
-            placeholder='https://example.com/webhook'
+            placeholder={t('automation.webhook.urlExample')}
             mono
             error={!!urlErrorMessage}
           />
@@ -293,7 +295,9 @@ export function WebhookStepForm({
             value={body}
             onChange={next => update({ body: next })}
             sources={variableSources}
-            placeholder={encoding === 'JSON' ? JSON_BODY_PLACEHOLDER : 'Request body…'}
+            placeholder={
+              encoding === 'JSON' ? JSON_BODY_PLACEHOLDER : t('automation.webhook.requestBody')
+            }
             error={!!fieldIssue('body')}
           />
           {fieldIssue('body') ? <FieldError message={fieldIssue('body')!.message} /> : null}
@@ -331,7 +335,7 @@ export function WebhookStepForm({
             type='number'
             min={100}
             max={30000}
-            placeholder='10000'
+            placeholder={t('automation.webhook.timeoutExample')}
             value={timeoutMs ?? ''}
             onChange={e => {
               const raw = e.target.value;
@@ -628,6 +632,7 @@ function HeadersEditor({
   onChange: (next: Array<[string, string]>) => void;
   sources: VariablePickerSource[];
 }): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const setKey = (i: number, nextKey: string): void => {
     const copy = rows.slice();
     const current = copy[i];
@@ -653,7 +658,7 @@ function HeadersEditor({
         rows.map((row, i) => (
           <div key={i} className='flex items-center gap-2'>
             <Input
-              placeholder='Header'
+              placeholder={t('automation.webhook.header')}
               value={row[0]}
               onChange={e => setKey(i, e.target.value)}
               className='w-[200px] font-mono text-xs'
@@ -666,7 +671,7 @@ function HeadersEditor({
                 value={row[1]}
                 onChange={next => setVal(i, next)}
                 sources={sources}
-                placeholder='Value'
+                placeholder={t('automation.value')}
                 mono
               />
             </div>

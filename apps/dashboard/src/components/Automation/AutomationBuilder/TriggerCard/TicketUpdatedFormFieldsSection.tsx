@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { FormFields, GlobalField } from '@xyne/shared';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -43,6 +44,7 @@ export function TicketUpdatedFormFieldsSection({
   onChange,
   onFieldNamesResolved,
 }: TicketUpdatedFormFieldsSectionProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   // Scoped to selected boardIds — avoids fetching all board forms
   const [boardMappings] = useCachedQuery(queries.getFormMappingsByBoardIds({ boardIds }), {
     enabled: boardIds.length > 0,
@@ -297,7 +299,7 @@ export function TicketUpdatedFormFieldsSection({
                                   onChange={e =>
                                     updateCondition(field.id, { value: e.target.value })
                                   }
-                                  placeholder='Value contains…'
+                                  placeholder={t('automation.trigger.valueContains')}
                                   className='h-7 min-w-[140px] flex-1 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground'
                                   data-track-category='automation-builder'
                                   data-track-name='form-field-contains-value'

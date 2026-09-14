@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CallType } from '@xyne/shared';
 import { ConfigChannelField } from '../SchemaForm/ConfigChannelField';
 import { MultiEntityVariableField } from '../SchemaForm/EntityVariableField';
@@ -35,6 +36,7 @@ export function MakeCallStepForm({
   pathPrefix,
   variableSources,
 }: MakeCallStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as MakeCallConfigShape;
 
   const issuesAt = useMemo(() => {
@@ -78,7 +80,7 @@ export function MakeCallStepForm({
           value={Array.isArray(cfg.invitedUserIds) ? cfg.invitedUserIds : []}
           onChange={next => setField('invitedUserIds', next)}
           variableSources={variableSources}
-          placeholder='Pick users to invite'
+          placeholder={t('automation.call.pickUsersToInvite')}
         />
       </FieldRow>
 
@@ -92,7 +94,7 @@ export function MakeCallStepForm({
           value={Array.isArray(cfg.userGroupIds) ? cfg.userGroupIds : []}
           onChange={next => setField('userGroupIds', next)}
           variableSources={variableSources}
-          placeholder='Pick user groups to invite'
+          placeholder={t('automation.call.pickGroupsToInvite')}
         />
       </FieldRow>
 

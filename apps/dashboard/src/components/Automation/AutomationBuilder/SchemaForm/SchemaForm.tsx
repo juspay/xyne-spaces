@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Button } from '../../../ui/Button/Button';
@@ -579,6 +580,7 @@ function RawInput({
   error,
   variableSources,
 }: RawInputProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   if (kind === 'enum' && Array.isArray(schema.enum)) {
     const items = schema.enum.map(option => ({
       label: primitiveToString(option),
@@ -591,7 +593,7 @@ function RawInput({
           className={cn('w-full', error && 'border-destructive')}
           aria-invalid={error ? true : undefined}
         >
-          <SelectValue placeholder={placeholder ?? 'Select…'} />
+          <SelectValue placeholder={placeholder ?? t('automation.condition.select')} />
         </SelectTrigger>
         <SelectContent>
           {items.map(item => (
@@ -873,6 +875,7 @@ function RecordRow({
   pathPrefix: string;
   variableSources: VariablePickerSource[];
 }): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [draftKey, setDraftKey] = useState(fieldKey);
   return (
     <div className='flex items-start gap-2'>
@@ -880,7 +883,7 @@ function RecordRow({
         value={draftKey}
         onChange={e => setDraftKey(e.target.value)}
         onBlur={() => onRenameKey(draftKey)}
-        placeholder='key'
+        placeholder={t('automation.schemaForm.key')}
         className='w-[200px] font-mono text-sm'
       />
       <div className='flex-1'>

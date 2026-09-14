@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Sparkles, X } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export function RunAgentStepForm({
   variableSources,
   readOnly = false,
 }: RunAgentStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as RunAgentConfigShape;
   const [agentSearch, setAgentSearch] = useState('');
 
@@ -156,7 +158,7 @@ export function RunAgentStepForm({
           </div>
         ) : (
           <Combobox
-            placeholder='Search agents by name or slug…'
+            placeholder={t('automation.runAgent.searchAgents')}
             queryString={agentSearch}
             onInputValueChange={setAgentSearch}
             items={agentItems}
@@ -182,7 +184,7 @@ export function RunAgentStepForm({
           value={cfg.prompt ?? ''}
           onChange={next => setField('prompt', next)}
           variableSources={variableSources}
-          placeholder='Summarize this ticket and classify its urgency…'
+          placeholder={t('automation.runAgent.summarizePrompt')}
         />
       </FieldRow>
 

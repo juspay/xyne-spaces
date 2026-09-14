@@ -295,5 +295,85 @@
     "subagentsTab": {
       "searchSubagents": "Buscar subagentes"
     }
+  },
+  "automation": {
+    "whyRejecting": "¿Por qué estás rechazando esto?",
+    "pickConversation": "Elige una conversación",
+    "pickBot": "Elige un bot (por defecto, el bot de automatizaciones)",
+    "value": "Valor",
+    "approvals": {
+      "searchProposals": "Buscar propuestas…"
+    },
+    "addStep": {
+      "searchSteps": "Buscar pasos…"
+    },
+    "builder": {
+      "addDescription": "Agrega una descripción (opcional)",
+      "nameRequired": "Dale un nombre a esta automatización (obligatorio)"
+    },
+    "condition": {
+      "operator": "Operador",
+      "select": "Seleccionar…",
+      "category": "Categoría…"
+    },
+    "schedule": {
+      "pickDateField": "Elige un campo de fecha…"
+    },
+    "entity": {
+      "searchUsers": "Buscar usuarios…",
+      "searchGroups": "Buscar grupos…",
+      "searchChannels": "Buscar canales…",
+      "searchBoards": "Buscar tableros…",
+      "searchBots": "Buscar bots…",
+      "searchStages": "Buscar etapas…",
+      "searchProjects": "Buscar proyectos…"
+    },
+    "schemaForm": {
+      "key": "clave"
+    },
+    "applyLabel": {
+      "channelIdOrPrefix": "ID del canal o",
+      "labelExample": "ej. VIP / Reembolsos"
+    },
+    "emailDraft": {
+      "writeDraft": "Escribe el borrador…"
+    },
+    "call": {
+      "pickUsersToInvite": "Elige a los usuarios a invitar",
+      "pickGroupsToInvite": "Elige los grupos de usuarios a invitar"
+    },
+    "notify": {
+      "pickUser": "Elige un usuario",
+      "pickUserGroup": "Elige un grupo de usuarios",
+      "title": "Título de la notificación",
+      "message": "Mensaje de la notificación"
+    },
+    "reply": {
+      "typeReplyMention": "Escribe tu respuesta… usa @ para mencionar a alguien"
+    },
+    "runAgent": {
+      "searchAgents": "Buscar agentes por nombre o slug…",
+      "summarizePrompt": "Resume este ticket y clasifica su urgencia…"
+    },
+    "sendMessage": {
+      "typeMessageMention": "Escribe tu mensaje… usa @ para mencionar a alguien",
+      "pickUsersToDm": "Elige usuarios para enviar mensaje directo"
+    },
+    "webhook": {
+      "urlExample": "https://example.com/webhook",
+      "timeoutExample": "10000",
+      "header": "Encabezado",
+      "requestBody": "Cuerpo de la solicitud…"
+    },
+    "trigger": {
+      "valueContains": "El valor contiene…",
+      "searchTriggers": "Buscar disparadores…"
+    },
+    "variablePicker": {
+      "searchVariables": "Buscar variables…"
+    },
+    "list": {
+      "searchAutomations": "Buscar automatizaciones…"
+    }
   }
 }

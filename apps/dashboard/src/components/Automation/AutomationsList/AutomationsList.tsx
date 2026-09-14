@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Archive } from 'lucide-react';
@@ -83,6 +84,7 @@ export function AutomationsList({
   onClone,
   onEditFork,
 }: AutomationsListProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const { workspaceId } = useAuthContextValues();
   // Desk settings shares the workspace's saved view and only pins the channel on top of it.
   const deskChannelIds = initialChannelIds?.length ? initialChannelIds : null;
@@ -251,7 +253,7 @@ export function AutomationsList({
               <Input
                 type='search'
                 aria-label='Search automations'
-                placeholder='Search automations…'
+                placeholder={t('automation.list.searchAutomations')}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 className='h-8 rounded-md pl-8 text-xs'
