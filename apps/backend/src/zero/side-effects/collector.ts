@@ -127,6 +127,20 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture the view_access grant before it is deleted, so the side-effect handler can
+  // notify the removed recipient that their access to the view was revoked.
+  if (operation === 'delete' && table === 'view_access') {
+    const grant = await tx.run(zql.view_access.where('id', entityId).one());
+    if (grant) {
+      previousValue = {
+        viewId: grant.viewId,
+        entityType: grant.entityType,
+        entityId: grant.entityId,
+        sharedBy: grant.sharedBy,
+      };
+    }
+  }
+
   // Same, for a channel membership row (leave) — recover channelId for the canvas fan-out.
   if (operation === 'delete' && table === 'channel_participants') {
     const participant = await tx.run(zql.channel_participants.where('id', entityId).one());
@@ -338,6 +352,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'stage_pr_status_mappings':
     case 'links':
     case 'link_access':
+    case 'view_access':
     case 'rcas':
     case 'ticket_stage_requests': {
       const typedArgs = args as { id: string };
