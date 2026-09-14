@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, UserPlus, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
@@ -27,6 +28,7 @@ export function AssigneePicker({
   channelId,
   label,
 }: AssigneePickerProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const users = useActiveUsers();
@@ -131,7 +133,7 @@ export function AssigneePicker({
             <input
               ref={searchRef}
               type='text'
-              placeholder='Search users...'
+              placeholder={t('tickets.filters.searchUsers')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import { FormFieldType } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
@@ -27,6 +28,7 @@ export const DynamicFieldSubmenu = ({
   onClose,
   className = '',
 }: DynamicFieldSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [stringValue, setStringValue] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({});
@@ -119,7 +121,7 @@ export const DynamicFieldSubmenu = ({
                 type='text'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder='Search options...'
+                placeholder={t('tickets.filters.searchOptions')}
                 className='pl-9'
               />
             </div>

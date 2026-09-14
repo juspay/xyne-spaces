@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type {
   TicketClassificationData,
   ClassificationMapping,
@@ -36,6 +37,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
   hasFormFields = false,
   onOverride,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [isExpanded, setIsExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -179,7 +181,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       }}
                     >
                       <SelectTrigger size='sm' className='w-full'>
-                        <SelectValue placeholder='Select category' />
+                        <SelectValue placeholder={t('tickets.aiClassification.selectCategory')} />
                       </SelectTrigger>
                       <SelectContent>
                         {categoryOptions.map(c => (
@@ -198,7 +200,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                         setEditCategory(e.target.value);
                         setEditSubCategory('');
                       }}
-                      placeholder='e.g. Feature Request'
+                      placeholder={t('tickets.aiClassification.featureRequestExample')}
                       data-track-category='AIClassification'
                       data-track-name='EditCategoryInput'
                     />
@@ -214,7 +216,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       onValueChange={v => setEditSubCategory(v === '__none__' ? '' : v)}
                     >
                       <SelectTrigger size='sm' className='w-full'>
-                        <SelectValue placeholder='— none —' />
+                        <SelectValue placeholder={t('tickets.aiClassification.none')} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value='__none__'>— none —</SelectItem>
@@ -231,7 +233,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                       className='w-full rounded border border-border bg-background px-2 py-1 text-sm'
                       value={editSubCategory}
                       onChange={e => setEditSubCategory(e.target.value)}
-                      placeholder='optional'
+                      placeholder={t('tickets.aiClassification.optional')}
                       data-track-category='AIClassification'
                       data-track-name='EditSubCategoryInput'
                     />

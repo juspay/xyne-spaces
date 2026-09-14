@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import {
   CheckTickCircle as CircleCheckBig,
@@ -52,6 +53,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
   onTagsChange,
   availableTags,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
 
   // The server rejects an eta in the past, so past days can't be offered. Midnight,
@@ -103,8 +105,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               onAssigneeChange(v === '' ? null : v);
               setActiveMenu(null);
             }}
-            placeholder='Assignee'
-            searchPlaceholder='Search users or groups...'
+            placeholder={t('tickets.bulkAction.assignee')}
+            searchPlaceholder={t('tickets.filters.searchUsersOrGroups')}
             variant='inline'
             isOpen={activeMenu === 'assignee'}
             onOpenChange={open => setActiveMenu(open ? 'assignee' : null)}
@@ -121,8 +123,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               if (v) onStatusChange(v as TicketStatusV2);
               setActiveMenu(null);
             }}
-            placeholder='Status'
-            searchPlaceholder='Search status...'
+            placeholder={t('tickets.bulkAction.status')}
+            searchPlaceholder={t('tickets.filters.searchStatus')}
             variant='inline'
             isOpen={activeMenu === 'status'}
             onOpenChange={open => setActiveMenu(open ? 'status' : null)}
@@ -139,8 +141,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               onPriorityChange((v || null) as TicketPriority | null);
               setActiveMenu(null);
             }}
-            placeholder='Priority'
-            searchPlaceholder='Search priority...'
+            placeholder={t('tickets.bulkAction.priority')}
+            searchPlaceholder={t('tickets.filters.searchPriority')}
             variant='inline'
             isOpen={activeMenu === 'priority'}
             onOpenChange={open => setActiveMenu(open ? 'priority' : null)}
@@ -191,8 +193,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
                 if (v) onStageChange(v);
                 setActiveMenu(null);
               }}
-              placeholder='Stage'
-              searchPlaceholder='Search stages...'
+              placeholder={t('tickets.bulkAction.stage')}
+              searchPlaceholder={t('tickets.filters.searchStages')}
               variant='inline'
               isOpen={activeMenu === 'stage'}
               onOpenChange={open => setActiveMenu(open ? 'stage' : null)}

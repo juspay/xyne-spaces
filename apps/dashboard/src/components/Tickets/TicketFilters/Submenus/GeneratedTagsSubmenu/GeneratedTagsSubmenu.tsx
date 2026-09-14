@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   SearchDefault as Search,
   CheckTickSingle as Check,
@@ -20,6 +21,7 @@ export const GeneratedTagsSubmenu = ({
   onChange,
   channelId,
 }: GeneratedTagsSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // null = level 1 (category list), string = level 2 (tags for that category)
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
@@ -169,7 +171,7 @@ export const GeneratedTagsSubmenu = ({
               type='text'
               value={tagSearchQuery}
               onChange={e => setTagSearchQuery(e.target.value)}
-              placeholder='Search tags...'
+              placeholder={t('tickets.filters.searchTags')}
               className='pl-9 h-9'
             />
           </div>
@@ -234,7 +236,7 @@ export const GeneratedTagsSubmenu = ({
             type='text'
             value={categorySearchQuery}
             onChange={e => setCategorySearchQuery(e.target.value)}
-            placeholder='Search categories...'
+            placeholder={t('tickets.filters.searchCategories')}
             className='pl-9 h-9'
           />
         </div>

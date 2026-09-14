@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check, Hashtag as Hash } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { usePlatform } from '../../../../../hooks/usePlatform';
@@ -20,6 +21,7 @@ export const SourceChannelsSubmenu = ({
   onChange,
   className = '',
 }: SourceChannelsSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +103,7 @@ export const SourceChannelsSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search channels...'
+            placeholder={t('tickets.filters.searchChannels')}
             className='pl-9 h-9'
           />
         </div>

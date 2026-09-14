@@ -85,7 +85,8 @@
       "selectXyneApp": "Select a Xyne App",
       "xynePlaceholder": "Xyne",
       "appIdExample": "com.example.app",
-      "channelNameExamples": "e.g. general, development, support"
+      "channelNameExamples": "e.g. general, development, support",
+      "searchProjects": "Search projects..."
     },
     "addDmForm": {
       "sayHelloToStart": "Say something to start the conversation...",
@@ -155,6 +156,78 @@
       "enterSkillName": "Enter skill name",
       "skillDescription": "Brief description of what this skill does",
       "skillInstructions": "Detailed instructions for how the AI should behave when using this skill"
+    }
+  },
+  "tickets": {
+    "assignGroup": "Assign Group",
+    "assignUser": "Assign User",
+    "selectAssignee": "Select assignee",
+    "selectPriority": "Select priority",
+    "selectBoard": "Select board",
+    "searchLabels": "Search labels...",
+    "createModal": {
+      "description": "Enter Ticket Description...",
+      "subTicketTitle": "Sub-ticket title",
+      "subTicketDescription": "Sub-ticket description (optional)",
+      "deployedExample": "deployed",
+      "newExample": "new",
+      "mainExample": "main",
+      "priorityLower": "priority",
+      "boardLower": "board",
+      "searchLabels": "Search labels",
+      "ticketTypeLower": "ticket type"
+    },
+    "stageForm": {
+      "selectOption": "Select an option",
+      "userId": "User ID",
+      "explainDecision": "Explain your decision…"
+    },
+    "aiClassification": {
+      "selectCategory": "Select category",
+      "featureRequestExample": "e.g. Feature Request",
+      "none": "— none —",
+      "optional": "optional"
+    },
+    "details": {
+      "addExistingSubTicket": "+ Add existing sub-ticket",
+      "searchOrCreateLabel": "Search or create label...",
+      "setStatus": "Set Status",
+      "setPriority": "Set Priority",
+      "setType": "Set Type",
+      "reasonKeepDates": "Reason for keeping the current dates...",
+      "addTicket": "+ Add ticket",
+      "searchByTicketIdOrName": "Search by ticket ID or name",
+      "searchBoards": "Search boards...",
+      "searchByIdOrName": "Search by ID or name"
+    },
+    "filters": {
+      "searchCategories": "Search categories...",
+      "searchOptions": "Search options...",
+      "searchTags": "Search tags...",
+      "searchRoles": "Search roles...",
+      "searchUsers": "Search users...",
+      "searchChannels": "Search channels...",
+      "searchStatus": "Search status...",
+      "searchTypes": "Search types...",
+      "searchUserGroups": "Search user groups...",
+      "nameThisView": "Name this view",
+      "searchTickets": "Search Tickets",
+      "searchUsersOrGroups": "Search users or groups...",
+      "searchPriority": "Search priority...",
+      "searchStages": "Search stages...",
+      "searchGroups": "Search groups...",
+      "selectDateRange": "Select date range"
+    },
+    "bulkAction": {
+      "assignee": "Assignee",
+      "status": "Status",
+      "priority": "Priority",
+      "stage": "Stage"
+    },
+    "cellEditor": {
+      "selectDefault": "Select...",
+      "searchDefault": "Search...",
+      "searchAssignees": "Search assignees..."
     }
   }
 }

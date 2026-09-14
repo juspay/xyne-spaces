@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { usePlatform } from '../../../../../hooks/usePlatform';
@@ -16,6 +17,7 @@ export const TicketTypeSubmenu = ({
   availableTypes = [],
   className = '',
 }: TicketTypeSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +86,7 @@ export const TicketTypeSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search types...'
+            placeholder={t('tickets.filters.searchTypes')}
             className='pl-9 h-9'
           />
         </div>

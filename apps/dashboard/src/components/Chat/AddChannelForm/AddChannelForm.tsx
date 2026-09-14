@@ -1024,7 +1024,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               selectedValue={field.state.value || null}
               onSelect={val => field.handleChange(val ?? '')}
               placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              searchPlaceholder='Search projects...'
+              searchPlaceholder={t('chat.addChannelForm.searchProjects')}
               width='100%'
             />
             {field.state.meta.errors.length > 0 && (

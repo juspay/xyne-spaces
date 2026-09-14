@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CalendarDefault as Calendar,
   MultipleCrossCancelDefault as X,
@@ -11,9 +12,10 @@ export const DateRangeFilter = ({
   dateRange,
   onChange,
   label,
-  placeholder = 'Select date range',
+  placeholder,
   className = '',
 }: DateRangeFilterProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [isOpen, setIsOpen] = useState(false);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -100,7 +102,7 @@ export const DateRangeFilter = ({
     } else if (dateRange.end) {
       return `Until ${formatDisplayDate(dateRange.end)}`;
     }
-    return placeholder;
+    return placeholder ?? t('tickets.filters.selectDateRange');
   };
 
   // Quick date presets

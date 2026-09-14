@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { UserTwo as Users } from '@xyne/icons';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -38,6 +39,7 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
   selectedGroupId,
   onGroupSelect,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchValue, setSearchValue] = useState('');
 
   // ==================== DATA FETCHING ====================
@@ -119,8 +121,8 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
       options={groupOptions}
       selectedValue={selectedGroupId}
       onSelect={onGroupSelect}
-      placeholder='Assign Group'
-      searchPlaceholder='Search groups...'
+      placeholder={t('tickets.assignGroup')}
+      searchPlaceholder={t('tickets.filters.searchGroups')}
       isLoading={false}
       width='auto'
       onSearchChange={setSearchValue}

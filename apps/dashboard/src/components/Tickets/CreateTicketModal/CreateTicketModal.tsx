@@ -39,6 +39,7 @@ import {
   MultipleCrossCancelDefault as X,
 } from '@xyne/icons';
 import React, { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -243,6 +244,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   standaloneSeed,
   enableUrlSync = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { user } = useAuth();
   const inheritedEntityLinkScope = useContext(EntityLinkContext);
@@ -2186,7 +2188,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 id='ticket-description'
                 value={field.state.value || ''}
                 aria-invalid={field.state.meta.errors.length > 0}
-                placeholder='Enter Ticket Description...'
+                placeholder={t('tickets.createModal.description')}
                 aria-label='Ticket Description'
                 data-testid='ticket-description-input'
                 data-track-category='Tickets'
@@ -2237,7 +2239,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             <Input
                               value={editingSubTicketTitle}
                               onChange={e => setEditingSubTicketTitle(e.target.value)}
-                              placeholder='Sub-ticket title'
+                              placeholder={t('tickets.createModal.subTicketTitle')}
                               className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
                             />
                           </div>
@@ -2255,7 +2257,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         <Textarea
                           value={editingSubTicketDescription}
                           onChange={e => setEditingSubTicketDescription(e.target.value)}
-                          placeholder='Sub-ticket description (optional)'
+                          placeholder={t('tickets.createModal.subTicketDescription')}
                           rows={2}
                           className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
                         />
@@ -2362,8 +2364,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     field.handleChange(value as CreateTicketFormData['boardId']);
                     setBoardSelectorOpen(false);
                   }}
-                  searchPlaceholder='board'
-                  placeholder='Select board'
+                  searchPlaceholder={t('tickets.createModal.boardLower')}
+                  placeholder={t('tickets.selectBoard')}
                   inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
                   inputClassName='!h-8 rounded-lg'
                   showIndicator={true}
@@ -2443,7 +2445,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         <input
                           value={range.deployedCommit}
                           onChange={e => setField('deployedCommit', e.target.value)}
-                          placeholder='deployed'
+                          placeholder={t('tickets.createModal.deployedExample')}
                           className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                           data-track-category='CreateTicket'
                           data-track-name='RepoDeployedCommit'
@@ -2452,7 +2454,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         <input
                           value={range.newCommit}
                           onChange={e => setField('newCommit', e.target.value)}
-                          placeholder='new'
+                          placeholder={t('tickets.createModal.newExample')}
                           className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                           data-track-category='CreateTicket'
                           data-track-name='RepoNewCommit'
@@ -2482,7 +2484,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         id={`repo-branch-${id}`}
                         value={range.branch}
                         onChange={e => setField('branch', e.target.value)}
-                        placeholder='main'
+                        placeholder={t('tickets.createModal.mainExample')}
                         className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
                         data-track-category='CreateTicket'
                         data-track-name='RepoBranch'
@@ -2636,7 +2638,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           }
                         }}
                         enableSearch
-                        searchPlaceholder='Search...'
+                        searchPlaceholder={t('tickets.cellEditor.searchDefault')}
                         alignment={SelectMenuAlignment.START}
                         error={!!error}
                         {...(error && { errorMessage: error })}
@@ -2930,8 +2932,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     onSelect={(value: string | null) =>
                       field.handleChange(value as CreateTicketFormData['priority'])
                     }
-                    searchPlaceholder='priority'
-                    placeholder='priority'
+                    searchPlaceholder={t('tickets.createModal.priorityLower')}
+                    placeholder={t('tickets.createModal.priorityLower')}
                     inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'
                     showClearButton={true}
@@ -2960,7 +2962,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     if (open && !tagsQueried) setTagsQueried(true);
                   }}
                   placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
-                  searchPlaceholder='Search labels'
+                  searchPlaceholder={t('tickets.createModal.searchLabels')}
                   showSearch={true}
                   collapseSelectedAfter={3}
                   collapsedLabel='labels'
@@ -2996,7 +2998,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     onSelect={(value: string | null) =>
                       field.handleChange(value as CreateTicketFormData['ticketType'])
                     }
-                    searchPlaceholder='ticket type'
+                    searchPlaceholder={t('tickets.createModal.ticketTypeLower')}
                     placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
                     inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'

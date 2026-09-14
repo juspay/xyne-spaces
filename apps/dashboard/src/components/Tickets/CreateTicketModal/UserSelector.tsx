@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -42,6 +43,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
   channelId,
   noBorder,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [searchValue, setSearchValue] = useState('');
   const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
 
@@ -134,8 +136,8 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
       options={optionsWithSelected}
       selectedValue={selectedUserId}
       onSelect={handleSelect}
-      placeholder='Assign User'
-      searchPlaceholder='Search users...'
+      placeholder={t('tickets.assignUser')}
+      searchPlaceholder={t('tickets.filters.searchUsers')}
       isLoading={false}
       width='auto'
       onSearchChange={setSearchValue}

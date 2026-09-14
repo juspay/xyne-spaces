@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -25,9 +26,10 @@ export const GenericCellEditor = ({
   onValueChange,
   stopEditing,
   options,
-  placeholder = 'Select...',
-  searchPlaceholder = 'Search...',
+  placeholder,
+  searchPlaceholder,
 }: GenericCellEditorProps) => {
+  const { t } = useTranslation('placeholders');
   const handleSelect = (val: string | null) => {
     const newValue = val === '' ? null : val;
     onValueChange(newValue);
@@ -43,8 +45,8 @@ export const GenericCellEditor = ({
         options={options}
         selectedValue={value}
         onSelect={handleSelect}
-        placeholder={placeholder}
-        searchPlaceholder={searchPlaceholder}
+        placeholder={placeholder ?? t('tickets.cellEditor.selectDefault')}
+        searchPlaceholder={searchPlaceholder ?? t('tickets.cellEditor.searchDefault')}
         variant='inline'
         isOpen={true}
         onOpenChange={open => !open && stopEditing?.()}
@@ -63,6 +65,7 @@ export const AssigneeCellEditor = ({
   users,
   userGroups,
 }: AssigneeCellEditorProps) => {
+  const { t } = useTranslation('placeholders');
   const options = getAssigneeOptions(users, userGroups || []);
 
   return (
@@ -71,8 +74,8 @@ export const AssigneeCellEditor = ({
       onValueChange={onValueChange}
       stopEditing={stopEditing}
       options={options}
-      placeholder='Assignee'
-      searchPlaceholder='Search assignees...'
+      placeholder={t('tickets.bulkAction.assignee')}
+      searchPlaceholder={t('tickets.cellEditor.searchAssignees')}
     />
   );
 };

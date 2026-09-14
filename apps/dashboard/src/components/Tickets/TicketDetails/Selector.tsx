@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 
@@ -28,7 +29,7 @@ export const Selector: React.FC<SelectorProps> = ({
   items,
   selectedValue,
   onValueChange,
-  placeholder = 'Select...',
+  placeholder,
   isLoading = false,
   icon,
   getItemIcon,
@@ -36,6 +37,7 @@ export const Selector: React.FC<SelectorProps> = ({
   isItemDisabled,
   onOpenChange,
 }) => {
+  const { t } = useTranslation('placeholders');
   const options: SelectorOption[] = useMemo(() => {
     return items.map(item => ({
       value: item.name, // Using name as value to match your handleStageChange logic
@@ -57,8 +59,8 @@ export const Selector: React.FC<SelectorProps> = ({
       options={options}
       selectedValue={selectedValue}
       onSelect={val => val && onValueChange(val)}
-      placeholder={placeholder}
-      searchPlaceholder='Search...'
+      placeholder={placeholder ?? t('tickets.cellEditor.selectDefault')}
+      searchPlaceholder={t('tickets.cellEditor.searchDefault')}
       isLoading={isLoading}
       isStatusSelector={true} // Triggers the border and divider styling
       width='auto'

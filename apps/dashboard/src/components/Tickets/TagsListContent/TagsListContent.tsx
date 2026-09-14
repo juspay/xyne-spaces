@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   SearchDefault as Search,
   CheckTickSingle as Check,
@@ -42,6 +43,7 @@ export const TagsListContent = ({
   onKeyDown,
   onSearch,
 }: TagsListContentProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -158,7 +160,7 @@ export const TagsListContent = ({
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder='Search labels...'
+            placeholder={t('tickets.searchLabels')}
             className='pl-9 h-9'
           />
         </div>

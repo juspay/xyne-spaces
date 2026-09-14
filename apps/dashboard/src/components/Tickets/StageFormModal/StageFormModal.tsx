@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../../src/hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -53,6 +54,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
   reenterMode,
   targetStageEtas,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { user } = useAuth();
 
@@ -323,7 +325,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
                 id='reviewer-comment'
                 value={reviewerComment}
                 onChange={e => setReviewerComment(e.target.value)}
-                placeholder='Explain your decision…'
+                placeholder={t('tickets.stageForm.explainDecision')}
                 rows={3}
                 className={`${stageFormControlClassName} resize-y`}
                 disabled={isSubmitting}

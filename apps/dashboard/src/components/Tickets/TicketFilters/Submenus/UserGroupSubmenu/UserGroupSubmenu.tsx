@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check, UserTwo as Users } from '@xyne/icons';
 import Input from '../../../../ui/Input/Input';
 import { useUserGroups } from '../../../../../hooks/useUserGroup';
@@ -14,6 +15,7 @@ export const UserGroupSubmenu = ({
   selectedGroups,
   onChange,
 }: UserGroupSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -97,7 +99,7 @@ export const UserGroupSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search user groups...'
+            placeholder={t('tickets.filters.searchUserGroups')}
             className='pl-9 h-9'
           />
         </div>
