@@ -4831,6 +4831,11 @@ export function createMutators(
               isExternal: false,
             });
           }
+
+          // Keep the denormalized call_participants preview in sync on join so the
+          // hasJoined flag is correct for active calls and preview-only surfaces
+          // (e.g. call-history avatars), not only when the call ends.
+          await updateCallParticipantPreview(tx, call.id);
         },
       ),
       leave: defineMutator(

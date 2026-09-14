@@ -1018,6 +1018,9 @@ export class CallRepository {
         joinedAt
       }
     });
+    // Rebuild the denormalized preview so the participant's hasJoined flag is
+    // reflected immediately, not only when the call ends.
+    await refreshCallParticipantPreview(tx, participant.callId);
     queueCallVespaFeed(participant.callId, { source: CallVespaFeedSource.CallRepositoryUpdateParticipantResponse });
     return participant;
   }
