@@ -618,5 +618,43 @@
     "inputBox": {
       "typeMessage": "Type a message..."
     }
+  },
+  "aiComposer": {
+    "askAnything": "Ask anything"
+  },
+  "appIcon": {
+    "searchIcons": "Search icons…"
+  },
+  "apps": {
+    "createApp": {
+      "namePlaceholder": "Enter app name"
+    },
+    "common": {
+      "descriptionPlaceholder": "Enter app description (optional)"
+    },
+    "editApp": {
+      "commandNamePlaceholder": "e.g. sell",
+      "commandDescriptionPlaceholder": "What does this command do?",
+      "shortcutIdPlaceholder": "e.g. create_task",
+      "shortcutDescriptionPlaceholder": "What does this shortcut do?",
+      "webhookUrlPlaceholder": "https://your-app.com/webhook",
+      "selectWebhookType": "Select a webhook type",
+      "selectWebhookAction": "Select a webhook action",
+      "selectChannel": "Select a channel",
+      "selectChannelFirst": "Select a channel first",
+      "noBoardsAvailable": "No boards available",
+      "selectBoard": "Select a board",
+      "webhookNamePlaceholder": "e.g., GitHub CI, Monitoring"
+    }
+  },
+  "analyticsDashboard": {
+    "queryNamePlaceholder": "Enter query name",
+    "searchFields": "Search fields...",
+    "selectFunction": "Select function...",
+    "searchFunctions": "Search functions...",
+    "selectField": "Select field...",
+    "alias": "alias",
+    "selectDirection": "Select direction...",
+    "searchDirections": "Search directions..."
   }
 }

@@ -618,5 +618,43 @@
     "inputBox": {
       "typeMessage": "Escribe un mensaje..."
     }
+  },
+  "aiComposer": {
+    "askAnything": "Pregunta lo que sea"
+  },
+  "appIcon": {
+    "searchIcons": "Buscar iconos…"
+  },
+  "apps": {
+    "createApp": {
+      "namePlaceholder": "Ingresar nombre de la app"
+    },
+    "common": {
+      "descriptionPlaceholder": "Ingresar descripción de la app (opcional)"
+    },
+    "editApp": {
+      "commandNamePlaceholder": "ej. sell",
+      "commandDescriptionPlaceholder": "¿Qué hace este comando?",
+      "shortcutIdPlaceholder": "ej. create_task",
+      "shortcutDescriptionPlaceholder": "¿Qué hace este atajo?",
+      "webhookUrlPlaceholder": "https://tu-app.com/webhook",
+      "selectWebhookType": "Seleccionar un tipo de webhook",
+      "selectWebhookAction": "Seleccionar una acción de webhook",
+      "selectChannel": "Seleccionar un canal",
+      "selectChannelFirst": "Selecciona un canal primero",
+      "noBoardsAvailable": "No hay tableros disponibles",
+      "selectBoard": "Seleccionar un tablero",
+      "webhookNamePlaceholder": "ej., GitHub CI, Monitoreo"
+    }
+  },
+  "analyticsDashboard": {
+    "queryNamePlaceholder": "Ingresar nombre de la consulta",
+    "searchFields": "Buscar campos...",
+    "selectFunction": "Seleccionar función...",
+    "searchFunctions": "Buscar funciones...",
+    "selectField": "Seleccionar campo...",
+    "alias": "alias",
+    "selectDirection": "Seleccionar dirección...",
+    "searchDirections": "Buscar direcciones..."
   }
 }

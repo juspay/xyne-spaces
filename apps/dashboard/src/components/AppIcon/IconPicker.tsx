@@ -16,6 +16,7 @@
  */
 
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ICON_META } from '@xyne/icons';
 import { X } from 'lucide-react';
 import { Dialog } from '../ui/Dialog';
@@ -44,6 +45,7 @@ export const IconPicker = ({
   size?: number;
   className?: string;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -121,7 +123,7 @@ export const IconPicker = ({
               autoFocus
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Search icons…'
+              placeholder={t('appIcon.searchIcons')}
               aria-label='Search icons'
               className='flex-1'
             />
