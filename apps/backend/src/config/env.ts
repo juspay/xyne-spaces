@@ -542,7 +542,14 @@ const envSchema = Joi.object({
   // Set to true to restore full-content feeds for migrated attachments. Only consulted on
   // the Slack migration paths — live uploads and KB/collections are unaffected.
   FILE_CONTENT_ENABLED: Joi.boolean().default(false),
-  // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
+  // Docling scheduler staging: split parts + per-part OCR results are written to
+  // the DEFAULT storage bucket (GCS/S3) under this prefix, so any scheduler pod
+  // can read them back — the roles (splitter/submitter/result/writer) run on
+  // different pods in production.
+  DOCLING_SCHEDULER_STAGING_PREFIX: Joi.string().default('docling-staging'),
+  // LEGACY pod-local staging root — only used to READ in-flight rows written
+  // before GCS staging (their part/result paths are absolute), and for
+  // best-effort cleanup of those local stage dirs.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
   // Submit (OCR wrapper) concurrency permits + leases
@@ -1215,6 +1222,7 @@ export const config = {
     maxVespaPayloadBytes: envVars.DOCLING_SCHEDULER_MAX_VESPA_PAYLOAD_BYTES as number,
     pageChunkSize: envVars.DOCLING_PAGE_CHUNK_SIZE as number,
     storageRoot: envVars.DOCLING_ASYNC_STORAGE_ROOT as string,
+    stagingPrefix: envVars.DOCLING_SCHEDULER_STAGING_PREFIX as string,
     keepTempResults: envVars.DOCLING_KEEP_TEMP_RESULTS as boolean,
     submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
     submitPermitLeaseTtlMs: envVars.DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS as number,

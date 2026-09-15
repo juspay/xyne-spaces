@@ -55,7 +55,7 @@ import {
   tryAcquireDoclingSchedulerWeightedPermit as tryAcquireWeightedPermit,
   type DoclingSchedulerPermit,
 } from '../runtime/submitPermits';
-import { readBuffer, readJson, cleanupStage, readSourceBuffer } from '../scheduler/storage';
+import { readBuffer, readJson, cleanupStage, readSourceBuffer, partKey } from '../scheduler/storage';
 import { stagePdfParts } from '../scheduler/pdfSplitter';
 import { submitDoclingAsyncJob } from '../runtime/client';
 
@@ -118,13 +118,14 @@ const getSchedulerFileContext = async (file: {
 };
 
 /**
- * Read a staged part PDF from local disk. The stage lives in the container's
- * ephemeral /tmp, so it can vanish (pod restart / disk eviction, or the splitter
- * ran on a different pod) → ENOENT. When that happens, re-fetch the SOURCE PDF
- * from GCS (its key is on the file row) and re-run the splitter to regenerate the
- * parts at the same local paths, then read again — so the part self-heals instead
- * of failing the whole file. Re-splits with the file's ORIGINAL page-chunk size so
- * the regenerated boundaries match the existing DB part rows exactly.
+ * Read a staged part PDF from staging (object storage, or the local filesystem
+ * for legacy in-flight rows). A staged part can still be missing (object
+ * deleted, or a legacy row whose local stage lived on another pod) → ENOENT.
+ * When that happens, re-fetch the SOURCE PDF from GCS (its key is on the file
+ * row) and re-run the splitter to regenerate the parts, then read the fresh
+ * staging key — so the part self-heals instead of failing the whole file.
+ * Re-splits with the file's ORIGINAL page-chunk size so the regenerated
+ * boundaries match the existing DB part rows exactly.
  */
 const readStagedPartBuffer = async (
   file: DoclingFile,
@@ -148,7 +149,9 @@ const readStagedPartBuffer = async (
       fileName: ctx.fileName,
       pageChunkSize: file.pageChunkSize || getRuntimeConfig().pageChunkSize,
     });
-    return await readBuffer(part.partPath);
+    // part.partPath may be a legacy pod-local path; after re-staging, the part
+    // lives at the current staging key — read that.
+    return await readBuffer(partKey(file.fileId, part.partIndex));
   }
 };
 
