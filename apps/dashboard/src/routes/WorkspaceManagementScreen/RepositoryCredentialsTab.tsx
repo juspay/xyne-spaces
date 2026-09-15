@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2, Github, KeyRound, ShieldAlert, Unplug } from 'lucide-react';
 import { WorkspaceRole } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -193,6 +194,7 @@ function CredentialForm(props: {
   onToken: (value: string) => void;
   onSubmit: () => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   return (
     <form
       className='mt-6 space-y-4'
@@ -217,7 +219,9 @@ function CredentialForm(props: {
             type='password'
             value={props.token}
             onChange={event => props.onToken(event.target.value)}
-            placeholder='github_pat_••••••••'
+            placeholder={t(
+              'routes.workspaceManagementScreen.repositoryCredentialsTab.githubTokenPlaceholder',
+            )}
             autoComplete='new-password'
             required
           />

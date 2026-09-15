@@ -1096,7 +1096,22 @@
       },
       "invitationsTab": {
         "emailPlaceholder": "Enter email address..."
+      },
+      "organizationsTab": {
+        "orgNamePlaceholder": "Enter organization name...",
+        "orgDescriptionPlaceholder": "A brief description of your organization...",
+        "selectOrgPlaceholder": "Select an organization...",
+        "searchOrgsPlaceholder": "Search organizations..."
+      },
+      "repositoryCredentialsTab": {
+        "githubTokenPlaceholder": "github_pat_••••••••"
+      },
+      "toolbarTab": {
+        "searchToolbarItemsPlaceholder": "Search toolbar items..."
       }
+    },
+    "workspaceSelectionScreen": {
+      "workspaceNameExamplePlaceholder": "e.g. Engineering, Design, Sales"
     }
   }
 }

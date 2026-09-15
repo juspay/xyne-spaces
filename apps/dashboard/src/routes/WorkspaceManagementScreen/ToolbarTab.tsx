@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Shield } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { useSelf } from '../../hooks/useUsers';
@@ -30,6 +31,7 @@ interface ToolbarTabProps {
 }
 
 export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const isAdmin = self?.role === WorkspaceRole.ADMIN || self?.role === WorkspaceRole.OWNER;
   const disabledPaths = useDisabledToolbarPaths();
@@ -83,7 +85,9 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <Input
               type='text'
-              placeholder='Search toolbar items...'
+              placeholder={t(
+                'routes.workspaceManagementScreen.toolbarTab.searchToolbarItemsPlaceholder',
+              )}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='pl-10'

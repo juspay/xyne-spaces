@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Building2, Plus, X, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -26,6 +27,7 @@ const Card = ({
 );
 
 export const OrganizationsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const z = useZero();
   const workspaceId = self?.workspaceId;
@@ -199,7 +201,9 @@ export const OrganizationsTab = (): ReactElement => {
               <Input
                 id='org-name'
                 type='text'
-                placeholder='Enter organization name...'
+                placeholder={t(
+                  'routes.workspaceManagementScreen.organizationsTab.orgNamePlaceholder',
+                )}
                 value={newOrgName}
                 onChange={e => setNewOrgName(e.target.value)}
                 disabled={isCreatingOrg}
@@ -215,7 +219,9 @@ export const OrganizationsTab = (): ReactElement => {
                 data-track-category='workspace-management'
                 data-track-name='org-description-input'
                 id='org-description'
-                placeholder='A brief description of your organization...'
+                placeholder={t(
+                  'routes.workspaceManagementScreen.organizationsTab.orgDescriptionPlaceholder',
+                )}
                 value={newOrgDescription}
                 onChange={e => setNewOrgDescription(e.target.value)}
                 disabled={isCreatingOrg}
@@ -273,8 +279,12 @@ export const OrganizationsTab = (): ReactElement => {
                 options={orgOptions}
                 selectedValue={selectedOrgId}
                 onSelect={setSelectedOrgId}
-                placeholder='Select an organization...'
-                searchPlaceholder='Search organizations...'
+                placeholder={t(
+                  'routes.workspaceManagementScreen.organizationsTab.selectOrgPlaceholder',
+                )}
+                searchPlaceholder={t(
+                  'routes.workspaceManagementScreen.organizationsTab.searchOrgsPlaceholder',
+                )}
                 width='100%'
               />
             </div>

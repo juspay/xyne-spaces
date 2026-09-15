@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
@@ -47,6 +48,7 @@ const getInitials = (name: string): string => {
 };
 
 export const WorkspaceSelectionScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
@@ -319,7 +321,9 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       data-track-name='EnterWorkspaceName'
                       value={newWorkspaceName}
                       onChange={e => setNewWorkspaceName(e.target.value)}
-                      placeholder='e.g. Engineering, Design, Sales'
+                      placeholder={t(
+                        'routes.workspaceSelectionScreen.workspaceNameExamplePlaceholder',
+                      )}
                       className='flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/30 focus:border-[hsl(var(--primary))]/40'
                       disabled={isCreating}
                       autoFocus
