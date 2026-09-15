@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Save,
   Users,
@@ -70,6 +71,7 @@ interface GeneralAndMembersTabProps {
 export const GeneralAndMembersTab = ({
   isActive = false,
 }: GeneralAndMembersTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const z = useZero();
   const workspaceId = self?.workspaceId;
@@ -247,7 +249,9 @@ export const GeneralAndMembersTab = ({
                 ref={workspaceNameInputRef}
                 id='workspace-name'
                 type='text'
-                placeholder='Enter workspace name...'
+                placeholder={t(
+                  'routes.workspaceManagementScreen.generalAndMembersTab.workspaceNamePlaceholder',
+                )}
                 value={name}
                 onChange={e => setName(e.target.value)}
                 className='w-full max-w-lg'
@@ -267,7 +271,9 @@ export const GeneralAndMembersTab = ({
               </label>
               <textarea
                 id='workspace-description'
-                placeholder='Enter workspace description...'
+                placeholder={t(
+                  'routes.workspaceManagementScreen.generalAndMembersTab.workspaceDescriptionPlaceholder',
+                )}
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 data-track-category='workspace-management'
@@ -332,7 +338,9 @@ export const GeneralAndMembersTab = ({
             <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <Input
               type='text'
-              placeholder='Search by name or email...'
+              placeholder={t(
+                'routes.workspaceManagementScreen.generalAndMembersTab.searchMembersPlaceholder',
+              )}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='pl-10'

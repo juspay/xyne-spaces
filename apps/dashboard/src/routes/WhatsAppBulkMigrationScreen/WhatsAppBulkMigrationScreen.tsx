@@ -1,4 +1,5 @@
 import { type ChangeEvent, type ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2,
   CloudUpload,
@@ -111,6 +112,7 @@ const parseTargetValue = (
 };
 
 const WhatsAppBulkMigrationScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
   const allChannels = useAllChannels();
   const hydratedUsers = useUsers();
@@ -663,7 +665,9 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                         );
                       }}
                       rows={8}
-                      placeholder={'Alice Example,alice@company.com\nBob Example,bob@company.com'}
+                      placeholder={t(
+                        'routes.whatsAppBulkMigrationScreen.mappingsExamplePlaceholder',
+                      )}
                     />
                     <div className='rounded-2xl border border-border/70 bg-background/70 p-4'>
                       <label
@@ -859,8 +863,12 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                                           );
                                         });
                                     }}
-                                    placeholder='Select channel or user'
-                                    searchPlaceholder='Search channels or users...'
+                                    placeholder={t(
+                                      'routes.whatsAppMigrationPanel.selectChannelOrUserPlaceholder',
+                                    )}
+                                    searchPlaceholder={t(
+                                      'routes.whatsAppMigrationPanel.searchChannelsOrUsersPlaceholder',
+                                    )}
                                     width='100%'
                                   />
                                 </div>
@@ -914,8 +922,12 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                             );
                           });
                       }}
-                      placeholder='Select channel or user'
-                      searchPlaceholder='Search channels or users...'
+                      placeholder={t(
+                        'routes.whatsAppMigrationPanel.selectChannelOrUserPlaceholder',
+                      )}
+                      searchPlaceholder={t(
+                        'routes.whatsAppMigrationPanel.searchChannelsOrUsersPlaceholder',
+                      )}
                       width='100%'
                     />
                   </div>

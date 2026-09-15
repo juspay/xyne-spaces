@@ -1081,6 +1081,22 @@
     },
     "userGuideScreen": {
       "trySearchPlaceholder": "Try 'create ticket' or 'Xyne AI'"
+    },
+    "whatsAppBulkMigrationScreen": {
+      "mappingsExamplePlaceholder": "Alice Example,alice@company.com\nBob Example,bob@company.com"
+    },
+    "workspaceManagementScreen": {
+      "generalAndMembersTab": {
+        "workspaceNamePlaceholder": "Enter workspace name...",
+        "workspaceDescriptionPlaceholder": "Enter workspace description...",
+        "searchMembersPlaceholder": "Search by name or email..."
+      },
+      "guestUsersTab": {
+        "searchPlaceholder": "Search by guest, email, entity, or grant type..."
+      },
+      "invitationsTab": {
+        "emailPlaceholder": "Enter email address..."
+      }
     }
   }
 }
