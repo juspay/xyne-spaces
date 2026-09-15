@@ -5647,6 +5647,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             sensors={sensors}
           >
             <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
+              {allColumnsHidden && (
+                <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
+                  <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
+                    <EyeOff className='size-6' />
+                  </div>
+                  <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
+                  <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
+                    Hidden columns keep their tickets out of the board and out of every count.
+                    Unhide one from the panel on the right.
+                  </p>
+                  <button
+                    type='button'
+                    onClick={showAllColumns}
+                    className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground transition-colors hover:bg-blue-700'
+                    data-track-category='Tickets'
+                    data-track-name='ShowAllKanbanColumns'
+                  >
+                    Show all columns
+                  </button>
+                </div>
+              )}
               {kanbanGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
@@ -5832,8 +5853,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         />
       )}
 
-      {/* Create Ticket Modal — my-tickets and saved views (no channel context, user picks channel + board) */}
-      {(isMyTicketsView || isWorkspaceView) && !channel && isCreateModalOpen && (
+      {/* Create Ticket Modal — no usable channel context (my-tickets, workspace views,
+          archived channel); the user picks channel + board */}
+      {(!channel || channel.isArchived || !effectiveProjectId) && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           onClose={() => {
