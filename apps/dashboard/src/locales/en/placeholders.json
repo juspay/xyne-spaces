@@ -588,6 +588,10 @@
       "noBoardsAvailable": "No boards available",
       "selectBoard": "Select a board",
       "webhookNamePlaceholder": "e.g., GitHub CI, Monitoring"
+    },
+    "shortcutPickerModal": {
+      "searchMessageShortcutsPlaceholder": "Search message shortcuts...",
+      "searchShortcutsPlaceholder": "Search shortcuts..."
     }
   },
   "analyticsDashboard": {

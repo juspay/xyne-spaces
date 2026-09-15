@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Table } from '../../ui/Table/Table';
 import { Button } from '../../ui/Button/Button';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -39,8 +40,13 @@ const CreatedByCell = ({
   userId: string;
   orgName?: string | undefined;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const user = useUser(userId);
-  return <span className='text-foreground'>{user?.name || orgName || 'Unknown'}</span>;
+  return (
+    <span className='text-foreground'>
+      {user?.name || orgName || t('apps.appsTable.createdByUnknown')}
+    </span>
+  );
 };
 
 interface AppsTableProps {
@@ -94,6 +100,7 @@ export const AppsTable = ({
   installedVersionByAppId = {},
   orgNamesById = {},
 }: AppsTableProps): ReactElement => {
+  const { t } = useTranslation('common');
   const isInstalledView = dataSource === 'install';
   const appAccessLevel = useMemo(() => {
     const appPerms = userPermissions.filter(p => p.resourceName === 'XYNE-APPS');
@@ -186,16 +193,17 @@ export const AppsTable = ({
 
   const handleCopyToken = async (appId: string) => {
     if (!onGetJwtToken) {
-      toast.error('JWT token generation not available');
+      toast.error(t('apps.appsTable.toasts.jwtNotAvailable'));
       return;
     }
     try {
       const jwtToken = await onGetJwtToken(appId);
       await copyTextToClipboard(jwtToken);
-      toast.success('Token copied to clipboard');
+      toast.success(t('apps.appsTable.toasts.tokenCopied'));
     } catch (error) {
-      toast.error('Failed to generate and copy JWT', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(t('apps.appsTable.toasts.jwtCopyFailed'), {
+        description:
+          error instanceof Error ? error.message : t('apps.appsTable.toasts.unknownError'),
       });
     }
   };
@@ -203,31 +211,33 @@ export const AppsTable = ({
   const handleCopyBotUserId = async (app: AppRow) => {
     const botUserId = getBotUserId(app);
     if (!botUserId) {
-      toast.error('No bot user ID available');
+      toast.error(t('apps.appsTable.toasts.noBotUserId'));
       return;
     }
     try {
       await copyTextToClipboard(botUserId);
-      toast.success('Bot user ID copied to clipboard');
+      toast.success(t('apps.appsTable.toasts.botUserIdCopied'));
     } catch (error) {
-      toast.error('Failed to copy bot user ID', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(t('apps.appsTable.toasts.botUserIdCopyFailed'), {
+        description:
+          error instanceof Error ? error.message : t('apps.appsTable.toasts.unknownError'),
       });
     }
   };
 
   const handleCopySigningSecret = async (appId: string) => {
     if (!onGetSigningSecret) {
-      toast.error('Signing secret retrieval not available');
+      toast.error(t('apps.appsTable.toasts.signingSecretNotAvailable'));
       return;
     }
     try {
       const signingSecret = await onGetSigningSecret(appId);
       await copyTextToClipboard(signingSecret);
-      toast.success('Signing secret copied to clipboard');
+      toast.success(t('apps.appsTable.toasts.signingSecretCopied'));
     } catch (error) {
-      toast.error('Failed to retrieve signing secret', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(t('apps.appsTable.toasts.signingSecretCopyFailed'), {
+        description:
+          error instanceof Error ? error.message : t('apps.appsTable.toasts.unknownError'),
       });
     }
   };
@@ -236,7 +246,7 @@ export const AppsTable = ({
   const columns: ColumnDef<AppRow>[] = [
     {
       field: 'name',
-      header: 'App',
+      header: t('apps.appsTable.columns.app'),
       renderCell: (_value, app) => {
         const botUserId = getBotUserId(app);
 
@@ -254,7 +264,7 @@ export const AppsTable = ({
                 }}
                 data-track-category='Apps'
                 data-track-name='COPY_BOT_USER_ID'
-                title='Copy bot user ID'
+                title={t('apps.appsTable.copyBotUserId')}
                 className='h-6 w-6 p-0'
               >
                 <Copy size={14} />
@@ -266,7 +276,7 @@ export const AppsTable = ({
     },
     {
       field: 'description',
-      header: 'Description',
+      header: t('apps.appsTable.columns.description'),
       renderCell: (_value, app) => (
         <span className='text-muted-foreground truncate max-w-xs block'>
           {app.description || '-'}
@@ -275,7 +285,7 @@ export const AppsTable = ({
     },
     {
       field: 'webhookUrl',
-      header: 'Webhook URL',
+      header: t('apps.appsTable.columns.webhookUrl'),
       renderCell: (_value, app) => {
         const webhookUrl = getWebhookUrl(app);
         return (
@@ -285,7 +295,7 @@ export const AppsTable = ({
     },
     {
       field: 'createdBy',
-      header: 'Created By',
+      header: t('apps.appsTable.columns.createdBy'),
       renderCell: (_value, app) => (
         <CreatedByCell
           userId={app.createdBy}
@@ -295,28 +305,38 @@ export const AppsTable = ({
     },
     {
       field: 'status',
-      header: 'Status',
+      header: t('apps.appsTable.columns.status'),
       renderCell: (_value, app) => {
         const status = getStatus(app);
         const statusClass =
           status === 'Installed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800';
+        const statusLabel =
+          status === 'Installed'
+            ? t('apps.appsTable.statusInstalled')
+            : status === 'Available'
+              ? t('apps.appsTable.statusAvailable')
+              : status;
         return (
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusClass}`}>
-            {status}
+            {statusLabel}
           </span>
         );
       },
     },
     {
       field: 'jwtToken',
-      header: 'JWT Token',
+      header: t('apps.appsTable.columns.jwtToken'),
       renderCell: (_value, app) => {
         const status = getStatus(app);
         const isInstalled = status === 'Installed';
         const canCopy = hasAdminAccess || app.createdBy === currentUserId;
 
         if (!isInstalled) {
-          return <span className='text-muted-foreground text-xs'>Install app first</span>;
+          return (
+            <span className='text-muted-foreground text-xs'>
+              {t('apps.appsTable.installAppFirst')}
+            </span>
+          );
         }
 
         return (
@@ -333,7 +353,9 @@ export const AppsTable = ({
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
-                canCopy ? 'Copy JWT to clipboard' : "You don't have permission to copy this token"
+                canCopy
+                  ? t('apps.appsTable.copyJwtToClipboard')
+                  : t('apps.appsTable.noPermissionCopyToken')
               }
             >
               <Copy size={14} />
@@ -344,7 +366,7 @@ export const AppsTable = ({
     },
     {
       field: 'signingSecret',
-      header: 'Signing Secret',
+      header: t('apps.appsTable.columns.signingSecret'),
       renderCell: (_value, app) => {
         // Signing secret is app-level — visible/copyable regardless of install state (creator/admin only).
         const canCopy = hasAdminAccess || app.createdBy === currentUserId;
@@ -364,8 +386,8 @@ export const AppsTable = ({
               className='h-6 w-6 p-0'
               title={
                 canCopy
-                  ? 'Copy signing secret to clipboard'
-                  : 'Only admin or app creator can copy this secret'
+                  ? t('apps.appsTable.copySigningSecretToClipboard')
+                  : t('apps.appsTable.onlyAdminOrCreatorCopySecret')
               }
             >
               <Copy size={14} />
@@ -379,7 +401,7 @@ export const AppsTable = ({
   // Add actions column for ADMIN or creator
   columns.push({
     field: 'actions',
-    header: 'Actions',
+    header: t('apps.appsTable.columns.actions'),
     renderCell: (_value, app) => {
       const isInstalled = getStatus(app) === 'Installed';
       const showUpdate = hasUpdate(app);
@@ -394,12 +416,16 @@ export const AppsTable = ({
             onClick={() => handleStartEdit(app)}
             disabled={isDisabledEdit}
             className='gap-1 h-8'
-            title={isDisabledEdit ? 'Only creator or admin can edit' : 'Edit app'}
+            title={
+              isDisabledEdit
+                ? t('apps.appsTable.onlyCreatorOrAdminEdit')
+                : t('apps.appsTable.editAppTitle')
+            }
             data-track-category='Apps'
             data-track-name='OpenEditAppModal'
           >
             <Pencil size={14} />
-            Edit
+            {t('apps.appsTable.editButton')}
           </Button>
           {hasAdminAccess && !isInstalled && (
             <Button
@@ -412,7 +438,7 @@ export const AppsTable = ({
               data-track-name='InstallApp'
             >
               <Download size={14} />
-              {isInstalling ? 'Installing...' : 'Install'}
+              {isInstalling ? t('apps.appsTable.installing') : t('apps.appsTable.install')}
             </Button>
           )}
           {hasAdminAccess && showUpdate && (
@@ -422,12 +448,12 @@ export const AppsTable = ({
               disabled={isInstalling}
               onClick={() => onReinstall(app.id)}
               className='gap-1 h-8'
-              title='Update to the latest app version (the creator changed commands or permissions)'
+              title={t('apps.appsTable.updateTooltip')}
               data-track-category='Apps'
               data-track-name='UpdateApp'
             >
               <RefreshCw size={14} />
-              {isInstalling ? 'Updating...' : 'Update'}
+              {isInstalling ? t('apps.appsTable.updating') : t('apps.appsTable.update')}
             </Button>
           )}
           {onPromote && canPromote && (
@@ -437,12 +463,12 @@ export const AppsTable = ({
               disabled={isPromoting}
               onClick={() => onPromote(app.id)}
               className='gap-1 h-8'
-              title='Promote to the cross-org marketplace (make this app global)'
+              title={t('apps.appsTable.promoteTooltip')}
               data-track-category='Apps'
               data-track-name='PromoteApp'
             >
               <Globe size={14} />
-              {isPromoting ? 'Promoting...' : 'Promote'}
+              {isPromoting ? t('apps.appsTable.promoting') : t('apps.appsTable.promote')}
             </Button>
           )}
         </div>
@@ -460,7 +486,11 @@ export const AppsTable = ({
         size='md'
         hoverable={true}
         serverSidePagination={true}
-        emptyState={<div className='text-center py-8 text-muted-foreground'>No apps found</div>}
+        emptyState={
+          <div className='text-center py-8 text-muted-foreground'>
+            {t('apps.appsTable.noAppsFound')}
+          </div>
+        }
       />
 
       {editingApp && (
@@ -472,8 +502,8 @@ export const AppsTable = ({
               setEditingApp(null);
             }
           }}
-          title={`Edit App: ${editingApp.name}`}
-          description='Update the app description and webhook URL'
+          title={t('apps.appsTable.editAppDialogTitle', { name: editingApp.name })}
+          description={t('apps.appsTable.editAppDialogDescription')}
           className='max-w-3xl max-h-[85vh] overflow-hidden'
         >
           <EditAppForm

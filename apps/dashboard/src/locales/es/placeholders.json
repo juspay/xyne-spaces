@@ -588,6 +588,10 @@
       "noBoardsAvailable": "No hay tableros disponibles",
       "selectBoard": "Seleccionar un tablero",
       "webhookNamePlaceholder": "ej., GitHub CI, Monitoreo"
+    },
+    "shortcutPickerModal": {
+      "searchMessageShortcutsPlaceholder": "Buscar atajos de mensaje...",
+      "searchShortcutsPlaceholder": "Buscar atajos..."
     }
   },
   "analyticsDashboard": {

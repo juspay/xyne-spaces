@@ -57,58 +57,61 @@ const CommandRow = ({
   onEdit,
   onDelete,
   readOnly = false,
-}: CommandRowProps): ReactElement => (
-  <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
-    <div className='flex-1 min-w-0'>
-      <div className='flex items-center gap-2'>
-        <span className='text-sm font-mono font-medium text-foreground'>
-          /{command.commandName}
-        </span>
-        <div className='flex gap-1'>
-          {command.isForChat && (
-            <span className='text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'>
-              chat
-            </span>
-          )}
-          {command.isForThread && (
-            <span className='text-[10px] px-1 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'>
-              thread
-            </span>
-          )}
+}: CommandRowProps): ReactElement => {
+  const { t } = useTranslation('common');
+  return (
+    <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-2'>
+          <span className='text-sm font-mono font-medium text-foreground'>
+            /{command.commandName}
+          </span>
+          <div className='flex gap-1'>
+            {command.isForChat && (
+              <span className='text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'>
+                {t('apps.editApp.commandRow.chatBadge')}
+              </span>
+            )}
+            {command.isForThread && (
+              <span className='text-[10px] px-1 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'>
+                {t('apps.editApp.commandRow.threadBadge')}
+              </span>
+            )}
+          </div>
         </div>
+        <p className='text-xs text-muted-foreground truncate mt-0.5'>{command.description}</p>
       </div>
-      <p className='text-xs text-muted-foreground truncate mt-0.5'>{command.description}</p>
+      {!readOnly && (
+        <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='h-7 w-7 p-0'
+            onClick={() => onEdit(command)}
+            data-track-category='app-command'
+            data-track-name='EDIT_COMMAND'
+            title={t('apps.editApp.commandRow.editTitle')}
+          >
+            <Pencil size={13} />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+            onClick={() => onDelete(command.commandName)}
+            data-track-category='app-command'
+            data-track-name='DELETE_COMMAND'
+            title={t('apps.editApp.commandRow.deleteTitle')}
+          >
+            <Trash2 size={13} />
+          </Button>
+        </div>
+      )}
     </div>
-    {!readOnly && (
-      <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='h-7 w-7 p-0'
-          onClick={() => onEdit(command)}
-          data-track-category='app-command'
-          data-track-name='EDIT_COMMAND'
-          title='Edit command'
-        >
-          <Pencil size={13} />
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
-          onClick={() => onDelete(command.commandName)}
-          data-track-category='app-command'
-          data-track-name='DELETE_COMMAND'
-          title='Delete command'
-        >
-          <Trash2 size={13} />
-        </Button>
-      </div>
-    )}
-  </div>
-);
+  );
+};
 
 // ─── Inline add / edit form ───────────────────────────────────────────────────
 
@@ -126,6 +129,7 @@ const CommandFormInline = ({
   onCancel,
 }: CommandFormInlineProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
@@ -137,15 +141,15 @@ const CommandFormInline = ({
   const handleSave = async () => {
     const trimmed = name.trim().toLowerCase();
     if (!trimmed) {
-      setNameError('Command name is required');
+      setNameError(tc('apps.editApp.commandForm.nameRequired'));
       return;
     }
     if (!/^[a-z0-9-]+$/.test(trimmed)) {
-      setNameError('Only lowercase letters, numbers, and hyphens');
+      setNameError(tc('apps.editApp.commandForm.nameInvalid'));
       return;
     }
     if (!desc.trim()) {
-      toast.error('Description is required');
+      toast.error(tc('apps.editApp.commandForm.descriptionRequired'));
       return;
     }
     setSaving(true);
@@ -161,8 +165,8 @@ const CommandFormInline = ({
         : await appsService.createCommand(appId, payload);
       onSaved(saved);
     } catch (e) {
-      toast.error('Failed to save command', {
-        description: e instanceof Error ? e.message : 'Unknown error',
+      toast.error(tc('apps.editApp.commandForm.saveFailed'), {
+        description: e instanceof Error ? e.message : tc('apps.appsTable.toasts.unknownError'),
       });
     } finally {
       setSaving(false);
@@ -174,7 +178,7 @@ const CommandFormInline = ({
       <div className='flex gap-2'>
         <div className='flex-1 space-y-1'>
           <label htmlFor='command-name' className='text-xs font-medium text-foreground'>
-            Command name
+            {tc('apps.editApp.commandForm.nameLabel')}
           </label>
           <div className='relative'>
             <span className='absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm'>
@@ -197,7 +201,7 @@ const CommandFormInline = ({
       </div>
       <div className='space-y-1'>
         <label htmlFor='command-description' className='text-xs font-medium text-foreground'>
-          Description
+          {tc('apps.editApp.commandForm.descriptionLabel')}
         </label>
         <Input
           id='command-description'
@@ -219,7 +223,7 @@ const CommandFormInline = ({
             data-track-category='app-command'
             data-track-name='toggle-accessibility-chat'
           />
-          Chat only
+          {tc('apps.editApp.commandForm.chatOnly')}
         </label>
         <label className='flex items-center gap-1.5 text-xs text-foreground cursor-pointer'>
           <input
@@ -231,7 +235,7 @@ const CommandFormInline = ({
             data-track-category='app-command'
             data-track-name='toggle-accessibility-thread'
           />
-          Threads only
+          {tc('apps.editApp.commandForm.threadsOnly')}
         </label>
         <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
           <input
@@ -243,7 +247,7 @@ const CommandFormInline = ({
             data-track-category='app-command'
             data-track-name='toggle-accessibility-both'
           />
-          Both
+          {tc('apps.editApp.commandForm.both')}
         </label>
       </div>
       <div className='flex gap-2 justify-end pt-1'>
@@ -257,7 +261,7 @@ const CommandFormInline = ({
           data-track-name='CANCEL_COMMAND_FORM'
           disabled={saving}
         >
-          <X size={13} className='mr-1' /> Cancel
+          <X size={13} className='mr-1' /> {tc('apps.editApp.commandForm.cancel')}
         </Button>
         <Button
           type='button'
@@ -269,7 +273,7 @@ const CommandFormInline = ({
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? tc('apps.editApp.commandForm.saving') : tc('apps.editApp.commandForm.save')}
         </Button>
       </div>
     </div>
@@ -290,58 +294,65 @@ const ShortcutRow = ({
   onEdit,
   onDelete,
   readOnly = false,
-}: ShortcutRowProps): ReactElement => (
-  <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
-    <div className='flex-shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
-      <Zap className='w-3.5 h-3.5 text-primary' />
-    </div>
-    <div className='flex-1 min-w-0'>
-      <div className='flex items-center gap-2'>
-        <span className='text-sm font-mono font-medium text-foreground truncate'>
-          {shortcut.commandName}
-        </span>
-        <span
-          className={`text-[10px] px-1 py-0.5 rounded ${
-            shortcut.commandAccessibility === CommandAccessibility.GLOBAL
-              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-              : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-          }`}
-        >
-          {shortcut.commandAccessibility?.toLowerCase() ?? 'global'}
-        </span>
+}: ShortcutRowProps): ReactElement => {
+  const { t } = useTranslation('common');
+  const accessibilityLabel =
+    shortcut.commandAccessibility?.toLowerCase() === 'message'
+      ? t('apps.editApp.shortcutRow.accessibilityMessage')
+      : t('apps.editApp.shortcutRow.accessibilityGlobal');
+  return (
+    <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
+      <div className='flex-shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
+        <Zap className='w-3.5 h-3.5 text-primary' />
       </div>
-      <p className='text-xs text-muted-foreground truncate mt-0.5'>{shortcut.description}</p>
-    </div>
-    {!readOnly && (
-      <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='h-7 w-7 p-0'
-          onClick={() => onEdit(shortcut)}
-          data-track-category='app-shortcut'
-          data-track-name='EDIT_SHORTCUT'
-          title='Edit shortcut'
-        >
-          <Pencil size={13} />
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
-          onClick={() => onDelete(shortcut.commandName)}
-          data-track-category='app-shortcut'
-          data-track-name='DELETE_SHORTCUT'
-          title='Delete shortcut'
-        >
-          <Trash2 size={13} />
-        </Button>
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-2'>
+          <span className='text-sm font-mono font-medium text-foreground truncate'>
+            {shortcut.commandName}
+          </span>
+          <span
+            className={`text-[10px] px-1 py-0.5 rounded ${
+              shortcut.commandAccessibility === CommandAccessibility.GLOBAL
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+            }`}
+          >
+            {accessibilityLabel}
+          </span>
+        </div>
+        <p className='text-xs text-muted-foreground truncate mt-0.5'>{shortcut.description}</p>
       </div>
-    )}
-  </div>
-);
+      {!readOnly && (
+        <div className='flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='h-7 w-7 p-0'
+            onClick={() => onEdit(shortcut)}
+            data-track-category='app-shortcut'
+            data-track-name='EDIT_SHORTCUT'
+            title={t('apps.editApp.shortcutRow.editTitle')}
+          >
+            <Pencil size={13} />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+            onClick={() => onDelete(shortcut.commandName)}
+            data-track-category='app-shortcut'
+            data-track-name='DELETE_SHORTCUT'
+            title={t('apps.editApp.shortcutRow.deleteTitle')}
+          >
+            <Trash2 size={13} />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Inline shortcut form ─────────────────────────────────────────────────────
 
@@ -359,6 +370,7 @@ const ShortcutFormInline = ({
   onCancel,
 }: ShortcutFormInlineProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [saving, setSaving] = useState(false);
   const [commandName, setCommandName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
@@ -370,15 +382,15 @@ const ShortcutFormInline = ({
   const handleSave = async () => {
     const trimmedName = commandName.trim().toLowerCase();
     if (!trimmedName) {
-      setNameError('Shortcut ID is required');
+      setNameError(tc('apps.editApp.shortcutForm.idRequired'));
       return;
     }
     if (!/^[a-z0-9_]+$/.test(trimmedName)) {
-      setNameError('Only lowercase letters, numbers, and underscores');
+      setNameError(tc('apps.editApp.shortcutForm.idInvalid'));
       return;
     }
     if (!desc.trim()) {
-      toast.error('Description is required');
+      toast.error(tc('apps.editApp.shortcutForm.descriptionRequired'));
       return;
     }
     setSaving(true);
@@ -393,8 +405,8 @@ const ShortcutFormInline = ({
         : await appsService.createShortcut(appId, payload);
       onSaved(saved);
     } catch (e) {
-      toast.error('Failed to save shortcut', {
-        description: e instanceof Error ? e.message : 'Unknown error',
+      toast.error(tc('apps.editApp.shortcutForm.saveFailed'), {
+        description: e instanceof Error ? e.message : tc('apps.appsTable.toasts.unknownError'),
       });
     } finally {
       setSaving(false);
@@ -405,7 +417,7 @@ const ShortcutFormInline = ({
     <div className='p-3 rounded-md border border-ring bg-muted/20 space-y-2'>
       <div className='space-y-1'>
         <label htmlFor='shortcut-command-name' className='text-xs font-medium text-foreground'>
-          Shortcut ID
+          {tc('apps.editApp.shortcutForm.idLabel')}
         </label>
         <Input
           id='shortcut-command-name'
@@ -422,7 +434,7 @@ const ShortcutFormInline = ({
       </div>
       <div className='space-y-1'>
         <label htmlFor='shortcut-description' className='text-xs font-medium text-foreground'>
-          Description
+          {tc('apps.editApp.shortcutForm.descriptionLabel')}
         </label>
         <Input
           id='shortcut-description'
@@ -444,7 +456,7 @@ const ShortcutFormInline = ({
             data-track-category='app-shortcut'
             data-track-name='toggle-type-global'
           />
-          Global
+          {tc('apps.editApp.shortcutForm.global')}
         </label>
         <label className='flex items-center gap-1.5 text-xs cursor-pointer'>
           <input
@@ -456,7 +468,7 @@ const ShortcutFormInline = ({
             data-track-category='app-shortcut'
             data-track-name='toggle-type-message'
           />
-          Message
+          {tc('apps.editApp.shortcutForm.message')}
         </label>
       </div>
       <div className='flex gap-2 justify-end pt-1'>
@@ -470,7 +482,7 @@ const ShortcutFormInline = ({
           data-track-name='CANCEL_SHORTCUT_FORM'
           disabled={saving}
         >
-          <X size={13} className='mr-1' /> Cancel
+          <X size={13} className='mr-1' /> {tc('apps.editApp.shortcutForm.cancel')}
         </Button>
         <Button
           type='button'
@@ -482,7 +494,7 @@ const ShortcutFormInline = ({
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? tc('apps.editApp.shortcutForm.saving') : tc('apps.editApp.shortcutForm.save')}
         </Button>
       </div>
     </div>
@@ -509,6 +521,7 @@ const PermissionsSection = ({
   installedAppId,
   readOnly = false,
 }: PermissionsSectionProps): ReactElement => {
+  const { t } = useTranslation('common');
   const isInstallMode = editMode === 'install' && !!installedAppId;
   const [available, setAvailable] = useState<AppPermission[]>([]);
   // Local selection — always editable regardless of install state
@@ -567,21 +580,21 @@ const PermissionsSection = ({
     if (status === 'UNAPPROVED') {
       return (
         <span className='text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 whitespace-nowrap'>
-          Update to activate
+          {t('apps.editApp.permissions.badgeUpdateToActivate')}
         </span>
       );
     }
     if (status === 'PENDINGDELETE') {
       return (
         <span className='text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 whitespace-nowrap'>
-          Removes on update
+          {t('apps.editApp.permissions.badgeRemovesOnUpdate')}
         </span>
       );
     }
     if (status === 'APPROVED') {
       return (
         <span className='text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 whitespace-nowrap'>
-          Active
+          {t('apps.editApp.permissions.badgeActive')}
         </span>
       );
     }
@@ -616,12 +629,12 @@ const PermissionsSection = ({
       } else {
         await appsService.setPermissions(appId, Array.from(selected));
       }
-      toast.success(`Permissions saved (${selected.size} granted)`);
+      toast.success(t('apps.editApp.permissions.saveSuccess', { count: selected.size }));
       // Refresh statuses after save so badges update
       loadGranted();
     } catch (e) {
-      toast.error('Failed to save permissions', {
-        description: e instanceof Error ? e.message : 'Unknown error',
+      toast.error(t('apps.editApp.permissions.saveFailed'), {
+        description: e instanceof Error ? e.message : t('apps.appsTable.toasts.unknownError'),
       });
     } finally {
       setSaving(false);
@@ -641,11 +654,11 @@ const PermissionsSection = ({
     setActivating(true);
     try {
       await appsService.activateInstalledPermissions(installedAppId);
-      toast.success('Permission changes applied');
+      toast.success(t('apps.editApp.permissions.activateSuccess'));
       loadGranted();
     } catch (e) {
-      toast.error('Failed to apply permission changes', {
-        description: e instanceof Error ? e.message : 'Unknown error',
+      toast.error(t('apps.editApp.permissions.activateFailed'), {
+        description: e instanceof Error ? e.message : t('apps.appsTable.toasts.unknownError'),
       });
     } finally {
       setActivating(false);
@@ -655,16 +668,21 @@ const PermissionsSection = ({
   return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between'>
-        <span className='block text-sm font-medium text-foreground'>Permissions</span>
+        <span className='block text-sm font-medium text-foreground'>
+          {t('apps.editApp.permissions.label')}
+        </span>
         <div className='flex items-center gap-2'>
           {!isInstalled && (
             <span className='text-xs text-amber-600 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded'>
-              Install app to apply
+              {t('apps.editApp.permissions.installToApply')}
             </span>
           )}
           {isInstalled && (
             <span className='text-xs text-muted-foreground'>
-              {selected.size} / {available.length} granted
+              {t('apps.editApp.permissions.grantedCount', {
+                selected: selected.size,
+                total: available.length,
+              })}
             </span>
           )}
           <Button
@@ -677,7 +695,9 @@ const PermissionsSection = ({
             data-track-category='Apps'
             data-track-name='ToggleSelectAllPermissions'
           >
-            {allSelected ? 'Deselect all' : 'Select all'}
+            {allSelected
+              ? t('apps.editApp.permissions.deselectAll')
+              : t('apps.editApp.permissions.selectAll')}
           </Button>
           <Button
             type='button'
@@ -689,7 +709,9 @@ const PermissionsSection = ({
             data-track-name='SAVE_APP'
             disabled={locked || !loaded}
           >
-            {saving ? 'Saving…' : 'Save Permissions'}
+            {saving
+              ? t('apps.editApp.permissions.savingButton')
+              : t('apps.editApp.permissions.savePermissionsButton')}
           </Button>
           {isInstallMode && hasPendingChanges && (
             <Button
@@ -701,20 +723,24 @@ const PermissionsSection = ({
               data-track-category='Apps'
               data-track-name='ACTIVATE_APP_INSTALL'
               disabled={activating || locked}
-              title='Re-sync this install to activate pending permission changes'
+              title={t('apps.editApp.permissions.activateTooltip')}
             >
-              {activating ? 'Applying…' : 'Apply & activate'}
+              {activating
+                ? t('apps.editApp.permissions.applying')
+                : t('apps.editApp.permissions.applyAndActivate')}
             </Button>
           )}
         </div>
       </div>
       <p className='text-[11px] leading-snug text-muted-foreground bg-muted/40 border border-border rounded-md px-2.5 py-2'>
         {isInstallMode
-          ? 'Permission changes only affect this app in your workspace. Use “Apply & activate” after saving to re-install with the updated permissions.'
-          : 'These permission changes need workspace admin approval before they take effect in the workspace.'}
+          ? t('apps.editApp.permissions.installModeHint')
+          : t('apps.editApp.permissions.templateModeHint')}
       </p>
       {!loaded || available.length === 0 ? (
-        <p className='text-xs text-muted-foreground py-2'>Loading permissions…</p>
+        <p className='text-xs text-muted-foreground py-2'>
+          {t('apps.editApp.permissions.loading')}
+        </p>
       ) : (
         <div className='border border-border rounded-md divide-y divide-border'>
           {available.map(perm => {
@@ -802,19 +828,25 @@ export interface EditAppFormProps {
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
 const WEBHOOK_TYPE_OPTIONS = [
-  { value: 'SLACK', label: 'Slack' },
-  { value: 'SENTINELONE', label: 'SentinelOne' },
-  { value: 'AMAZON_SNS', label: 'Amazon SNS' },
-  { value: 'PINGDOM', label: 'Pingdom' },
-  { value: 'GCP', label: 'GCP Monitoring' },
+  { value: 'SLACK', labelKey: 'apps.editApp.incoming.webhookTypeLabels.slack' },
+  { value: 'SENTINELONE', labelKey: 'apps.editApp.incoming.webhookTypeLabels.sentinelone' },
+  { value: 'AMAZON_SNS', labelKey: 'apps.editApp.incoming.webhookTypeLabels.amazonSns' },
+  { value: 'PINGDOM', labelKey: 'apps.editApp.incoming.webhookTypeLabels.pingdom' },
+  { value: 'GCP', labelKey: 'apps.editApp.incoming.webhookTypeLabels.gcp' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
-const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
-  WEBHOOK_TYPE_OPTIONS.map(option => [option.value, option.label]),
+const WEBHOOK_TYPE_LABEL_KEYS: Record<IncomingWebhookType, string> = Object.fromEntries(
+  WEBHOOK_TYPE_OPTIONS.map(option => [option.value, option.labelKey]),
 ) as Record<IncomingWebhookType, string>;
 const WEBHOOK_ACTION_OPTIONS = [
-  { value: AppIncomingWebhookAction.MESSAGE, label: 'Message' },
-  { value: AppIncomingWebhookAction.TICKET, label: 'Ticket' },
+  {
+    value: AppIncomingWebhookAction.MESSAGE,
+    labelKey: 'apps.editApp.incoming.webhookActionLabels.message',
+  },
+  {
+    value: AppIncomingWebhookAction.TICKET,
+    labelKey: 'apps.editApp.incoming.webhookActionLabels.ticket',
+  },
 ] as const;
 type IncomingWebhookAction = (typeof WEBHOOK_ACTION_OPTIONS)[number]['value'];
 
@@ -865,7 +897,7 @@ type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'inco
 
 interface EditAppNavItem {
   id: EditAppSection;
-  label: string;
+  labelKey: string;
   icon: ReactElement;
 }
 
@@ -897,6 +929,7 @@ export const EditAppForm = ({
   onCancel,
 }: EditAppFormProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   // Install mode = editing this workspace's install (admin). Template mode = editing the app
   // (creator). In install mode commands and name/description are read-only (template-owned).
   const isInstallMode = editMode === 'install';
@@ -1025,11 +1058,12 @@ export const EditAppForm = ({
       setSelectedWebhookAction(AppIncomingWebhookAction.MESSAGE);
       setProjectBoards([]);
       setSelectedBoardId('');
-      toast.success('Incoming webhook created');
+      toast.success(tc('apps.editApp.incoming.toasts.created'));
       fetchWebhooks(0);
     } catch (error) {
-      toast.error('Failed to create webhook', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(tc('apps.editApp.incoming.toasts.createFailed'), {
+        description:
+          error instanceof Error ? error.message : tc('apps.appsTable.toasts.unknownError'),
       });
     } finally {
       setIsCreating(false);
@@ -1042,11 +1076,12 @@ export const EditAppForm = ({
     setRevokeTargetId(null);
     try {
       await appsService.revokeIncomingWebhook(targetId);
-      toast.success('Webhook revoked');
+      toast.success(tc('apps.editApp.incoming.toasts.revoked'));
       fetchWebhooks(webhookOffset);
     } catch (error) {
-      toast.error('Failed to revoke webhook', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(tc('apps.editApp.incoming.toasts.revokeFailed'), {
+        description:
+          error instanceof Error ? error.message : tc('apps.appsTable.toasts.unknownError'),
       });
     }
   };
@@ -1058,11 +1093,12 @@ export const EditAppForm = ({
       await appsService.updateIncomingWebhook(webhookId, { name: trimmed });
       setEditingWebhookId(null);
       setEditingName('');
-      toast.success('Webhook renamed');
+      toast.success(tc('apps.editApp.incoming.toasts.renamed'));
       fetchWebhooks(webhookOffset);
     } catch (error) {
-      toast.error('Failed to rename webhook', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(tc('apps.editApp.incoming.toasts.renameFailed'), {
+        description:
+          error instanceof Error ? error.message : tc('apps.appsTable.toasts.unknownError'),
       });
     }
   };
@@ -1071,7 +1107,7 @@ export const EditAppForm = ({
     const fullUrl = getFullWebhookUrl(webhookUrl);
     if (!fullUrl) return;
     void copyTextToClipboard(fullUrl);
-    toast.success('Webhook URL copied to clipboard');
+    toast.success(tc('apps.editApp.incoming.toasts.urlCopied'));
   };
 
   // ── Commands state ──
@@ -1095,9 +1131,9 @@ export const EditAppForm = ({
         : appsService.getCommands(appId);
     fetcher
       .then(setCommands)
-      .catch(() => toast.error('Failed to load commands'))
+      .catch(() => toast.error(tc('apps.editApp.commands.loadFailed')))
       .finally(() => setCommandsLoading(false));
-  }, [appId, isInstallMode, installedAppId]);
+  }, [appId, isInstallMode, installedAppId, tc]);
 
   useEffect(() => {
     setShortcutsLoading(true);
@@ -1107,9 +1143,9 @@ export const EditAppForm = ({
         : appsService.getShortcuts(appId);
     fetcher
       .then(setShortcuts)
-      .catch(() => toast.error('Failed to load shortcuts'))
+      .catch(() => toast.error(tc('apps.editApp.shortcuts.loadFailed')))
       .finally(() => setShortcutsLoading(false));
-  }, [appId, isInstallMode, installedAppId]);
+  }, [appId, isInstallMode, installedAppId, tc]);
 
   const handleCommandSaved = (saved: AppCommand) => {
     setCommands(prev => {
@@ -1123,16 +1159,16 @@ export const EditAppForm = ({
     });
     setShowCommandForm(false);
     setEditingCommand(null);
-    toast.success(`Command /${saved.commandName} saved`);
+    toast.success(tc('apps.editApp.commands.savedToast', { name: saved.commandName }));
   };
 
   const handleDeleteCommand = async (commandName: string) => {
     try {
       await appsService.deleteCommand(appId, commandName);
       setCommands(prev => prev.filter(c => c.commandName !== commandName));
-      toast.success(`Command /${commandName} deleted`);
+      toast.success(tc('apps.editApp.commands.deletedToast', { name: commandName }));
     } catch {
-      toast.error('Failed to delete command');
+      toast.error(tc('apps.editApp.commands.deleteFailed'));
     }
   };
 
@@ -1153,16 +1189,16 @@ export const EditAppForm = ({
     });
     setShowShortcutForm(false);
     setEditingShortcut(null);
-    toast.success(`Shortcut "${saved.commandName}" saved`);
+    toast.success(tc('apps.editApp.shortcuts.savedToast', { name: saved.commandName }));
   };
 
   const handleDeleteShortcut = async (commandName: string) => {
     try {
       await appsService.deleteShortcut(appId, commandName);
       setShortcuts(prev => prev.filter(s => s.commandName !== commandName));
-      toast.success('Shortcut deleted');
+      toast.success(tc('apps.editApp.shortcuts.deletedToast'));
     } catch {
-      toast.error('Failed to delete shortcut');
+      toast.error(tc('apps.editApp.shortcuts.deleteFailed'));
     }
   };
 
@@ -1189,28 +1225,29 @@ export const EditAppForm = ({
     if (!file) return;
 
     if (!onUploadPicture) {
-      toast.error('Upload not available');
+      toast.error(tc('apps.editApp.basicInfo.uploadNotAvailable'));
       return;
     }
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Only JPG, PNG, and WebP are allowed.');
+      toast.error(tc('apps.editApp.basicInfo.invalidFileType'));
       return;
     }
 
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      toast.error('File too large. Maximum size is 5MB.');
+      toast.error(tc('apps.editApp.basicInfo.fileTooLarge'));
       return;
     }
 
     try {
       await onUploadPicture(appId, file);
-      toast.success('Profile picture uploaded successfully');
+      toast.success(tc('apps.editApp.basicInfo.uploadSuccess'));
     } catch (error) {
-      toast.error('Failed to upload profile picture', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error(tc('apps.editApp.basicInfo.uploadFailed'), {
+        description:
+          error instanceof Error ? error.message : tc('apps.appsTable.toasts.unknownError'),
       });
     }
 
@@ -1258,15 +1295,23 @@ export const EditAppForm = ({
   // Incoming webhooks are install-scoped, so the section only appears when editing an install.
   const showIncomingSection = isInstallMode && !!incomingInstalledAppId;
   const navItems: EditAppNavItem[] = [
-    { id: 'basic', label: 'Basic info', icon: <Info className='size-4' /> },
-    { id: 'commands', label: 'Commands', icon: <Command className='size-4' /> },
-    { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
-    { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
+    { id: 'basic', labelKey: 'apps.editApp.nav.basicInfo', icon: <Info className='size-4' /> },
+    {
+      id: 'commands',
+      labelKey: 'apps.editApp.nav.commands',
+      icon: <Command className='size-4' />,
+    },
+    { id: 'shortcuts', labelKey: 'apps.editApp.nav.shortcuts', icon: <Zap className='size-4' /> },
+    {
+      id: 'permissions',
+      labelKey: 'apps.editApp.nav.permissions',
+      icon: <Shield className='size-4' />,
+    },
     ...(showIncomingSection
       ? [
           {
             id: 'incoming' as const,
-            label: 'Incoming Webhooks',
+            labelKey: 'apps.editApp.nav.incomingWebhooks',
             icon: <Link2 className='size-4' />,
           },
         ]
@@ -1283,12 +1328,14 @@ export const EditAppForm = ({
     >
       {/* Header */}
       <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
-        <p className='text-base font-semibold text-foreground truncate'>Edit {appName}</p>
+        <p className='text-base font-semibold text-foreground truncate'>
+          {tc('apps.editApp.header.editAppTitle', { name: appName })}
+        </p>
         <button
           type='button'
           onClick={onCancel}
           className='p-1.5 rounded-md hover:bg-muted transition-colors'
-          aria-label='Close'
+          aria-label={tc('apps.editApp.header.closeAriaLabel')}
           data-track-category='Apps'
           data-track-name='CloseEditApp'
         >
@@ -1300,7 +1347,7 @@ export const EditAppForm = ({
         {/* Left navigation */}
         <div
           role='tablist'
-          aria-label='App settings sections'
+          aria-label={tc('apps.editApp.nav.tablistAriaLabel')}
           className='flex md:flex-col md:w-52 shrink-0 border-b md:border-b-0 md:border-r border-border p-2 gap-0.5 overflow-x-auto md:overflow-visible'
         >
           {navItems.map(item => {
@@ -1322,7 +1369,7 @@ export const EditAppForm = ({
                 data-track-name={`EditAppSection_${item.id}`}
               >
                 {item.icon}
-                {item.label}
+                {tc(item.labelKey)}
               </button>
             );
           })}
@@ -1332,20 +1379,19 @@ export const EditAppForm = ({
         <div role='tabpanel' className='flex-1 overflow-y-auto p-6 space-y-6'>
           {!canEditInstallSettings && (
             <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
-              You&apos;re viewing this app as its creator. Only a workspace apps admin can change
-              these settings — you can create and manage Incoming Webhooks.
+              {tc('apps.editApp.warningBanner')}
             </div>
           )}
 
           {activeSection === 'basic' && (
             <>
               <SectionHeading
-                title='Basic info'
-                subtitle='Set the description, webhook URL, and profile picture for this app.'
+                title={tc('apps.editApp.basicInfo.sectionTitle')}
+                subtitle={tc('apps.editApp.basicInfo.sectionSubtitle')}
               />
               <div className='space-y-2'>
                 <label htmlFor='appName' className='block text-md font-medium text-foreground'>
-                  App Name
+                  {tc('apps.editApp.basicInfo.appNameLabel')}
                 </label>
                 <Input
                   id='appName'
@@ -1358,7 +1404,7 @@ export const EditAppForm = ({
 
               <div className='space-y-2'>
                 <label htmlFor='description' className='block text-sm font-medium text-foreground'>
-                  Description
+                  {tc('apps.editApp.basicInfo.descriptionLabel')}
                 </label>
                 <Controller
                   name='description'
@@ -1376,7 +1422,7 @@ export const EditAppForm = ({
                 />
                 {isInstallMode && (
                   <p className='text-xs text-muted-foreground'>
-                    Description is set on the app template. Edit it from the Org Apps screen.
+                    {tc('apps.editApp.basicInfo.descriptionTemplateHint')}
                   </p>
                 )}
                 {errors.description && (
@@ -1386,7 +1432,7 @@ export const EditAppForm = ({
 
               <div className='space-y-2'>
                 <label htmlFor='webhookUrl' className='block text-sm font-medium text-foreground'>
-                  Webhook URL
+                  {tc('apps.editApp.basicInfo.webhookUrlLabel')}
                 </label>
                 <Controller
                   name='webhookUrl'
@@ -1398,7 +1444,7 @@ export const EditAppForm = ({
                         new URL(value);
                         return true;
                       } catch {
-                        return 'Please enter a valid URL';
+                        return tc('apps.editApp.basicInfo.invalidUrl');
                       }
                     },
                   }}
@@ -1415,8 +1461,8 @@ export const EditAppForm = ({
                 />
                 <p className='text-xs text-muted-foreground'>
                   {isInstallMode
-                    ? "This install's backend endpoint for your workspace. Overrides the template URL."
-                    : "The app's backend endpoint. Editable any time (even before install); installs pick it up on Update."}
+                    ? tc('apps.editApp.basicInfo.webhookHintInstall')
+                    : tc('apps.editApp.basicInfo.webhookHintTemplate')}
                 </p>
                 {errors.webhookUrl && (
                   <p className='text-xs text-destructive'>{errors.webhookUrl.message}</p>
@@ -1429,7 +1475,7 @@ export const EditAppForm = ({
                     htmlFor='profilePicture'
                     className='block text-sm font-medium text-foreground'
                   >
-                    Profile Picture
+                    {tc('apps.editApp.basicInfo.profilePictureLabel')}
                   </label>
                   <div className='flex gap-2'>
                     <input
@@ -1448,14 +1494,14 @@ export const EditAppForm = ({
                       data-track-name='UPLOAD_BOT_AVATAR'
                       disabled={isLoading || !canEditInstallSettings}
                       className='gap-1'
-                      title='Upload bot profile picture'
+                      title={tc('apps.editApp.basicInfo.uploadTitle')}
                     >
                       <Upload size={14} />
-                      Upload Picture
+                      {tc('apps.editApp.basicInfo.uploadButton')}
                     </Button>
                   </div>
                   <p className='text-xs text-muted-foreground'>
-                    Supported formats: JPG, PNG, WebP. Max size: 5MB.
+                    {tc('apps.editApp.basicInfo.supportedFormatsHint')}
                   </p>
                 </div>
               )}
@@ -1466,8 +1512,8 @@ export const EditAppForm = ({
             <div className='space-y-2'>
               <div>
                 <SectionHeading
-                  title='Incoming Webhooks'
-                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack, SentinelOne, Amazon SNS, Pingdom and GCP Monitoring webhook URL formats.'
+                  title={tc('apps.editApp.incoming.sectionTitle')}
+                  subtitle={tc('apps.editApp.incoming.sectionSubtitle')}
                 />
                 {botChannels.length > 0 && !showCreateForm && (
                   <Button
@@ -1480,7 +1526,7 @@ export const EditAppForm = ({
                     className='gap-1 w-full mt-2'
                   >
                     <Plus size={14} />
-                    Create Incoming Webhook
+                    {tc('apps.editApp.incoming.createButton')}
                   </Button>
                 )}
               </div>
@@ -1492,7 +1538,7 @@ export const EditAppForm = ({
                       htmlFor='webhook-type-select'
                       className='block text-xs font-medium text-foreground'
                     >
-                      Webhook Type
+                      {tc('apps.editApp.incoming.webhookTypeLabel')}
                     </label>
                     <Select
                       value={selectedWebhookType}
@@ -1504,7 +1550,7 @@ export const EditAppForm = ({
                       <SelectContent>
                         {WEBHOOK_TYPE_OPTIONS.map(option => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            {tc(option.labelKey)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1516,7 +1562,7 @@ export const EditAppForm = ({
                         htmlFor='webhook-action-select'
                         className='block text-xs font-medium text-foreground'
                       >
-                        Action
+                        {tc('apps.editApp.incoming.actionLabel')}
                       </label>
                       <Select
                         value={selectedWebhookAction}
@@ -1530,7 +1576,7 @@ export const EditAppForm = ({
                         <SelectContent>
                           {WEBHOOK_ACTION_OPTIONS.map(option => (
                             <SelectItem key={option.value} value={option.value}>
-                              {option.label}
+                              {tc(option.labelKey)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1542,7 +1588,7 @@ export const EditAppForm = ({
                       htmlFor='webhook-channel-select'
                       className='block text-xs font-medium text-foreground'
                     >
-                      Channel
+                      {tc('apps.editApp.incoming.channelLabel')}
                     </label>
                     <Select
                       value={selectedChannelId}
@@ -1577,7 +1623,7 @@ export const EditAppForm = ({
                           htmlFor='webhook-board-select'
                           className='block text-xs font-medium text-foreground'
                         >
-                          Board
+                          {tc('apps.editApp.incoming.boardLabel')}
                         </label>
                         <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
                           <SelectTrigger
@@ -1605,12 +1651,12 @@ export const EditAppForm = ({
                         </Select>
                         {!selectedChannelId && (
                           <p className='text-xs text-muted-foreground'>
-                            Choose a channel first so we can load boards from that project.
+                            {tc('apps.editApp.incoming.chooseChannelFirstHint')}
                           </p>
                         )}
                         {selectedChannelId && projectBoards.length === 0 && (
                           <p className='text-xs text-muted-foreground'>
-                            No boards found for the selected channel&apos;s project.
+                            {tc('apps.editApp.incoming.noBoardsHint')}
                           </p>
                         )}
                       </div>
@@ -1620,7 +1666,7 @@ export const EditAppForm = ({
                       htmlFor='webhook-name-input'
                       className='block text-xs font-medium text-foreground'
                     >
-                      Webhook Name
+                      {tc('apps.editApp.incoming.webhookNameLabel')}
                     </label>
                     <WebhookNameInput
                       id='webhook-name-input'
@@ -1646,7 +1692,9 @@ export const EditAppForm = ({
                           !selectedBoardId)
                       }
                     >
-                      {isCreating ? 'Creating...' : 'Create'}
+                      {isCreating
+                        ? tc('apps.editApp.incoming.creating')
+                        : tc('apps.editApp.incoming.create')}
                     </Button>
                     <Button
                       type='button'
@@ -1664,7 +1712,7 @@ export const EditAppForm = ({
                       data-track-category='INCOMING_WEBHOOKS'
                       data-track-name='CANCEL_CREATE_WEBHOOK'
                     >
-                      Cancel
+                      {tc('apps.editApp.incoming.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -1672,7 +1720,7 @@ export const EditAppForm = ({
 
               {botChannels.length === 0 && (
                 <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
-                  Add the bot to a channel first to create incoming webhooks.
+                  {tc('apps.editApp.incoming.noChannelsHint')}
                 </div>
               )}
 
@@ -1729,12 +1777,14 @@ export const EditAppForm = ({
                           {webhook.name}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {WEBHOOK_TYPE_LABELS[webhook.type] ?? webhook.type}
+                          {WEBHOOK_TYPE_LABEL_KEYS[webhook.type]
+                            ? tc(WEBHOOK_TYPE_LABEL_KEYS[webhook.type])
+                            : webhook.type}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
                           {webhook.action === AppIncomingWebhookAction.TICKET
-                            ? 'Ticket'
-                            : 'Message'}
+                            ? tc('apps.editApp.incoming.webhookActionLabels.ticket')
+                            : tc('apps.editApp.incoming.webhookActionLabels.message')}
                         </span>
                         <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
                           <span className='w-3 flex-shrink-0 flex items-center justify-center'>
@@ -1744,7 +1794,7 @@ export const EditAppForm = ({
                         </span>
                         {webhook.boardName && (
                           <span className='text-xs text-muted-foreground'>
-                            Board: {webhook.boardName}
+                            {tc('apps.editApp.incoming.boardPrefix', { name: webhook.boardName })}
                           </span>
                         )}
                       </div>
@@ -1758,7 +1808,7 @@ export const EditAppForm = ({
                             setEditingName(webhook.name);
                           }}
                           className='h-7 w-7 p-0 text-muted-foreground hover:text-foreground'
-                          title='Rename'
+                          title={tc('apps.editApp.incoming.renameTitle')}
                           data-track-category='INCOMING_WEBHOOKS'
                           data-track-name='Edit_Webhook_Name'
                         >
@@ -1770,7 +1820,7 @@ export const EditAppForm = ({
                           size='sm'
                           onClick={() => setRevokeTargetId(webhook.id)}
                           className='h-7 w-7 p-0 text-muted-foreground hover:text-destructive'
-                          title='Revoke webhook'
+                          title={tc('apps.editApp.incoming.revokeTitle')}
                           data-track-category='INCOMING_WEBHOOKS'
                           data-track-name='Revoke_Webhook'
                         >
@@ -1804,8 +1854,11 @@ export const EditAppForm = ({
               {(hasPrev || hasNext) && (
                 <div className='flex items-center justify-between'>
                   <span className='text-xs text-muted-foreground'>
-                    {webhookOffset + 1}–{Math.min(webhookOffset + WEBHOOK_PAGE_SIZE, webhookTotal)}{' '}
-                    of {webhookTotal}
+                    {tc('apps.editApp.incoming.paginationRange', {
+                      start: webhookOffset + 1,
+                      end: Math.min(webhookOffset + WEBHOOK_PAGE_SIZE, webhookTotal),
+                      total: webhookTotal,
+                    })}
                   </span>
                   <div className='flex gap-1'>
                     <Button
@@ -1843,7 +1896,7 @@ export const EditAppForm = ({
             <div className='space-y-2'>
               <div className='flex items-center justify-between'>
                 <label htmlFor='app-commands' className='block text-sm font-medium text-foreground'>
-                  Commands
+                  {tc('apps.editApp.commands.label')}
                 </label>
                 {!showCommandForm && !isInstallMode && (
                   <Button
@@ -1858,7 +1911,7 @@ export const EditAppForm = ({
                     data-track-category='app-command'
                     data-track-name='OPEN_CREATE_COMMAND_FORM'
                   >
-                    <Plus size={12} /> Add Command
+                    <Plus size={12} /> {tc('apps.editApp.commands.addButton')}
                   </Button>
                 )}
               </div>
@@ -1877,15 +1930,18 @@ export const EditAppForm = ({
 
               {isInstallMode && (
                 <p className='text-xs text-muted-foreground'>
-                  Commands come from the app template. Click Update to sync the latest.
+                  {tc('apps.editApp.commands.installHint')}
                 </p>
               )}
               {commandsLoading ? (
-                <p className='text-xs text-muted-foreground py-2'>Loading commands…</p>
+                <p className='text-xs text-muted-foreground py-2'>
+                  {tc('apps.editApp.commands.loading')}
+                </p>
               ) : commands.length === 0 && !showCommandForm ? (
                 <p className='text-xs text-muted-foreground py-2'>
-                  No commands yet. Add one to let users trigger actions with{' '}
-                  <span className='font-mono'>/commandname</span>.
+                  {tc('apps.editApp.commands.emptyPrefix')}{' '}
+                  <span className='font-mono'>/commandname</span>
+                  {tc('apps.editApp.commands.emptySuffix')}
                 </p>
               ) : (
                 <div className='space-y-1.5'>
@@ -1907,7 +1963,9 @@ export const EditAppForm = ({
           {activeSection === 'shortcuts' && (
             <div className='space-y-2'>
               <div className='flex items-center justify-between'>
-                <span className='block text-sm font-medium text-foreground'>Shortcuts</span>
+                <span className='block text-sm font-medium text-foreground'>
+                  {tc('apps.editApp.shortcuts.label')}
+                </span>
                 {!showShortcutForm && !isInstallMode && (
                   <Button
                     type='button'
@@ -1921,7 +1979,7 @@ export const EditAppForm = ({
                     data-track-category='app-shortcut'
                     data-track-name='OPEN_CREATE_SHORTCUT_FORM'
                   >
-                    <Plus size={12} /> Add Shortcut
+                    <Plus size={12} /> {tc('apps.editApp.shortcuts.addButton')}
                   </Button>
                 )}
               </div>
@@ -1939,13 +1997,16 @@ export const EditAppForm = ({
               )}
 
               {shortcutsLoading ? (
-                <p className='text-xs text-muted-foreground py-2'>Loading shortcuts…</p>
+                <p className='text-xs text-muted-foreground py-2'>
+                  {tc('apps.editApp.shortcuts.loading')}
+                </p>
               ) : shortcuts.length === 0 && !showShortcutForm ? (
                 <p className='text-xs text-muted-foreground py-2'>
-                  No shortcuts yet. Add a <span className='font-semibold'>Global</span> shortcut
-                  (accessible from the ⚡ button in the composer) or a{' '}
-                  <span className='font-semibold'>Message</span> shortcut (accessible from the
-                  message action menu).
+                  {tc('apps.editApp.shortcuts.emptyPrefix')}{' '}
+                  <span className='font-semibold'>{tc('apps.editApp.shortcuts.globalWord')}</span>{' '}
+                  {tc('apps.editApp.shortcuts.emptyMiddle')}{' '}
+                  <span className='font-semibold'>{tc('apps.editApp.shortcuts.messageWord')}</span>{' '}
+                  {tc('apps.editApp.shortcuts.emptySuffix')}
                 </p>
               ) : (
                 <div className='space-y-1.5'>
@@ -1985,7 +2046,9 @@ export const EditAppForm = ({
           disabled={isLoading}
           type='button'
         >
-          {activeSection === 'basic' ? 'Cancel' : 'Close'}
+          {activeSection === 'basic'
+            ? tc('apps.editApp.footer.cancel')
+            : tc('apps.editApp.footer.close')}
         </Button>
         {/* Save Changes only persists the Basic info fields (description + webhook URL); the other
             sections manage their own saves inline, so the button is scoped to Basic info. */}
@@ -1996,7 +2059,7 @@ export const EditAppForm = ({
             data-track-category='Apps'
             data-track-name='EditApp'
           >
-            {isLoading ? 'Saving...' : 'Save Changes'}
+            {isLoading ? tc('apps.editApp.footer.saving') : tc('apps.editApp.footer.saveChanges')}
           </Button>
         )}
       </div>
@@ -2009,10 +2072,11 @@ export const EditAppForm = ({
       >
         <div className='p-6 space-y-4'>
           <div className='space-y-1'>
-            <h2 className='text-base font-semibold text-foreground'>Revoke webhook?</h2>
+            <h2 className='text-base font-semibold text-foreground'>
+              {tc('apps.editApp.incoming.revokeDialogTitle')}
+            </h2>
             <p className='text-sm text-muted-foreground'>
-              This webhook URL will stop working immediately and cannot be re-enabled. Create a new
-              webhook to replace it.
+              {tc('apps.editApp.incoming.revokeDialogBody')}
             </p>
           </div>
           <div className='flex gap-2 justify-end'>
@@ -2024,7 +2088,7 @@ export const EditAppForm = ({
               data-track-category='Apps'
               data-track-name='CANCEL_REVOKE_INSTALL'
             >
-              Cancel
+              {tc('apps.editApp.incoming.revokeDialogCancel')}
             </Button>
             <Button
               type='button'
@@ -2034,7 +2098,7 @@ export const EditAppForm = ({
               data-track-category='INCOMING_WEBHOOKS'
               data-track-name='Confirm_Revoke_Webhook'
             >
-              Revoke
+              {tc('apps.editApp.incoming.revokeDialogConfirm')}
             </Button>
           </div>
         </div>

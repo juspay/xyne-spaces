@@ -780,5 +780,245 @@
       "addNewFormField": "Agregar nuevo campo de formulario",
       "cancel": "Cancelar"
     }
+  },
+  "apps": {
+    "appsTable": {
+      "createdByUnknown": "Desconocido",
+      "statusInstalled": "Instalado",
+      "statusAvailable": "Disponible",
+      "columns": {
+        "app": "Aplicación",
+        "description": "Descripción",
+        "webhookUrl": "URL del webhook",
+        "createdBy": "Creado por",
+        "status": "Estado",
+        "jwtToken": "Token JWT",
+        "signingSecret": "Secreto de firma",
+        "actions": "Acciones"
+      },
+      "copyBotUserId": "Copiar ID de usuario del bot",
+      "installAppFirst": "Instala la aplicación primero",
+      "copyJwtToClipboard": "Copiar JWT al portapapeles",
+      "noPermissionCopyToken": "No tienes permiso para copiar este token",
+      "copySigningSecretToClipboard": "Copiar secreto de firma al portapapeles",
+      "onlyAdminOrCreatorCopySecret": "Solo el administrador o el creador de la app pueden copiar este secreto",
+      "onlyCreatorOrAdminEdit": "Solo el creador o el administrador pueden editar",
+      "editAppTitle": "Editar aplicación",
+      "editButton": "Editar",
+      "installing": "Instalando...",
+      "install": "Instalar",
+      "updateTooltip": "Actualizar a la última versión de la app (el creador cambió comandos o permisos)",
+      "updating": "Actualizando...",
+      "update": "Actualizar",
+      "promoteTooltip": "Promover al mercado entre organizaciones (hacer esta app global)",
+      "promoting": "Promoviendo...",
+      "promote": "Promover",
+      "noAppsFound": "No se encontraron aplicaciones",
+      "editAppDialogTitle": "Editar aplicación: {{name}}",
+      "editAppDialogDescription": "Actualiza la descripción de la app y la URL del webhook",
+      "toasts": {
+        "jwtNotAvailable": "La generación de tokens JWT no está disponible",
+        "tokenCopied": "Token copiado al portapapeles",
+        "jwtCopyFailed": "No se pudo generar y copiar el JWT",
+        "noBotUserId": "No hay ID de usuario del bot disponible",
+        "botUserIdCopied": "ID de usuario del bot copiado al portapapeles",
+        "botUserIdCopyFailed": "No se pudo copiar el ID de usuario del bot",
+        "signingSecretNotAvailable": "La recuperación del secreto de firma no está disponible",
+        "signingSecretCopied": "Secreto de firma copiado al portapapeles",
+        "signingSecretCopyFailed": "No se pudo recuperar el secreto de firma",
+        "unknownError": "Error desconocido"
+      }
+    },
+    "createApp": {
+      "appNameLabel": "Nombre de la aplicación",
+      "appNameRequired": "El nombre de la aplicación es obligatorio",
+      "appNameEmpty": "El nombre de la aplicación no puede estar vacío",
+      "descriptionLabel": "Descripción",
+      "cancel": "Cancelar",
+      "creating": "Creando...",
+      "createAppButton": "Crear aplicación",
+      "createSuccess": "Aplicación creada correctamente",
+      "createFailed": "No se pudo crear la aplicación"
+    },
+    "shortcutPickerModal": {
+      "closeAriaLabel": "Cerrar el modal de atajos",
+      "useAShortcut": "Usar un atajo",
+      "globalShortcuts": "Atajos globales",
+      "noShortcutsFound": "No se encontraron atajos",
+      "running": "Ejecutando…",
+      "runFailed": "No se pudo ejecutar el atajo \"{{name}}\""
+    },
+    "editApp": {
+      "commandRow": {
+        "chatBadge": "chat",
+        "threadBadge": "hilo",
+        "editTitle": "Editar comando",
+        "deleteTitle": "Eliminar comando"
+      },
+      "commandForm": {
+        "nameRequired": "El nombre del comando es obligatorio",
+        "nameInvalid": "Solo letras minúsculas, números y guiones",
+        "descriptionRequired": "La descripción es obligatoria",
+        "saveFailed": "No se pudo guardar el comando",
+        "nameLabel": "Nombre del comando",
+        "descriptionLabel": "Descripción",
+        "chatOnly": "Solo chat",
+        "threadsOnly": "Solo hilos",
+        "both": "Ambos",
+        "cancel": "Cancelar",
+        "saving": "Guardando…",
+        "save": "Guardar"
+      },
+      "shortcutRow": {
+        "editTitle": "Editar atajo",
+        "deleteTitle": "Eliminar atajo",
+        "accessibilityGlobal": "global",
+        "accessibilityMessage": "mensaje"
+      },
+      "shortcutForm": {
+        "idRequired": "El ID del atajo es obligatorio",
+        "idInvalid": "Solo letras minúsculas, números y guiones bajos",
+        "descriptionRequired": "La descripción es obligatoria",
+        "saveFailed": "No se pudo guardar el atajo",
+        "idLabel": "ID del atajo",
+        "descriptionLabel": "Descripción",
+        "global": "Global",
+        "message": "Mensaje",
+        "cancel": "Cancelar",
+        "saving": "Guardando…",
+        "save": "Guardar"
+      },
+      "permissions": {
+        "badgeUpdateToActivate": "Actualiza para activar",
+        "badgeRemovesOnUpdate": "Se elimina al actualizar",
+        "badgeActive": "Activo",
+        "saveSuccess": "Permisos guardados ({{count}} concedidos)",
+        "saveFailed": "No se pudieron guardar los permisos",
+        "activateSuccess": "Cambios de permisos aplicados",
+        "activateFailed": "No se pudieron aplicar los cambios de permisos",
+        "label": "Permisos",
+        "installToApply": "Instala la app para aplicar",
+        "grantedCount": "{{selected}} / {{total}} concedidos",
+        "deselectAll": "Deseleccionar todo",
+        "selectAll": "Seleccionar todo",
+        "savingButton": "Guardando…",
+        "savePermissionsButton": "Guardar permisos",
+        "activateTooltip": "Resincroniza esta instalación para activar los cambios de permisos pendientes",
+        "applying": "Aplicando…",
+        "applyAndActivate": "Aplicar y activar",
+        "installModeHint": "Los cambios de permisos solo afectan a esta app en tu espacio de trabajo. Usa “Aplicar y activar” después de guardar para reinstalar con los permisos actualizados.",
+        "templateModeHint": "Estos cambios de permisos necesitan la aprobación de un administrador del espacio de trabajo antes de tener efecto.",
+        "loading": "Cargando permisos…"
+      },
+      "nav": {
+        "basicInfo": "Información básica",
+        "commands": "Comandos",
+        "shortcuts": "Atajos",
+        "permissions": "Permisos",
+        "incomingWebhooks": "Webhooks entrantes",
+        "tablistAriaLabel": "Secciones de configuración de la app"
+      },
+      "header": {
+        "editAppTitle": "Editar {{name}}",
+        "closeAriaLabel": "Cerrar"
+      },
+      "warningBanner": "Estás viendo esta app como su creador. Solo un administrador de apps del espacio de trabajo puede cambiar esta configuración — puedes crear y gestionar webhooks entrantes.",
+      "basicInfo": {
+        "sectionTitle": "Información básica",
+        "sectionSubtitle": "Configura la descripción, la URL del webhook y la imagen de perfil de esta app.",
+        "appNameLabel": "Nombre de la aplicación",
+        "descriptionLabel": "Descripción",
+        "descriptionTemplateHint": "La descripción se define en la plantilla de la app. Edítala desde la pantalla de Apps de la organización.",
+        "webhookUrlLabel": "URL del webhook",
+        "invalidUrl": "Introduce una URL válida",
+        "webhookHintInstall": "El endpoint de backend de esta instalación para tu espacio de trabajo. Sobrescribe la URL de la plantilla.",
+        "webhookHintTemplate": "El endpoint de backend de la app. Editable en cualquier momento (incluso antes de instalar); las instalaciones lo obtienen al actualizar.",
+        "profilePictureLabel": "Imagen de perfil",
+        "uploadTitle": "Subir imagen de perfil del bot",
+        "uploadButton": "Subir imagen",
+        "supportedFormatsHint": "Formatos admitidos: JPG, PNG, WebP. Tamaño máximo: 5MB.",
+        "uploadNotAvailable": "La subida no está disponible",
+        "invalidFileType": "Tipo de archivo no válido. Solo se permiten JPG, PNG y WebP.",
+        "fileTooLarge": "El archivo es demasiado grande. El tamaño máximo es 5MB.",
+        "uploadSuccess": "Imagen de perfil subida correctamente",
+        "uploadFailed": "No se pudo subir la imagen de perfil"
+      },
+      "incoming": {
+        "sectionTitle": "Webhooks entrantes",
+        "sectionSubtitle": "Genera URLs de webhook para que servicios externos publiquen mensajes como este bot. Compatible con los formatos de webhook de Slack, SentinelOne, Amazon SNS, Pingdom y GCP Monitoring.",
+        "createButton": "Crear webhook entrante",
+        "webhookTypeLabel": "Tipo de webhook",
+        "actionLabel": "Acción",
+        "channelLabel": "Canal",
+        "boardLabel": "Tablero",
+        "chooseChannelFirstHint": "Elige primero un canal para poder cargar los tableros de ese proyecto.",
+        "noBoardsHint": "No se encontraron tableros para el proyecto del canal seleccionado.",
+        "webhookNameLabel": "Nombre del webhook",
+        "creating": "Creando...",
+        "create": "Crear",
+        "cancel": "Cancelar",
+        "noChannelsHint": "Agrega el bot a un canal primero para crear webhooks entrantes.",
+        "boardPrefix": "Tablero: {{name}}",
+        "renameTitle": "Renombrar",
+        "revokeTitle": "Revocar webhook",
+        "paginationRange": "{{start}}–{{end}} de {{total}}",
+        "revokeDialogTitle": "¿Revocar webhook?",
+        "revokeDialogBody": "Esta URL de webhook dejará de funcionar de inmediato y no se puede volver a habilitar. Crea un nuevo webhook para reemplazarlo.",
+        "revokeDialogCancel": "Cancelar",
+        "revokeDialogConfirm": "Revocar",
+        "webhookTypeLabels": {
+          "slack": "Slack",
+          "sentinelone": "SentinelOne",
+          "amazonSns": "Amazon SNS",
+          "pingdom": "Pingdom",
+          "gcp": "GCP Monitoring"
+        },
+        "webhookActionLabels": {
+          "message": "Mensaje",
+          "ticket": "Ticket"
+        },
+        "toasts": {
+          "created": "Webhook entrante creado",
+          "createFailed": "No se pudo crear el webhook",
+          "revoked": "Webhook revocado",
+          "revokeFailed": "No se pudo revocar el webhook",
+          "renamed": "Webhook renombrado",
+          "renameFailed": "No se pudo renombrar el webhook",
+          "urlCopied": "URL del webhook copiada al portapapeles"
+        }
+      },
+      "commands": {
+        "label": "Comandos",
+        "addButton": "Agregar comando",
+        "installHint": "Los comandos provienen de la plantilla de la app. Haz clic en Actualizar para sincronizar los más recientes.",
+        "loading": "Cargando comandos…",
+        "emptyPrefix": "Aún no hay comandos. Agrega uno para que los usuarios activen acciones con",
+        "emptySuffix": ".",
+        "loadFailed": "No se pudieron cargar los comandos",
+        "savedToast": "Comando /{{name}} guardado",
+        "deletedToast": "Comando /{{name}} eliminado",
+        "deleteFailed": "No se pudo eliminar el comando"
+      },
+      "shortcuts": {
+        "label": "Atajos",
+        "addButton": "Agregar atajo",
+        "loading": "Cargando atajos…",
+        "emptyPrefix": "Aún no hay atajos. Agrega un atajo",
+        "globalWord": "Global",
+        "emptyMiddle": "(accesible desde el botón ⚡ del compositor) o un atajo",
+        "messageWord": "de mensaje",
+        "emptySuffix": "(accesible desde el menú de acciones del mensaje).",
+        "loadFailed": "No se pudieron cargar los atajos",
+        "savedToast": "Atajo \"{{name}}\" guardado",
+        "deletedToast": "Atajo eliminado",
+        "deleteFailed": "No se pudo eliminar el atajo"
+      },
+      "footer": {
+        "cancel": "Cancelar",
+        "close": "Cerrar",
+        "saving": "Guardando...",
+        "saveChanges": "Guardar cambios"
+      }
+    }
   }
 }

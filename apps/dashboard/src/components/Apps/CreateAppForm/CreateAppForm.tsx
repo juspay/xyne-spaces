@@ -20,6 +20,7 @@ export interface CreateAppFormProps {
 
 export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const {
     control,
     handleSubmit,
@@ -38,12 +39,12 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
       return appsService.createApp(data);
     },
     onSuccess: () => {
-      toast.success('App created successfully');
+      toast.success(tc('apps.createApp.createSuccess'));
       reset();
       onSuccess?.();
     },
     onError: (error: Error) => {
-      toast.error('Failed to create app', {
+      toast.error(tc('apps.createApp.createFailed'), {
         description: error.message,
       });
     },
@@ -67,22 +68,22 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
           <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded-lg'>
             {createAppMutation.error instanceof Error
               ? createAppMutation.error.message
-              : 'Failed to create app'}
+              : tc('apps.createApp.createFailed')}
           </div>
         )}
 
         <div className='space-y-2'>
           <label htmlFor='name' className='block text-sm font-medium text-foreground'>
-            App Name <span className='text-red-500'>*</span>
+            {tc('apps.createApp.appNameLabel')} <span className='text-red-500'>*</span>
           </label>
           <Controller
             name='name'
             control={control}
             rules={{
-              required: 'App name is required',
+              required: tc('apps.createApp.appNameRequired'),
               minLength: {
                 value: 1,
-                message: 'App name cannot be empty',
+                message: tc('apps.createApp.appNameEmpty'),
               },
             }}
             render={({ field }) => (
@@ -99,7 +100,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
 
         <div className='space-y-2'>
           <label htmlFor='description' className='block text-sm font-medium text-foreground'>
-            Description
+            {tc('apps.createApp.descriptionLabel')}
           </label>
           <Controller
             name='description'
@@ -127,7 +128,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
           disabled={createAppMutation.isPending}
           type='button'
         >
-          Cancel
+          {tc('apps.createApp.cancel')}
         </Button>
         <Button
           type='submit'
@@ -135,7 +136,9 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
           data-track-category='Apps'
           data-track-name='CreateApp'
         >
-          {createAppMutation.isPending ? 'Creating...' : 'Create App'}
+          {createAppMutation.isPending
+            ? tc('apps.createApp.creating')
+            : tc('apps.createApp.createAppButton')}
         </Button>
       </div>
     </form>

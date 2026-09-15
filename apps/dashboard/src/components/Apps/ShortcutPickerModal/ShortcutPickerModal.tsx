@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Zap, Search, X } from 'lucide-react';
 import Button from '../../ui/Button';
 import { appsService, type AppShortcutWithApp } from '../../../services/Apps/appsService';
@@ -33,6 +34,8 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
   message,
   shortcuts,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [search, setSearch] = useState('');
   const [dispatching, setDispatching] = useState<string | null>(null);
 
@@ -70,7 +73,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
       );
       onClose();
     } catch {
-      toast.error(`Failed to run shortcut "${shortcut.commandName}"`);
+      toast.error(tc('apps.shortcutPickerModal.runFailed', { name: shortcut.commandName }));
     } finally {
       setDispatching(null);
     }
@@ -83,7 +86,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
       className='fixed inset-0 z-[100] flex items-center justify-center'
       role='button'
       tabIndex={0}
-      aria-label='Close shortcuts modal'
+      aria-label={tc('apps.shortcutPickerModal.closeAriaLabel')}
       data-track-category='shortcut-picker'
       data-track-name='close-modal-backdrop'
       onClick={e => {
@@ -103,7 +106,9 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
           <div className='flex items-center gap-2'>
             <Zap className='w-4 h-4 text-muted-foreground' />
             <h2 className='text-sm font-semibold text-foreground'>
-              {message ? 'Use a shortcut' : 'Global shortcuts'}
+              {message
+                ? tc('apps.shortcutPickerModal.useAShortcut')
+                : tc('apps.shortcutPickerModal.globalShortcuts')}
             </h2>
           </div>
           <Button
@@ -133,7 +138,11 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
             <input
               autoFocus
               type='text'
-              placeholder={message ? 'Search message shortcuts...' : 'Search shortcuts...'}
+              placeholder={
+                message
+                  ? t('apps.shortcutPickerModal.searchMessageShortcutsPlaceholder')
+                  : t('apps.shortcutPickerModal.searchShortcutsPlaceholder')
+              }
               value={search}
               onChange={e => setSearch(e.target.value)}
               data-track-category='shortcut-picker'
@@ -146,7 +155,9 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
         {/* List */}
         <div className='flex-1 overflow-y-auto px-2 pb-2'>
           {grouped.size === 0 ? (
-            <p className='text-sm text-muted-foreground text-center py-8'>No shortcuts found</p>
+            <p className='text-sm text-muted-foreground text-center py-8'>
+              {tc('apps.shortcutPickerModal.noShortcutsFound')}
+            </p>
           ) : (
             Array.from(grouped.entries()).map(([appName, appShortcuts]) => (
               <div key={appName} className='mb-1'>
@@ -178,7 +189,9 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                       )}
                     </div>
                     {dispatching === shortcut.commandName && (
-                      <span className='text-xs text-muted-foreground self-center'>Running…</span>
+                      <span className='text-xs text-muted-foreground self-center'>
+                        {tc('apps.shortcutPickerModal.running')}
+                      </span>
                     )}
                   </button>
                 ))}

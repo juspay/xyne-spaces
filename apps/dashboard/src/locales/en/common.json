@@ -780,5 +780,245 @@
       "addNewFormField": "Add new form field",
       "cancel": "Cancel"
     }
+  },
+  "apps": {
+    "appsTable": {
+      "createdByUnknown": "Unknown",
+      "statusInstalled": "Installed",
+      "statusAvailable": "Available",
+      "columns": {
+        "app": "App",
+        "description": "Description",
+        "webhookUrl": "Webhook URL",
+        "createdBy": "Created By",
+        "status": "Status",
+        "jwtToken": "JWT Token",
+        "signingSecret": "Signing Secret",
+        "actions": "Actions"
+      },
+      "copyBotUserId": "Copy bot user ID",
+      "installAppFirst": "Install app first",
+      "copyJwtToClipboard": "Copy JWT to clipboard",
+      "noPermissionCopyToken": "You don't have permission to copy this token",
+      "copySigningSecretToClipboard": "Copy signing secret to clipboard",
+      "onlyAdminOrCreatorCopySecret": "Only admin or app creator can copy this secret",
+      "onlyCreatorOrAdminEdit": "Only creator or admin can edit",
+      "editAppTitle": "Edit app",
+      "editButton": "Edit",
+      "installing": "Installing...",
+      "install": "Install",
+      "updateTooltip": "Update to the latest app version (the creator changed commands or permissions)",
+      "updating": "Updating...",
+      "update": "Update",
+      "promoteTooltip": "Promote to the cross-org marketplace (make this app global)",
+      "promoting": "Promoting...",
+      "promote": "Promote",
+      "noAppsFound": "No apps found",
+      "editAppDialogTitle": "Edit App: {{name}}",
+      "editAppDialogDescription": "Update the app description and webhook URL",
+      "toasts": {
+        "jwtNotAvailable": "JWT token generation not available",
+        "tokenCopied": "Token copied to clipboard",
+        "jwtCopyFailed": "Failed to generate and copy JWT",
+        "noBotUserId": "No bot user ID available",
+        "botUserIdCopied": "Bot user ID copied to clipboard",
+        "botUserIdCopyFailed": "Failed to copy bot user ID",
+        "signingSecretNotAvailable": "Signing secret retrieval not available",
+        "signingSecretCopied": "Signing secret copied to clipboard",
+        "signingSecretCopyFailed": "Failed to retrieve signing secret",
+        "unknownError": "Unknown error"
+      }
+    },
+    "createApp": {
+      "appNameLabel": "App Name",
+      "appNameRequired": "App name is required",
+      "appNameEmpty": "App name cannot be empty",
+      "descriptionLabel": "Description",
+      "cancel": "Cancel",
+      "creating": "Creating...",
+      "createAppButton": "Create App",
+      "createSuccess": "App created successfully",
+      "createFailed": "Failed to create app"
+    },
+    "shortcutPickerModal": {
+      "closeAriaLabel": "Close shortcuts modal",
+      "useAShortcut": "Use a shortcut",
+      "globalShortcuts": "Global shortcuts",
+      "noShortcutsFound": "No shortcuts found",
+      "running": "Running…",
+      "runFailed": "Failed to run shortcut \"{{name}}\""
+    },
+    "editApp": {
+      "commandRow": {
+        "chatBadge": "chat",
+        "threadBadge": "thread",
+        "editTitle": "Edit command",
+        "deleteTitle": "Delete command"
+      },
+      "commandForm": {
+        "nameRequired": "Command name is required",
+        "nameInvalid": "Only lowercase letters, numbers, and hyphens",
+        "descriptionRequired": "Description is required",
+        "saveFailed": "Failed to save command",
+        "nameLabel": "Command name",
+        "descriptionLabel": "Description",
+        "chatOnly": "Chat only",
+        "threadsOnly": "Threads only",
+        "both": "Both",
+        "cancel": "Cancel",
+        "saving": "Saving…",
+        "save": "Save"
+      },
+      "shortcutRow": {
+        "editTitle": "Edit shortcut",
+        "deleteTitle": "Delete shortcut",
+        "accessibilityGlobal": "global",
+        "accessibilityMessage": "message"
+      },
+      "shortcutForm": {
+        "idRequired": "Shortcut ID is required",
+        "idInvalid": "Only lowercase letters, numbers, and underscores",
+        "descriptionRequired": "Description is required",
+        "saveFailed": "Failed to save shortcut",
+        "idLabel": "Shortcut ID",
+        "descriptionLabel": "Description",
+        "global": "Global",
+        "message": "Message",
+        "cancel": "Cancel",
+        "saving": "Saving…",
+        "save": "Save"
+      },
+      "permissions": {
+        "badgeUpdateToActivate": "Update to activate",
+        "badgeRemovesOnUpdate": "Removes on update",
+        "badgeActive": "Active",
+        "saveSuccess": "Permissions saved ({{count}} granted)",
+        "saveFailed": "Failed to save permissions",
+        "activateSuccess": "Permission changes applied",
+        "activateFailed": "Failed to apply permission changes",
+        "label": "Permissions",
+        "installToApply": "Install app to apply",
+        "grantedCount": "{{selected}} / {{total}} granted",
+        "deselectAll": "Deselect all",
+        "selectAll": "Select all",
+        "savingButton": "Saving…",
+        "savePermissionsButton": "Save Permissions",
+        "activateTooltip": "Re-sync this install to activate pending permission changes",
+        "applying": "Applying…",
+        "applyAndActivate": "Apply & activate",
+        "installModeHint": "Permission changes only affect this app in your workspace. Use “Apply & activate” after saving to re-install with the updated permissions.",
+        "templateModeHint": "These permission changes need workspace admin approval before they take effect in the workspace.",
+        "loading": "Loading permissions…"
+      },
+      "nav": {
+        "basicInfo": "Basic info",
+        "commands": "Commands",
+        "shortcuts": "Shortcuts",
+        "permissions": "Permissions",
+        "incomingWebhooks": "Incoming Webhooks",
+        "tablistAriaLabel": "App settings sections"
+      },
+      "header": {
+        "editAppTitle": "Edit {{name}}",
+        "closeAriaLabel": "Close"
+      },
+      "warningBanner": "You're viewing this app as its creator. Only a workspace apps admin can change these settings — you can create and manage Incoming Webhooks.",
+      "basicInfo": {
+        "sectionTitle": "Basic info",
+        "sectionSubtitle": "Set the description, webhook URL, and profile picture for this app.",
+        "appNameLabel": "App Name",
+        "descriptionLabel": "Description",
+        "descriptionTemplateHint": "Description is set on the app template. Edit it from the Org Apps screen.",
+        "webhookUrlLabel": "Webhook URL",
+        "invalidUrl": "Please enter a valid URL",
+        "webhookHintInstall": "This install's backend endpoint for your workspace. Overrides the template URL.",
+        "webhookHintTemplate": "The app's backend endpoint. Editable any time (even before install); installs pick it up on Update.",
+        "profilePictureLabel": "Profile Picture",
+        "uploadTitle": "Upload bot profile picture",
+        "uploadButton": "Upload Picture",
+        "supportedFormatsHint": "Supported formats: JPG, PNG, WebP. Max size: 5MB.",
+        "uploadNotAvailable": "Upload not available",
+        "invalidFileType": "Invalid file type. Only JPG, PNG, and WebP are allowed.",
+        "fileTooLarge": "File too large. Maximum size is 5MB.",
+        "uploadSuccess": "Profile picture uploaded successfully",
+        "uploadFailed": "Failed to upload profile picture"
+      },
+      "incoming": {
+        "sectionTitle": "Incoming Webhooks",
+        "sectionSubtitle": "Generate webhook URLs for external services to post messages as this bot. Supports Slack, SentinelOne, Amazon SNS, Pingdom and GCP Monitoring webhook URL formats.",
+        "createButton": "Create Incoming Webhook",
+        "webhookTypeLabel": "Webhook Type",
+        "actionLabel": "Action",
+        "channelLabel": "Channel",
+        "boardLabel": "Board",
+        "chooseChannelFirstHint": "Choose a channel first so we can load boards from that project.",
+        "noBoardsHint": "No boards found for the selected channel's project.",
+        "webhookNameLabel": "Webhook Name",
+        "creating": "Creating...",
+        "create": "Create",
+        "cancel": "Cancel",
+        "noChannelsHint": "Add the bot to a channel first to create incoming webhooks.",
+        "boardPrefix": "Board: {{name}}",
+        "renameTitle": "Rename",
+        "revokeTitle": "Revoke webhook",
+        "paginationRange": "{{start}}–{{end}} of {{total}}",
+        "revokeDialogTitle": "Revoke webhook?",
+        "revokeDialogBody": "This webhook URL will stop working immediately and cannot be re-enabled. Create a new webhook to replace it.",
+        "revokeDialogCancel": "Cancel",
+        "revokeDialogConfirm": "Revoke",
+        "webhookTypeLabels": {
+          "slack": "Slack",
+          "sentinelone": "SentinelOne",
+          "amazonSns": "Amazon SNS",
+          "pingdom": "Pingdom",
+          "gcp": "GCP Monitoring"
+        },
+        "webhookActionLabels": {
+          "message": "Message",
+          "ticket": "Ticket"
+        },
+        "toasts": {
+          "created": "Incoming webhook created",
+          "createFailed": "Failed to create webhook",
+          "revoked": "Webhook revoked",
+          "revokeFailed": "Failed to revoke webhook",
+          "renamed": "Webhook renamed",
+          "renameFailed": "Failed to rename webhook",
+          "urlCopied": "Webhook URL copied to clipboard"
+        }
+      },
+      "commands": {
+        "label": "Commands",
+        "addButton": "Add Command",
+        "installHint": "Commands come from the app template. Click Update to sync the latest.",
+        "loading": "Loading commands…",
+        "emptyPrefix": "No commands yet. Add one to let users trigger actions with",
+        "emptySuffix": ".",
+        "loadFailed": "Failed to load commands",
+        "savedToast": "Command /{{name}} saved",
+        "deletedToast": "Command /{{name}} deleted",
+        "deleteFailed": "Failed to delete command"
+      },
+      "shortcuts": {
+        "label": "Shortcuts",
+        "addButton": "Add Shortcut",
+        "loading": "Loading shortcuts…",
+        "emptyPrefix": "No shortcuts yet. Add a",
+        "globalWord": "Global",
+        "emptyMiddle": "shortcut (accessible from the ⚡ button in the composer) or a",
+        "messageWord": "Message",
+        "emptySuffix": "shortcut (accessible from the message action menu).",
+        "loadFailed": "Failed to load shortcuts",
+        "savedToast": "Shortcut \"{{name}}\" saved",
+        "deletedToast": "Shortcut deleted",
+        "deleteFailed": "Failed to delete shortcut"
+      },
+      "footer": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "saving": "Saving...",
+        "saveChanges": "Save Changes"
+      }
+    }
   }
 }
