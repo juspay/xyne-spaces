@@ -1,4 +1,14 @@
-import { ReactElement, memo, useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  ReactElement,
+  memo,
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { Skeleton } from '../../../ui/Skeleton';
 import {
   ArrowRightUp,
   FocusTarget,
@@ -64,6 +74,43 @@ const DRAG_SHADOW = '0 24px 50px -12px rgb(0 0 0 / 0.28), 0 2px 4px -2px rgb(0 0
 const RING_IN_MS = 220;
 const RING_OUT_MS = 130;
 
+/**
+ * What a column shows while its surface is still being built.
+ *
+ * Shaped like a conversation rather than a generic block, because the point is
+ * that the column reads as *itself, loading* rather than as an empty box: the
+ * header above it already names the channel, and this says the messages are on
+ * their way. A plain blank body under a real title reads as broken.
+ *
+ * Deliberately static apart from the shared pulse — no stagger, no per-row
+ * delay. It exists to cost nothing on the frame a column arrives, which is the
+ * one frame that cannot afford anything.
+ */
+const SKELETON_ROWS = [
+  { avatar: true, lines: ['w-1/3', 'w-11/12', 'w-2/3'] },
+  { avatar: true, lines: ['w-1/4', 'w-5/6'] },
+  { avatar: true, lines: ['w-2/5', 'w-10/12', 'w-1/2'] },
+  { avatar: true, lines: ['w-1/3', 'w-3/4'] },
+] as const;
+
+const ColumnSkeleton = (): ReactElement => (
+  <div
+    className='flex h-full flex-col gap-5 px-3 pt-4 duration-150 animate-in fade-in-0 motion-reduce:animate-none'
+    aria-hidden
+  >
+    {SKELETON_ROWS.map((row, index) => (
+      <div key={index} className='flex gap-2'>
+        {row.avatar && <Skeleton className='size-7 shrink-0 rounded-full opacity-60' />}
+        <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+          {row.lines.map((width, line) => (
+            <Skeleton key={line} className={cn('h-3 opacity-60', width)} />
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export interface StreamColumnProps {
   column: Column;
   width: number;
@@ -78,6 +125,34 @@ export interface StreamColumnProps {
    * column that just came into existence should arrive.
    */
   opening: boolean;
+  /**
+   * The strip is moving. Delays a surface that has not been built yet; never
+   * touches one that has.
+   *
+   * The distinction is the whole point, and getting it wrong is what made the
+   * first attempt at this unusable. A single switch across the strip blanked
+   * every column the moment the scrollbar moved — including the loaded ones the
+   * user was looking at — which reads as the app wiping itself for no reason.
+   * Held per column and one-way, it only ever postpones work not yet done: a
+   * column that has its messages keeps them through any amount of scrolling,
+   * and only the ones genuinely still loading show as loading.
+   */
+  scrolling: boolean;
+  /**
+   * Fired the moment this column's surface is about to be built.
+   *
+   * A surface arriving scrolls the strip, and not through anything the stream
+   * does: a chat panel brings its latest message into view as it mounts, and
+   * bringing an element into view scrolls *every* scrollable ancestor to
+   * comply — including the horizontal strip three levels up. Measured: a strip
+   * parked at 4,200px walked to 5,906px roughly 800ms after it had settled,
+   * with no focus event anywhere, which is why the composer guard never saw it.
+   *
+   * The stream pins itself for the length of the arrival rather than trying to
+   * prevent it, because there is nothing to prevent — no JS assigns the scroll,
+   * so there is no call to intercept.
+   */
+  onSurfaceMount?: () => void;
   focused: boolean;
   /** Briefly lit, to answer "where is it" when you asked for one you already have. */
   flash: boolean;
@@ -213,6 +288,8 @@ const StreamColumn = ({
   width,
   closing,
   opening,
+  scrolling,
+  onSurfaceMount,
   focused,
   flash,
   activity,
@@ -344,6 +421,44 @@ const StreamColumn = ({
     ),
     [surface, column.source, workspaceId, onEscape, body],
   );
+
+  /**
+   * Build the surface *beside* the frame rather than in front of it.
+   *
+   * A surface costs ~100ms to construct, and until now that was spent
+   * synchronously — the browser could not paint anything at all while it ran,
+   * so a column arriving mid-scroll froze the whole strip for two to four
+   * frames and the queued scroll lurched forward afterwards to catch up. That
+   * is measured, not inferred: four such freezes in one five-second scroll.
+   *
+   * The work does not get smaller here. It gets *interruptible*. The column
+   * paints its skeleton on the first commit, which costs nothing, and the real
+   * surface is requested as a transition — so React renders it in slices and
+   * yields between them, letting scroll frames through in the gaps. Slightly
+   * longer in total, and never at the expense of the gesture.
+   *
+   * Honest limit: this governs render work. A surface that blocks inside an
+   * effect — opening a socket, a synchronous read — still blocks, because
+   * effects run after commit and cannot be sliced. So this narrows the freeze
+   * rather than guaranteeing its absence.
+   */
+  const [surfaceReady, setSurfaceReady] = useState(false);
+  useEffect(() => {
+    // Nothing is built while the strip is moving. Measured: a strip that built
+    // nothing during a gesture scrolled perfectly, and every version that built
+    // *something* — even sliced into a transition — never came to rest, because
+    // a column finishing mid-gesture changes the page under the hand.
+    if (opening || scrolling || surfaceReady) return undefined;
+    // A frame of skeleton first, so the column is on screen before the work
+    // starts rather than competing with it.
+    const frame = requestAnimationFrame(() => {
+      // Before the build, not after: the surface scrolls the strip on its very
+      // first commit, so the stream has to be holding its position already.
+      onSurfaceMount?.();
+      startTransition(() => setSurfaceReady(true));
+    });
+    return (): void => cancelAnimationFrame(frame);
+  }, [opening, scrolling, surfaceReady, onSurfaceMount]);
 
   // Whether a drag is currently hovering this column. Local, because it changes
   // several times a second while a drag crosses the stream and nothing outside
@@ -874,7 +989,7 @@ const StreamColumn = ({
             into a column that has already finished moving. It fades up rather
             than appearing, so the two read as one event rather than as a panel
             that arrived late. */}
-        {opening ? null : mounted}
+        {opening ? null : surfaceReady ? mounted : <ColumnSkeleton />}
 
         {/* The drop promise, drawn over the body rather than by it.
             The surface says what it accepts and the stream says what accepting

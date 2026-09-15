@@ -79,10 +79,12 @@ import {
   STRIP_PAD,
   STREAM_PRESS_ROW,
 } from './components/Streams/Streams.types';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import {
   assertStridesMatchDom,
   columnBand,
   columnStrides,
+  HANDLE_PX,
   toClientX,
 } from './components/Streams/Streams.geometry';
 import type { ColumnBox } from './hooks/useColumnDrag';
@@ -126,6 +128,9 @@ interface ColumnHandlers {
  * channel resolving.
  */
 const FOCUS_SCROLL_GUARD_MS = 400;
+
+/** A scroll this soon after a real gesture belongs to the user, not to a mount. */
+const INPUT_GRACE_MS = 200;
 
 /**
  * Where a dragged column will land — one marker for the whole stream.
@@ -281,6 +286,23 @@ const StreamsScreen = (): ReactElement => {
   const stripScrollRef = useRef(0);
   /** Timestamp until which the strip is pinned against a focus-driven scroll. */
   const restoreUntilRef = useRef(0);
+  /** When the user last actually touched the strip — see the scroll guard. */
+  const lastInputRef = useRef(0);
+
+  /**
+   * The stream is about to scroll on purpose — stand down.
+   *
+   * A jump or a re-centring is exactly as programmatic as the scroll the hold
+   * exists to reject, and indistinguishable from it at the event. So the caller
+   * says so, and records where it is going: without the second half the hold
+   * re-arms against a stale position and drags the strip back off the column it
+   * was just asked for.
+   */
+  const intendStripScroll = useCallback((left: number): void => {
+    restoreUntilRef.current = 0;
+    stripScrollRef.current = left;
+  }, []);
+
   /** Which column the strip was last scrolled to centre on. */
   const centredOnRef = useRef<string | null>(null);
   /** False until the centring effect has run once — see the note there. */
@@ -1508,9 +1530,29 @@ const StreamsScreen = (): ReactElement => {
         tweenScroll(strip, strip.scrollLeft + delta);
         return;
       }
-      strip.scrollTo({ left: Math.max(0, strip.scrollLeft + delta), behavior: scrollBehavior() });
+      // A jump arrives. It never travels, and the reason is not taste.
+      //
+      // A smooth scroll is an animation the browser runs internally for
+      // hundreds of milliseconds, and *any* assignment to `scrollLeft` during
+      // it cancels it where it stands. A column finishing its load in that
+      // window does exactly that, through the guard that stops a mounting
+      // surface dragging the strip — so the jump would stop partway, or, if the
+      // load landed early, never visibly start. Which load lands when is not
+      // knowable, so the failure was intermittent: the same button did nothing,
+      // then worked, then did nothing.
+      //
+      // Arriving outright removes the window rather than defending it. It is
+      // also cheaper: gliding drags the mounted range across every column in
+      // between and builds each one on the way past, where going straight there
+      // builds the destination alone.
+      const target = Math.max(0, strip.scrollLeft + delta);
+      intendStripScroll(target);
+      // `instant`, not `auto`. `auto` defers to CSS, and the strip carries
+      // `scroll-smooth` — so the glide this exists to avoid would happen
+      // anyway, via the stylesheet instead of the call.
+      strip.scrollTo({ left: target, behavior: 'instant' });
     },
-    [columnOrder, setFocus, focusMode, columnBox, scrollingIndexOf],
+    [columnOrder, setFocus, focusMode, columnBox, scrollingIndexOf, intendStripScroll],
   );
 
   // Published for the stream mutations above, which need to travel to a column
@@ -1545,6 +1587,176 @@ const StreamsScreen = (): ReactElement => {
     rootRef: panelRef,
     columnBox,
   });
+
+  /**
+   * Whether the strip is currently windowed.
+   *
+   * Off in focus mode, where a column's width is a percentage of the strip
+   * rather than `column.width` — the virtualiser would be sizing its pages from
+   * numbers that do not describe them. Off through a focus transition too, and
+   * `widthMs` rather than `transitioningRef` because a ref does not re-render:
+   * leaving focus flips `focusMode` back in the same commit that starts the
+   * widths animating home, so virtualising on that frame would measure against
+   * the destination while the DOM is still at the origin.
+   */
+  const virtualizeDeck = !focusMode && widthMs === 0;
+
+  /**
+   * Indexes that stay mounted whatever the scroll position says.
+   *
+   * A dragged column cannot be allowed to unmount: `useColumnDrag` caches the
+   * raw nodes at drag start and writes `style.transform` straight onto them
+   * every frame, so an unmount mid-gesture leaves it addressing detached nodes
+   * and the card freezes under the pointer while the drag carries on around it.
+   *
+   * The focused column is here for `trackFocusedColumn`, which pins `scrollLeft`
+   * against its measured box each frame through a focus flip — it has to be in
+   * the document before the flip starts, not once the scroll arrives.
+   *
+   * Pairs are admitted whole. A channel and the pane it holds are one page, and
+   * half a pair is worse than neither half.
+   */
+  const keepMounted = useMemo(() => {
+    const keep = new Set<number>();
+    const add = (id: string | undefined): void => {
+      if (id === undefined) return;
+      const at = scrollingIndexOf.get(id);
+      if (at !== undefined) keep.add(at);
+    };
+    const withPartner = (id: string | undefined): void => {
+      if (id === undefined) return;
+      add(id);
+      add(attachmentOf(columns, id)?.id);
+      add(columns.find(column => column.id === id)?.attachedTo);
+    };
+    withPartner(drag?.columnId);
+    add(drag?.partnerId);
+    withPartner(columns[stream.focus]?.id);
+    return keep;
+  }, [drag, columns, stream.focus, scrollingIndexOf]);
+
+  /**
+   * The columns actually on screen, as opposed to merely mounted.
+   *
+   * `rangeExtractor` is handed the visible range *before* overscan widens it,
+   * which is the only place that distinction is available — and it is the
+   * distinction the drift turns on. A ref rather than state because it is read
+   * during the same render the virtualiser triggers: writing state here would
+   * loop.
+   */
+  const onScreenRef = useRef<{ start: number; end: number }>({ start: 0, end: -1 });
+
+  const rangeExtractor = useCallback(
+    (range: Range): number[] => {
+      onScreenRef.current = { start: range.startIndex, end: range.endIndex };
+      const visible = defaultRangeExtractor(range);
+      if (keepMounted.size === 0) return visible;
+      return Array.from(new Set([...visible, ...keepMounted])).sort((a, b) => a - b);
+    },
+    [keepMounted],
+  );
+
+  /**
+   * The strip's window.
+   *
+   * `estimateSize` is exact rather than estimated: a column's width is state,
+   * and the handle after it is a constant, so there is no measure-then-correct
+   * cycle and no drift to reconcile. That is the one way this is simpler than
+   * the chat list it otherwise follows.
+   */
+  const columnWindow = useVirtualizer({
+    horizontal: true,
+    count: scrolling.length,
+    getScrollElement: () => stripRef.current,
+    estimateSize: (index: number): number => {
+      const column = scrolling[index];
+      return column ? widthFor(column) + HANDLE_PX : 0;
+    },
+    getItemKey: (index: number): string => scrolling[index]?.id ?? String(index),
+    // Shells, not surfaces — which is why this number is small and no longer
+    // load-bearing.
+    //
+    // A column is not a list row: it is a chat panel that opens Zero queries and
+    // builds its own virtualised list, measured at ~100ms to mount. Tuning the
+    // overscan was the first attempt at containing that, and it does not work in
+    // either direction. Two produced four main-thread stalls of 43-64ms in one
+    // five-second scroll, each followed by the queued scroll lurching to catch
+    // up; fifteen simply moved the same stalls to whatever column count exceeded
+    // it. The cost is in *when a surface is built*, and the window was never the
+    // thing deciding that.
+    //
+    // A surface is built when its column is on screen — see `offScreen` in
+    // `renderColumn` — so what the overscan holds either side is a mounted shell
+    // with a skeleton in it, which costs nothing. It exists to have the shell in
+    // the document before it scrolls into view, so nothing pops in, and five is
+    // comfortably more than one gesture reaches.
+    overscan: 5,
+    rangeExtractor,
+    // React 19 changed flushSync semantics; the default adds synchronous
+    // layout/paint cycles during scroll. Same reasoning as `ChatListV4`.
+    useFlushSync: false,
+  });
+
+  const virtualColumns = columnWindow.getVirtualItems();
+
+  /**
+   * Whether the strip is in motion, for the columns that have not loaded yet.
+   *
+   * Only ever postpones. A loaded column ignores this entirely, which is the
+   * correction to the first attempt: that one wiped every column on any scroll,
+   * including the ones already on screen with their messages in them.
+   */
+  const windowScrolling =
+    (virtualizeDeck && columnWindow.isScrolling) ||
+    // A focus flip is the other moment nothing may be built. Virtualisation is
+    // off in focus mode, so crossing into it mounts every column the window was
+    // holding back — thirteen surfaces in one commit, landing on the frames the
+    // width transition needs. Same bargain as a scroll: hold the work until the
+    // movement is over, then let them fill in.
+    widthMs > 0;
+
+  /**
+   * The strip is a flex row and stays one.
+   *
+   * Absolute positioning is the usual way to place virtual items, and it would
+   * mean re-deriving every height in here: the columns are `self-stretch` and
+   * the handle between them owns the spacing. Spacers instead, which leave every
+   * rendered child exactly the flex child it was — so the fade mask, the ring
+   * gutter and the handles need no changes at all.
+   *
+   * A spacer before *every* column rather than one at each end, because the
+   * window is not a contiguous run: `rangeExtractor` force-keeps the dragged and
+   * focused columns wherever they happen to be, so the rendered set can be
+   * 0,1,2,3,6 with a hole in the middle. Padding only the ends closes that hole
+   * by sliding everything after it leftward — the focused column landed 736px
+   * short of its own position, which is the entire layout wrong from there on.
+   * Each gap is carried where it actually falls.
+   */
+  const windowed = useMemo(() => {
+    // The unwindowed case goes through the *same* shape rather than a second
+    // branch, and that is not tidiness. A column rendered under a different
+    // wrapper is a different position in the tree, so switching branches makes
+    // React tear down every column and build it again — which is exactly what
+    // made entering focus mode reload a stream that was already sitting there
+    // fully loaded. Focus mode changes widths; it has no business changing
+    // identities. One shape, all the time, and the only thing that varies is
+    // which columns are in it and how much space stands in for the rest.
+    if (!virtualizeDeck) {
+      return {
+        items: scrolling.map(column => ({ key: column.id, gap: 0, column })),
+        tail: 0,
+      };
+    }
+    const items: { key: string; gap: number; column: Column }[] = [];
+    let cursor = 0;
+    for (const item of virtualColumns) {
+      const column = scrolling[item.index];
+      if (!column) continue;
+      items.push({ key: column.id, gap: Math.max(0, item.start - cursor), column });
+      cursor = item.end;
+    }
+    return { items, tail: Math.max(0, columnWindow.getTotalSize() - cursor) };
+  }, [virtualizeDeck, virtualColumns, scrolling, columnWindow]);
 
   /**
    * Hold the arithmetic to the document's account, while both still answer.
@@ -1893,6 +2105,7 @@ const StreamsScreen = (): ReactElement => {
     // card edge. Send it back to the start so the first one sits flush.
     const behavior = scrollBehavior();
     if (focused.pinned) {
+      intendStripScroll(0);
       strip.scrollTo({ left: 0, behavior });
       return;
     }
@@ -1909,8 +2122,18 @@ const StreamsScreen = (): ReactElement => {
     if (!box) return;
     const stripRect = strip.getBoundingClientRect();
     const delta = box.left + box.width / 2 - (stripRect.left + stripRect.width / 2);
+    intendStripScroll(Math.max(0, strip.scrollLeft + delta));
     strip.scrollTo({ left: Math.max(0, strip.scrollLeft + delta), behavior });
-  }, [stream.focus, columns, dev.autoCenter, closing, focusMode, trackFocusedColumn, pageBoxFor]);
+  }, [
+    stream.focus,
+    columns,
+    dev.autoCenter,
+    closing,
+    focusMode,
+    trackFocusedColumn,
+    pageBoxFor,
+    intendStripScroll,
+  ]);
 
   // ------------------------------------------------- focus arbitration
 
@@ -1951,6 +2174,25 @@ const StreamsScreen = (): ReactElement => {
     );
     if (intentional) composerIntentRef.current = true;
   }, []);
+
+  /**
+   * Hold the strip still while a surface arrives.
+   *
+   * Reuses the composer guard's mechanism for a cause it cannot see. A chat
+   * panel brings its latest message into view as it mounts, and that scrolls
+   * every scrollable ancestor — no JS assigns `scrollLeft`, no focus event
+   * fires, so there is nothing to intercept and nothing to cancel. Latching the
+   * pin across the arrival stops it on its first frame, exactly as the composer
+   * case does.
+   *
+   * This only became visible once surfaces stopped mounting at page load: they
+   * now arrive after a scroll settles, so the stray scroll arrives with them,
+   * several hundred milliseconds after the user has come to rest.
+   */
+  const holdStripThroughMount = useCallback((): void => {
+    restoreUntilRef.current = performance.now() + FOCUS_SCROLL_GUARD_MS;
+    pinStrip();
+  }, [pinStrip]);
 
   // The trap this creates: anything Streams opens on purpose must carry
   // `data-streams-input` or its autofocused field is blurred the instant it
@@ -1993,14 +2235,33 @@ const StreamsScreen = (): ReactElement => {
     const strip = stripRef.current;
     if (!strip) return;
     const onScroll = (): void => {
-      if (performance.now() < restoreUntilRef.current) {
+      // The guard has to tell a scroll the user asked for from one a surface
+      // caused, because the two arrive through the same event and only one may
+      // be undone. Pinning both would make the strip refuse to move for the
+      // length of every arrival; pinning neither is the drift this exists to
+      // stop. The user's own input is the only thing that separates them, so
+      // any scroll within `INPUT_GRACE_MS` of a real gesture is treated as
+      // intended and recorded rather than reverted.
+      const now = performance.now();
+      const userDriven = now - lastInputRef.current <= INPUT_GRACE_MS;
+      if (now < restoreUntilRef.current && !userDriven) {
         pinStrip();
         return;
       }
       stripScrollRef.current = strip.scrollLeft;
     };
+    // Capture, so a surface that stops propagation cannot hide the gesture.
+    const onInput = (): void => {
+      lastInputRef.current = performance.now();
+    };
+    const inputs = ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const;
+    for (const type of inputs)
+      strip.addEventListener(type, onInput, { capture: true, passive: true });
     strip.addEventListener('scroll', onScroll, { passive: true });
-    return (): void => strip.removeEventListener('scroll', onScroll);
+    return (): void => {
+      strip.removeEventListener('scroll', onScroll);
+      for (const type of inputs) strip.removeEventListener(type, onInput, { capture: true });
+    };
   }, [pinStrip]);
 
   const enterColumn = useCallback((): void => {
@@ -2276,6 +2537,13 @@ const StreamsScreen = (): ReactElement => {
     const partner = isHeld ? columns.find(candidate => candidate.id === column.attachedTo) : held;
     const pairTotal = partner ? widthFor(column) + widthFor(partner) : 0;
     const fillShare = pairTotal > 0 ? widthFor(column) / pairTotal : 1;
+
+    // Mounted but outside the viewport — the overscan band. Read from the range
+    // the virtualiser was handed before it widened it; see `onScreenRef`.
+    const at = scrollingIndexOf.get(column.id);
+    const offScreen =
+      at !== undefined && (at < onScreenRef.current.start || at > onScreenRef.current.end);
+
     return (
       <Fragment key={column.id}>
         <StreamColumn
@@ -2283,6 +2551,31 @@ const StreamsScreen = (): ReactElement => {
           width={widthFor(column)}
           closing={closing.has(column.id)}
           opening={opening.has(column.id)}
+          onSurfaceMount={holdStripThroughMount}
+          // The focused column is exempt. Everything else waits for the strip to
+          // stop, because building during a gesture is what made it stutter —
+          // but the column you just asked for is the destination, not something
+          // you happen to be passing, and arriving at a skeleton reads as the
+          // jump having failed. One surface built during the trip, not twenty.
+          // Two reasons to hold a surface back; the focused column overrides
+          // both, because it is the destination and arriving at a skeleton
+          // reads as the jump having failed.
+          //
+          // The second reason is what ends the drift. A column in the overscan
+          // is loaded but *off screen*, and a chat panel brings its newest
+          // message into view as it loads — which, for an element outside the
+          // viewport, scrolls the strip sideways to reveal it. No JS assigns
+          // that scroll and no focus event fires, so there is nothing to
+          // intercept: every guard against it was a bet on timing that belongs
+          // to whenever the channel's data happens to resolve, which is why it
+          // failed at random. Not building a surface that is off screen removes
+          // the thing that scrolls rather than racing it — by the time a column
+          // builds, it is already where it wants to be seen.
+          scrolling={
+            (windowScrolling || (virtualizeDeck && offScreen)) &&
+            hostFor(columns, columns[stream.focus]?.id ?? '')?.id !==
+              hostFor(columns, column.id)?.id
+          }
           // Through the pair. Focus lands on whichever half you opened, but a
           // pair is one page — so the parent reading as unfocused while its own
           // pane held focus is what left its focus button offering to *enter* a
@@ -2569,6 +2862,18 @@ const StreamsScreen = (): ReactElement => {
               ref={stripRef}
               className={cn(
                 'streams-strip flex min-w-0 flex-1 items-stretch overflow-x-auto overflow-y-hidden',
+                // Scroll anchoring off, and this is a correctness fix rather
+                // than a preference. Chrome keeps what you are looking at still
+                // by *moving the scroll* whenever the DOM changes outside the
+                // viewport — which is the one thing a windowed strip does
+                // constantly, mounting and unmounting columns to the left of
+                // where you are. The browser reads each of those as content
+                // shifting and compensates, so the strip teleports under the
+                // hand and a jump lands and is then yanked back off its target.
+                // Nothing here needs anchoring: every column's position is
+                // computed, and the spacers hold the width of the ones that are
+                // absent, so the layout never actually moves for it to correct.
+                '[overflow-anchor:none]',
                 '[scrollbar-width:auto] [scrollbar-color:hsl(var(--muted-foreground)/0.5)_hsl(var(--muted)/0.6)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-[hsl(var(--muted)/0.6)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-[hsl(var(--muted-foreground)/0.5)] [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-[hsl(var(--muted-foreground)/0.8)] motion-reduce:scroll-auto',
                 'scroll-smooth',
                 // Fades, not gutters. A column that ends at a hard edge
@@ -2638,7 +2943,19 @@ const StreamsScreen = (): ReactElement => {
               }
               data-testid='streams-strip'
             >
-              {scrolling.map(renderColumn)}
+              {/* Windowed in deck mode, whole in focus mode. The spacers carry
+                  the width of everything not mounted, so the scroll extent and
+                  every column's position on it are the same either way — what
+                  changes is only how many of them exist. */}
+              {windowed.items.map(({ key, gap, column }) => (
+                <Fragment key={key}>
+                  {gap > 0 && <div aria-hidden className='shrink-0' style={{ width: gap }} />}
+                  {renderColumn(column)}
+                </Fragment>
+              ))}
+              {windowed.tail > 0 && (
+                <div aria-hidden className='shrink-0' style={{ width: windowed.tail }} />
+              )}
 
               {/* The add slot is a column-sized citizen of the strip, not a chip
               tacked onto the end — it is where the next column will appear.
