@@ -90,6 +90,28 @@ interface UseColumnDragOptions {
   normalizeSlot?: (slot: number, remaining: readonly string[]) => number;
   /** Root to hit-test within. Columns are found by `[data-column]`. */
   rootRef: React.RefObject<HTMLElement | null>;
+  /**
+   * Where a column is, in viewport coordinates, whether or not it is rendered.
+   *
+   * The strip used to answer this by querying `[data-column]` and reading a
+   * rect, which is correct only while every column is mounted — a virtualised
+   * strip has no node for an off-screen column, and a drop target that only
+   * considers what happens to be on screen is not a drop target. So the stream
+   * answers instead: it computes the scrolling columns from their widths and
+   * measures the pinned run, which never virtualises.
+   *
+   * Returns null for an id the stream does not place. Only the strip uses this;
+   * the overview grid is not virtualised and stays on its own rects.
+   */
+  columnBox: (id: string) => ColumnBox | null;
+}
+
+/** A column's place in viewport coordinates — the part of a rect this needs. */
+export interface ColumnBox {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface UseColumnDragResult {
@@ -124,6 +146,7 @@ export const useColumnDrag = ({
   onReorder,
   normalizeSlot,
   rootRef,
+  columnBox,
 }: UseColumnDragOptions): UseColumnDragResult => {
   const [drag, setDrag] = useState<DragState | null>(null);
   /** The dragged nodes — the column, plus its pane when it has one — cached at
@@ -139,6 +162,8 @@ export const useColumnDrag = ({
   onReorderRef.current = onReorder;
   const normalizeSlotRef = useRef(normalizeSlot);
   normalizeSlotRef.current = normalizeSlot;
+  const columnBoxRef = useRef(columnBox);
+  columnBoxRef.current = columnBox;
 
   const beginDrag = useCallback(
     (event: React.PointerEvent, columnId: string, partnerId?: string): void => {
@@ -197,17 +222,32 @@ export const useColumnDrag = ({
       // stays mounted under the overlay, so every card has a hidden twin.
       const cards = root.querySelectorAll<HTMLElement>('[data-column-card]');
       const grid = cards.length > 0;
-      const nodes = Array.from(grid ? cards : root.querySelectorAll<HTMLElement>('[data-column]'));
-      const key = grid ? 'columnCard' : 'column';
 
-      const entries = nodes
-        .map(node => ({ id: node.dataset[key] ?? '', rect: node.getBoundingClientRect() }))
-        .filter(entry => entry.id !== '' && entry.id !== draggedId && entry.id !== partnerId);
-      // Visual order. Rows first in the grid; a single left-to-right run in the strip.
+      // The grid is not virtualised — every card is mounted whenever the overlay
+      // is up — so it keeps measuring itself. The strip cannot: an off-screen
+      // column has no node, and asking the DOM there would quietly shorten the
+      // candidate list to whatever happens to be on screen.
+      const entries = (
+        grid
+          ? Array.from(cards).map(node => ({
+              id: node.dataset['columnCard'] ?? '',
+              rect: node.getBoundingClientRect() as ColumnBox,
+            }))
+          : orderRef.current.map(id => ({ id, rect: columnBoxRef.current(id) }))
+      ).filter(
+        (entry): entry is { id: string; rect: ColumnBox } =>
+          entry.rect !== null &&
+          entry.id !== '' &&
+          entry.id !== draggedId &&
+          entry.id !== partnerId,
+      );
+      // Visual order. Rows first in the grid; a single left-to-right run in the
+      // strip, where the pinned run sits left of the scroller and so sorts ahead
+      // of it on the same key.
       entries.sort(
         grid
-          ? (a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left
-          : (a, b) => a.rect.left - b.rect.left,
+          ? (a, b): number => a.rect.top - b.rect.top || a.rect.left - b.rect.left
+          : (a, b): number => a.rect.left - b.rect.left,
       );
       if (entries.length === 0) return { slot: 0, marker: null };
 
@@ -257,7 +297,7 @@ export const useColumnDrag = ({
       return {
         slot,
         marker: edge
-          ? { x: rect ? edge.left : edge.right, y: edge.top, height: edge.height }
+          ? { x: rect ? edge.left : edge.left + edge.width, y: edge.top, height: edge.height }
           : null,
       };
     },

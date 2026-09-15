@@ -79,7 +79,13 @@ import {
   STRIP_PAD,
   STREAM_PRESS_ROW,
 } from './components/Streams/Streams.types';
-import { assertStridesMatchDom, columnStrides } from './components/Streams/Streams.geometry';
+import {
+  assertStridesMatchDom,
+  columnBand,
+  columnStrides,
+  toClientX,
+} from './components/Streams/Streams.geometry';
+import type { ColumnBox } from './hooks/useColumnDrag';
 import { streamsActor } from '../../machines/streamsMachine';
 import { questionFor, type StreamItem } from './components/StreamsDnd/StreamsDnd';
 import type {
@@ -1385,6 +1391,65 @@ const StreamsScreen = (): ReactElement => {
    * centre biases every column by the same constant — and a constant bias still
    * picks the wrong column, just consistently.
    */
+  /**
+   * Where the scrolling columns sit, computed rather than measured.
+   *
+   * The pinned run owns the left edge when it exists, and the scroller's own
+   * padding changes to match — so the lead is read from the same condition the
+   * style uses rather than being restated as a constant.
+   */
+  const stripLead = pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET;
+  const scrollingStrides = useMemo(
+    () => columnStrides(scrolling.map(widthFor), stripLead),
+    [scrolling, widthFor, stripLead],
+  );
+
+  const scrollingIndexOf = useMemo(() => {
+    const index = new Map<string, number>();
+    scrolling.forEach((column, at) => index.set(column.id, at));
+    return index;
+  }, [scrolling]);
+
+  /**
+   * Where a column is on screen, for anything that has to answer that about a
+   * column it cannot see.
+   *
+   * Three sources, and which one applies is a property of the column rather
+   * than a preference:
+   *
+   * - **Scrolling columns** come from `scrollingStrides`. This is the case the
+   *   whole file exists for: after virtualisation an off-screen column has no
+   *   node, so the only honest answer is the computed one.
+   * - **Pinned columns** are measured. They render in their own run outside the
+   *   scroller and never virtualise, so their node is always there and always
+   *   right — and the strides deliberately do not cover them.
+   * - **Focus mode** is measured throughout, because width there is a
+   *   percentage of the strip rather than `column.width`, so the strides do not
+   *   describe it. Focus mode is not virtualised yet; when it is, it brings its
+   *   own sizing with it.
+   */
+  const columnBox = useCallback(
+    (id: string): ColumnBox | null => {
+      const measure = (): ColumnBox | null => {
+        const node = panelRef.current?.querySelector<HTMLElement>(`[data-column="${id}"]`);
+        if (!node) return null;
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      };
+      const strip = stripRef.current;
+      const at = scrollingIndexOf.get(id);
+      if (strip === null || at === undefined || focusMode) return measure();
+      const band = columnBand(strip, RING_GUTTER);
+      return {
+        left: toClientX(scrollingStrides.left[at] ?? 0, strip, stripLead),
+        top: band.top,
+        width: scrollingStrides.width[at] ?? 0,
+        height: band.height,
+      };
+    },
+    [scrollingIndexOf, scrollingStrides, stripLead, focusMode],
+  );
+
   const columnAtCentre = useCallback((): number => {
     const strip = stripRef.current;
     if (!strip) return -1;
@@ -1393,17 +1458,16 @@ const StreamsScreen = (): ReactElement => {
     let best = -1;
     let bestDistance = Infinity;
     columnOrder.forEach((id, index) => {
-      const node = strip.querySelector<HTMLElement>(`[data-column="${id}"]`);
-      if (!node) return;
-      const rect = node.getBoundingClientRect();
-      const distance = Math.abs(rect.left + rect.width / 2 - centre);
+      const box = columnBox(id);
+      if (!box) return;
+      const distance = Math.abs(box.left + box.width / 2 - centre);
       if (distance < bestDistance) {
         bestDistance = distance;
         best = index;
       }
     });
     return best;
-  }, [columnOrder]);
+  }, [columnOrder, columnBox]);
 
   // Published through a ref so the scroll listener below can use it without
   // taking it as a dependency — re-attaching a scroll handler whenever the stream
@@ -1422,27 +1486,31 @@ const StreamsScreen = (): ReactElement => {
       centredOnRef.current = columnId;
       const strip = stripRef.current;
       if (!strip) return;
-      const node = strip.querySelector<HTMLElement>(`[data-column="${columnId}"]`);
-      if (!node) return;
+
+      // Pinned columns live outside the scroller and are always on screen, so
+      // there is nothing to scroll to — focus is the whole trip.
+      if (!scrollingIndexOf.has(columnId)) return;
+
+      // Computed, not measured, and this is the jump that most needs it: the
+      // whole point of jumping to a column is that you cannot see it, which
+      // after virtualisation is exactly when it has no node. Asking the DOM
+      // here used to fall out through `if (!node) return` — a jump to an
+      // off-screen column that silently did nothing at all.
+      const box = columnBox(columnId);
+      if (!box) return;
+      const stripRect = strip.getBoundingClientRect();
+      const delta = box.left + box.width / 2 - (stripRect.left + stripRect.width / 2);
 
       // In focus mode every column is the same width, so a jump changes nothing
       // about the layout — there is no growing target to track, only a distance
       // to travel, and it gets a tween we control the length of.
       if (focusMode && scrollBehavior() === 'smooth') {
-        const nodeRect = node.getBoundingClientRect();
-        const stripRect = strip.getBoundingClientRect();
-        tweenScroll(
-          strip,
-          strip.scrollLeft +
-            (nodeRect.left + nodeRect.width / 2 - (stripRect.left + stripRect.width / 2)),
-        );
+        tweenScroll(strip, strip.scrollLeft + delta);
         return;
       }
-      // Pinned columns live outside the scroller and are always on screen, so
-      // there is nothing to scroll to — focus is the whole trip.
-      node.scrollIntoView({ behavior: scrollBehavior(), block: 'nearest', inline: 'center' });
+      strip.scrollTo({ left: Math.max(0, strip.scrollLeft + delta), behavior: scrollBehavior() });
     },
-    [columnOrder, setFocus, focusMode],
+    [columnOrder, setFocus, focusMode, columnBox, scrollingIndexOf],
   );
 
   // Published for the stream mutations above, which need to travel to a column
@@ -1475,20 +1543,8 @@ const StreamsScreen = (): ReactElement => {
     onReorder: reorder,
     normalizeSlot,
     rootRef: panelRef,
+    columnBox,
   });
-
-  /**
-   * Where the scrolling columns sit, computed rather than measured.
-   *
-   * The pinned run owns the left edge when it exists, and the scroller's own
-   * padding changes to match — so the lead is read from the same condition the
-   * style uses rather than being restated as a constant.
-   */
-  const stripLead = pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET;
-  const scrollingStrides = useMemo(
-    () => columnStrides(scrolling.map(widthFor), stripLead),
-    [scrolling, widthFor, stripLead],
-  );
 
   /**
    * Hold the arithmetic to the document's account, while both still answer.
