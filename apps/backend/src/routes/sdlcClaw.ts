@@ -60,9 +60,10 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
 router.post(
   '/links',
   route(async (req, res) => {
-    const input = createSdlcLinkSchema.extend({ repoId: createSdlcLinkSchema.shape.sourceId }).parse(
-      req.body,
-    );
+    // Optional: a hub covering no repository is addressed by channelId instead.
+    const input = createSdlcLinkSchema
+      .extend({ repoId: createSdlcLinkSchema.shape.sourceId.optional() })
+      .parse(req.body);
     const { repoId, ...linkInput } = input;
     const link = await sdlcHub.linkContext(
       await actorFromRequest(req),
@@ -77,13 +78,12 @@ router.post(
 router.post(
   '/tracks/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
-    const tracks = await sdlcHub.listTracks(
-      await actorFromRequest(req),
-      repoId,
-      channelIdFromBody(req)
-    );
+    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : undefined;
+    const channelId = channelIdFromBody(req);
+    // Tracks belong to the hub, so the claw tool sends only its channelId; a repoId
+    // is accepted as the older way of naming the same hub.
+    if (!repoId && !channelId) throw new AppError('repoId or channelId is required', 400);
+    const tracks = await sdlcHub.listTracks(await actorFromRequest(req), repoId, channelId);
     res.status(200).json({ success: true, tracks });
   }),
 );
@@ -100,12 +100,14 @@ router.post(
 router.post(
   '/artifact-types/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
+    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : undefined;
+    const channelId = channelIdFromBody(req);
+    // A hub covering no repository is addressed by channel; one of the two is required.
+    if (!repoId && !channelId) throw new AppError('repoId or channelId is required', 400);
     const artifactTypes = await sdlcHub.listArtifactTypes(
       await actorFromRequest(req),
       repoId,
-      channelIdFromBody(req)
+      channelId
     );
     res.status(200).json({ success: true, artifactTypes });
   }),
@@ -145,7 +147,15 @@ router.patch(
 router.post(
   '/artifacts',
   route(async (req, res) => {
-    const input = createSdlcClawArtifactSchema.parse(req.body);
+    // The claw tool narrows a hub with `repoIds`; exactly one names the repository
+    // the artifact belongs to, the older `repoId` still wins when present.
+    const repoIds = Array.isArray(req.body?.repoIds) ? req.body.repoIds : [];
+    const input = createSdlcClawArtifactSchema.parse({
+      ...req.body,
+      ...(!req.body?.repoId && repoIds.length === 1 && typeof repoIds[0] === 'string'
+        ? { repoId: repoIds[0] }
+        : {}),
+    });
     const artifact = await sdlcHub.createArtifactFromClaw(await actorFromRequest(req), input);
     res.status(201).json({ success: true, artifact });
   }),

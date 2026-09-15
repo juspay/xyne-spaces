@@ -73,7 +73,8 @@ export interface SdlcHub {
   getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
-    conversationId: string
+    conversationId: string,
+    channelId?: string
   ): Promise<SdlcRepositoryRunContext>;
   createArtifactFromClaw(
     actor: SdlcActor,
@@ -83,7 +84,7 @@ export interface SdlcHub {
     actor: SdlcActor,
     input: UpdateSdlcBaselineDraftInput
   ): Promise<SdlcArtifact>;
-  listTracks(actor: SdlcActor, repoId: string, channelId?: string): Promise<unknown>;
+  listTracks(actor: SdlcActor, repoId: string | undefined, channelId?: string): Promise<unknown>;
   createTrack(actor: SdlcActor, input: CreateSdlcTrackInput): Promise<unknown>;
   linkContext(actor: SdlcActor, repoId: string, input: CreateSdlcLinkInput): Promise<SdlcLink>;
   unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void>;

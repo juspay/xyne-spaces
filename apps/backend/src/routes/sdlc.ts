@@ -213,10 +213,13 @@ router.get(
     const conversationId =
       typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
     if (!conversationId) throw new AppError('conversationId is required', 400);
+    const channelId =
+      typeof req.query.channelId === 'string' ? req.query.channelId.trim() : '';
     const context = await sdlcHub.getRepositoryRunContext(
       actorFromRequest(req),
       req.params.repoId,
-      conversationId
+      conversationId,
+      channelId || undefined
     );
     res.status(200).json({ success: true, context });
   })
@@ -346,6 +349,30 @@ router.delete(
   '/repositories/:repoId/links/:linkId',
   route(async (req, res) => {
     await sdlcHub.unlinkContext(actorFromRequest(req), req.params.repoId, req.params.linkId);
+    res.status(204).send();
+  })
+);
+
+// Hub-addressed twins of the two above, for a hub that covers no repository. The
+// link is placed by its channel either way; the repository was only ever the route.
+router.post(
+  '/channels/:channelId/links',
+  route(async (req, res) => {
+    const input = createSdlcLinkSchema.parse(req.body);
+    const link = await sdlcHub.linkContext(
+      actorFromRequest(req),
+      undefined,
+      input,
+      req.params.channelId
+    );
+    res.status(201).json({ success: true, link });
+  })
+);
+
+router.delete(
+  '/channels/:channelId/links/:linkId',
+  route(async (req, res) => {
+    await sdlcHub.unlinkContext(actorFromRequest(req), undefined, req.params.linkId);
     res.status(204).send();
   })
 );

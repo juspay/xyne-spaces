@@ -221,6 +221,9 @@ const SECTION_IDS: ReadonlySet<string> = new Set<string>([
   'tracks',
 ]);
 
+/** Sections generated from the repository itself, so they have nothing to show without one. */
+const REPO_DERIVED_SECTIONS: ReadonlySet<string> = new Set<string>(['wiki', 'baseline']);
+
 const BASELINE_LABELS: Record<string, string> = {
   CORE_CODE_MAP: 'Core Code Map',
   FRONTEND_DESIGN_SYSTEM: 'Frontend Design System',
@@ -526,6 +529,15 @@ export default function SdlcScreen(): ReactElement {
     }
   }, [navigate, channelId, channels]);
 
+  // Wiki and Repo Knowledge are hidden without a repository, so a URL naming one
+  // (a bookmark, or the repository being detached) falls back to the overview
+  // rather than rendering a section that has nothing to read.
+  useEffect(() => {
+    if (!channelId || repo || !REPO_DERIVED_SECTIONS.has(section)) return;
+    if (channelRow === undefined || repoQueryDetails.type !== 'complete') return;
+    void navigate(`/sdlc/${channelId}/overview`, { replace: true });
+  }, [channelId, repo, section, channelRow, repoQueryDetails.type, navigate]);
+
   const canvases = useMemo(() => {
     if (!channel) return [];
     return (channel.canvasFolders ?? []).flatMap(folder => folder.canvases ?? []);
@@ -654,7 +666,10 @@ export default function SdlcScreen(): ReactElement {
       }),
     [baseline],
   );
-  const folders = useMemo(() => (repo ? (repo.channel?.canvasFolders ?? []) : []), [repo]);
+  // Artifact types are folders on the hub's channel, seeded when the hub is created,
+  // so they are read from the channel — reaching them through the repository would
+  // hide every type on a hub that covers none.
+  const folders = useMemo(() => channel?.canvasFolders ?? [], [channel]);
   const typeFolders = useMemo(
     () =>
       folders
@@ -932,7 +947,10 @@ export default function SdlcScreen(): ReactElement {
     routeSearchParams.get('discussion') === '1' && sdlcChatTab === 'conversations';
   const rightPanelMode = sdlcRightPanelMode({
     chatOpen: chatLayout.panelOpen,
-    debuggerOpen: externalDebuggerTarget?.repoId === repoId,
+    // Both sides are undefined on a hub with no repository and no debugger open, and
+    // `undefined === undefined` would report the debugger as open forever — holding
+    // the right panel on an empty debugger instead of the discussion.
+    debuggerOpen: Boolean(externalDebuggerTarget && externalDebuggerTarget.repoId === repoId),
   });
   const rightPanelOpen = rightPanelMode !== 'closed';
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
@@ -1125,10 +1143,13 @@ export default function SdlcScreen(): ReactElement {
     body: unknown,
     success: string,
   ): Promise<void> => {
+    // Wiki and Repo Knowledge are repository-addressed, so they are inert on a hub
+    // that covers none — their sections are hidden there anyway.
+    if (!repoId) return;
     await call(
       key,
       async () => {
-        await apiInstance.post(`/sdlc/repositories/${repoId!}/wiki/${path}`, body);
+        await apiInstance.post(`/sdlc/repositories/${repoId}/wiki/${path}`, body);
         await Promise.all([
           wikiRunQuery.refetch(),
           ...(section === 'wiki' ? [wikiQuery.refetch()] : []),
@@ -1143,11 +1164,12 @@ export default function SdlcScreen(): ReactElement {
   const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
     callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
   const runKnowledgeControl = (control: RepoKnowledgeControl): Promise<void> => {
+    if (!repoId) return Promise.resolve();
     const action = repoKnowledgeAction(control);
     return call(
       action.key,
       async () => {
-        await apiInstance.post(`/sdlc/repositories/${repoId!}/${action.path}`);
+        await apiInstance.post(`/sdlc/repositories/${repoId}/${action.path}`);
         await setupExecutionQuery.refetch();
       },
       action.success,
@@ -1156,12 +1178,12 @@ export default function SdlcScreen(): ReactElement {
   const retryKnowledge = (): Promise<void> => runKnowledgeControl('RETRY');
   const callWikiExecutionAction = (action: 'retry' | 'cancel', success: string): Promise<void> => {
     const executionId = wikiRunQuery.data?.executionId;
-    if (!executionId) return Promise.resolve();
+    if (!repoId || !executionId) return Promise.resolve();
     return call(
       `wiki-${action}`,
       async () => {
         await apiInstance.post(
-          `/sdlc/repositories/${repoId!}/wiki/runs/${encodeURIComponent(executionId)}/${action}`,
+          `/sdlc/repositories/${repoId}/wiki/runs/${encodeURIComponent(executionId)}/${action}`,
         );
         await Promise.all([
           wikiRunQuery.refetch(),
@@ -1216,8 +1238,6 @@ export default function SdlcScreen(): ReactElement {
     openWindowForCanvas(section, canvasId, canvasSearch(canvasId, withDiscussion));
 
   const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
-    if (!repoId) return;
-
     const withDiscussion = Boolean(options?.withDiscussion);
     if (shouldOpenInNewWindow(options?.event) && openCanvasInWindow(canvasId, withDiscussion)) {
       return;
@@ -1235,7 +1255,6 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const closeCanvas = (): void => {
-    if (!repoId) return;
     const typeFolder =
       selectedCanvasTypeFolder ?? (section === 'artifacts' ? activeTypeFolder : null);
     if (typeFolder) {
@@ -1323,7 +1342,7 @@ export default function SdlcScreen(): ReactElement {
 
   const openSdlcAssistant = useCallback(
     (threadInfo?: ThreadInfo): void => {
-      if (!repo) return;
+      if (!channel) return;
       closeExternalDebugger();
       // Ask AI renders inside the SDLC lane itself (the framed bundle's own
       // XyneAISidebar), so Ask AI changes ship with this lane and never need a
@@ -1334,29 +1353,46 @@ export default function SdlcScreen(): ReactElement {
         actorOpen: assistantState.matches('open'),
         selectedAgentSlug,
         actorChannelId: assistantState.context.channelId,
-        repositoryChannelId: repo.channelId,
+        repositoryChannelId: channel.id,
         actorRepositoryId:
           actorResearchContext?.type === 'repository' ? actorResearchContext.id : null,
-        repositoryId: repo.id,
+        repositoryId: repo?.id ?? null,
       });
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
         contextType: 'chat',
-        contextId: repo.channelId,
-        channelId: repo.channelId,
+        contextId: channel.id,
+        channelId: channel.id,
         startFreshChat,
         ...(assistantCanvas && { canvasInfo: assistantCanvas }),
         ...(threadInfo && { threadInfo }),
-        researchContext: { type: 'repository', id: repo.id, name: repo.name },
+        // Only a hub with a repository pins one; otherwise the channel is the scope.
+        ...(repo && {
+          researchContext: {
+            type: 'repository' as const,
+            id: repo.id,
+            name: repo.name,
+            // The hub, not just the repository: the same repository belongs to
+            // several hubs and the agent must run in the one that is open.
+            channelId: channel.id,
+          },
+        }),
       });
     },
-    [assistantCanvas, closeExternalDebugger, repo, selectedAgentSlug, setSelectedAgentSlug],
+    [
+      assistantCanvas,
+      channel,
+      closeExternalDebugger,
+      repo,
+      selectedAgentSlug,
+      setSelectedAgentSlug,
+    ],
   );
 
   const askSdlcAssistant = useCallback(
     (query: string, canvas?: { canvasId: string; title: string }, forceFreshChat = false): void => {
-      if (!repo) return;
+      if (!channel) return;
       closeExternalDebugger();
       const assistantState = xyneAIActor.getSnapshot();
       const pinnedContext = assistantState.context.researchContext;
@@ -1364,22 +1400,30 @@ export default function SdlcScreen(): ReactElement {
         forceFreshChat ||
         !assistantState.matches('open') ||
         selectedAgentSlug !== 'sdlc-agent' ||
-        assistantState.context.channelId !== repo.channelId ||
-        pinnedContext?.type !== 'repository' ||
-        pinnedContext.id !== repo.id;
+        assistantState.context.channelId !== channel.id ||
+        (repo ? pinnedContext?.type !== 'repository' || pinnedContext.id !== repo.id : false);
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
         contextType: 'chat',
-        contextId: repo.channelId,
-        channelId: repo.channelId,
+        contextId: channel.id,
+        channelId: channel.id,
         startFreshChat: needsFreshChat,
         ...(canvas && { canvasInfo: canvas }),
-        researchContext: { type: 'repository', id: repo.id, name: repo.name },
+        ...(repo && {
+          researchContext: {
+            type: 'repository' as const,
+            id: repo.id,
+            name: repo.name,
+            // The hub, not just the repository: the same repository belongs to
+            // several hubs and the agent must run in the one that is open.
+            channelId: channel.id,
+          },
+        }),
         initialQuery: query,
       });
     },
-    [closeExternalDebugger, repo, selectedAgentSlug, setSelectedAgentSlug],
+    [channel, closeExternalDebugger, repo, selectedAgentSlug, setSelectedAgentSlug],
   );
 
   const openSdlcDebugger = useCallback(
@@ -1467,13 +1511,13 @@ export default function SdlcScreen(): ReactElement {
     // Legacy ?chat=ai deep link: the assistant is the global sidebar now, not
     // a panel tab. Open it once and strip the param — keeping the param made
     // this effect re-open the sidebar every time the user closed it.
-    if (!repo) return;
+    if (!channel) return;
     openSdlcAssistant();
     const next = new URLSearchParams(location.search);
     next.delete('chat');
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
-  }, [location.pathname, location.search, navigate, openSdlcAssistant, repo, sdlcChatTab]);
+  }, [channel, location.pathname, location.search, navigate, openSdlcAssistant, sdlcChatTab]);
 
   const clearArtifactDialogFields = (input?: {
     track?: { id: string; name: string } | null;
@@ -1503,13 +1547,13 @@ export default function SdlcScreen(): ReactElement {
       .map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
   const createArtifact = (): void => {
-    if (!repoId || !repo || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
     const related = relatedArtifactsForPayload();
     const query = buildSdlcArtifactCreationPrompt({
       typeLabel: artifactDialog.name,
       folderId: artifactDialog.id,
       title: artifactTitle.trim(),
-      repositoryName: repo.name,
+      ...(repo ? { repositoryName: repo.name } : { hubName: channel.name }),
       ...(artifactAiPrompt.trim() && { direction: artifactAiPrompt.trim() }),
       ...(related.length > 0 && { relatedArtifacts: related }),
       track: artifactTrack,
@@ -1519,10 +1563,14 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createTicketForArtifact = (canvas: { id: string; title: string }): void => {
-    if (!repo) return;
+    if (!channel) return;
+    // The link is hub-scoped: spaces-create-ticket takes the hub's channelId and the
+    // canvas, so the prompt reads the same whether or not the hub covers a repository.
     askSdlcAssistant(
-      `Create an implementation ticket for the artifact "${canvas.title}" in repository "${repo.name}". ` +
-        `Call spaces-create-ticket with sdlcRepoId ${repo.id} and sourceCanvasId ${canvas.id} so the ticket is linked to this artifact. ` +
+      `Create an implementation ticket for the artifact "${canvas.title}" in ${
+        repo ? `repository "${repo.name}"` : `SDLC hub "${channel.name}"`
+      }. ` +
+        `Call spaces-create-ticket with channelId ${channel.id} and sourceCanvasId ${canvas.id} so the ticket is linked to this artifact. ` +
         `Read the artifact first and derive the ticket title and description from it; ask me only if something essential is missing.`,
       { canvasId: canvas.id, title: canvas.title },
       true,
@@ -1530,13 +1578,14 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createBlankArtifact = async (): Promise<void> => {
-    if (!repo || !channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
     const folder = artifactDialog;
     const title = artifactTitle.trim();
     const response = await apiInstance.post<{ artifact: { canvasId: string } }>(
       '/sdlc/claw/artifacts',
       {
-        repoId: repo.id,
+        // A hub covering no repository addresses itself by channel alone.
+        ...(repo && { repoId: repo.id }),
         channelId: channel.id,
         folderId: folder.id,
         title,
@@ -1560,10 +1609,10 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createArtifactType = async (): Promise<void> => {
-    if (!repo || !channel || !typeName.trim()) return;
+    if (!channel || !typeName.trim()) return;
     const response = await apiInstance.post<{ artifactType: { id: string; name: string } }>(
       '/sdlc/claw/artifact-types',
-      { repoId: repo.id, channelId: channel.id, name: typeName.trim() },
+      { ...(repo && { repoId: repo.id }), channelId: channel.id, name: typeName.trim() },
     );
     const created = response.data.artifactType;
     setTypeDialogOpen(false);
@@ -1572,9 +1621,10 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const renameArtifactType = async (folderId: string, name: string): Promise<void> => {
-    if (!repo || !name.trim()) return;
+    if (!channel || !name.trim()) return;
     await apiInstance.patch(`/sdlc/claw/artifact-types/${folderId}`, {
-      repoId: repo.id,
+      ...(repo && { repoId: repo.id }),
+      channelId: channel.id,
       name: name.trim(),
     });
     setRenameTypeId(null);
@@ -1582,7 +1632,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const linkPickedContext = (selections: ContextSelections): void => {
-    if (!repoId || !relatedSourceId) return;
+    if (!channel || !relatedSourceId) return;
     const targets = [
       ...selections.channels.map(item => ({ type: 'CHANNEL', id: item.id })),
       ...selections.tickets.map(item => ({ type: 'TICKET', id: item.id })),
@@ -1599,14 +1649,17 @@ export default function SdlcScreen(): ReactElement {
       async () => {
         await Promise.all(
           targets.map(target =>
-            apiInstance.post(`/sdlc/repositories/${repoId}/links`, {
-              channelId,
-              sourceType: 'CANVAS',
-              sourceId: relatedSourceId,
-              targetType: target.type,
-              targetId: target.id,
-              relationType: 'CONTEXT',
-            }),
+            apiInstance.post(
+              repo ? `/sdlc/repositories/${repo.id}/links` : `/sdlc/channels/${channel.id}/links`,
+              {
+                channelId,
+                sourceType: 'CANVAS',
+                sourceId: relatedSourceId,
+                targetType: target.type,
+                targetId: target.id,
+                relationType: 'CONTEXT',
+              },
+            ),
           ),
         );
         setLinkDialog(false);
@@ -1671,26 +1724,14 @@ export default function SdlcScreen(): ReactElement {
     );
   }
 
-  if (!repo) {
-    return (
-      <div className='h-full grid place-items-center p-8 text-center text-muted-foreground'>
-        <div>
-          <p className='text-sm'>This hub has no repositories.</p>
-          <p className='mt-1 text-xs'>
-            A hub always keeps at least one, so this should not happen.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const runTrackMutation = async (mutation: ReturnType<typeof zero.mutate>): Promise<void> => {
     const response = await mutation.server;
     if (response.type === 'error') throw new Error(response.error.message);
   };
 
   const createTrackAction = async (): Promise<void> => {
-    if (!repo || !channel) return;
+    // Tracks hang off the hub's channel, so they do not need a repository.
+    if (!channel) return;
     const id = uuidv4();
     await runTrackMutation(
       zero.mutate(
@@ -2429,45 +2470,48 @@ export default function SdlcScreen(): ReactElement {
     );
   };
   const openTrack = (trackId: string | null): void => {
-    if (!repoId) return;
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
       trackId ? `?track=${encodeURIComponent(trackId)}` : '',
     );
   };
 
-  const sectionNavRows = SECTIONS.map(item => {
-    const Icon = item.icon;
-    return (
-      <div key={item.id} className='mb-0.5'>
-        <button
-          onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`)}
-          {...(section === item.id && { 'aria-current': 'page' as const })}
-          className={cn(
-            'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
-            section === item.id ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/[0.06]',
-          )}
-          data-track-category='SdlcHub'
-          data-track-name='SectionChanged'
-          data-track-metadata={JSON.stringify({ section: item.id, repoId: repo.id })}
-        >
-          <Icon size={15} className='shrink-0 text-sidebar-foreground/70' />
-          <span className='flex-1 truncate text-left'>{item.label}</span>
-          <span className='text-xs tabular-nums text-sidebar-foreground/50'>
-            {item.id === 'wiki'
-              ? section === 'wiki'
-                ? wikiPages.length
-                : ''
-              : item.id === 'baseline'
-                ? baseline.length
-                : item.id === 'tickets'
-                  ? channelTicketCount
-                  : ''}
-          </span>
-        </button>
-      </div>
-    );
-  });
+  // Wiki and Repo Knowledge are generated from the repository, so a hub covering
+  // none hides them rather than offering empty screens.
+  const sectionNavRows = SECTIONS.filter(item => repo || !REPO_DERIVED_SECTIONS.has(item.id)).map(
+    item => {
+      const Icon = item.icon;
+      return (
+        <div key={item.id} className='mb-0.5'>
+          <button
+            onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`)}
+            {...(section === item.id && { 'aria-current': 'page' as const })}
+            className={cn(
+              'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
+              section === item.id ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/[0.06]',
+            )}
+            data-track-category='SdlcHub'
+            data-track-name='SectionChanged'
+            data-track-metadata={JSON.stringify({ section: item.id, repoId: repo?.id })}
+          >
+            <Icon size={15} className='shrink-0 text-sidebar-foreground/70' />
+            <span className='flex-1 truncate text-left'>{item.label}</span>
+            <span className='text-xs tabular-nums text-sidebar-foreground/50'>
+              {item.id === 'wiki'
+                ? section === 'wiki'
+                  ? wikiPages.length
+                  : ''
+                : item.id === 'baseline'
+                  ? baseline.length
+                  : item.id === 'tickets'
+                    ? channelTicketCount
+                    : ''}
+            </span>
+          </button>
+        </div>
+      );
+    },
+  );
 
   return (
     <div className='flex h-full min-w-0 overflow-hidden bg-transparent'>
@@ -2735,7 +2779,7 @@ export default function SdlcScreen(): ReactElement {
                             data-track-name='SectionChanged'
                             data-track-metadata={JSON.stringify({
                               type: folder.id,
-                              repoId: repo.id,
+                              repoId: repo?.id,
                             })}
                           >
                             <Folder size={15} className='shrink-0 text-sidebar-foreground/70' />
@@ -2934,18 +2978,16 @@ export default function SdlcScreen(): ReactElement {
               <Users className='size-4' />
             </Button>
             <div className='flex min-w-0 items-center gap-1.5 overflow-hidden pl-1.5 [&_button]:!size-7 [&_button]:!rounded-lg'>
-              {chatPanelAvailable && repo.channelId ? (
+              {chatPanelAvailable && channel.id ? (
                 <CallTriggerModal
-                  channelId={repo.channelId}
-                  {...(repo.channel?.scopeType && { scopeType: repo.channel.scopeType })}
-                  channelName={repo.name}
-                  participantCount={repo.channel?.channelStats?.participantCount ?? 0}
-                  callDisplayName={repo.name}
+                  channelId={channel.id}
+                  {...(channel.scopeType && { scopeType: channel.scopeType })}
+                  channelName={repo?.name ?? channel.name}
+                  participantCount={channel.channelStats?.participantCount ?? 0}
+                  callDisplayName={repo?.name ?? channel.name}
                   trackSource='sdlc_repo_header'
                   isMember={Boolean(
-                    repo.channel?.participants?.some(
-                      participant => participant.userId === auth.userID,
-                    ),
+                    channel.participants?.some(participant => participant.userId === auth.userID),
                   )}
                   {...((): { sdlcLink?: SdlcCallLink } => {
                     if (discussionOwner) {
@@ -2968,7 +3010,7 @@ export default function SdlcScreen(): ReactElement {
                   })()}
                 />
               ) : null}
-              {chatPanelAvailable && repo.channelId ? (
+              {chatPanelAvailable && channel.id ? (
                 <Button
                   size='icon'
                   variant='ghost'
@@ -3022,7 +3064,10 @@ export default function SdlcScreen(): ReactElement {
           orientation='horizontal'
           className='min-h-0 flex-1 overflow-hidden'
           autoSaveId='sdlc-chat-shell'
-          panelIds={sdlcRightPanelIds(rightPanelMode)}
+          // Keyed off what actually renders, not the URL: a `discussion=1` link on a
+          // surface with no discussion would otherwise reserve a slot for a panel that
+          // never mounts, leaving the main pane capped at 62%.
+          panelIds={sdlcRightPanelIds(showRightPanel ? rightPanelMode : 'closed')}
         >
           <Panel
             id={SDLC_MAIN_PANEL_ID}
@@ -3042,7 +3087,9 @@ export default function SdlcScreen(): ReactElement {
                 <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
                   {section === 'overview' && (
                     <section>
-                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{repo.name}</h1>
+                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>
+                        {repo?.name ?? channel.name}
+                      </h1>
                       {showAccessWarning && (
                         <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
                           <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
@@ -3054,54 +3101,62 @@ export default function SdlcScreen(): ReactElement {
                           </div>
                         </div>
                       )}
-                      <div className='rounded-xl border bg-background p-5'>
-                        <div className='flex items-center justify-between gap-6'>
-                          <div className='min-w-0'>
-                            <h2 className='text-base font-semibold'>Repo Knowledge</h2>
-                            <p className='mt-1 text-sm text-muted-foreground'>
-                              Create and approve repository guides used by SDLC Assistant.
-                            </p>
-                            <p className='mt-2 text-xs text-muted-foreground'>
-                              {state.currentBaselineKind
-                                ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
-                                : 'No document currently running'}
-                              {' · '}
-                              {state.completedCount}/{SDLC_BASELINE_COUNT} generated
-                              {' · '}
-                              Updated {setupUpdatedAtLabel(state.updatedAt)}
-                            </p>
-                            {state.error && (
-                              <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-                                {state.error}
+                      {/* Generated from the repository, so it has nothing to show without one. */}
+                      {repo && (
+                        <div className='rounded-xl border bg-background p-5'>
+                          <div className='flex items-center justify-between gap-6'>
+                            <div className='min-w-0'>
+                              <h2 className='text-base font-semibold'>Repo Knowledge</h2>
+                              <p className='mt-1 text-sm text-muted-foreground'>
+                                Create and approve repository guides used by SDLC Assistant.
                               </p>
-                            )}
-                          </div>
-                          <div className='flex shrink-0 items-center gap-2'>
-                            <StatusPill phase={state.phase} />
-                            {renderRepoKnowledgeControls()}
-                            {!isAdmin && state.phase === 'NOT_STARTED' ? (
-                              <span className='max-w-40 text-right text-xs text-muted-foreground'>
-                                Repository admin must generate Repo Knowledge.
-                              </span>
-                            ) : null}
+                              <p className='mt-2 text-xs text-muted-foreground'>
+                                {state.currentBaselineKind
+                                  ? `Current: ${BASELINE_LABELS[state.currentBaselineKind] || state.currentBaselineKind}`
+                                  : 'No document currently running'}
+                                {' · '}
+                                {state.completedCount}/{SDLC_BASELINE_COUNT} generated
+                                {' · '}
+                                Updated {setupUpdatedAtLabel(state.updatedAt)}
+                              </p>
+                              {state.error && (
+                                <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
+                                  {state.error}
+                                </p>
+                              )}
+                            </div>
+                            <div className='flex shrink-0 items-center gap-2'>
+                              <StatusPill phase={state.phase} />
+                              {renderRepoKnowledgeControls()}
+                              {!isAdmin && state.phase === 'NOT_STARTED' ? (
+                                <span className='max-w-40 text-right text-xs text-muted-foreground'>
+                                  Repository admin must generate Repo Knowledge.
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
-                        <Metric
-                          label='Repo Knowledge ready'
-                          value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
-                          icon={ShieldCheck}
-                        />
+                      )}
+                      <div
+                        className={cn(
+                          'mt-5 grid divide-x overflow-hidden rounded-xl border bg-background',
+                          repo ? 'grid-cols-2' : 'grid-cols-1',
+                        )}
+                      >
+                        {repo && (
+                          <Metric
+                            label='Repo Knowledge ready'
+                            value={`${readyCount}/${SDLC_BASELINE_COUNT}`}
+                            icon={ShieldCheck}
+                          />
+                        )}
                         <Metric
                           label='Tickets'
                           value={String(channelTicketCount)}
                           icon={CircleDot}
                         />
                       </div>
-                      {repo.channelId ? (
-                        <SdlcActivityPreview key={repo.channelId} channelId={repo.channelId} />
-                      ) : null}
+                      <SdlcActivityPreview key={channel.id} channelId={channel.id} />
                     </section>
                   )}
 
@@ -3201,7 +3256,7 @@ export default function SdlcScreen(): ReactElement {
                       onCancelRun={cancelWiki}
                       onDebugRun={() => {
                         const run = wikiRunQuery.data;
-                        if (!run?.conversationId) return;
+                        if (!repo || !run?.conversationId) return;
                         openSdlcDebugger({
                           source: 'sdlc',
                           repoId: repo.id,
@@ -3227,9 +3282,9 @@ export default function SdlcScreen(): ReactElement {
                     ) : (
                       <EmptyCard text='Select an artifact type from the sidebar.' />
                     ))}
-                  {section === 'tickets' && repo.channelId && (
+                  {section === 'tickets' && channel.id && (
                     <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                      <KanbanBoardScreen channelId={repo.channelId} />
+                      <KanbanBoardScreen channelId={channel.id} />
                     </div>
                   )}
                 </div>
@@ -3246,12 +3301,12 @@ export default function SdlcScreen(): ReactElement {
                 <EntityLinkContext.Provider value={entityLinkScope}>
                   {rightPanelMode === 'debugger' ? (
                     <SdlcDebuggerPanel />
-                  ) : discussionOwner && discussionSurface && repo.channelId ? (
+                  ) : discussionOwner && discussionSurface && channel.id ? (
                     <SdlcChatPanel
                       key={`discussion-${discussionOwner.canvasId}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        repoId: repo?.id,
                         ownerType: 'CANVAS',
                         ownerId: discussionOwner.canvasId,
                         surfaceType: discussionSurface.type,
@@ -3263,12 +3318,12 @@ export default function SdlcScreen(): ReactElement {
                       onAskAI={openSdlcAssistant}
                       title={discussionOwner.title}
                     />
-                  ) : activeFolderDiscussion && repo.channelId ? (
+                  ) : activeFolderDiscussion && channel.id ? (
                     <SdlcChatPanel
                       key={`folder-${activeFolderDiscussion.id}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        repoId: repo?.id,
                         ownerType: 'FOLDER',
                         ownerId: activeFolderDiscussion.id,
                       }}
@@ -3282,12 +3337,12 @@ export default function SdlcScreen(): ReactElement {
                         onExit: () => setFolderDiscussion(null),
                       }}
                     />
-                  ) : section === 'tracks' && selectedTrack && repo.channelId ? (
+                  ) : section === 'tracks' && selectedTrack && channel.id ? (
                     <SdlcChatPanel
                       key={`track-${selectedTrack.id}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        repoId: repo?.id,
                         ownerType: 'TRACK',
                         ownerId: selectedTrack.id,
                       }}
@@ -3306,13 +3361,13 @@ export default function SdlcScreen(): ReactElement {
         </ResizableGroup>
       </div>
 
-      {repo.channelId && createTicketOpen ? (
+      {channel.id && createTicketOpen ? (
         <EntityLinkContext.Provider value={entityLinkScope}>
           <CreateTicketModal
             isOpen={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
-            channelId={repo.channelId}
-            projectId={repo.project?.id ?? ''}
+            channelId={channel.id}
+            projectId={repo?.project?.id ?? channel.projectId}
             onTicketCreated={() => setCreateTicketOpen(false)}
           />
         </EntityLinkContext.Provider>
@@ -3393,7 +3448,7 @@ export default function SdlcScreen(): ReactElement {
                 Create an artifact
               </span>
               <span className='text-[12.5px] text-muted-foreground'>
-                {repo.name} · {typeFolders.length} types
+                {repo?.name ?? channel.name} · {typeFolders.length} types
               </span>
             </div>
             <button
@@ -4067,14 +4122,19 @@ export default function SdlcScreen(): ReactElement {
                 void call(
                   'link',
                   async () => {
-                    await apiInstance.post(`/sdlc/repositories/${repo.id}/links`, {
-                      channelId,
-                      sourceType: 'CANVAS',
-                      sourceId: relatedSourceId,
-                      targetType: linkTargetType,
-                      targetId: linkTargetId,
-                      relationType: 'CONTEXT',
-                    });
+                    await apiInstance.post(
+                      repo
+                        ? `/sdlc/repositories/${repo.id}/links`
+                        : `/sdlc/channels/${channel.id}/links`,
+                      {
+                        channelId,
+                        sourceType: 'CANVAS',
+                        sourceId: relatedSourceId,
+                        targetType: linkTargetType,
+                        targetId: linkTargetId,
+                        relationType: 'CONTEXT',
+                      },
+                    );
                     setLinkDialog(false);
                     setLinkTargetId('');
                   },
@@ -4137,11 +4197,11 @@ export default function SdlcScreen(): ReactElement {
       <Dialog
         open={membersDialog}
         onOpenChange={setMembersDialog}
-        title='Repository members'
+        title='Hub members'
         className='max-w-2xl'
       >
         <Info
-          channel={repo.channel as unknown as VisibleChannel}
+          channel={channel as unknown as VisibleChannel}
           defaultTab='members'
           onClose={() => setMembersDialog(false)}
         />

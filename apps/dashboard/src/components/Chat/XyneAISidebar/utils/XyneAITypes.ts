@@ -52,6 +52,7 @@ export interface ResearchContext {
   type: 'product' | 'repository';
   id: string;
   name: string;
+  channelId?: string;
 }
 
 export interface LastInputContext {

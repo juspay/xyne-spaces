@@ -30,7 +30,7 @@ export function resolveSdlcAskAiSelectedArtifact(
 }
 
 interface SdlcAskAiContextInput {
-  repo: {
+  repo?: {
     id: string;
     name: string;
     url: string;
@@ -54,7 +54,7 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
         `Title: ${input.selectedArtifact.title}`,
         `Artifact kind: ${input.selectedArtifact.artifactKind}`,
         `Canvas ID: ${input.selectedArtifact.canvasId}`,
-        `Repository ID: ${input.repo.id}`,
+        ...(input.repo ? [`Repository ID: ${input.repo.id}`] : []),
         'This selected canvas is already an SDLC artifact. Never classify it as a regular canvas.',
         ...(input.selectedArtifact.artifactKind === 'ARTIFACT'
           ? [
@@ -78,6 +78,30 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
       : 'Wiki freshness is unknown. Still read relevant existing Wiki pages as orientation, warn that they may be partial, stale, or inconsistent, inspect live code before factual repository claims, and disclose the freshness limitation.',
   ].join('\n');
 
+  // A hub with no repository: everything below that mentions sandboxes, code,
+  // baselines or pull requests has nothing to address, so it is left out rather
+  // than pointed at a repository that does not exist.
+  if (!input.repo) {
+    return [
+      '# SDLC hub mode',
+      `SDLC hub channel ID: ${input.channelId}`,
+      'This hub covers no repository. There is no codebase to read, no sandbox to open, no Wiki or Repo Knowledge, and no pull requests. Never call sandbox-repo-setup or any repository tool here, and never claim to have inspected code. If the user asks for something that needs a repository, say the hub has none attached and that an admin can attach one.',
+      selectedArtifactInstruction,
+      `When the user explicitly asks to create an artifact (PRD, Tech Doc, or any custom type), resolve its type folderId with spaces-sdlc-list-artifact-types, then call spaces-sdlc-mutate-artifact with action create, that folderId, the trackId the artifact belongs to, title, and markdown. Pass channelId ${input.channelId} instead of an SDLC repository ID — this hub has none. Link existing artifacts the user names as related context via relatedCanvasIds. Never use a generic canvas tool as fallback. If any tool says an action was queued for approval, the action is still pending: never mark the artifact as created or complete. Claim success only when spaces-sdlc-mutate-artifact returns the created SDLC artifact identity and URL. If the user says only "PR", ask whether they mean PRD or pull request before taking action.`,
+      `When creating an implementation ticket for an artifact, call spaces-create-ticket with channelId ${input.channelId} and sourceCanvasId set to the artifact canvas ID; the link is hub-scoped and needs no repository. The ticket is not complete until the tool confirms the SDLC link; never create an unlinked fallback or a duplicate ticket.`,
+      [
+        'Answer from what this hub holds. For every substantive question:',
+        `1. Call spaces-search once with type: canvas and in: ${input.channelId}, using focused terms from the question.`,
+        '2. Read up to three of the most relevant results with spaces-read-canvas — PRDs, Tech Docs and other artifacts in this hub.',
+        '3. Also use this hub’s Tickets, conversations, explicitly linked context and channel history as supporting evidence, subject to their existing authorization.',
+        '4. If the hub holds no relevant evidence, say so plainly rather than guessing or inventing repository detail.',
+      ].join('\n'),
+      'Claims drawn from PRD, Tech Doc, Ticket, or conversation tools must retain the exact inline citation tokens returned by those tools. If sources disagree or a source category has no useful evidence, say so plainly.',
+      '# Explicitly linked context',
+      input.linkedContext.join('\n\n') || 'No accessible linked context is available.',
+    ].join('\n\n');
+  }
+
   return [
     '# SDLC repository mode',
     `Repository: ${input.repo.name} (${input.repo.url})`,
@@ -93,7 +117,7 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     implementationInstruction,
     selectedArtifactInstruction,
     'When the user explicitly asks to create an artifact (PRD, Tech Doc, or any custom type), resolve its type folderId with spaces-sdlc-list-artifact-types, then call spaces-sdlc-mutate-artifact with action create, that folderId, the trackId the artifact belongs to, title, and markdown. Pass this SDLC repository ID. Link existing artifacts the user names as related context via relatedCanvasIds. Creating these Spaces artifacts does not require writable repository access. Never use a generic canvas tool as fallback. If any tool says an action was queued for approval, the action is still pending: never mark the artifact as created or complete. Claim success only when spaces-sdlc-mutate-artifact returns the created SDLC artifact identity and URL. If the user says only "PR", ask whether they mean PRD or pull request before taking action. V1 creates the editable canvas immediately without a separate approval card.',
-    'When creating an implementation ticket for an artifact, call spaces-create-ticket with both sdlcRepoId set to this SDLC repository ID and sourceCanvasId set to the artifact canvas ID. The ticket is not complete until the tool confirms the SDLC link; never create an unlinked fallback or a duplicate ticket.',
+    `When creating an implementation ticket for an artifact, call spaces-create-ticket with channelId ${input.channelId} and sourceCanvasId set to the artifact canvas ID; the link is hub-scoped. The ticket is not complete until the tool confirms the SDLC link; never create an unlinked fallback or a duplicate ticket.`,
     canvasPreflight,
     'Use relevant repository Tickets, conversations, explicitly linked context, and repository-channel history as supporting evidence. Inspect the live pinned codebase only when the preflight rules require it. Keep every lookup subject to its existing authorization.',
     'The approved baseline documents below are already loaded into this session. Use them directly; do not spend tool calls rediscovering their canvas IDs.',
