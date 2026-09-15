@@ -133,4 +133,8 @@ export const config: AppConfig = {
   useBundledUI: process.env.USE_BUNDLED_UI === 'true' ? true : baseConfig.useBundledUI,
   RELEASE_CONFIG_URL: process.env.RELEASE_CONFIG_URL || baseConfig.RELEASE_CONFIG_URL,
   UI_ZIP_URL: process.env.UI_ZIP_URL || baseConfig.UI_ZIP_URL,
+  // The dev dashboard does not always get port 5173 — another Vite server on the
+  // machine takes it first and Vite silently moves on. Overridable so the shell
+  // can be pointed at wherever the dashboard actually came up.
+  FRONTEND_URL: process.env.FRONTEND_URL || baseConfig.FRONTEND_URL,
 };
