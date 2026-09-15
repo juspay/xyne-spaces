@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, BookOpen, Search } from 'lucide-react';
 import { GUIDE_CATEGORIES, USER_GUIDE_FEATURES } from './features';
 import { CategorySection } from '../../components/UserGuide/CategorySection';
@@ -6,6 +7,7 @@ import { TableOfContents } from '../../components/UserGuide/TableOfContents';
 import { usePlatform } from '../../hooks/usePlatform';
 
 const UserGuideScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [activeSection, setActiveSection] = useState<string>('');
   const [showBackToTop, setShowBackToTop] = useState(false);
@@ -133,7 +135,7 @@ const UserGuideScreen = (): ReactElement => {
               <input
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="Try 'create ticket' or 'Xyne AI'"
+                placeholder={t('routes.userGuideScreen.trySearchPlaceholder')}
                 data-track-category='USER_GUIDE'
                 data-track-name='SEARCH_FEATURES'
                 className='w-full rounded-xl border border-border bg-background py-2.5 pl-10 pr-3.5 text-base text-foreground outline-none focus:ring-2 focus:ring-primary/35 placeholder:text-muted-foreground/55'

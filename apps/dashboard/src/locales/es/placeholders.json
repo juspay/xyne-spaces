@@ -1065,6 +1065,22 @@
       "searchWikiTitlesPlaceholder": "Buscar títulos o rutas de repositorio",
       "filterDocumentsPlaceholder": "Filtrar documentos",
       "filterFilesPlaceholder": "Filtrar archivos"
+    },
+    "supportScreen": {
+      "replyToReviewPlaceholder": "Responder a esta reseña…"
+    },
+    "ticketReportsScreen": {
+      "allBoardsPlaceholder": "Todos los tableros",
+      "allStatusesPlaceholder": "Todos los estados",
+      "allPrioritiesPlaceholder": "Todas las prioridades",
+      "allAssigneesPlaceholder": "Todos los responsables",
+      "allTagsPlaceholder": "Todas las etiquetas"
+    },
+    "userGroupsScreen": {
+      "searchPlaceholder": "Buscar grupos de usuarios por nombre..."
+    },
+    "userGuideScreen": {
+      "trySearchPlaceholder": "Prueba 'crear ticket' o 'Xyne AI'"
     }
   }
 }

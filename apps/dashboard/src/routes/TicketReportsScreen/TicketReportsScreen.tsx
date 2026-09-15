@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FileSpreadsheet } from 'lucide-react';
 import {
@@ -80,6 +81,7 @@ const TicketReportsScreen = ({
   sourceChannelId,
   onClose,
 }: TicketReportsScreenProps): React.ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { workspaceId } = useAuthContextValues();
   const permissions = usePermissions();
   const [searchParams] = useSearchParams();
@@ -508,7 +510,7 @@ const TicketReportsScreen = ({
                     options={boardOptions}
                     selectedValues={boardIds}
                     onChange={setBoardIds}
-                    placeholder='All boards'
+                    placeholder={t('routes.ticketReportsScreen.allBoardsPlaceholder')}
                     helperText='No selection includes all boards.'
                     disabled={requiresProject && !projectId}
                   />
@@ -517,7 +519,7 @@ const TicketReportsScreen = ({
                     options={statusOptions}
                     selectedValues={statuses}
                     onChange={setStatuses}
-                    placeholder='All statuses'
+                    placeholder={t('routes.ticketReportsScreen.allStatusesPlaceholder')}
                     helperText='No selection includes all statuses.'
                   />
                   <MultiSelect
@@ -525,7 +527,7 @@ const TicketReportsScreen = ({
                     options={priorityOptions}
                     selectedValues={priorities}
                     onChange={setPriorities}
-                    placeholder='All priorities'
+                    placeholder={t('routes.ticketReportsScreen.allPrioritiesPlaceholder')}
                     helperText='No selection includes all priorities.'
                   />
                   <MultiSelect
@@ -533,7 +535,7 @@ const TicketReportsScreen = ({
                     options={assigneeOptions}
                     selectedValues={assignees}
                     onChange={setAssignees}
-                    placeholder='All assignees'
+                    placeholder={t('routes.ticketReportsScreen.allAssigneesPlaceholder')}
                     helperText='No selection includes assigned and unassigned tickets.'
                   />
                   <MultiSelect
@@ -541,7 +543,7 @@ const TicketReportsScreen = ({
                     options={tagOptions}
                     selectedValues={tags}
                     onChange={setTags}
-                    placeholder='All tags'
+                    placeholder={t('routes.ticketReportsScreen.allTagsPlaceholder')}
                     helperText='No selection includes tickets with any or no tag.'
                     disabled={requiresProject && !projectId}
                   />

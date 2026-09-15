@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../hooks/useZero';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -19,6 +20,7 @@ import { searchUserGroups } from './UserGroupsScreen.utils';
 import { AccessType } from '@xyne/shared';
 
 const UserGroupsScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -210,7 +212,7 @@ const UserGroupsScreen = (): ReactElement => {
             <Input
               ref={searchInputRef}
               type='text'
-              placeholder='Search user groups by name...'
+              placeholder={t('routes.userGroupsScreen.searchPlaceholder')}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='h-full min-w-0 flex-1 rounded-none border-0 p-0 text-[13px] shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-[13px]'
