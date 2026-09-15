@@ -55,6 +55,8 @@ import {
   TYPE_SUGGESTIONS,
   SearchableTypes,
   GROUP_KEY_TO_DOC_TYPE,
+  BACKEND_GROUP_KEYS,
+  ALL_TAB_SKELETON_GROUPS,
   getRelevantTabs,
 } from './ChannelCommandMenu.types';
 
@@ -2910,7 +2912,7 @@ const ChannelCommandMenuContent = ({
       filteredLocalUsers.length > 0) ||
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
-  const showEmptyState = searchText.trim() && !isLoading && !hasResults;
+  const showEmptyState = searchText.trim() && !isLoading && !isSearchPending && !hasResults;
 
   // Auto-select first result when search results change. Reset the
   // navigation flag when either the free-text query OR the active filter
@@ -3097,19 +3099,124 @@ const ChannelCommandMenuContent = ({
     );
   };
 
+  // Loading state for backend sections while `isSearchPending` (keystroke → latest search
+  // settles): an empty section shows a skeleton, a non-empty one keeps its stale results dimmed.
+  // Local sections (People / Channels / DMs) resolve synchronously and never get either. A ticket
+  // view has its own skeleton (`showTicketViewSkeleton`), so these stand down while it shows.
+  const pendingDimClass = `transition-opacity ${isSearchPending ? 'opacity-60' : ''}`;
+  const tabBackendGroupKeys = BACKEND_GROUP_KEYS.filter(groupKey =>
+    backendGroupBelongsToTab(groupKey, activeTab),
+  );
+  // A specific tab is one entity type: while pending with nothing to show it renders a single
+  // headerless skeleton list instead of one skeleton per group.
+  const showTabSkeleton =
+    isSearchPending &&
+    !showTicketViewSkeleton &&
+    activeTab !== TabType.ALL &&
+    tabBackendGroupKeys.length > 0 &&
+    tabBackendGroupKeys.every(groupKey => !groupedBackendResults[groupKey]?.length);
+  // On ALL only Messages and Tickets shimmer (the sections that nearly always return), and only
+  // when the tab is enabled here and the active filters can still target it.
+  const isAllTabSkeletonGroup = (groupKey: string): boolean => {
+    const tab = ALL_TAB_SKELETON_GROUPS[groupKey];
+    return !!tab && activeEnabledTabs.includes(tab) && (!relevantTabs || relevantTabs.has(tab));
+  };
+
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
-      {isFlatAllView
-        ? flatAllBackendResults.length > 0 && (
-            <div className='mb-4'>
+      {/* The backend answers every zero-result search with `grouped: false`, so an empty flat
+          view only means the previous search found nothing — fall through to the sectioned
+          skeleton so the loading state looks the same on every search. */}
+      {isFlatAllView && flatAllBackendResults.length > 0 ? (
+        <div className={`mb-4 ${pendingDimClass}`}>
+          <Command.Group
+            heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
+            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+          >
+            {flatAllBackendResults.map((result, index) => (
+              <SearchResultItem
+                key={`${result.type}-${result.id}`}
+                result={result}
+                channelDisplayName={getResultChannelLabel(result)}
+                channelTag={getResultChannelTag(result)}
+                onSelect={res => handleBackendResultSelect(res, index + 1)}
+                onPreview={handleFilePreview}
+                onItemMouseDown={handleItemMouseDown}
+                onItemMouseEnter={handleTicketMouseEnter}
+                onItemMouseLeave={handleTicketMouseLeave}
+                isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
+                mergeMode={deskMergeMode && !!getDeskTicketId(result)}
+                isMergeSelected={selectedMergeTickets.has(result.searchContext?.ticketId || '')}
+                onToggleSelect={handleToggleDeskMergeSelect}
+              />
+            ))}
+          </Command.Group>
+        </div>
+      ) : showTabSkeleton ? (
+        <div className='mb-4'>
+          <SearchSectionSkeleton rows={4} />
+        </div>
+      ) : (
+        tabBackendGroupKeys.map(groupKey => {
+          const items = groupedBackendResults[groupKey];
+          if (!items || items.length === 0) {
+            if (
+              !isSearchPending ||
+              showTicketViewSkeleton ||
+              activeTab !== TabType.ALL ||
+              !isAllTabSkeletonGroup(groupKey)
+            ) {
+              return null;
+            }
+            return (
+              <div key={groupKey} className='mb-4'>
+                <Command.Group
+                  heading={getGroupLabel(groupKey)}
+                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                >
+                  <SearchSectionSkeleton
+                    // Screen mode previews 2 rows per section; match it to avoid a height jump.
+                    rows={searchMode === 'screen' ? 2 : 3}
+                  />
+                </Command.Group>
+              </div>
+            );
+          }
+
+          const displayCount =
+            activeTab !== TabType.ALL ? paginationState[activeTab].cumulativeCount : items.length;
+
+          const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
+          const displayItems = isScreenAll ? items.slice(0, 2) : items;
+          const hiddenCount = items.length - displayItems.length;
+          const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
+
+          // "See more" routes to the full results page with this section's tab
+          // pre-selected. Offered on every tab, not just All: an active filter
+          // (`assignee:`, `from:`) narrows the enabled tabs via getRelevantTabs and
+          // moves activeTab off All, and those searches still need the way out.
+          // Every section here is a capped slice, so there is more to see even when
+          // nothing was truncated locally. Screen mode keeps its narrower rule: it
+          // only offers the link when it actually cut items off. A ticket-screen search
+          // never offers it: the results page would drop the view's filters, and the
+          // list already pages in place.
+          const showSeeMore =
+            !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
+
+          return (
+            <div key={groupKey} className={`mb-4 ${pendingDimClass}`}>
               <Command.Group
-                heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
+                heading={
+                  isScreenAll
+                    ? getGroupLabel(groupKey)
+                    : `${getGroupLabel(groupKey)} (${displayCount})`
+                }
                 className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
               >
-                {flatAllBackendResults.map((result, index) => (
+                {displayItems.map((result, index) => (
                   <SearchResultItem
-                    key={`${result.type}-${result.id}`}
+                    key={result.id}
                     result={result}
                     channelDisplayName={getResultChannelLabel(result)}
                     channelTag={getResultChannelTag(result)}
@@ -3124,84 +3231,25 @@ const ChannelCommandMenuContent = ({
                     onToggleSelect={handleToggleDeskMergeSelect}
                   />
                 ))}
+                {showSeeMore && sectionTab && (
+                  <SeeMoreItem
+                    value={`__see-more-backend-${groupKey}__`}
+                    label={hiddenCount > 0 ? `See ${hiddenCount} more` : 'See more'}
+                    onSelect={() => handleSeeMoreNavigate(sectionTab)}
+                    hoverable={!isMobile}
+                    trackCategory='SEARCH'
+                    trackName='SEE_MORE_SECTION'
+                    trackMetadata={JSON.stringify({ tab: sectionTab })}
+                  />
+                )}
               </Command.Group>
             </div>
-          )
-        : ['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
-            .filter(groupKey => backendGroupBelongsToTab(groupKey, activeTab))
-            .map(groupKey => {
-              const items = groupedBackendResults[groupKey];
-              if (!items || items.length === 0) return null;
-
-              const displayCount =
-                activeTab !== TabType.ALL
-                  ? paginationState[activeTab].cumulativeCount
-                  : items.length;
-
-              const isScreenAll = searchMode === 'screen' && activeTab === TabType.ALL;
-              const displayItems = isScreenAll ? items.slice(0, 2) : items;
-              const hiddenCount = items.length - displayItems.length;
-              const sectionTab = GROUP_KEY_TO_DOC_TYPE[groupKey];
-
-              // "See more" routes to the full results page with this section's tab
-              // pre-selected. Offered on every tab, not just All: an active filter
-              // (`assignee:`, `from:`) narrows the enabled tabs via getRelevantTabs and
-              // moves activeTab off All, and those searches still need the way out.
-              // Every section here is a capped slice, so there is more to see even when
-              // nothing was truncated locally. Screen mode keeps its narrower rule: it
-              // only offers the link when it actually cut items off. A ticket-screen search
-              // never offers it: the results page would drop the view's filters, and the
-              // list already pages in place.
-              const showSeeMore =
-                !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
-
-              return (
-                <div key={groupKey} className='mb-4'>
-                  <Command.Group
-                    heading={
-                      isScreenAll
-                        ? getGroupLabel(groupKey)
-                        : `${getGroupLabel(groupKey)} (${displayCount})`
-                    }
-                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                  >
-                    {displayItems.map((result, index) => (
-                      <SearchResultItem
-                        key={result.id}
-                        result={result}
-                        channelDisplayName={getResultChannelLabel(result)}
-                        channelTag={getResultChannelTag(result)}
-                        onSelect={res => handleBackendResultSelect(res, index + 1)}
-                        onPreview={handleFilePreview}
-                        onItemMouseDown={handleItemMouseDown}
-                        onItemMouseEnter={handleTicketMouseEnter}
-                        onItemMouseLeave={handleTicketMouseLeave}
-                        isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
-                        mergeMode={deskMergeMode && !!getDeskTicketId(result)}
-                        isMergeSelected={selectedMergeTickets.has(
-                          result.searchContext?.ticketId || '',
-                        )}
-                        onToggleSelect={handleToggleDeskMergeSelect}
-                      />
-                    ))}
-                    {showSeeMore && sectionTab && (
-                      <SeeMoreItem
-                        value={`__see-more-backend-${groupKey}__`}
-                        label={hiddenCount > 0 ? `See ${hiddenCount} more` : 'See more'}
-                        onSelect={() => handleSeeMoreNavigate(sectionTab)}
-                        hoverable={!isMobile}
-                        trackCategory='SEARCH'
-                        trackName='SEE_MORE_SECTION'
-                        trackMetadata={JSON.stringify({ tab: sectionTab })}
-                      />
-                    )}
-                  </Command.Group>
-                </div>
-              );
-            })}
+          );
+        })
+      )}
 
       {/* Infinite scroll trigger and loading indicator */}
-      {paginationState[activeTab].hasMore && (
+      {backendResults.length > 0 && paginationState[activeTab].hasMore && (
         <div ref={loadMoreRef} className='py-4 flex justify-center'>
           {isLoadingMore && (
             <div className='flex items-center gap-2 text-sm text-muted-foreground'>
@@ -5376,7 +5424,8 @@ const ChannelCommandMenuContent = ({
                         )}
                         {hasFromOrInFilter ? (
                           <>
-                            {backendResults.length > 0 && renderSearchBackendResults()}
+                            {(backendResults.length > 0 || isSearchPending) &&
+                              renderSearchBackendResults()}
                             {/* Flat ALL view replaces the per-category sections with ONE merged
                                 people/DM/channel list — rendering both would repeat every row.
                                 It renders unconditionally: it is local, so it must survive a
@@ -5388,7 +5437,8 @@ const ChannelCommandMenuContent = ({
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
                             {renderSearchLocalSections()}
-                            {backendResults.length > 0 && renderSearchBackendResults()}
+                            {(backendResults.length > 0 || isSearchPending) &&
+                              renderSearchBackendResults()}
                           </>
                         )}
                       </>
