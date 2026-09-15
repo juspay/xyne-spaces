@@ -8,6 +8,7 @@
  */
 
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Refresh,
   CheckTickSingle,
@@ -67,7 +68,8 @@ export function SummaryTemplateMenu({
   onRequestClose,
   trackCategory,
 }: SummaryTemplateMenuProps): ReactElement {
-  const fullLabel = getSummaryTemplateLabel(selectedTemplate);
+  const { t } = useTranslation('common');
+  const fullLabel = getSummaryTemplateLabel(selectedTemplate, t);
   const label = truncateTemplateName(fullLabel);
   const selectedTemplateId = selectedTemplate?.id ?? 'default';
   const activeRegeneratingTemplateId = isRegenerating
@@ -77,11 +79,13 @@ export function SummaryTemplateMenu({
     templates.find(template => template.id === activeRegeneratingTemplateId) ??
     (selectedTemplateId === activeRegeneratingTemplateId ? selectedTemplate : undefined);
   const regeneratingTemplateLabel = regeneratingTemplate
-    ? getSummaryTemplateLabel(regeneratingTemplate)
+    ? getSummaryTemplateLabel(regeneratingTemplate, t)
     : activeRegeneratingTemplateId === 'default' || !activeRegeneratingTemplateId
-      ? getSummaryTemplateLabel(undefined)
-      : 'selected template';
-  const regeneratingTooltipContent = `Generating ${regeneratingTemplateLabel} summary`;
+      ? getSummaryTemplateLabel(undefined, t)
+      : t('summaryTemplateMenu.selectedTemplateFallback');
+  const regeneratingTooltipContent = t('summaryTemplateMenu.generatingSummary', {
+    template: regeneratingTemplateLabel,
+  });
   const isSelectedTemplateRegenerating = activeRegeneratingTemplateId === selectedTemplateId;
   const isDisabledDuringRegeneration = isRegenerating;
   const renderRegeneratingSpinner = (): ReactElement => (
@@ -134,7 +138,7 @@ export function SummaryTemplateMenu({
           }}
           data-ph-capture-attribute-track-id='regenerate_selected_summary_template'
           data-ph-capture-attribute-track-category={trackCategory}
-          aria-label={`Regenerate with ${fullLabel}`}
+          aria-label={t('summaryTemplateMenu.regenerateWith', { template: fullLabel })}
           className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackCategory}
           data-track-name='regenerate_selected_summary_template'
@@ -145,18 +149,20 @@ export function SummaryTemplateMenu({
           <CheckTickSingle
             strokeWidth={2.5}
             className='size-4 text-status-success'
-            aria-label='Selected template'
+            aria-label={t('summaryTemplateMenu.selectedTemplateAriaLabel')}
           />
         </span>
       </div>
 
       <div className='mx-1.5 my-1.5 h-px bg-border' />
       <p className='px-2.5 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-        Templates
+        {t('summaryTemplateMenu.templatesHeading')}
       </p>
       <div className='thin-scrollbar max-h-72 overflow-y-auto'>
         {isLoading ? (
-          <p className='px-2.5 py-1.5 text-sm text-muted-foreground'>Loading templates…</p>
+          <p className='px-2.5 py-1.5 text-sm text-muted-foreground'>
+            {t('summaryTemplateMenu.loadingTemplates')}
+          </p>
         ) : (
           templates
             .filter(template => template.id !== selectedTemplate?.id)
@@ -229,7 +235,7 @@ export function SummaryTemplateMenu({
         >
           <GridDashboardBento strokeWidth={2} className='size-4' />
         </span>
-        All templates…
+        {t('summaryTemplateMenu.allTemplates')}
       </button>
       <button
         type='button'
@@ -255,7 +261,7 @@ export function SummaryTemplateMenu({
         >
           <PlusDefault className='size-4' />
         </span>
-        New template
+        {t('summaryTemplateMenu.newTemplate')}
       </button>
     </>
   );

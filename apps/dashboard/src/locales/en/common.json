@@ -1020,5 +1020,61 @@
         "saveChanges": "Save Changes"
       }
     }
+  },
+  "summaryTemplateMenu": {
+    "defaultSummary": "Default summary",
+    "selectedTemplateFallback": "selected template",
+    "generatingSummary": "Generating {{template}} summary",
+    "regenerateWith": "Regenerate with {{template}}",
+    "selectedTemplateAriaLabel": "Selected template",
+    "templatesHeading": "Templates",
+    "loadingTemplates": "Loading templates…",
+    "allTemplates": "All templates…",
+    "newTemplate": "New template"
+  },
+  "screenPicker": {
+    "accessBlocked": "Screen recording access is blocked",
+    "accessBlockedDescription": "Please allow access in your system settings and reload.",
+    "openSettings": "Open Settings",
+    "shareYourScreen": "Share your screen",
+    "close": "Close",
+    "entireScreen": "Entire Screen",
+    "window": "Window",
+    "noScreensFound": "No screens found",
+    "noWindowsFound": "No windows found",
+    "shareSystemAudio": "Share system audio",
+    "cancel": "Cancel",
+    "share": "Share"
+  },
+  "browserPanel": {
+    "hintBar": {
+      "clickToOpenExternally": "{{modifier}}-click to open externally ·",
+      "changeDefaultInPreferences": "change default in preferences",
+      "dismiss": "Dismiss"
+    },
+    "settingsMenu": {
+      "browserSettings": "Browser Settings",
+      "siteSettings": "Site Settings",
+      "popupsAndRedirects": "Popups and redirects",
+      "clearSiteData": "Clear Site Data"
+    }
+  },
+  "notetaker": {
+    "markedMomentDivider": {
+      "markedMoment": "Marked moment"
+    },
+    "liveTranscriptList": {
+      "paused": "paused",
+      "transcribing": "transcribing...",
+      "searchTranscriptShort": "Search transcript…",
+      "searchTranscriptLong": "Search the live transcript…",
+      "searchTranscriptAriaLabel": "Search transcript",
+      "matchCounter": "{{current}} of {{total}}",
+      "noMatches": "No matches",
+      "previousMatch": "Previous match",
+      "nextMatch": "Next match",
+      "clearSearch": "Clear transcript search",
+      "returnToCurrent": "Return to current"
+    }
   }
 }

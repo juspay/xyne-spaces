@@ -12,6 +12,7 @@
  */
 
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronBigDown, Spinner } from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
@@ -68,6 +69,7 @@ export function CallSummaryTemplatePicker({
   regeneratingTemplateName,
   className,
 }: CallSummaryTemplatePickerProps): ReactElement {
+  const { t } = useTranslation('common');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [templatesModalMode, setTemplatesModalMode] = useState<'browse' | 'new' | null>(null);
   const [shouldLoadTemplates, setShouldLoadTemplates] = useState(false);
@@ -109,7 +111,7 @@ export function CallSummaryTemplatePicker({
     storedTemplateOption ??
     DEFAULT_TEMPLATE_OPTION;
 
-  const fullLabel = getSummaryTemplateLabel(selectedTemplate);
+  const fullLabel = getSummaryTemplateLabel(selectedTemplate, t);
   const label = truncateTemplateName(fullLabel);
   const regeneratingTooltip = regeneratingTemplateName
     ? `Generating ${regeneratingTemplateName} summary`

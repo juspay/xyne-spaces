@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Settings, Shield } from 'lucide-react';
 import Popover from '../ui/Popover';
 
@@ -13,6 +14,7 @@ interface BrowserSettingsMenuProps {
 }
 
 export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen, setIsOpen }) => {
+  const { t } = useTranslation('common');
   const browserSettings = useSelector(browserPanelActor, state => state.context.browserSettings);
 
   const handleUpdateSetting = (key: keyof typeof browserSettings, value: boolean) => {
@@ -45,7 +47,7 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
       trigger={
         <button
           className='p-1.5 rounded-md hover:bg-border text-muted-foreground transition-colors'
-          title='Browser Settings'
+          title={t('browserPanel.settingsMenu.browserSettings')}
         >
           <Settings size={16} />
         </button>
@@ -55,11 +57,13 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
       className='w-72'
     >
       <div className='flex flex-col gap-4'>
-        <div className='font-medium text-sm text-foreground'>Site Settings</div>
+        <div className='font-medium text-sm text-foreground'>
+          {t('browserPanel.settingsMenu.siteSettings')}
+        </div>
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-2 text-sm text-foreground'>
             <Shield size={16} className='text-muted-foreground' />
-            <span>Popups and redirects</span>
+            <span>{t('browserPanel.settingsMenu.popupsAndRedirects')}</span>
           </div>
           <Switch
             checked={browserSettings.popups}
@@ -78,7 +82,7 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
           data-track-category='browser_settings'
           data-track-name='clear_site_data'
         >
-          Clear Site Data
+          {t('browserPanel.settingsMenu.clearSiteData')}
         </button>
       </div>
     </Popover>

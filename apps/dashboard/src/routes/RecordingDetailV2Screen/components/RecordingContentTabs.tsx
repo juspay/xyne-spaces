@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { CaptionOn, ChevronBigDown, ListAiGenerated, Spinner } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
@@ -71,6 +72,7 @@ export const RecordingContentTabs = ({
   onOpenTemplates,
   onNewTemplate,
 }: RecordingContentTabsProps): ReactElement => {
+  const { t } = useTranslation('common');
   const shouldReduceMotion = useReducedMotion();
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
 
@@ -122,15 +124,15 @@ export const RecordingContentTabs = ({
 
   const renderSummaryTab = (): ReactElement => {
     const isActive = visibleTab === 'summary';
-    const fullLabel = hasSummary ? getSummaryTemplateLabel(selectedTemplate) : 'Summary';
+    const fullLabel = hasSummary ? getSummaryTemplateLabel(selectedTemplate, t) : 'Summary';
     const label = truncateTemplateName(fullLabel);
     const regeneratingTemplate =
       templates.find(template => template.id === regeneratingTemplateId) ??
       (selectedTemplate?.id === regeneratingTemplateId ? selectedTemplate : undefined);
     const regeneratingTemplateLabel = regeneratingTemplate
-      ? getSummaryTemplateLabel(regeneratingTemplate)
+      ? getSummaryTemplateLabel(regeneratingTemplate, t)
       : regeneratingTemplateId === 'default' || !regeneratingTemplateId
-        ? getSummaryTemplateLabel(undefined)
+        ? getSummaryTemplateLabel(undefined, t)
         : 'selected template';
     const regeneratingTooltipContent = `Generating ${regeneratingTemplateLabel} summary`;
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { Monitor, AppWindow, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,6 +17,7 @@ interface PickerState {
 }
 
 export function ScreenPickerModal(): React.ReactElement | null {
+  const { t } = useTranslation('common');
   const [pickerState, setPickerState] = useState<PickerState | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('screen');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -33,13 +35,13 @@ export function ScreenPickerModal(): React.ReactElement | null {
         // Show the same toast as mic/camera — its "Open Settings" uses openExternal which works reliably
         const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
         const screenSettingsUrl = MACOS_PRIVACY_URLS['screen'];
-        toast.error('Screen recording access is blocked', {
-          description: 'Please allow access in your system settings and reload.',
+        toast.error(t('screenPicker.accessBlocked'), {
+          description: t('screenPicker.accessBlockedDescription'),
           duration: 6000,
           action:
             isElectron && screenSettingsUrl
               ? {
-                  label: 'Open Settings',
+                  label: t('screenPicker.openSettings'),
                   onClick: () => {
                     void window.electronAPI?.openExternal?.(screenSettingsUrl);
                   },
@@ -100,11 +102,13 @@ export function ScreenPickerModal(): React.ReactElement | null {
       <div className='bg-background border border-border rounded-xl shadow-2xl w-[780px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden'>
         {/* Header */}
         <div className='flex items-center justify-between px-5 pt-4 pb-0'>
-          <h2 className='text-foreground text-[15px] font-semibold'>Share your screen</h2>
+          <h2 className='text-foreground text-[15px] font-semibold'>
+            {t('screenPicker.shareYourScreen')}
+          </h2>
           <button
             onClick={handleCancel}
             className='text-muted-foreground hover:text-foreground hover:bg-muted rounded-md p-1.5 transition-colors'
-            aria-label='Close'
+            aria-label={t('screenPicker.close')}
             data-track-category='screen-picker'
             data-track-name='close'
           >
@@ -129,7 +133,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
             )}
           >
             <Monitor className='w-3.5 h-3.5' />
-            Entire Screen
+            {t('screenPicker.entireScreen')}
             <span
               className={cn(
                 'text-xs rounded-full px-1.5 py-0.5 tabular-nums',
@@ -158,7 +162,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
             )}
           >
             <AppWindow className='w-3.5 h-3.5' />
-            Window
+            {t('screenPicker.window')}
             <span
               className={cn(
                 'text-xs rounded-full px-1.5 py-0.5 tabular-nums',
@@ -179,7 +183,11 @@ export function ScreenPickerModal(): React.ReactElement | null {
           {visibleSources.length === 0 ? (
             <div className='flex flex-col items-center justify-center py-12 text-muted-foreground gap-2'>
               <Monitor className='w-8 h-8' />
-              <p className='text-sm'>No {activeTab === 'screen' ? 'screens' : 'windows'} found</p>
+              <p className='text-sm'>
+                {activeTab === 'screen'
+                  ? t('screenPicker.noScreensFound')
+                  : t('screenPicker.noWindowsFound')}
+              </p>
             </div>
           ) : (
             <div
@@ -254,7 +262,9 @@ export function ScreenPickerModal(): React.ReactElement | null {
               data-track-category='screen-picker'
               data-track-name='toggle-audio'
             />
-            <span className='text-sm text-muted-foreground'>Share system audio</span>
+            <span className='text-sm text-muted-foreground'>
+              {t('screenPicker.shareSystemAudio')}
+            </span>
           </label>
 
           <div className='flex items-center gap-2'>
@@ -264,7 +274,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
               data-track-name='cancel'
               className='px-4 py-2 text-sm rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
             >
-              Cancel
+              {t('screenPicker.cancel')}
             </button>
             <button
               onClick={handleShare}
@@ -279,7 +289,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
                   : 'bg-muted text-muted-foreground cursor-not-allowed',
               )}
             >
-              Share
+              {t('screenPicker.share')}
             </button>
           </div>
         </div>

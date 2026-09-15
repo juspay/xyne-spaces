@@ -1,6 +1,8 @@
+import type { TFunction } from 'i18next';
 import type { SummaryTemplateOption } from './SummaryTemplateMenu.types';
 
-/** Name of the built-in template, which has no icon of its own. */
+/** Name of the built-in template, which has no icon of its own. Stable data
+ *  identifier compared against persisted template names — never translated. */
 export const DEFAULT_SUMMARY_TEMPLATE_NAME = 'Default summary';
 
 const TEMPLATE_NAME_MAX_LENGTH = 24;
@@ -16,6 +18,9 @@ export function isDefaultSummaryTemplate(template: SummaryTemplateOption | undef
   return !template || template.name === DEFAULT_SUMMARY_TEMPLATE_NAME;
 }
 
-export function getSummaryTemplateLabel(template: SummaryTemplateOption | undefined): string {
-  return template?.name ?? DEFAULT_SUMMARY_TEMPLATE_NAME;
+export function getSummaryTemplateLabel(
+  template: SummaryTemplateOption | undefined,
+  t: TFunction,
+): string {
+  return template?.name ?? t('summaryTemplateMenu.defaultSummary');
 }

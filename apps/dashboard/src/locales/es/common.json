@@ -1020,5 +1020,61 @@
         "saveChanges": "Guardar cambios"
       }
     }
+  },
+  "summaryTemplateMenu": {
+    "defaultSummary": "Resumen predeterminado",
+    "selectedTemplateFallback": "plantilla seleccionada",
+    "generatingSummary": "Generando resumen de {{template}}",
+    "regenerateWith": "Regenerar con {{template}}",
+    "selectedTemplateAriaLabel": "Plantilla seleccionada",
+    "templatesHeading": "Plantillas",
+    "loadingTemplates": "Cargando plantillas…",
+    "allTemplates": "Todas las plantillas…",
+    "newTemplate": "Nueva plantilla"
+  },
+  "screenPicker": {
+    "accessBlocked": "El acceso a la grabación de pantalla está bloqueado",
+    "accessBlockedDescription": "Permite el acceso en la configuración de tu sistema y recarga.",
+    "openSettings": "Abrir configuración",
+    "shareYourScreen": "Comparte tu pantalla",
+    "close": "Cerrar",
+    "entireScreen": "Pantalla completa",
+    "window": "Ventana",
+    "noScreensFound": "No se encontraron pantallas",
+    "noWindowsFound": "No se encontraron ventanas",
+    "shareSystemAudio": "Compartir audio del sistema",
+    "cancel": "Cancelar",
+    "share": "Compartir"
+  },
+  "browserPanel": {
+    "hintBar": {
+      "clickToOpenExternally": "{{modifier}}+clic para abrir externamente ·",
+      "changeDefaultInPreferences": "cambiar predeterminado en preferencias",
+      "dismiss": "Descartar"
+    },
+    "settingsMenu": {
+      "browserSettings": "Configuración del navegador",
+      "siteSettings": "Configuración del sitio",
+      "popupsAndRedirects": "Ventanas emergentes y redirecciones",
+      "clearSiteData": "Borrar datos del sitio"
+    }
+  },
+  "notetaker": {
+    "markedMomentDivider": {
+      "markedMoment": "Momento marcado"
+    },
+    "liveTranscriptList": {
+      "paused": "en pausa",
+      "transcribing": "transcribiendo...",
+      "searchTranscriptShort": "Buscar transcripción…",
+      "searchTranscriptLong": "Buscar en la transcripción en vivo…",
+      "searchTranscriptAriaLabel": "Buscar transcripción",
+      "matchCounter": "{{current}} de {{total}}",
+      "noMatches": "Sin coincidencias",
+      "previousMatch": "Coincidencia anterior",
+      "nextMatch": "Siguiente coincidencia",
+      "clearSearch": "Borrar búsqueda de transcripción",
+      "returnToCurrent": "Volver al actual"
+    }
   }
 }

@@ -11,6 +11,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Button } from '../../ui/Button/Button';
@@ -36,6 +37,7 @@ export const LiveTranscriptList = ({
   trackCategory,
   className,
 }: LiveTranscriptListProps): ReactElement => {
+  const { t } = useTranslation('common');
   const styles = VARIANT_STYLES[variant];
   const isPanel = variant === 'panel';
   const shouldReduceMotion = useReducedMotion();
@@ -145,7 +147,11 @@ export const LiveTranscriptList = ({
               )}
             />
           </span>
-          <span>{isPaused ? 'paused' : 'transcribing...'}</span>
+          <span>
+            {isPaused
+              ? t('notetaker.liveTranscriptList.paused')
+              : t('notetaker.liveTranscriptList.transcribing')}
+          </span>
         </div>
       )}
     </>
@@ -166,9 +172,13 @@ export const LiveTranscriptList = ({
             onFocus={search.open}
             onChange={event => search.setQuery(event.target.value)}
             onKeyDown={search.handleKeyDown}
-            placeholder={isPanel ? 'Search transcript…' : 'Search the live transcript…'}
+            placeholder={
+              isPanel
+                ? t('notetaker.liveTranscriptList.searchTranscriptShort')
+                : t('notetaker.liveTranscriptList.searchTranscriptLong')
+            }
             className={styles.searchInput}
-            aria-label='Search transcript'
+            aria-label={t('notetaker.liveTranscriptList.searchTranscriptAriaLabel')}
             data-track-category={trackCategory}
             data-track-name='transcript_search_input'
           />
@@ -176,8 +186,11 @@ export const LiveTranscriptList = ({
             <>
               <span className={styles.searchCounter}>
                 {search.matchCount > 0
-                  ? `${search.currentIndex + 1} of ${search.matchCount}`
-                  : 'No matches'}
+                  ? t('notetaker.liveTranscriptList.matchCounter', {
+                      current: search.currentIndex + 1,
+                      total: search.matchCount,
+                    })
+                  : t('notetaker.liveTranscriptList.noMatches')}
               </span>
               <Button
                 type='button'
@@ -186,7 +199,7 @@ export const LiveTranscriptList = ({
                 onClick={search.goToPrevious}
                 disabled={search.matchCount === 0}
                 className={styles.searchButton}
-                aria-label='Previous match'
+                aria-label={t('notetaker.liveTranscriptList.previousMatch')}
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_previous'
               >
@@ -199,7 +212,7 @@ export const LiveTranscriptList = ({
                 onClick={search.goToNext}
                 disabled={search.matchCount === 0}
                 className={styles.searchButton}
-                aria-label='Next match'
+                aria-label={t('notetaker.liveTranscriptList.nextMatch')}
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_next'
               >
@@ -211,7 +224,7 @@ export const LiveTranscriptList = ({
                 size='iconSm'
                 onClick={search.close}
                 className={cn(styles.searchButton, 'disabled:opacity-100')}
-                aria-label='Clear transcript search'
+                aria-label={t('notetaker.liveTranscriptList.clearSearch')}
                 data-track-category={trackCategory}
                 data-track-name='transcript_search_clear'
               >
@@ -250,7 +263,7 @@ export const LiveTranscriptList = ({
                   data-track-category={trackCategory}
                   data-track-name='return_to_current'
                 >
-                  Return to current
+                  {t('notetaker.liveTranscriptList.returnToCurrent')}
                   <ChevronDown size={13} strokeWidth={2.5} />
                 </Button>
               </motion.div>

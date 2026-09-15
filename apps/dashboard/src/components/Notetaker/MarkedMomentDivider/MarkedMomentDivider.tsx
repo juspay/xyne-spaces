@@ -9,21 +9,29 @@
  */
 
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Flag } from '@xyne/icons';
 
-export const MarkedMomentDivider = (): ReactElement => (
-  <div className='flex items-center gap-2' role='separator' aria-label='Marked moment'>
-    <span
-      className='flex size-5 shrink-0 items-center justify-center rounded-md bg-destructive/10'
-      aria-hidden='true'
+export const MarkedMomentDivider = (): ReactElement => {
+  const { t } = useTranslation('common');
+  return (
+    <div
+      className='flex items-center gap-2'
+      role='separator'
+      aria-label={t('notetaker.markedMomentDivider.markedMoment')}
     >
-      <Flag size={11} strokeWidth={2.5} className='text-primary' />
-    </span>
-    <span className='shrink-0 text-xs font-semibold uppercase tracking-wide text-primary'>
-      Marked moment
-    </span>
-    <span className='h-px flex-1 bg-destructive/20' aria-hidden='true' />
-  </div>
-);
+      <span
+        className='flex size-5 shrink-0 items-center justify-center rounded-md bg-destructive/10'
+        aria-hidden='true'
+      >
+        <Flag size={11} strokeWidth={2.5} className='text-primary' />
+      </span>
+      <span className='shrink-0 text-xs font-semibold uppercase tracking-wide text-primary'>
+        {t('notetaker.markedMomentDivider.markedMoment')}
+      </span>
+      <span className='h-px flex-1 bg-destructive/20' aria-hidden='true' />
+    </div>
+  );
+};
 
 export default MarkedMomentDivider;

@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useMeasure } from 'react-use';
@@ -14,6 +15,7 @@ export function BrowserHintBar({
   onOpenPreferences,
   onDismiss,
 }: BrowserHintBarProps): ReactElement {
+  const { t } = useTranslation('common');
   const [containerRef, bounds] = useMeasure<HTMLDivElement>();
   const shouldReduceMotion = useReducedMotion();
 
@@ -35,7 +37,9 @@ export function BrowserHintBar({
       <div ref={containerRef}>
         <div className='flex items-start gap-2 bg-muted border-b border-border px-3 py-1'>
           <p className='min-w-0 flex-1 text-[11px] leading-4 text-muted-foreground'>
-            {isMac ? '⌘' : 'Ctrl'}-click to open externally ·{' '}
+            {t('browserPanel.hintBar.clickToOpenExternally', {
+              modifier: isMac ? '⌘' : 'Ctrl',
+            })}{' '}
             <button
               type='button'
               onClick={onOpenPreferences}
@@ -43,13 +47,13 @@ export function BrowserHintBar({
               data-track-category='BROWSER'
               data-track-name='OpenLinkPreferences'
             >
-              change default in preferences
+              {t('browserPanel.hintBar.changeDefaultInPreferences')}
             </button>
           </p>
           <button
             type='button'
-            aria-label='Dismiss'
-            title='Dismiss'
+            aria-label={t('browserPanel.hintBar.dismiss')}
+            title={t('browserPanel.hintBar.dismiss')}
             onClick={onDismiss}
             className='mt-px shrink-0 rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-border hover:text-foreground'
             data-track-category='BROWSER'
