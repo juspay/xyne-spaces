@@ -76,6 +76,7 @@ import {
   type RecordingSummaryTemplate,
 } from './components/RecordingContentTabs';
 import { SummaryGenerationPanel } from './components/SummaryGenerationPill/SummaryGenerationPanel';
+import { NonOwnerSummaryNotice } from './components/NonOwnerSummaryNotice';
 import { deriveSummaryPanelState } from './summaryPanelState';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
@@ -1497,7 +1498,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
                       </div>
                     ))}
                 </>
-              ) : (
+              ) : isOwner || showSummaryShimmer ? (
                 <SummaryGenerationPanel
                   isAwaiting={showSummaryShimmer}
                   canGenerate={hasTranscript}
@@ -1510,6 +1511,13 @@ export default function RecordingDetailV2Screen(): ReactElement {
                   onProgressPause={handleSummaryProgressPause}
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
+              ) : (
+                /* Owner-only action, same rule the backend enforces: only the
+                   recording's creator may start a summary run, so a viewer the
+                   recording was shared with gets the reason, not a 403 button.
+                   A run already in flight (showSummaryShimmer) stays visible to
+                   everyone — progress is a status, not an action. */
+                <NonOwnerSummaryNotice />
               )}
               {/* Owner-only: the docs live in the owner's Drive, so these links are
                   dead ends for anyone the recording was merely shared with. */}
