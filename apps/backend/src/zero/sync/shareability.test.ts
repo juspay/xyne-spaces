@@ -36,6 +36,10 @@ test('every SHARED_BASE_QUERY is GATE-collapsible (no per-row admission)', () =>
 test('no SHARED_BASE_QUERY uses per-subscriber cursor pagination', () => {
   // A fixed `.limit()` window is fine (shared by the instance); a `.start()`/cursor is per-subscriber
   // scroll → fragments into per-subscriber instances → not shareable. Detect a cursor on the base AST.
+  // NOTE: this build-time check only sees the cursor if SAMPLE_ARGS carries a cursor — for a query
+  // with a CONDITIONAL `.start()` (`if (args.cursor) …`), SAMPLE_ARGS MUST include cursor-shaped args
+  // or this stays green. The load-bearing catch is the runtime refuse in clientGateway (builds the
+  // base from the client's ACTUAL args); this test is the fast-feedback belt.
   for (const name of SHARED_BASE_QUERIES) {
     const args = SAMPLE_ARGS[name];
     assert.ok(args, `add SAMPLE_ARGS['${name}']`);

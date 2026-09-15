@@ -7,6 +7,8 @@ import { hashOfNameAndArgs } from './protocol';
 import { deriveAclGate } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
+import { resolveSharedBase } from './baseQueries';
+import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
 
 /**
@@ -172,6 +174,20 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
         reason: collapse.reason,
       });
       socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
+      return;
+    }
+    // Cursor pagination is per-subscriber (scroll position) → it fragments into per-subscriber
+    // instances (hashOfNameAndArgs keys by the cursor args), defeating sharing. The CI guard's
+    // cursor check is SAMPLE_ARGS-dependent and misses CONDITIONAL `.start()` (built only when the
+    // client passes a cursor), so re-check the base built from the ACTUAL args here. A fixed
+    // `.limit()` window is fine (shared per instance) — only `.start()` is the disqualifier. Build
+    // fresh (queryMetaFor's meta cache is first-args-wins, so it can't be trusted for this).
+    const actualBase = resolveSharedBase(queryName, syncContext(), args[0]) as { ast?: { start?: unknown } } | undefined;
+    if (actualBase?.ast?.start !== undefined) {
+      syncEngine.unsubscribe(dataInstanceKey, connId);
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'cursor-paginated' });
+      logger.error('[SyncGateway] cursor-paginated query — refusing subscribe (not shareable)', { queryName });
+      socket.emit('sync:error', { queryName, message: 'query is cursor-paginated (not shareable)' });
       return;
     }
     const grantByTable = new Map<string, string>();
