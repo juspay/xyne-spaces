@@ -1939,9 +1939,30 @@ export class TicketController {
       const timestamp = new Date();
       const stringValue = normalizedFieldValue.fieldValue;
 
-      // Upsert the form entity value
+      // Upsert the form entity value.
+      // Values MUST be stamped with contextId = boardId and the current visit
+      // version, matching the canonical write path (FormsRepository
+      // .upsertTicketFormFields) and the read path (getTicketCustomFormData),
+      // which both scope by (contextId = boardId, version). Writing rows with a
+      // NULL contextId/version made them invisible to GET /api/apps/ticket/:xyneId,
+      // so app-updated fields looked blank even though the value was stored.
+      // NULL version is treated as version 1; compute the max in code because the
+      // column is nullable with no DB default and ORDER BY version DESC sorts NULLs
+      // first in Postgres.
+      const existingVersions = await prismaClient.formEntityValues.findMany({
+        where: { entityId: ticketId, entityType: 'TICKET', contextId: ticket.boardId },
+        select: { version: true },
+      });
+      const currentVersion = existingVersions.reduce((max, v) => Math.max(max, v.version ?? 1), 1);
+
       const existing = await prismaClient.formEntityValues.findFirst({
-        where: { entityId: ticketId, entityType: 'TICKET', fieldId: field.id },
+        where: {
+          entityId: ticketId,
+          entityType: 'TICKET',
+          fieldId: field.id,
+          contextId: ticket.boardId,
+          version: currentVersion,
+        },
       });
 
       if (existing) {
@@ -1961,6 +1982,8 @@ export class TicketController {
             entityType: 'TICKET',
             formId: formMapping.formId,
             fieldId: field.id,
+            contextId: ticket.boardId,
+            version: currentVersion,
             fieldValue: stringValue,
             actualFieldValue: normalizedFieldValue.actualFieldValue,
             workspaceId: ticket.workspaceId,
