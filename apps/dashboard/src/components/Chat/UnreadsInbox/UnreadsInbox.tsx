@@ -220,12 +220,7 @@ const UnreadsInbox = (): ReactElement => {
                     data-track-name='TOGGLE_CHANNEL_ACCORDION'
                   >
                     <div className='flex-1 pointer-events-none'>
-                      <ChannelItemV2
-                        channel={channel}
-                        unreadCount={0}
-                        hideDraftIndicator
-                        className='gap-2 h-8 mt-0'
-                      />
+                      <ChannelItemV2 channel={channel} unreadCount={0} hideDraftIndicator />
                     </div>
                     <div className='pr-3 text-muted-foreground flex items-center gap-3'>
                       {isOpen && (
