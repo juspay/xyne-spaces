@@ -1,7 +1,6 @@
 import { UserSessionService } from '@/services/userSessionService';
 import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
-import { repositories } from '@/database/repositories';
 import { logger as baseLogger } from '@/utils/logger';
 
 const logger = baseLogger.child({ module: 'AccountDeactivationService' });
@@ -32,7 +31,6 @@ class AccountDeactivationService {
       { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId) },
       // Stop notifications: clear mobile push tokens and browser subscriptions.
       { name: 'unregisterPushTokens', run: () => fcmPushService.unregisterUserTokens(userId) },
-      { name: 'deactivateBrowserSubscriptions', run: () => repositories.browserNotificationSubscriptions.deactivateByUserId(userId) },
     ];
 
     const results = await Promise.allSettled(steps.map((step) => step.run()));

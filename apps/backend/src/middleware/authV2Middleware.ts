@@ -1,116 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
-import { OAuth2Client, gaxios } from 'google-auth-library';
-import axios from 'axios';
 import { jwtService } from '../services/jwtService';
 import { logger as baseLogger } from '../utils/logger';
 import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { AuthProvider } from '@xyne/shared';
-import { accountDeactivationService } from '../services/accountDeactivationService';
+import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
   private userSessionService: UserSessionService;
-  private googleClientId: string;
-  private googleClientSecret: string;
 
   constructor() {
     this.userSessionService = new UserSessionService();
-
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-
-    if (!clientId || !clientSecret) {
-      logger.error('[AUTH] GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set. Cannot start AuthV2Middleware.');
-      throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
-    }
-
-    this.googleClientId = clientId;
-    this.googleClientSecret = clientSecret;
   }
-
-  /**
-   * Verify a Google refresh token is still valid against Google.
-   *
-   * A single shared OAuth2Client whose credentials are mutated on every request
-   * can surface a spurious `unauthorized_client` error under concurrency, which
-   * previously masked genuine account deactivations (they were treated as
-   * transient and the session was allowed). To avoid that, each check runs on a
-   * FRESH client and, if the first attempt reports `unauthorized_client`, we
-   * recreate the client and retry once so a real revocation surfaces as
-   * `invalid_grant`.
-   *
-   * Returns true only when Google definitively rejects the token — meaning the
-   * account is deactivated/revoked. This mirrors the PERMANENT_AUTH_ERROR
-   * convention used by the Gmail/Calendar workers
-   * (`invalid_grant` / `unauthorized_client` / `invalid_token`). Transient or
-   * system errors return false so the local session is allowed to continue.
-   */
-  private isGoogleRefreshTokenRevoked = async (
-    refreshToken: string,
-    user: { id: string; email: string },
-  ): Promise<boolean> => {
-    const PERMANENT_ERRORS = ['invalid_grant', 'unauthorized_client', 'invalid_token'];
-
-    const attempt = async (): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        const client = new OAuth2Client(this.googleClientId, this.googleClientSecret);
-        client.setCredentials({ refresh_token: refreshToken });
-        // If the user has been deleted or suspended in Google, this throws.
-        await client.getAccessToken();
-        return { ok: true };
-      } catch (err) {
-        const googleError = err as gaxios.GaxiosError;
-        return { ok: false, error: googleError.response?.data?.error ?? googleError.message };
-      }
-    };
-
-    let result = await attempt();
-    if (result.ok) {
-      logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${user.email}`, {
-        userId: user.id,
-        email: user.email,
-      });
-      return false;
-    }
-
-    // `unauthorized_client` can come from a stale/reused client rather than a
-    // real revocation. Recreate a fresh client and retry once so a genuine
-    // deactivation surfaces as `invalid_grant`.
-    if (result.error === 'unauthorized_client') {
-      logger.info(`[AUTH] [Auto-Refresh] Google returned unauthorized_client for ${user.email}; recreating client and retrying`, {
-        userId: user.id,
-        email: user.email,
-      });
-      result = await attempt();
-      if (result.ok) {
-        logger.info(`[AUTH] [Auto-Refresh] Google verification successful on retry for user ${user.email}`, {
-          userId: user.id,
-          email: user.email,
-        });
-        return false;
-      }
-    }
-
-    if (result.error && PERMANENT_ERRORS.includes(result.error)) {
-      logger.warn(`[AUTH] [Auto-Refresh] Google rejected token (${result.error}) for ${user.email} — account revoked/deactivated. Session rejected.`, {
-        userId: user.id,
-        email: user.email,
-        googleError: result.error,
-      });
-      return true;
-    }
-
-    // Transient/system error (network, 5xx, etc.) — allow the local session.
-    logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${user.email}. Error: ${result.error}`, {
-      userId: user.id,
-      email: user.email,
-      error: result.error,
-    });
-    return false;
-  };
 
   /**
    * Helper to extract token from workspace-specific cookie
@@ -172,125 +75,12 @@ class AuthV2Middleware {
         return false;
       }
 
-      // Check expiry and status
-      const now = new Date();
-      const isActive = session.status === 'ACTIVE';
-      const isExpired = now >= session.refreshTokenExpiry;
-
-      if (!isActive || isExpired) {
-        logger.warn(`[AUTH] [Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} (Expiry: ${session.refreshTokenExpiry})`, {
-          userId: session.user.id,
-          email: session.user.email,
-          sessionStatus: session.status,
-          refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-        });
+      // Shared validity + provider-revocation check (status, expiry, leftAt,
+      // Google/Microsoft revocation, and deactivation cleanup). Same decision
+      // used by v1 authMiddleware so both stay in sync.
+      if (!(await isRefreshAllowed(session))) {
         return false;
       }
-
-      // Check if user has been removed from the organization entirely
-      if (session.user.orgMember?.leftAt) {
-        logger.warn(`[AUTH] [Auto-Refresh] User ${session.user.email} has left organization (leftAt=${session.user.orgMember.leftAt.toISOString()}). Session rejected.`, {
-          userId: session.user.id,
-          email: session.user.email,
-          orgMemberLeftAt: session.user.orgMember.leftAt.toISOString(),
-        });
-        return false;
-      }
-
-      if (session.user.leftAt) {
-        logger.warn(`[AUTH] [Auto-Refresh] Workspace user ${session.user.email} has left workspace ${session.user.workspaceId} (leftAt=${session.user.leftAt.toISOString()}). Session rejected.`, {
-          userId: session.user.id,
-          email: session.user.email,
-          workspaceId: session.user.workspaceId,
-          userLeftAt: session.user.leftAt.toISOString(),
-        });
-        return false;
-      }
-
-      // --- Provider Verification Step ---
-      // Only verify with Google if the user authenticated via Google
-      if (session.user.authProvider === AuthProvider.GOOGLE && session.refreshToken) {
-        // Verify the user is still valid in Google. A fresh client is used per
-        // attempt and `unauthorized_client` triggers a recreate-and-retry so a
-        // genuine deactivation is confirmed via `invalid_grant` (see helper).
-        const revoked = await this.isGoogleRefreshTokenRevoked(session.refreshToken, {
-          id: session.user.id,
-          email: session.user.email,
-        });
-        if (revoked) {
-          await accountDeactivationService.handleDeactivatedUser({
-            userId: session.user.id,
-            email: session.user.email,
-          });
-          return false;
-        }
-      } else if (session.user.authProvider === AuthProvider.MICROSOFT) {
-        // Verify if the user is still valid in Azure AD via Microsoft Graph API
-        if (session.accessToken) {
-          try {
-            const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
-              headers: { Authorization: `Bearer ${session.accessToken}` },
-              validateStatus: () => true, // Don't throw on non-2xx
-            });
-
-            if (graphResponse.status === 200) {
-              logger.info(`[Auto-Refresh] Microsoft Graph verification successful for user ${session.user.email}`);
-            } else if (graphResponse.status === 401) {
-              // Access token expired — try refreshing via Microsoft token endpoint
-              const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
-              const tokenResponse = await axios.post(
-                `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-                new URLSearchParams({
-                  client_id: process.env.MICROSOFT_CLIENT_ID!,
-                  client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
-                  grant_type: 'refresh_token',
-                  refresh_token: session.refreshToken,
-                  scope: 'openid email profile User.Read',
-                }),
-                {
-                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                  validateStatus: () => true,
-                }
-              );
-
-              if (tokenResponse.status === 200) {
-                const tokenData = tokenResponse.data as { access_token: string };
-                await this.userSessionService.updateSession(session.id, {
-                  accessToken: tokenData.access_token,
-                });
-                logger.info(`[Auto-Refresh] Microsoft token refreshed for user ${session.user.email}`);
-              } else {
-                logger.warn(`[Auto-Refresh] Microsoft token refresh failed for ${session.user.email}. User may be disabled in Azure AD.`);
-                await accountDeactivationService.handleDeactivatedUser({
-                  userId: session.user.id,
-                  email: session.user.email,
-                });
-                return false;
-              }
-            } else {
-              // 403 or other error — user likely disabled/deleted in Azure AD
-              logger.warn(`[Auto-Refresh] Microsoft Graph returned ${graphResponse.status} for ${session.user.email}. User may be disabled in Azure AD.`);
-              await accountDeactivationService.handleDeactivatedUser({
-                userId: session.user.id,
-                email: session.user.email,
-              });
-              return false;
-            }
-          } catch (err) {
-            // Network/transient error — allow session to continue
-            logger.warn(`[Auto-Refresh] Microsoft Graph verification failed (transient) for ${session.user.email}: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        } else {
-          logger.info(`[Auto-Refresh] No access token for Microsoft user ${session.user.email}. Skipping Graph check.`);
-        }
-      } else if (session.user.authProvider === AuthProvider.EMAIL) {
-        // Email auth: we issued the refresh token ourselves
-        // No external provider to verify against
-        logger.info(`[Auto-Refresh] Email auth session for ${session.user.email} — skipping provider check`);
-      } else if (!session.refreshToken) {
-         logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping provider check.`);
-      }
-      // --------------------------------
 
       logger.info(`[AUTH] [Auto-Refresh] Valid session found for user ${session.user.email}`, {
         userId: session.user.id,
