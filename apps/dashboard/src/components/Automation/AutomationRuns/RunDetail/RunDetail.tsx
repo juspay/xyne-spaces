@@ -5,7 +5,7 @@ import { fetchAutomationRun } from '../../../../api/automationsApi';
 import type { AutomationRunStatus } from '../../Automation.types';
 import type { RunDetailProps } from './RunDetail.types';
 
-const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
+export const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
   PENDING: 'bg-muted text-muted-foreground border-border',
   SCHEDULED:
     'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40',

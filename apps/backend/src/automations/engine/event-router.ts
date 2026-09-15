@@ -13,6 +13,7 @@ import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
+import { resolveDebugEntity } from '../util/debug-entity';
 
 // Wire payload carries only ticketId, so the scope ids come off the ticket row.
 const TICKET_SCOPED_EVENTS: ReadonlySet<string> = new Set([
@@ -142,6 +143,7 @@ class EventRouter {
                   status: AutomationRunStatus.PENDING,
                   tag: 'root',
                   workspaceId,
+                  ...resolveDebugEntity(eventType, payload),
                 },
               });
               await tx.workflowExecutionState.create({
