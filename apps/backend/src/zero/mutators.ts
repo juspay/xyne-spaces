@@ -801,6 +801,15 @@ async function assignFullRoles(
     }
 
     logger.info(`[AUTO-ASSIGN] Full role assignment complete for ticket ${ticketId}`);
+
+    // Sync the primary assignee's workload mapping. assignFullRolesToTicket syncs
+    // only the non-primary roles; ticket.assignedTo (the primary) was never synced
+    // (XYNE-55777), so the least-loaded scorer kept picking a stale-low user.
+    try {
+      await syncUserWorkload(primaryUserId, userGroupId, boardId, createdBy);
+    } catch (workloadError) {
+      logger.error(`[AUTO-ASSIGN] Error syncing workload for primary assignee ${primaryUserId}:`, workloadError);
+    }
   }
 }
 

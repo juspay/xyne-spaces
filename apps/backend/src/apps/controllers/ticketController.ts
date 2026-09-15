@@ -6,6 +6,7 @@ import { createTicketWithConversation } from '../core/ticketutils';
 import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
@@ -842,6 +843,16 @@ export class TicketController {
         });
       }
 
+      // Sync workload mapping for the assigned user (single-assignee path).
+      if (userGroupId && resolvedAssignedTo && result.ticketId) {
+        try {
+          await syncUserWorkload(resolvedAssignedTo, userGroupId, boardId, userId);
+          logger.info(`[Apps Ticket Creation] Synced workload for user ${resolvedAssignedTo}`);
+        } catch (error) {
+          logger.error('[Apps Ticket Creation] Error syncing workload:', error);
+        }
+      }
+
       if (pendingFullRoleAssignment && userGroupId && result.ticketId) {
         try {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
@@ -858,6 +869,12 @@ export class TicketController {
               data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+            try {
+              await syncUserWorkload(primaryUserId, userGroupId, boardId, userId);
+              logger.info(`[Apps Ticket Creation] Synced workload for primary assignee ${primaryUserId}`);
+            } catch (error) {
+              logger.error('[Apps Ticket Creation] Error syncing workload for primary assignee:', error);
+            }
           }
         } catch (error) {
           logger.error('[Apps Ticket Creation] Error during full role assignment:', error);
@@ -1173,6 +1190,12 @@ export class TicketController {
                 data: { assignedTo: primaryUserId, updatedBy: userId, updatedAt: new Date() },
               });
               await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+              try {
+                await syncUserWorkload(primaryUserId, effectiveGroupId!, targetBoardId!, userId);
+                logger.info(`[TicketController] Synced workload for primary assignee ${primaryUserId}`);
+              } catch (error) {
+                logger.error('[TicketController] Error syncing workload for primary assignee:', error);
+              }
             }
           } else {
             const assignmentResult = await evaluateAssignmentRule(
@@ -1184,6 +1207,12 @@ export class TicketController {
             );
             if (assignmentResult.assignedUserId) {
               await ticketService.updateTicketAssignee(ticketId, userId, assignmentResult.assignedUserId);
+              try {
+                await syncUserWorkload(assignmentResult.assignedUserId, effectiveGroupId!, targetBoardId!, userId);
+                logger.info(`[TicketController] Synced workload for user ${assignmentResult.assignedUserId}`);
+              } catch (error) {
+                logger.error('[TicketController] Error syncing workload:', error);
+              }
             }
           }
         } catch (error) {
@@ -2481,6 +2510,12 @@ export class TicketController {
                 data: { assignedTo: resolvedAssignedTo },
               });
               await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+              try {
+                await syncUserWorkload(resolvedAssignedTo, userGroupId, ticket.boardId!, userId);
+                logger.info(`[Apps Email Ticket Creation] Synced workload for user ${resolvedAssignedTo}`);
+              } catch (error) {
+                logger.error('[Apps Email Ticket Creation] Error syncing workload:', error);
+              }
             }
           }
         } catch (error) {
@@ -2504,6 +2539,12 @@ export class TicketController {
               data: { assignedTo: primaryUserId },
             });
             await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+            try {
+              await syncUserWorkload(primaryUserId, userGroupId, ticket.boardId!, userId);
+              logger.info(`[Apps Email Ticket Creation] Synced workload for primary assignee ${primaryUserId}`);
+            } catch (error) {
+              logger.error('[Apps Email Ticket Creation] Error syncing workload for primary assignee:', error);
+            }
           }
         } catch (error) {
           logger.error('[Apps Email Ticket Creation] Error during full role assignment:', error);
