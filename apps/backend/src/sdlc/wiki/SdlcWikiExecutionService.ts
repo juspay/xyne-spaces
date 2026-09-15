@@ -1,3 +1,4 @@
+import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { config } from '@/config/env';
@@ -244,7 +245,7 @@ export class SdlcWikiExecutionService {
           : role === 'CORRECTOR'
             ? 'CORRECTING'
             : 'PROCESSING',
-      agentSlug: 'sdlc-agent',
+      agentSlug: SDLC_AGENT_SLUG,
       conversationId,
       sessionId,
       credentialSessionId: sessionId,
@@ -308,6 +309,7 @@ export class SdlcWikiExecutionService {
       repo.id,
       {
         operation: 'wiki',
+        channelId,
         workflowExecutionId: execution.id,
         sessionId,
         conversationId,
@@ -374,7 +376,7 @@ export class SdlcWikiExecutionService {
     ].join('\n\n');
     await runS2SClawAgent({
       sessionId,
-      agentSlug: 'sdlc-agent',
+      agentSlug: SDLC_AGENT_SLUG,
       task,
       userId: user.id,
       userName: user.name || user.email,
