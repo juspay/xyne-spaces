@@ -243,7 +243,7 @@ async function main(): Promise<void> {
     [SDLC_WORKFLOW_TYPES, repoSelector ? repoIds[0] : null]
   );
   const executionIds = await textIds(
-    `SELECT id FROM public.workflow_executions
+    `SELECT id FROM workflow.workflow_executions
       WHERE "workflowType" = ANY($1::text[])
         AND ($2::text IS NULL OR "workflowId" = ANY($3::text[])
           OR context::jsonb->>'repoId' = $2)`,
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
   const clawConversationIds = executionIds.length
     ? await textIds(
         `SELECT DISTINCT context::jsonb->>'conversationId' AS id
-           FROM public.workflow_executions
+           FROM workflow.workflow_executions
           WHERE id = ANY($1::text[])
             AND context::jsonb->>'conversationId' IS NOT NULL`,
         [executionIds]
@@ -409,7 +409,7 @@ async function main(): Promise<void> {
       ['public', 'canvases', 'id', canvases],
       ['public', 'canvas_folders', 'id', folders],
       ['public', 'repos', 'id', repoIds],
-      ['public', 'workflow_executions', 'id', executionIds],
+      ['workflow', 'workflow_executions', 'id', executionIds],
       ['public', 'workflows', 'id', workflowIds],
       ['public', 'channels', 'id', channelIds],
     ];

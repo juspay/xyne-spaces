@@ -19,6 +19,10 @@ import {
 // Define the base URL
 export const BASE_URL = API_BASE_URL;
 
+/** Range-capable media endpoint; the element must use `crossOrigin='use-credentials'`. */
+export const getAttachmentStreamUrl = (attachmentId: string): string =>
+  `${BASE_URL}/attachments/${attachmentId}/stream`;
+
 // Cache regex patterns to avoid recompilation on each call
 const URL_SANITIZATION_PATTERNS = [
   {

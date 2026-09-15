@@ -136,6 +136,7 @@ export interface VespaSearchFilters {
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  userGroup?: string; // User group ID(s) - comma-separated
   dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'

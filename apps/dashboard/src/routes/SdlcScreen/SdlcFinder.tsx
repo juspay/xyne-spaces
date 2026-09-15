@@ -8,6 +8,7 @@ import {
   type ReactElement,
 } from 'react';
 import { ChevronRight, FileText, Folder, FolderOpen, MessageCircle, Plus } from 'lucide-react';
+import { useScope, useShortcutById } from '../../shortcuts';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { cn } from '../../utils/classNames';
@@ -68,11 +69,13 @@ export function SdlcFinderColumn(props: {
   isLast: boolean;
   onSelectFolder: (folder: { id: string; name: string }) => void;
   onSelectCanvas: (canvasId: string) => void;
-  onOpenCanvas: (canvasId: string, event?: ReactMouseEvent) => void;
+  onOpenCanvas: (canvasId: string, event?: { metaKey: boolean; ctrlKey: boolean }) => void;
   previewCanvasId: string | null;
   onNewFolder: (parent: SdlcFinderStep) => void;
   onNewArtifact: (parent: SdlcFinderStep) => void;
   onDiscussFolder: (folder: { id: string; name: string }) => void;
+  onDiscussTrack: () => void;
+  onPreviewCanvas: (canvasId: string) => void;
   folderById: ReadonlyMap<string, SdlcFinderFolder>;
   discussingFolderId: string | null;
   onRenameFolder: (folderId: string, name: string) => void;
@@ -89,6 +92,8 @@ export function SdlcFinderColumn(props: {
   const groupBy = useUserPreference('sdlcFinderGroupBy');
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [columnDragOver, setColumnDragOver] = useState(false);
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -195,8 +200,130 @@ export function SdlcFinderColumn(props: {
     return labels.map(label => ({ label, rows: byLabel.get(label) ?? [] }));
   }, [groupBy, rows]);
 
+  useScope('sdlc-finder', keyboardFocused);
+  useEffect(() => {
+    if (!keyboardFocused || focusedRowId !== null) return;
+    const first = rows[0];
+    if (first) setFocusedRowId(first.id);
+  }, [keyboardFocused, focusedRowId, rows]);
+  const focusedIndex = rows.findIndex(row => row.id === focusedRowId);
+  const focusedRow = focusedIndex === -1 ? null : rows[focusedIndex];
+  const moveFocus = (delta: number): void => {
+    if (rows.length === 0) return;
+    const from = focusedIndex === -1 ? (delta > 0 ? -1 : rows.length) : focusedIndex;
+    const next = rows[Math.min(rows.length - 1, Math.max(0, from + delta))];
+    if (!next) return;
+    setFocusedRowId(next.id);
+    columnRef.current
+      ?.querySelector(`[data-finder-row="${next.id}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  };
+  const focusColumn = (id: string): void => {
+    let frames = 0;
+    const tick = (): void => {
+      const column = columnRef.current?.parentElement?.querySelector<HTMLElement>(
+        `[data-finder-column="${id}"]`,
+      );
+      if (column) {
+        column.focus();
+        column.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        return;
+      }
+      if (frames < 12) {
+        frames += 1;
+        requestAnimationFrame(tick);
+      }
+    };
+    requestAnimationFrame(tick);
+  };
+  const openFolder = (): void => {
+    if (focusedRow?.kind !== 'FOLDER') return;
+    props.onSelectFolder({ id: focusedRow.id, name: focusedRow.name });
+  };
+  const stepInto = (): void => {
+    if (focusedRow?.kind !== 'FOLDER') return;
+    const folder = { id: focusedRow.id, name: focusedRow.name };
+    props.onSelectFolder(folder);
+    focusColumn(folder.id);
+  };
+  const bind = { enabled: keyboardFocused };
+  useShortcutById('finder.down', () => moveFocus(1), bind);
+  useShortcutById('finder.up', () => moveFocus(-1), bind);
+  useShortcutById('finder.into', stepInto, bind);
+  useShortcutById(
+    'finder.out',
+    () => {
+      let sibling = columnRef.current?.previousElementSibling;
+      while (sibling && !(sibling instanceof HTMLElement && sibling.dataset['finderColumn'])) {
+        sibling = sibling.previousElementSibling;
+      }
+      if (sibling instanceof HTMLElement) {
+        sibling.focus();
+        sibling.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+    },
+    bind,
+  );
+  useShortcutById(
+    'finder.open',
+    () => {
+      if (!focusedRow) return;
+      if (focusedRow.kind === 'FOLDER') openFolder();
+      else props.onOpenCanvas(focusedRow.id);
+    },
+    bind,
+  );
+  useShortcutById(
+    'finder.rename',
+    () => {
+      if (focusedRow?.kind !== 'FOLDER') return;
+      renameAbandoned.current = false;
+      setRenameDraft(focusedRow.name);
+      setRenamingId(focusedRow.id);
+    },
+    bind,
+  );
+  useShortcutById(
+    'finder.preview',
+    () => {
+      if (focusedRow?.kind === 'CANVAS') props.onPreviewCanvas(focusedRow.id);
+    },
+    bind,
+  );
+  useShortcutById(
+    'finder.openInWindow',
+    event => {
+      if (focusedRow?.kind === 'CANVAS') props.onOpenCanvas(focusedRow.id, event);
+    },
+    bind,
+  );
+  useShortcutById('finder.newFolder', () => props.onNewFolder(props.parent), bind);
+  useShortcutById('finder.newArtifact', () => props.onNewArtifact(props.parent), bind);
+  useShortcutById(
+    'finder.discuss',
+    () => {
+      const folder =
+        focusedRow?.kind === 'FOLDER'
+          ? { id: focusedRow.id, name: focusedRow.name }
+          : props.parent.type === 'FOLDER'
+            ? { id: props.parent.id, name: props.parent.name }
+            : null;
+      if (folder) props.onDiscussFolder(folder);
+    },
+    bind,
+  );
+  useShortcutById('finder.trackDiscuss', () => props.onDiscussTrack(), bind);
+
   return (
     <div
+      tabIndex={-1}
+      data-finder-column={props.parent.id}
+      onFocusCapture={() => setKeyboardFocused(true)}
+      onBlurCapture={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setKeyboardFocused(false);
+        }
+      }}
       onDragOver={event => {
         if (!props.draggingItem) return;
         event.preventDefault();
@@ -218,7 +345,7 @@ export function SdlcFinderColumn(props: {
       ref={columnRef}
       style={props.isLast ? { minWidth: FINDER_MIN_COLUMN_WIDTH } : { width: columnWidth }}
       className={cn(
-        'relative flex shrink-0 flex-col border-r border-border transition-colors last:border-r-0',
+        'relative flex shrink-0 flex-col border-r border-border outline-none transition-colors last:border-r-0',
         props.isLast && 'flex-1',
         props.draggingItem && columnDragOver && !dragOverId && 'bg-primary/[0.06]',
       )}
@@ -341,6 +468,7 @@ export function SdlcFinderColumn(props: {
                   key={row.id}
                   type='button'
                   onClick={event => {
+                    setFocusedRowId(row.id);
                     if (row.kind === 'FOLDER') {
                       props.onSelectFolder({ id: row.id, name: row.name });
                       return;
@@ -394,13 +522,22 @@ export function SdlcFinderColumn(props: {
                     props.onDragItem(null);
                   }}
                   className={cn(
-                    'mb-px flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors',
+                    'mb-px flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left outline-none transition-colors',
                     activeSelected && 'bg-primary text-primary-foreground',
-                    selected && !activeSelected && 'bg-foreground/[0.07] text-foreground',
+                    selected &&
+                      !activeSelected &&
+                      'bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/15',
                     !selected && 'hover:bg-muted',
                     props.draggingItem?.id === row.id && 'opacity-40',
                     dragOverId === row.id && 'ring-1 ring-inset ring-primary',
+                    keyboardFocused &&
+                      focusedRowId === row.id &&
+                      (activeSelected
+                        ? 'ring-2 ring-inset ring-primary-foreground/70'
+                        : 'bg-foreground/[0.07] ring-2 ring-inset ring-foreground/40'),
                   )}
+                  tabIndex={-1}
+                  data-finder-row={row.id}
                   data-track-category='SdlcHub'
                   data-track-name={row.kind === 'FOLDER' ? 'FolderOpened' : 'FinderCanvasOpened'}
                   data-track-metadata={JSON.stringify({ id: row.id })}
