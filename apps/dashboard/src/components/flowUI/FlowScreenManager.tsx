@@ -15,6 +15,7 @@ interface FlowScreenManagerProps {
   /** Called when the flow is fully closed (close_screen with empty stack) */
   onClose?: (finalMessage?: string) => void;
   messageContext?: FlowMessageContext;
+  compact?: boolean;
 }
 
 /**
@@ -36,6 +37,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
   conversationId,
   onClose,
   messageContext,
+  compact = false,
 }) => {
   const [screenStack, setScreenStack] = useState<FlowDefinition[]>([flow]);
 
@@ -162,7 +164,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
         conversationId={conversationId}
         {...(messageContext && { messageContext })}
         onAppAction={handleAppAction}
-        compact={false}
+        compact={compact}
       />
 
       {/* ── Popup for action-response screens ── */}

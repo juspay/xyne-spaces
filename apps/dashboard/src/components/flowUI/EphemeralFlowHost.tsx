@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useLocation } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { Dialog } from '../ui/Dialog';
 import { FlowScreenManager } from './FlowScreenManager';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import {
@@ -52,65 +51,37 @@ export const EphemeralFlowHost: React.FC = () => {
   if (!current) return null;
 
   const flowJSON = current.flowJSON;
-  const title = flowJSON?.title ?? 'Message';
-
   return (
-    <DialogPrimitive.Root open onOpenChange={open => !open && handleClose()}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0' />
-
-        <DialogPrimitive.Content
-          className='fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm focus:outline-none
-            data-[state=open]:animate-in data-[state=closed]:animate-out
-            data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
-            data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95
-            duration-200'
-        >
-          <DialogPrimitive.Title className='sr-only'>{title}</DialogPrimitive.Title>
-          <DialogPrimitive.Description className='sr-only'>
-            Ephemeral message — visible only to you, and gone when you reload
-          </DialogPrimitive.Description>
-
-          <div className='rounded-xl border border-border bg-popover text-popover-foreground shadow-xl overflow-hidden'>
-            <div className='flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted'>
-              <span className='text-xs font-semibold text-foreground uppercase tracking-wide'>
-                {title}
-              </span>
-              <button
-                onClick={handleClose}
-                className='rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-                aria-label='Close'
-                data-track-category='flow'
-                data-track-name='close-ephemeral'
-              >
-                <X className='size-3.5' />
-              </button>
-            </div>
-
-            <div className='px-4 py-3 max-h-[70vh] overflow-y-auto'>
-              {flowJSON ? (
-                // Rendered from the flow object the server sent, not by re-parsing
-                // the escaped copy embedded in `content`. `onClose` fires when the
-                // app answers a submit with close_screen, which is how an app
-                // dismisses its own card; `ack` deliberately leaves it open.
-                <FlowScreenManager
-                  key={current.messageId}
-                  flow={flowJSON}
-                  messageId={current.messageId}
-                  conversationId={current.conversationId}
-                  onClose={handleClose}
-                />
-              ) : (
-                <RenderMessageWithHTML
-                  message={current.content}
-                  messageId={current.messageId}
-                  conversationId={current.conversationId}
-                />
-              )}
-            </div>
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <Dialog
+      open
+      onOpenChange={open => !open && handleClose()}
+      title={flowJSON?.title ?? 'Message'}
+      description='Ephemeral message — visible only to you, and gone when you reload'
+      className='max-w-lg p-4 max-h-[85vh] overflow-hidden'
+    >
+      {flowJSON ? (
+        // Rendered from the flow object the server sent, not by re-parsing the
+        // escaped copy embedded in `content`. `onClose` fires when the app answers
+        // a submit with close_screen, which is how an app dismisses its own card;
+        // `ack` deliberately leaves it open.
+        <FlowScreenManager
+          key={current.messageId}
+          flow={flowJSON}
+          messageId={current.messageId}
+          conversationId={current.conversationId}
+          onClose={handleClose}
+          // This is a popup, so the first screen is a popup screen: bounded, with
+          // its action bar in a footer. Without this the Dialog scrolls the whole
+          // screen and the buttons sit below the fold.
+          compact
+        />
+      ) : (
+        <RenderMessageWithHTML
+          message={current.content}
+          messageId={current.messageId}
+          conversationId={current.conversationId}
+        />
+      )}
+    </Dialog>
   );
 };
