@@ -127,6 +127,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
   isDeleting = false,
 }) => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [editingField, setEditingField] = useState<EditableField | null>(null);
   const [editValue, setEditValue] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -184,7 +185,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className='p-1 text-muted-foreground hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-950 rounded transition-colors'
-              title='Delete document'
+              title={tc('memory.compareCard.deleteDocumentTooltip')}
               data-track-category='Memory'
               data-track-name='ShowDeleteConfirm'
             >
@@ -193,12 +194,14 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
           )}
           {showDeleteConfirm && (
             <div className='flex items-center gap-1'>
-              <span className='text-xs text-red-600'>Delete?</span>
+              <span className='text-xs text-red-600'>
+                {tc('memory.compareCard.deleteQuestion')}
+              </span>
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
                 className='h-auto p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-950 rounded transition-colors disabled:opacity-50'
-                title='Confirm delete'
+                title={tc('memory.compareCard.confirmDeleteTooltip')}
                 data-ph-capture-attribute-track-id='memory_confirm_delete_document'
                 data-track-category='Memory'
                 data-track-name='ConfirmDeleteDocument'
@@ -208,7 +211,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className='p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors'
-                title='Cancel delete'
+                title={tc('memory.compareCard.cancelDeleteTooltip')}
                 data-track-category='Memory'
                 data-track-name='CancelDeleteDocument'
               >
@@ -219,7 +222,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
           <button
             onClick={onRemove}
             className='p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors'
-            title='Remove from compare'
+            title={tc('memory.compareCard.removeFromCompareTooltip')}
             data-track-category='Memory'
             data-track-name='RemoveFromCompare'
           >
@@ -232,7 +235,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
       {(isUpdating || isDeleting) && (
         <div className='px-4 py-2 bg-blue-50 dark:bg-blue-950/30 border-b border-border'>
           <span className='text-xs text-blue-600 dark:text-blue-400'>
-            {isUpdating ? 'Saving…' : 'Deleting…'}
+            {isUpdating ? tc('memory.compareCard.saving') : tc('memory.compareCard.deleting')}
           </span>
         </div>
       )}
@@ -241,7 +244,8 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
       <div className='flex-1 overflow-auto p-4 space-y-4'>
         {/* User Query */}
         <EditableSection
-          label='User Query'
+          label={tc('memory.compareCard.userQueryLabel')}
+          trackId='UserQuery'
           labelClass={labelClass}
           isFieldEditing={editingField === 'userQuery'}
           canEdit={!!onUpdate}
@@ -269,7 +273,8 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
 
         {/* Summary */}
         <EditableSection
-          label='Summary'
+          label={tc('memory.compareCard.summaryLabel')}
+          trackId='Summary'
           labelClass={labelClass}
           isFieldEditing={editingField === 'rawContent'}
           canEdit={!!onUpdate}
@@ -293,7 +298,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                   </Markdown>
                 </div>
               ) : (
-                <p className='text-muted-foreground'>No summary</p>
+                <p className='text-muted-foreground'>{tc('memory.compareCard.noSummary')}</p>
               )}
             </div>
           }
@@ -301,9 +306,10 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
 
         {/* File Pointers */}
         <EditableSection
-          label='Files'
+          label={tc('memory.compareCard.filesLabel')}
+          trackId='Files'
           labelClass={labelClass}
-          editHint='one per line'
+          editHint={tc('memory.compareCard.filesHint')}
           isFieldEditing={editingField === 'filePointers'}
           canEdit={!!onUpdate}
           onStartEdit={() => startEdit('filePointers')}
@@ -338,9 +344,10 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
 
         {/* Tags */}
         <EditableSection
-          label='Tags'
+          label={tc('memory.compareCard.tagsLabel')}
+          trackId='Tags'
           labelClass={labelClass}
-          editHint='comma-separated'
+          editHint={tc('memory.compareCard.tagsHint')}
           isFieldEditing={editingField === 'tags'}
           canEdit={!!onUpdate}
           onStartEdit={() => startEdit('tags')}
@@ -378,13 +385,18 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
 
         {/* Metadata */}
         <div className='border-t pt-3'>
-          <h4 className={`${labelClass} block mb-2`}>Metadata</h4>
+          <h4 className={`${labelClass} block mb-2`}>{tc('memory.compareCard.metadataLabel')}</h4>
           <table className='w-full text-xs'>
             <tbody className='divide-y divide-border'>
-              <ReadOnlyRow label='Session' value={doc.sessionId} mono />
-              <ReadOnlyRow label='Repo' value={doc.repoUrl} />
+              <ReadOnlyRow
+                label={tc('memory.compareCard.sessionLabel')}
+                value={doc.sessionId}
+                mono
+              />
+              <ReadOnlyRow label={tc('memory.compareCard.repoLabel')} value={doc.repoUrl} />
               <EditableMetadataRow
-                label='Commit'
+                label={tc('memory.compareCard.commitLabel')}
+                trackId='Commit'
                 value={doc.commitId || ''}
                 isFieldEditing={editingField === 'commitId'}
                 canEdit={!!onUpdate}
@@ -396,8 +408,15 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                 isUpdating={isUpdating}
                 mono
               />
-              <ReadOnlyRow label='Ticket' value={doc.ticketId || ''} />
-              <ReadOnlyRow label='Parent Ref' value={doc.parentRef || ''} mono />
+              <ReadOnlyRow
+                label={tc('memory.compareCard.ticketLabel')}
+                value={doc.ticketId || ''}
+              />
+              <ReadOnlyRow
+                label={tc('memory.compareCard.parentRefLabel')}
+                value={doc.parentRef || ''}
+                mono
+              />
               <ReviewStatusRow
                 value={doc.reviewStatus}
                 isFieldEditing={editingField === 'reviewStatus'}
@@ -409,20 +428,33 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                 onEditChange={setEditValue}
                 isUpdating={isUpdating}
               />
-              <ReadOnlyRow label='Agent' value={doc.agentUsed} />
-              <ReadOnlyRow label='Models' value={doc.modelUsed?.join(', ')} />
-              <ReadOnlyRow label='Storage' value={doc.fileStoragePath} mono />
+              <ReadOnlyRow label={tc('memory.compareCard.agentLabel')} value={doc.agentUsed} />
+              <ReadOnlyRow
+                label={tc('memory.compareCard.modelsLabel')}
+                value={doc.modelUsed?.join(', ')}
+              />
+              <ReadOnlyRow
+                label={tc('memory.compareCard.storageLabel')}
+                value={doc.fileStoragePath}
+                mono
+              />
               <tr>
-                <td className='py-1 pr-3 text-muted-foreground font-medium w-24'>Created</td>
+                <td className='py-1 pr-3 text-muted-foreground font-medium w-24'>
+                  {tc('memory.compareCard.createdLabel')}
+                </td>
                 <td className='py-1'>{formatTimestamp(doc.createdAt)}</td>
               </tr>
               <tr>
-                <td className='py-1 pr-3 text-muted-foreground font-medium'>Updated</td>
+                <td className='py-1 pr-3 text-muted-foreground font-medium'>
+                  {tc('memory.compareCard.updatedLabel')}
+                </td>
                 <td className='py-1'>{formatTimestamp(doc.updatedAt)}</td>
               </tr>
               {doc.relevanceScore !== undefined && (
                 <tr>
-                  <td className='py-1 pr-3 text-muted-foreground font-medium'>Relevance</td>
+                  <td className='py-1 pr-3 text-muted-foreground font-medium'>
+                    {tc('memory.compareCard.relevanceLabel')}
+                  </td>
                   <td className='py-1'>{doc.relevanceScore.toFixed(4)}</td>
                 </tr>
               )}
@@ -437,6 +469,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
 /** Section with inline edit — label row has pencil icon on hover */
 const EditableSection: React.FC<{
   label: string;
+  trackId: string;
   labelClass: string;
   editHint?: string;
   isFieldEditing: boolean;
@@ -449,6 +482,7 @@ const EditableSection: React.FC<{
   viewContent: React.ReactNode;
 }> = ({
   label,
+  trackId,
   labelClass,
   editHint,
   isFieldEditing,
@@ -459,55 +493,58 @@ const EditableSection: React.FC<{
   isUpdating,
   editContent,
   viewContent,
-}) => (
-  <div className='group/field'>
-    <div className='flex items-center gap-1.5 mb-1.5'>
-      <span className={labelClass}>{label}</span>
-      {isFieldEditing ? (
-        <>
-          {editHint && (
-            <span className='text-xs text-muted-foreground font-normal normal-case tracking-normal'>
-              ({editHint})
-            </span>
-          )}
-          <div className='ml-auto flex items-center gap-0.5'>
-            <button
-              onClick={onSave}
-              disabled={isUpdating}
-              className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded transition-colors disabled:opacity-50'
-              title='Save'
-              data-ph-capture-attribute-track-id='memory_save_field_edit'
-              data-track-category='Memory'
-              data-track-name='SaveEdit'
-            >
-              <Check size={12} />
-            </button>
-            <button
-              onClick={onCancel}
-              className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors'
-              title='Cancel'
-              data-track-category='Memory'
-              data-track-name='CancelEdit'
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </>
-      ) : canEdit ? (
-        <button
-          onClick={onStartEdit}
-          className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors opacity-0 group-hover/field:opacity-100'
-          title={`Edit ${label.toLowerCase()}`}
-          data-track-category='Memory'
-          data-track-name={`StartEdit${label.replace(/\s+/g, '')}`}
-        >
-          <Pencil size={12} />
-        </button>
-      ) : null}
+}) => {
+  const { t: tc } = useTranslation('common');
+  return (
+    <div className='group/field'>
+      <div className='flex items-center gap-1.5 mb-1.5'>
+        <span className={labelClass}>{label}</span>
+        {isFieldEditing ? (
+          <>
+            {editHint && (
+              <span className='text-xs text-muted-foreground font-normal normal-case tracking-normal'>
+                ({editHint})
+              </span>
+            )}
+            <div className='ml-auto flex items-center gap-0.5'>
+              <button
+                onClick={onSave}
+                disabled={isUpdating}
+                className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded transition-colors disabled:opacity-50'
+                title={tc('memory.compareCard.saveTooltip')}
+                data-ph-capture-attribute-track-id='memory_save_field_edit'
+                data-track-category='Memory'
+                data-track-name='SaveEdit'
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={onCancel}
+                className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors'
+                title={tc('memory.compareCard.cancelTooltip')}
+                data-track-category='Memory'
+                data-track-name='CancelEdit'
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </>
+        ) : canEdit ? (
+          <button
+            onClick={onStartEdit}
+            className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors opacity-0 group-hover/field:opacity-100'
+            title={tc('memory.compareCard.editFieldTooltip', { field: label.toLowerCase() })}
+            data-track-category='Memory'
+            data-track-name={`StartEdit${trackId}`}
+          >
+            <Pencil size={12} />
+          </button>
+        ) : null}
+      </div>
+      {isFieldEditing ? editContent : viewContent}
     </div>
-    {isFieldEditing ? editContent : viewContent}
-  </div>
-);
+  );
+};
 
 /** Read-only metadata row */
 const ReadOnlyRow: React.FC<{ label: string; value?: string; mono?: boolean }> = ({
@@ -528,6 +565,7 @@ const ReadOnlyRow: React.FC<{ label: string; value?: string; mono?: boolean }> =
 /** Editable metadata row — pencil icon on hover, inline input when editing */
 const EditableMetadataRow: React.FC<{
   label: string;
+  trackId: string;
   value?: string;
   isFieldEditing: boolean;
   canEdit: boolean;
@@ -540,6 +578,7 @@ const EditableMetadataRow: React.FC<{
   mono?: boolean;
 }> = ({
   label,
+  trackId,
   value,
   isFieldEditing,
   canEdit,
@@ -551,6 +590,7 @@ const EditableMetadataRow: React.FC<{
   isUpdating,
   mono,
 }) => {
+  const { t: tc } = useTranslation('common');
   if (!isFieldEditing && !value && !canEdit) return null;
 
   return (
@@ -571,7 +611,7 @@ const EditableMetadataRow: React.FC<{
               onClick={onSave}
               disabled={isUpdating}
               className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
-              title='Save'
+              title={tc('memory.compareCard.saveTooltip')}
               data-ph-capture-attribute-track-id='memory_save_metadata_edit'
               data-track-category='Memory'
               data-track-name='SaveMetadataEdit'
@@ -581,7 +621,7 @@ const EditableMetadataRow: React.FC<{
             <button
               onClick={onCancel}
               className='p-0.5 text-muted-foreground hover:text-foreground rounded'
-              title='Cancel'
+              title={tc('memory.compareCard.cancelTooltip')}
               data-track-category='Memory'
               data-track-name='CancelMetadataEdit'
             >
@@ -597,9 +637,9 @@ const EditableMetadataRow: React.FC<{
               <button
                 onClick={onStartEdit}
                 className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors opacity-0 group-hover/metarow:opacity-100 flex-shrink-0'
-                title={`Edit ${label.toLowerCase()}`}
+                title={tc('memory.compareCard.editFieldTooltip', { field: label.toLowerCase() })}
                 data-track-category='Memory'
-                data-track-name={`StartEdit${label.replace(/\s+/g, '')}`}
+                data-track-name={`StartEdit${trackId}`}
               >
                 <Pencil size={10} />
               </button>
@@ -612,6 +652,12 @@ const EditableMetadataRow: React.FC<{
 };
 
 const REVIEW_STATUS_OPTIONS = ['pending', 'verified', 'rejected'] as const;
+
+const reviewStatusLabelKeys: Record<(typeof REVIEW_STATUS_OPTIONS)[number], string> = {
+  pending: 'memory.compareCard.reviewStatus.pending',
+  verified: 'memory.compareCard.reviewStatus.verified',
+  rejected: 'memory.compareCard.reviewStatus.rejected',
+};
 
 const reviewStatusColors: Record<string, { bg: string; text: string }> = {
   pending: { bg: 'bg-yellow-100 dark:bg-yellow-950', text: 'text-yellow-700 dark:text-yellow-300' },
@@ -641,15 +687,22 @@ const ReviewStatusRow: React.FC<{
   onEditChange,
   isUpdating,
 }) => {
+  const { t: tc } = useTranslation('common');
   if (!isFieldEditing && !value) return null;
 
   const colors = value
     ? reviewStatusColors[value] || { bg: 'bg-muted', text: 'text-muted-foreground' }
     : null;
+  const knownStatus: (typeof REVIEW_STATUS_OPTIONS)[number] | null =
+    value && (REVIEW_STATUS_OPTIONS as readonly string[]).includes(value)
+      ? (value as (typeof REVIEW_STATUS_OPTIONS)[number])
+      : null;
 
   return (
     <tr className='group/metarow'>
-      <td className='py-1 pr-3 text-muted-foreground font-medium w-24'>Status</td>
+      <td className='py-1 pr-3 text-muted-foreground font-medium w-24'>
+        {tc('memory.compareCard.statusLabel')}
+      </td>
       <td className='py-1'>
         {isFieldEditing ? (
           <div className='flex items-center gap-1'>
@@ -674,7 +727,7 @@ const ReviewStatusRow: React.FC<{
                   data-track-category='Memory'
                   data-track-name={`SelectStatus${opt}`}
                 >
-                  {opt}
+                  {tc(reviewStatusLabelKeys[opt])}
                 </button>
               );
             })}
@@ -682,7 +735,7 @@ const ReviewStatusRow: React.FC<{
               onClick={onSave}
               disabled={isUpdating}
               className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
-              title='Save'
+              title={tc('memory.compareCard.saveTooltip')}
               data-ph-capture-attribute-track-id='memory_save_status_edit'
               data-track-category='Memory'
               data-track-name='SaveStatusEdit'
@@ -692,7 +745,7 @@ const ReviewStatusRow: React.FC<{
             <button
               onClick={onCancel}
               className='p-0.5 text-muted-foreground hover:text-foreground rounded'
-              title='Cancel'
+              title={tc('memory.compareCard.cancelTooltip')}
               data-track-category='Memory'
               data-track-name='CancelStatusEdit'
             >
@@ -705,7 +758,7 @@ const ReviewStatusRow: React.FC<{
               <span
                 className={`px-2 py-0.5 text-xs font-semibold rounded ${colors.bg} ${colors.text}`}
               >
-                {value}
+                {knownStatus ? tc(reviewStatusLabelKeys[knownStatus]) : value}
               </span>
             ) : (
               <span className='text-muted-foreground'>—</span>
@@ -714,7 +767,7 @@ const ReviewStatusRow: React.FC<{
               <button
                 onClick={onStartEdit}
                 className='p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors opacity-0 group-hover/metarow:opacity-100 flex-shrink-0'
-                title='Edit status'
+                title={tc('memory.compareCard.editStatusTooltip')}
                 data-track-category='Memory'
                 data-track-name='StartEditStatus'
               >

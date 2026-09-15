@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   DataTable,
   ColumnDefinition,
@@ -59,7 +60,14 @@ interface MemoryTableProps {
   enableCompare?: boolean;
 }
 
+const reviewStatusLabelKeys: Record<string, string> = {
+  pending: 'memory.compareCard.reviewStatus.pending',
+  verified: 'memory.compareCard.reviewStatus.verified',
+  rejected: 'memory.compareCard.reviewStatus.rejected',
+};
+
 const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = false }) => {
+  const { t } = useTranslation('common');
   const context = useAuthContextValues();
   const isMemoryAdmin = useIsMemoryAdmin();
   const [currentPage, setCurrentPage] = useState(1);
@@ -249,13 +257,13 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
       : []),
     {
       field: 'docType',
-      header: 'Type',
+      header: t('memory.table.typeHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown): React.ReactElement => {
         const docType = value as string;
         return (
           <Tag
-            text={docType || 'N/A'}
+            text={docType || t('memory.table.notApplicable')}
             variant={TagVariant.SUBTLE}
             color={TagColor.NEUTRAL}
             size={TagSize.SM}
@@ -265,7 +273,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'userQuery',
-      header: 'User Query',
+      header: t('memory.table.userQueryHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => (
         <div className='max-w-[250px] line-clamp-2 text-foreground text-sm'>
@@ -275,7 +283,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'rawContent',
-      header: 'Summary',
+      header: t('memory.table.summaryHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         let rawContent = '';
@@ -299,7 +307,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'tags',
-      header: 'Tags',
+      header: t('memory.table.tagsHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const tagsStr = String(value);
@@ -325,7 +333,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'filePointers',
-      header: 'Files',
+      header: t('memory.table.filesHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const filesStr = String(value);
@@ -349,7 +357,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'repoUrl',
-      header: 'Repo URL',
+      header: t('memory.table.repoUrlHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const url = String(value);
@@ -366,12 +374,12 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'ticketId',
-      header: 'Ticket',
+      header: t('memory.table.ticketHeader'),
       type: ColumnType.TEXT,
     },
     {
       field: 'sessionId',
-      header: 'Session',
+      header: t('memory.table.sessionHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -385,7 +393,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'commitId',
-      header: 'Commit',
+      header: t('memory.table.commitHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -399,7 +407,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'agentUsed',
-      header: 'Agent',
+      header: t('memory.table.agentHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -411,7 +419,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'reviewStatus',
-      header: 'Review Status',
+      header: t('memory.table.reviewStatusHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -428,16 +436,17 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
           rejected: { bg: 'bg-red-100 dark:bg-red-950', text: 'text-red-700 dark:text-red-300' },
         };
         const colors = colorMap[val] || { bg: 'bg-muted', text: 'text-muted-foreground' };
+        const labelKey = reviewStatusLabelKeys[val];
         return (
           <span className={`px-2 py-0.5 text-xs font-semibold rounded ${colors.bg} ${colors.text}`}>
-            {val}
+            {labelKey ? t(labelKey) : val}
           </span>
         );
       },
     },
     {
       field: 'parentRef',
-      header: 'Parent Ref',
+      header: t('memory.table.parentRefHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -451,7 +460,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'createdAt',
-      header: 'Created At',
+      header: t('memory.table.createdAtHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -471,7 +480,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
     },
     {
       field: 'updatedAt',
-      header: 'Updated At',
+      header: t('memory.table.updatedAtHeader'),
       type: ColumnType.TEXT,
       renderCell: (value: unknown) => {
         const val = String(value);
@@ -524,7 +533,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
       {filters.sessionIdFilter.trim() && isMemoryAdmin && (
         <div className='flex items-center justify-between px-2 py-2 mb-2 rounded-md bg-muted/50 border border-border'>
           <span className='text-sm text-muted-foreground'>
-            Showing session:{' '}
+            {t('memory.table.showingSession')}{' '}
             <span className='font-mono text-xs text-foreground'>
               {filters.sessionIdFilter.trim()}
             </span>
@@ -534,20 +543,22 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               const sessionId = filters.sessionIdFilter.trim();
               deleteSessionMutation.mutate([sessionId], {
                 onSuccess: () => {
-                  toast.success('Session deleted from Vespa memory');
+                  toast.success(t('memory.table.sessionDeleted'));
                 },
-                onError: () => toast.error('Failed to delete session'),
+                onError: () => toast.error(t('memory.table.sessionDeleteFailed')),
               });
             }}
             disabled={deleteSessionMutation.isPending}
             className='h-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-            title='Delete all Vespa memory docs for this session'
+            title={t('memory.table.deleteSessionTooltip')}
             data-ph-capture-attribute-track-id='memory_delete_session'
             data-track-category='Memory'
             data-track-name='DeleteSession'
           >
             <Trash2 size={12} />
-            {deleteSessionMutation.isPending ? 'Deleting…' : 'Delete Session'}
+            {deleteSessionMutation.isPending
+              ? t('memory.table.deleting')
+              : t('memory.table.deleteSession')}
           </button>
         </div>
       )}
@@ -605,7 +616,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {selectedDocument.userQuery && (
                 <div>
                   <h3 className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider'>
-                    User Query
+                    {t('memory.table.userQueryHeader')}
                   </h3>
                   <div className='text-sm bg-muted/50 rounded px-3 py-2 border border-border'>
                     <RenderMessageWithHTML message={selectedDocument.userQuery} />
@@ -616,7 +627,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {/* Summary - Use rawContent */}
               <div>
                 <h3 className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider'>
-                  Summary
+                  {t('memory.table.summaryHeader')}
                 </h3>
                 <div className='text-sm text-foreground space-y-2'>
                   {selectedDocument.rawContent ? (
@@ -626,7 +637,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                       </Markdown>
                     </div>
                   ) : (
-                    <p className='text-muted-foreground'>No summary available</p>
+                    <p className='text-muted-foreground'>{t('memory.table.noSummaryAvailable')}</p>
                   )}
                 </div>
               </div>
@@ -635,7 +646,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {selectedDocument.filePointers?.length > 0 && (
                 <div>
                   <h3 className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider'>
-                    File Pointers
+                    {t('memory.table.filePointersHeader')}
                   </h3>
                   <div className='space-y-1'>
                     {selectedDocument.filePointers.map((file, idx) => (
@@ -655,7 +666,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {selectedDocument.tags?.length > 0 && (
                 <div>
                   <h3 className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider'>
-                    Tags
+                    {t('memory.table.tagsHeader')}
                   </h3>
                   <div className='flex flex-wrap gap-1.5'>
                     {selectedDocument.tags.map(tag => (
@@ -673,18 +684,20 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
               {/* Metadata */}
               <div className='border-t pt-4'>
                 <h3 className='text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider'>
-                  Metadata
+                  {t('memory.compareCard.metadataLabel')}
                 </h3>
                 <table className='w-full text-xs'>
                   <tbody className='divide-y divide-border'>
                     <tr>
-                      <td className='py-1.5 pr-4 text-muted-foreground font-medium w-32'>Doc ID</td>
+                      <td className='py-1.5 pr-4 text-muted-foreground font-medium w-32'>
+                        {t('memory.table.docIdLabel')}
+                      </td>
                       <td className='py-1.5 font-mono'>{selectedDocument.docId}</td>
                     </tr>
                     {selectedDocument.sessionId && (
                       <tr>
                         <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
-                          Session ID
+                          {t('memory.table.sessionIdLabel')}
                         </td>
                         <td className='py-1.5 font-mono'>{selectedDocument.sessionId}</td>
                       </tr>
@@ -692,7 +705,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                     {selectedDocument.parentRef && (
                       <tr>
                         <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
-                          Parent Doc
+                          {t('memory.table.parentDocLabel')}
                         </td>
                         <td className='py-1.5 font-mono'>{selectedDocument.parentRef}</td>
                       </tr>
@@ -700,7 +713,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                     {selectedDocument.reviewStatus && (
                       <tr>
                         <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
-                          Review Status
+                          {t('memory.table.reviewStatusHeader')}
                         </td>
                         <td className='py-1.5'>
                           {(() => {
@@ -722,11 +735,12 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                             const colors = (
                               colorMap as Record<string, { bg: string; text: string }>
                             )[val] || { bg: 'bg-muted', text: 'text-muted-foreground' };
+                            const labelKey = reviewStatusLabelKeys[val];
                             return (
                               <span
                                 className={`px-2 py-0.5 text-xs font-semibold rounded ${colors.bg} ${colors.text}`}
                               >
-                                {val}
+                                {labelKey ? t(labelKey) : val}
                               </span>
                             );
                           })()}
@@ -735,13 +749,17 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                     )}
                     {selectedDocument.userId && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>User ID</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.userIdLabel')}
+                        </td>
                         <td className='py-1.5'>{selectedDocument.userId}</td>
                       </tr>
                     )}
                     {selectedDocument.repoUrl && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Repo URL</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.repoUrlHeader')}
+                        </td>
                         <td className='py-1.5 break-all text-primary'>
                           {selectedDocument.repoUrl}
                         </td>
@@ -749,32 +767,40 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                     )}
                     {selectedDocument.commitId && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Commit ID</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.commitIdLabel')}
+                        </td>
                         <td className='py-1.5 font-mono'>{selectedDocument.commitId}</td>
                       </tr>
                     )}
                     {selectedDocument.ticketId && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Ticket ID</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.ticketIdLabel')}
+                        </td>
                         <td className='py-1.5'>{selectedDocument.ticketId}</td>
                       </tr>
                     )}
                     {selectedDocument.agentUsed && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Agent</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.agentHeader')}
+                        </td>
                         <td className='py-1.5'>{selectedDocument.agentUsed}</td>
                       </tr>
                     )}
                     {selectedDocument.modelUsed?.length > 0 && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Models</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.modelsLabel')}
+                        </td>
                         <td className='py-1.5'>{selectedDocument.modelUsed.join(', ')}</td>
                       </tr>
                     )}
                     {selectedDocument.fileStoragePath && (
                       <tr>
                         <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
-                          Storage Path
+                          {t('memory.table.storagePathLabel')}
                         </td>
                         <td className='py-1.5 font-mono break-all'>
                           {selectedDocument.fileStoragePath}
@@ -782,18 +808,22 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                       </tr>
                     )}
                     <tr>
-                      <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Created</td>
+                      <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                        {t('memory.table.createdLabel')}
+                      </td>
                       <td className='py-1.5'>{formatTimestamp(selectedDocument.createdAt)}</td>
                     </tr>
                     <tr>
-                      <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Updated</td>
+                      <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                        {t('memory.table.updatedLabel')}
+                      </td>
                       <td className='py-1.5'>{formatTimestamp(selectedDocument.updatedAt)}</td>
                     </tr>
                     {typeof selectedDocument.committedAt === 'number' &&
                       selectedDocument.committedAt > 0 && (
                         <tr>
                           <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
-                            Committed
+                            {t('memory.table.committedLabel')}
                           </td>
                           <td className='py-1.5'>
                             {formatTimestamp(selectedDocument.committedAt)}
@@ -802,7 +832,9 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                       )}
                     {selectedDocument.relevanceScore !== undefined && (
                       <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Relevance</td>
+                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                          {t('memory.table.relevanceLabel')}
+                        </td>
                         <td className='py-1.5'>{selectedDocument.relevanceScore.toFixed(4)}</td>
                       </tr>
                     )}
@@ -818,7 +850,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
       {enableCompare && selectedForCompare.size > 0 && (
         <div className='fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-background border border-border rounded-lg shadow-lg px-5 py-3'>
           <span className='text-sm text-foreground font-medium'>
-            {selectedForCompare.size} selected
+            {t('memory.table.selectedCount', { count: selectedForCompare.size })}
           </span>
           <button
             onClick={() => setIsCompareOpen(true)}
@@ -827,7 +859,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
             data-track-category='Memory'
             data-track-name='OpenCompareView'
           >
-            Compare
+            {t('memory.table.compare')}
           </button>
           <button
             onClick={clearCompareSelection}
@@ -835,7 +867,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
             data-track-category='Memory'
             data-track-name='ClearCompareSelection'
           >
-            Clear
+            {t('memory.table.clear')}
           </button>
         </div>
       )}

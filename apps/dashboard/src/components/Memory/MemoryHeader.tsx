@@ -16,6 +16,7 @@ interface MemoryHeaderProps {
 
 const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange }) => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -47,14 +48,12 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
           setPendingFiles([]);
           setRepoUrl('');
           const count = data.files.length;
-          toast.success(`${count} file${count !== 1 ? 's' : ''} queued for ingestion`);
+          toast.success(tc('memory.header.filesQueued', { count }));
           if (data.rejected && data.rejected.length > 0) {
-            toast.warning(
-              `${data.rejected.length} file(s) rejected: only .txt and .md are supported`,
-            );
+            toast.warning(tc('memory.header.filesRejected', { count: data.rejected.length }));
           }
         },
-        onError: () => toast.error('Failed to upload documents'),
+        onError: () => toast.error(tc('memory.header.uploadFailed')),
       },
     );
   };
@@ -63,11 +62,11 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
     cleanupMutation.mutate(undefined, {
       onSuccess: () => {
         setShowCleanupConfirm(false);
-        toast.success('All Vespa memory documents deleted');
+        toast.success(tc('memory.header.allDeleted'));
       },
       onError: () => {
         setShowCleanupConfirm(false);
-        toast.error('Cleanup failed');
+        toast.error(tc('memory.header.cleanupFailed'));
       },
     });
   };
@@ -126,8 +125,8 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
   const docTypeOptions = ['fact', 'sop'];
   const scopeOptions = [
-    { label: 'Mine', value: 'my' },
-    { label: 'All', value: 'all' },
+    { labelKey: 'memory.header.scopeMine', value: 'my' },
+    { labelKey: 'memory.header.scopeAll', value: 'all' },
   ];
 
   const getSearchPlaceholder = (): string => {
@@ -163,7 +162,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
         <div className='flex items-center gap-3'>
           <Brain size={24} className='text-purple-600' />
           <h1 className='font-semibold text-xl leading-[32px] tracking-normal text-foreground whitespace-nowrap'>
-            Context
+            {tc('memory.header.heading')}
           </h1>
         </div>
 
@@ -183,12 +182,14 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadMutation.isPending}
             className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-            title='Upload .txt or .md files to ingest as SOPs/Facts'
+            title={tc('memory.header.uploadTooltip')}
             data-track-category='Memory'
             data-track-name='UploadDocuments'
           >
             <Upload size={14} />
-            {uploadMutation.isPending ? 'Uploading…' : 'Upload Docs'}
+            {uploadMutation.isPending
+              ? tc('memory.header.uploading')
+              : tc('memory.header.uploadDocs')}
           </button>
 
           {isMemoryAdmin && (
@@ -196,12 +197,14 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               onClick={() => setShowCleanupConfirm(true)}
               disabled={cleanupMutation.isPending}
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 bg-background text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              title='Delete ALL documents from Vespa memory — irreversible'
+              title={tc('memory.header.cleanupTooltip')}
               data-track-category='Memory'
               data-track-name='CleanupAllVespaMemory'
             >
               <Trash2 size={14} />
-              {cleanupMutation.isPending ? 'Deleting…' : 'Cleanup All'}
+              {cleanupMutation.isPending
+                ? tc('memory.header.deleting')
+                : tc('memory.header.cleanupAll')}
             </button>
           )}
         </div>
@@ -220,24 +223,24 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
         className='max-w-sm'
       >
         <div className='p-6 space-y-4'>
-          <h2 className='text-base font-semibold text-foreground'>Upload documents</h2>
+          <h2 className='text-base font-semibold text-foreground'>
+            {tc('memory.header.uploadDocumentsHeading')}
+          </h2>
           <p className='text-sm text-muted-foreground'>
-            {pendingFiles.length} file{pendingFiles.length !== 1 ? 's' : ''} selected:{' '}
+            {tc('memory.header.filesSelected', { count: pendingFiles.length })}{' '}
             <span className='text-foreground'>{pendingFiles.map(f => f.name).join(', ')}</span>
           </p>
 
           <div className='space-y-1'>
             <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-              Repository URL <span className='text-red-500'>*</span>
+              {tc('memory.header.repositoryUrl')} <span className='text-red-500'>*</span>
             </p>
             <TextInput
               placeholder={t('memory.header.repoUrlPlaceholder')}
               value={repoUrl}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRepoUrl(e.target.value)}
             />
-            <p className='text-xs text-muted-foreground'>
-              Scope ingested knowledge to a specific repository for better retrieval.
-            </p>
+            <p className='text-xs text-muted-foreground'>{tc('memory.header.repoUrlHint')}</p>
           </div>
 
           <div className='flex justify-end gap-2'>
@@ -251,7 +254,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='CancelUploadDocuments'
             >
-              Cancel
+              {tc('memory.header.cancel')}
             </button>
             <button
               onClick={handleUploadSubmit}
@@ -261,7 +264,9 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='ConfirmUploadDocuments'
             >
-              {uploadMutation.isPending ? 'Uploading…' : 'Upload'}
+              {uploadMutation.isPending
+                ? tc('memory.header.uploading')
+                : tc('memory.header.upload')}
             </button>
           </div>
         </div>
@@ -270,11 +275,15 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
       {/* Cleanup confirmation dialog — admin only */}
       <Dialog open={showCleanupConfirm} onOpenChange={setShowCleanupConfirm} className='max-w-sm'>
         <div className='p-6 space-y-4'>
-          <h2 className='text-base font-semibold text-foreground'>Delete all Vespa memory?</h2>
+          <h2 className='text-base font-semibold text-foreground'>
+            {tc('memory.header.deleteAllHeading')}
+          </h2>
           <p className='text-sm text-muted-foreground'>
-            This will permanently delete{' '}
-            <span className='font-medium text-foreground'>all SOP and Fact documents</span> from the
-            Vespa memory schema for all users. This action cannot be undone.
+            {tc('memory.header.deleteAllPrefix')}{' '}
+            <span className='font-medium text-foreground'>
+              {tc('memory.header.deleteAllTarget')}
+            </span>{' '}
+            {tc('memory.header.deleteAllSuffix')}
           </p>
           <div className='flex justify-end gap-2'>
             <button
@@ -283,7 +292,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='CancelCleanupVespaMemory'
             >
-              Cancel
+              {tc('memory.header.cancel')}
             </button>
             <button
               onClick={handleCleanupConfirm}
@@ -293,7 +302,9 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='ConfirmCleanupVespaMemory'
             >
-              {cleanupMutation.isPending ? 'Deleting…' : 'Delete All'}
+              {cleanupMutation.isPending
+                ? tc('memory.header.deleting')
+                : tc('memory.header.deleteAll')}
             </button>
           </div>
         </div>
@@ -324,11 +335,11 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
                     ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                     : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
-                title='Include user query in search ranking'
+                title={tc('memory.header.includeQueryTooltip')}
                 data-track-category='Memory'
                 data-track-name='ToggleIncludeQuery'
               >
-                Query
+                {tc('memory.header.query')}
               </button>
               <button
                 onClick={() => {
@@ -341,11 +352,11 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
                     ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                     : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
-                title='Include summary in search ranking'
+                title={tc('memory.header.includeSummaryTooltip')}
                 data-track-category='Memory'
                 data-track-name='ToggleIncludeSummary'
               >
-                Summary
+                {tc('memory.header.summary')}
               </button>
             </div>
           </div>
@@ -356,7 +367,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='ClearAllFilters'
             >
-              <span>Clear All</span>
+              <span>{tc('memory.header.clearAll')}</span>
             </button>
           )}
         </div>
@@ -369,7 +380,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               data-track-category='Memory'
               data-track-name='ClearFilters'
             >
-              <span>Clear Filters</span>
+              <span>{tc('memory.header.clearFiltersLabel')}</span>
             </button>
           )}
 
@@ -378,7 +389,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             items={[
               {
                 items: scopeOptions.map(option => ({
-                  label: option.label,
+                  label: tc(option.labelKey),
                   value: option.value,
                 })),
               },
