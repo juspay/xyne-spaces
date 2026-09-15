@@ -191,6 +191,17 @@ export class MessageAttachmentRepository {
     });
   }
 
+  /** Removes the attachments owned by note-taker recordings. */
+  async deleteByRecordingIds(recordingIds: string[]): Promise<void> {
+    if (recordingIds.length === 0) return;
+    await this.db.messageAttachment.deleteMany({
+      where: {
+        entityId: { in: recordingIds },
+        entityType: AttachmentEntityType.RECORDING,
+      },
+    });
+  }
+
   async findByTicketId(ticketId: string): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {

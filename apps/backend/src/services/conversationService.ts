@@ -18,7 +18,7 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, buildInitialMessageMd } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -89,6 +89,8 @@ export interface CreateConversationWithMessageParams {
   suppressAutomations?: boolean;
   /** Caller replays MessagesSideEffectHandler.onInsert itself, which already emits MESSAGE_RECEIVED for the initial message — don't emit it twice. */
   emitsMessageReceivedViaSideEffects?: boolean;
+  /** Slack migration import: with FILE_CONTENT_ENABLED=false, attachment Vespa feeds are downgraded to metadata-only. */
+  isMigrationImport?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -109,6 +111,8 @@ export interface AddMessageToConversationParams {
   markParticipantsRead?: boolean;
   /** Migration import: skip live-only side effects (TICKET_COMMENTED automations, meet-link extraction) so bulk-imported history never fires workflows. */
   suppressAutomations?: boolean;
+  /** Slack migration import: with FILE_CONTENT_ENABLED=false, attachment Vespa feeds are downgraded to metadata-only. */
+  isMigrationImport?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -274,12 +278,24 @@ export class ConversationService {
     attachments: Array<{ id: string; mimetype: string }>,
     userId: string,
     workspaceId?: string,
-    createdAt?: Date
+    createdAt?: Date,
+    // Slack migration import. With FILE_CONTENT_ENABLED=false such attachments get a
+    // single metadata-only feed (nameOnly) instead of the full-content one: the worker
+    // then skips the GCS download + parse (mapper) and never routes the file to the OCR
+    // scheduler, so the file is searchable by name with none of the parse cost.
+    isMigrationImport = false,
   ): Promise<void> {
     if (attachments.length === 0) return;
 
     // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
     const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    const metadataOnly = isMigrationImport && !config.fileContentFeed.enabled;
+    if (metadataOnly) {
+      logger.info(
+        `[ConversationService] FILE_CONTENT_ENABLED=false — feeding ${supportedAttachments.length} migrated attachment(s) metadata-only (no content)`
+      );
+    }
 
     const queue = this.pickVespaQueue(createdAt);
     for (const attachment of supportedAttachments) {
@@ -289,6 +305,7 @@ export class ConversationService {
         docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT,
         ...(workspaceId ? { workspaceId } : {}),
+        ...(metadataOnly ? { nameOnly: true } : {}),
       }).catch(async (error) => {
         logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
@@ -343,6 +360,7 @@ export class ConversationService {
       pinned,
       suppressAutomations = false,
       emitsMessageReceivedViaSideEffects = false,
+      isMigrationImport = false,
     } = params;
 
     // Check if channel exists
@@ -388,34 +406,57 @@ export class ConversationService {
 
     const messageContent = await replaceEmojisInContent(content?.trim() || '');
 
-    // First create the message
-    const messageData: CreateMessageInput = {
-      conversationId: 'temp', // Will be updated after conversation creation
-      senderId: userId,
-      content: messageContent,
-      msgType: msgType || MessageType.USER,
-      hasAttachment: processedFiles.length > 0,
-      metadata: {
-        ...messageMetadata,
-        contentFormat: isMarkdown ? 'markdown' : 'html',
-      },
-      ...(createdAt && { createdAt }),
+    // Both ids are minted here so the conversation can carry a complete
+    // initial_message_md on its INSERT. The alternative — insert a placeholder,
+    // then patch initialMessageId, then patch the md — is three commits, and
+    // between the first and the last the conversation is live with no message
+    // body for every subscriber.
+    const conversationId = uuidv4();
+    const messageId = uuidv4();
+    const resolvedMsgType = msgType || MessageType.USER;
+    const messageCreatedAt = createdAt ?? new Date();
+    const resolvedMessageMetadata = {
+      ...messageMetadata,
+      contentFormat: isMarkdown ? 'markdown' : 'html',
     };
 
-    // Create a placeholder conversation first
+    const messageData: CreateMessageInput = {
+      messageId,
+      conversationId,
+      senderId: userId,
+      content: messageContent,
+      msgType: resolvedMsgType,
+      hasAttachment: processedFiles.length > 0,
+      metadata: resolvedMessageMetadata,
+      createdAt: messageCreatedAt,
+    };
+
     const conversationData: CreateConversationInput = {
+      conversationId,
       channelId,
       createdBy: userId,
-      initialMessageId: 'temp', // Will be updated after message creation
+      initialMessageId: messageId,
+      initial_message_md: buildInitialMessageMd({
+        messageId,
+        conversationId,
+        workspaceId: channel.workspaceId,
+        senderId: userId,
+        content: messageContent,
+        msgType: resolvedMsgType,
+        hasAttachment: processedFiles.length > 0,
+        createdAt: messageCreatedAt.getTime(),
+        metadata: resolvedMessageMetadata,
+        // Mirror the messages column defaults the insert below relies on, so the
+        // snapshot matches the row it describes.
+        isSent: true,
+        nudgeCount: 0,
+      }),
       metadata,
       pinned: pinned || false,
       ...(createdAt && { createdAt }),
     };
 
     const conversation = await this.conversationRepository.create(conversationData);
-
-    // Update message with real conversation ID
-    messageData.conversationId = conversation.conversationId;
     const message = await this.messageRepository.create(messageData);
 
     if (await this.userRepository.findById(userId)) {
@@ -472,7 +513,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt, isMigrationImport).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
         });
       }
@@ -485,12 +526,6 @@ export class ConversationService {
         error
       );
     });
-
-    // Update conversation with real initial message ID
-    await this.conversationRepository.update(conversation.conversationId, {
-      initialMessageId: message.messageId,
-    });
-    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     if (
       !suppressAutomations &&
@@ -584,6 +619,7 @@ export class ConversationService {
       isAddingParticipant = true,
       markParticipantsRead = false,
       suppressAutomations = false,
+      isMigrationImport = false,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -711,7 +747,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt).catch(error => {
+        this.pushVespaJobForAttachments(attachments, userId, channel?.workspaceId, message.createdAt, isMigrationImport).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
@@ -755,19 +791,32 @@ export class ConversationService {
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
+        initial_message_md: buildInitialMessageMd({
+          ...message,
+          msgType: message.msgType as MessageType,
+          createdAt: message.createdAt.getTime(),
+        }),
         parentMessageId: conversation.initialMessageId,
         pinned: false,
       });
-      await messageMetadataService.syncInitialMessageMd(childConversationId);
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
-    await this.conversationRepository.incrementReplyCount(
+    // Single conversations write: replyCount, lastActivityAt and replies_md were
+    // three separate commits against this row, each replayed through every
+    // subscribed Zero pipeline. replies_md is read immediately before the write
+    // so the lost-update window stays as narrow as the previous append's was.
+    const replyAppliedAt = new Date();
+    await this.conversationRepository.applyThreadReply({
       conversationId,
-      createdAt === undefined ? undefined : message.createdAt,
+      repliesMd: messageMetadataService.buildRepliesMdAfterReply(
+        await this.conversationRepository.findRepliesMd(conversationId),
+        userId,
+      ),
+      lastActivityAt: lastActivityAt ?? replyAppliedAt,
+      replyCreatedAt: createdAt === undefined ? replyAppliedAt : message.createdAt,
       markParticipantsRead,
-    );
-    await messageMetadataService.addReply(conversationId, userId);
+    });
 
     // Update reply count for previous message's child conversation if it exists
     // This matches the mutator logic - get the most recent previous message and check if it has showInChannel
@@ -780,13 +829,6 @@ export class ConversationService {
     if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
       await this.conversationRepository.update(mostRecentPrevMsg.childConversationId, {
         replyCount: 1,
-      });
-    }
-
-    // Update last activity for the conversation
-    if (lastActivityAt) {
-      await this.conversationRepository.update(conversationId, {
-        lastActivityAt: lastActivityAt,
       });
     }
 

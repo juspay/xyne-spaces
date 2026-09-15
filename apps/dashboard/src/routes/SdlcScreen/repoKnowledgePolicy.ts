@@ -67,3 +67,10 @@ export const CANCEL_REPO_KNOWLEDGE: RepoKnowledgeAction = {
 export function repoKnowledgeAction(phase: RepoKnowledgePhase): RepoKnowledgeAction {
   return phase === 'RUNNING' ? CANCEL_REPO_KNOWLEDGE : RUN_REPO_KNOWLEDGE;
 }
+
+export type RepoSetupExecution = {
+  id: string;
+  status: string;
+  context: string | null;
+  updatedAt: number | null;
+};

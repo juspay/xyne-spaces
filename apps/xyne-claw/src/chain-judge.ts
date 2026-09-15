@@ -8,6 +8,40 @@ import { LITELLM } from "./config.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("chain-judge");
 
+export interface ChainJudgeToolInvocation {
+  toolName?: string;
+  command?: string;
+  isError?: boolean;
+}
+
+const JUDGE_RESULT_LIMIT = 8000;
+const JUDGE_INVOCATION_LIMIT = 40;
+const JUDGE_COMMAND_EXCERPT_LIMIT = 200;
+const JUDGE_INVOCATION_BLOCK_LIMIT = 4000;
+
+function summarizeInvocations(invocations: ChainJudgeToolInvocation[] | undefined): string {
+  if (!invocations?.length) return "";
+  const lines: string[] = [];
+  let used = 0;
+  for (const inv of invocations.slice(0, JUDGE_INVOCATION_LIMIT)) {
+    const name = typeof inv?.toolName === "string" ? inv.toolName : "";
+    if (!name) continue;
+    const rawCommand = typeof inv?.command === "string" ? inv.command.replace(/\s+/g, " ").trim() : "";
+    const command =
+      rawCommand.length > JUDGE_COMMAND_EXCERPT_LIMIT
+        ? `${rawCommand.slice(0, JUDGE_COMMAND_EXCERPT_LIMIT)}…`
+        : rawCommand;
+    const line = `- ${name}${command ? `: ${command}` : ""}${inv?.isError ? " [error]" : ""}`;
+    if (used + line.length > JUDGE_INVOCATION_BLOCK_LIMIT) {
+      lines.push("- … (truncated)");
+      break;
+    }
+    used += line.length;
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 export async function judgeChainContinuation(
   agentResult: string,
   sourceAgent: string,
@@ -15,20 +49,25 @@ export async function judgeChainContinuation(
   taskTemplate?: string,
   userQuery?: string,
   judgeContext?: string,
+  toolInvocations?: ChainJudgeToolInvocation[],
 ): Promise<{ action: "continue" | "stop"; reason: string }> {
   try {
     const contextParts: string[] = [];
     if (userQuery) contextParts.push(`User's original request: "${userQuery}"`);
     if (taskTemplate) contextParts.push(`If continued, "${targetAgent}" will be asked: "${taskTemplate}"`);
-    if (judgeContext) contextParts.push(`Decision guidelines from the chain owner:\n${judgeContext}`);
     contextParts.push(`Agent "${sourceAgent}" just finished and produced the output below.`);
     contextParts.push(`You must decide: should "${targetAgent}" be triggered next?`);
 
+    const invocationSummary = summarizeInvocations(toolInvocations);
+
     const userContent = [
       ...contextParts,
+      ...(invocationSummary
+        ? ["", `--- ${sourceAgent} Tool Calls ---`, invocationSummary]
+        : []),
       "",
       `--- ${sourceAgent} Output ---`,
-      agentResult.slice(0, 2000),
+      agentResult.slice(0, JUDGE_RESULT_LIMIT),
     ].join("\n");
 
     const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
@@ -43,6 +82,16 @@ export async function judgeChainContinuation(
           {
             role: "system",
             content: `You control an agent chain. Two agents collaborate to fulfill the user's request.
+${
+  judgeContext
+    ? `
+OVERRIDING RULE FROM THE CHAIN OWNER — this OUTRANKS every default rule below. If it conflicts with the defaults, follow it and ignore the conflicting default. If its condition for continuing is not clearly met by the agent's output and tool calls, answer STOP.
+"""
+${judgeContext}
+"""
+`
+    : ""
+}
 
 Your job: read the agent's output and decide CONTINUE or STOP, then call the \`decide\` tool with your decision.
 

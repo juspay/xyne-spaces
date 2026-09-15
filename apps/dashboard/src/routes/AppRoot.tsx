@@ -131,6 +131,8 @@ import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
+import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
@@ -972,6 +974,8 @@ const AppRoot = (): ReactElement => {
                           ) : (
                             <RecordingOverlay />
                           )}
+                          <RecordingCameraBubble />
+                          <ScreenPickerHost />
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
-import { findOrCreateConversation, updateConversation, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
+import { findOrCreateConversation, updateConversation, deleteConversationMessage, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
 import { repositories } from '@/database/repositories';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
@@ -72,6 +72,15 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
 }).refine(
   data => !!data.text || !!data.markdownText || !!data.flowJSON || (data.attachments && data.attachments.length > 0),
   { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] }
+);
+
+const DeleteMessageBodySchema = z.object({
+  messageId: z.string().min(1, 'Message ID is required').trim(),
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required', path: ['channelId'] }
 );
 
 const ChannelHistoryQuerySchema = z.object({
@@ -400,6 +409,56 @@ export class ChatController {
         }
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+
+  /**
+   * Delete an app-authored bot message.
+   * POST /api/external-event/chat/deleteMessage
+   */
+  deleteMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = DeleteMessageBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+        return;
+      }
+
+      const { messageId, channelId, channelName } = bodyResult.data;
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
+      const message = await repositories.messages.findById(messageId);
+      if (!message) {
+        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      const conversation = await repositories.conversations.findById(message.conversationId);
+      if (!conversation || conversation.channelId !== resolvedChannelId) {
+        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      if (message.senderId !== userId || message.msgType !== MessageType.BOT) {
+        res.status(403).json({ error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const result = await deleteConversationMessage(messageId, userId);
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error deleting message:', error);
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
+        return;
+      }
       res.status(500).json({ error: 'Internal server error' });
     }
   };

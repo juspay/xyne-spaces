@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import type { StdioMcpAdapter } from "../types.js";
-import { WORKFLOW_WRITE_TOOL_NAMES } from "../servers/xyne-workflows-tools.js";
 
 const SERVER_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -12,7 +11,7 @@ export const xyneWorkflowsAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "xyne-workflows",
   healthCheck: { name: "workflow_catalog", params: {} },
-  writeTools: [...WORKFLOW_WRITE_TOOL_NAMES],
+  writeTools: [],
   credentialFields: [],
   buildCommand(credentials) {
     const url = String(

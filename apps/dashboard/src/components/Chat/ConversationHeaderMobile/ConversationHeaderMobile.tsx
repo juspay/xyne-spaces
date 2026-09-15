@@ -303,6 +303,7 @@ const ConversationHeaderMobile = ({
               isMember={!!channelUserStatus}
               className={cn('rounded-full', floatingButtonClass)}
               disabled={channel.isArchived}
+              trackSource='chat_header_mobile'
             />
           </div>
         </div>

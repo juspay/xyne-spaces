@@ -199,6 +199,8 @@ model Ticket {
   @@index([projectId, createdAt(sort: Desc), id])
   @@index([projectId, isArchived, statusV2, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, statusV2, isArchived, rootId, createdAt(sort: Desc), id])
+  @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
@@ -492,7 +494,7 @@ model WorkflowExecution {
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model WorkflowExecutionState {
@@ -2517,7 +2519,11 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  // NOT @updatedAt: clients sort, cursor-paginate AND render the row timestamp from
+  // this column (zero/queries.ts userActivitiesPaginatedV2, ActivityItemCard.tsx),
+  // so bumping it is user-visible. Set it explicitly at the few sites that intend to
+  // re-surface a row; bookkeeping writes must leave it alone.
+  updatedAt       DateTime @default(now())
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
@@ -2930,6 +2936,7 @@ model CallRecording {
   storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
+  attachmentId  String?                          // RECORDING message_attachments row (note-taker recordings)
   startedAt     DateTime                         // Set explicitly in code (no DB default — team convention)
   endedAt       DateTime?
   createdAt     DateTime                         // Set explicitly in code (no DB default — team convention)
