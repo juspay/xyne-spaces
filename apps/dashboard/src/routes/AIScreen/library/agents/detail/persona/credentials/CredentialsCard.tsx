@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { ChevronBigDown } from '@xyne/icons';
 import { Pill } from '../../../../shared/primitives/Pill';
 import {
@@ -10,6 +10,7 @@ import {
   ReadOnlyBadge,
 } from '../../../../shared/primitives/DetailPrimitives';
 import { AgentKeysDialog } from './AgentKeysDialog';
+import { agentCredentialScope } from './credentialScope';
 import { useAgentCredentials } from './useAgentCredentials';
 
 interface CredentialsCardProps {
@@ -20,7 +21,8 @@ interface CredentialsCardProps {
 
 export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardProps): ReactElement {
   const [keysOpen, setKeysOpen] = useState(false);
-  const { data: credentials } = useAgentCredentials(slug, canRead);
+  const scope = useMemo(() => agentCredentialScope(slug), [slug]);
+  const { data: credentials } = useAgentCredentials(scope, canRead);
 
   const configured = (credentials ?? []).filter(entry => entry.configured).length;
 
@@ -66,7 +68,7 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
       <AgentKeysDialog
         open={keysOpen}
         onOpenChange={setKeysOpen}
-        slug={slug}
+        scope={scope}
         canManage={canManage}
       />
     </DetailSection>

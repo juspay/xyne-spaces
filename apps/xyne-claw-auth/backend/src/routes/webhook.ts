@@ -20,6 +20,7 @@ import {
   activeGoalRepository,
   experimentRepository,
   agentRequestRepository,
+  userProviderCredentialsRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
@@ -30,6 +31,7 @@ import {
   resolveAgentCapabilities,
   toolIdsFromConfig,
   unknownToolsNote,
+  resolveDraftExtras,
   type DraftAgentSpec,
 } from "../lib/agent-card.js";
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
@@ -134,6 +136,7 @@ import {
   buildAgentSummaryFlow,
   buildMcpSuggestFlow,
   MAX_AGENT_LIST_CARDS,
+  buildProviderSuggestFlow,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
@@ -151,6 +154,16 @@ import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import {
+  SUPPORTED_PROVIDERS,
+  PROVIDER_LABELS,
+  PROVIDER_DESCRIPTIONS,
+  PROVIDER_CONNECT_METHOD,
+  providersUserAskedFor,
+  stripAddressedAgentMention,
+  unsupportedProvidersFromText,
+  wantsProviderRoster,
+} from "../lib/provider-hints.js";
 import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
@@ -1908,7 +1921,23 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const threadAwarenessBlock = history
       ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
       : "";
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
+    const providerAskText = stripAddressedAgentMention(task, agent.slug);
+    const providerCardWillPost =
+      eventType !== "USER_MENTIONED" &&
+      !!agent.slug &&
+      !!agent.orgId &&
+      (providersUserAskedFor(providerAskText).length > 0 || wantsProviderRoster(providerAskText));
+    const providerCardNote = providerCardWillPost
+      ? [
+          "## AI Provider Card",
+          "A card listing this user's AI providers and their live connection status is posted to this thread alongside your reply. It is built from their stored credentials, so it is authoritative.",
+          "Do NOT list the providers, state which are connected or disconnected, or say you cannot see the user's credentials — the card already answers that, and contradicting it confuses the user.",
+          "Acknowledge the card in one short sentence and answer anything else they asked.",
+        ].join("\n")
+      : "";
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock, providerCardNote]
+      .filter(Boolean)
+      .join("\n\n");
 
     // Email auto-draft forward target — suppresses placeholder+DM (see /webhook/result).
     const resultForwardUrl =
@@ -5032,6 +5061,74 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
+  // AI provider suggestions. Unlike connectors the roster is a fixed list in
+  // code, so intent is read from the user's own message and the card is built
+  // without the model participating at all. A provider we do not offer is
+  // named back as unsupported rather than dropped, so the reply cannot promise
+  // a card that will never render.
+  if (agentCardDeliverable) {
+    try {
+      const askText = stripAddressedAgentMention(ctx.rootTask ?? ctx.task ?? "", ctx.agentSlug);
+      const namedProviders = providersUserAskedFor(askText);
+      const unsupported = unsupportedProvidersFromText(askText);
+      const providerRoster = wantsProviderRoster(askText);
+
+      if (namedProviders.length > 0 || providerRoster) {
+        const creds = await userProviderCredentialsRepository
+          .listByUser(ctx.senderId)
+          .catch(() => []);
+        const connectedByProvider = new Map(creds.map((c) => [c.provider, c] as const));
+
+        const shown = providerRoster ? [...SUPPORTED_PROVIDERS] : namedProviders;
+        const providers = shown.map((provider) => {
+          const cred = connectedByProvider.get(provider);
+          return {
+            provider,
+            name: PROVIDER_LABELS[provider] ?? provider,
+            ...(PROVIDER_DESCRIPTIONS[provider]
+              ? { description: PROVIDER_DESCRIPTIONS[provider] as string }
+              : {}),
+            connected: provider === "spaces" ? true : !!cred,
+            ...(cred?.sharedCredentialId ? { sharedName: "Shared with your org" } : {}),
+            ...(PROVIDER_CONNECT_METHOD[provider]
+              ? { connectMethod: PROVIDER_CONNECT_METHOD[provider] as "oauth" | "device" | "api_key" | "none" }
+              : {}),
+          };
+        });
+
+        const flow = withSpacesAppId(
+          buildProviderSuggestFlow({
+            providers,
+            title: providerRoster ? "AI providers you can connect" : "Connect this provider",
+            ...(providerRoster ? { browseAll: true, totalCount: SUPPORTED_PROVIDERS.length } : {}),
+            ...(unsupported.length > 0
+              ? { reason: `${unsupported.join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available on Xyne.` }
+              : {}),
+            screenKey: `${ctx.senderId}-${shown.join("-")}`,
+            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+            userId: ctx.senderId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          }),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        log.info(`[provider-suggest] posted ${providers.length} provider cards conv=${ctx.conversationId}`);
+      } else if (unsupported.length > 0) {
+        log.info(`[provider-suggest] unsupported only: ${unsupported.join(", ")} — no card`);
+      }
+    } catch (err) {
+      log.warn("Failed to post provider suggestions (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
     try {
       const [total, globalCount, sampleAgents] = await Promise.all([
@@ -5243,7 +5340,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       }
 
-      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug);
+      const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
+      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
       const flow = withSpacesAppId(
         buildAgentCardFlow(
           {

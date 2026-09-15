@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select';
 import { useAuth } from '@/hooks/useAuth';
-import { clawSettingsKey, useClawSettings } from '@/hooks/useClawSettings';
+import { invalidateClawSettings, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
   deleteSubagentRouting,
@@ -1380,7 +1380,7 @@ const ClawSettingsScreen = (): ReactElement => {
   );
 
   const invalidateSettings = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: clawSettingsKey(userId) });
+    await invalidateClawSettings(queryClient, userId);
   };
 
   return (
