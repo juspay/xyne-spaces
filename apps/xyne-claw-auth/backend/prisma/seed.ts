@@ -996,9 +996,9 @@ You:
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
           "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "ask",
-          "xyne-workflows__workflow_update": "ask",
-          "xyne-workflows__workflow_run": "ask"
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection. Skills otherwise load via pi's
         // progressive disclosure (only the 1-line <available_skills> description
@@ -1082,9 +1082,9 @@ You:
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
           "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "ask",
-          "xyne-workflows__workflow_update": "ask",
-          "xyne-workflows__workflow_run": "ask"
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection — see the matching block in `create`
         // for the full rationale and the toolName/skillSlug/when conventions.
