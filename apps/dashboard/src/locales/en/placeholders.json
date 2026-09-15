@@ -1046,6 +1046,25 @@
     "sdlcHubSidebar": {
       "selectHubPlaceholder": "Select hub",
       "searchHubsAndRepositoriesPlaceholder": "Search hubs and repositories..."
+    },
+    "sdlcScreen": {
+      "trackPurposePlaceholder": "What is this track for?",
+      "workstreamNameExamplePlaceholder": "e.g. Payments revamp",
+      "workstreamDescriptionPlaceholder": "What is this workstream about?",
+      "artifactTitlePlaceholder": "Clear, outcome-focused title",
+      "selectTrackPlaceholder": "Select a track",
+      "searchTracksPlaceholder": "Search tracks...",
+      "searchArtifactsInTrackPlaceholder": "Search artifacts in this track…",
+      "aiFocusInstructionsPlaceholder": "e.g. focus on retry semantics and the ledger contract; skip the mobile flow.",
+      "artifactTypeExamplePlaceholder": "e.g. API Spec, RFC, Runbook",
+      "artifactStatusExamplePlaceholder": "e.g. Hub split, Approved, Archive",
+      "pasteEntityIdPlaceholder": "Paste stable entity ID"
+    },
+    "sdlcWikiSection": {
+      "startCommitShaPlaceholder": "40-character start commit SHA",
+      "searchWikiTitlesPlaceholder": "Search titles or repository paths",
+      "filterDocumentsPlaceholder": "Filter documents",
+      "filterFilesPlaceholder": "Filter files"
     }
   }
 }

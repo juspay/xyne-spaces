@@ -10,6 +10,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ChannelRole,
   isBaselineCanvasType,
@@ -252,6 +253,7 @@ function actionErrorMessage(error: unknown): string {
 }
 
 export default function SdlcScreen(): ReactElement {
+  const { t } = useTranslation('placeholders');
   const {
     workspaceId,
     channelId,
@@ -2004,7 +2006,7 @@ export default function SdlcScreen(): ReactElement {
                       );
                     }
                   }}
-                  placeholder='What is this track for?'
+                  placeholder={t('routes.sdlcScreen.trackPurposePlaceholder')}
                   className='-mx-1 block w-[calc(100%+0.5rem)] resize-none overflow-hidden rounded border-0 bg-muted/40 px-1 py-0.5 text-[13.5px] leading-relaxed text-foreground outline-none ring-0 transition-[height,background-color] duration-150 ease-out placeholder:text-muted-foreground focus:bg-muted/60 focus:outline-none motion-reduce:transition-none'
                   data-track-category='SdlcHub'
                   data-track-name='TrackDescriptionEdited'
@@ -3160,7 +3162,7 @@ export default function SdlcScreen(): ReactElement {
             onChange={event => setTrackName(event.target.value)}
             maxLength={120}
             className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
-            placeholder='e.g. Payments revamp'
+            placeholder={t('routes.sdlcScreen.workstreamNameExamplePlaceholder')}
             data-track-category='SdlcHub'
             data-track-name='TrackNameChanged'
           />
@@ -3173,7 +3175,7 @@ export default function SdlcScreen(): ReactElement {
             onChange={event => setTrackDescription(event.target.value)}
             maxLength={2000}
             className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
-            placeholder='What is this workstream about?'
+            placeholder={t('routes.sdlcScreen.workstreamDescriptionPlaceholder')}
             data-track-category='SdlcHub'
             data-track-name='TrackDescriptionChanged'
           />
@@ -3359,7 +3361,7 @@ export default function SdlcScreen(): ReactElement {
                 value={artifactTitle}
                 onChange={event => setArtifactTitle(event.target.value)}
                 className='h-[38px] text-[13.5px]'
-                placeholder='Clear, outcome-focused title'
+                placeholder={t('routes.sdlcScreen.artifactTitlePlaceholder')}
                 data-track-category='SdlcHub'
                 data-track-name='ArtifactTitleChanged'
               />
@@ -3382,8 +3384,8 @@ export default function SdlcScreen(): ReactElement {
                       const track = tracks.find(item => item.id === value);
                       setArtifactTrack(track ? { id: track.id, name: track.name } : null);
                     }}
-                    placeholder='Select a track'
-                    searchPlaceholder='Search tracks...'
+                    placeholder={t('routes.sdlcScreen.selectTrackPlaceholder')}
+                    searchPlaceholder={t('routes.sdlcScreen.searchTracksPlaceholder')}
                     width='100%'
                     matchTriggerWidth
                   />
@@ -3431,7 +3433,7 @@ export default function SdlcScreen(): ReactElement {
                         onChange={event => setRelatedSearchQuery(event.target.value)}
                         onFocus={() => setRelatedListOpen(true)}
                         onBlur={() => setTimeout(() => setRelatedListOpen(false), 120)}
-                        placeholder='Search artifacts in this track…'
+                        placeholder={t('routes.sdlcScreen.searchArtifactsInTrackPlaceholder')}
                         className='h-6 min-w-0 flex-1 border-none bg-transparent text-[13.5px] outline-none'
                         data-track-category='SdlcHub'
                         data-track-name='RelatedArtifactSearch'
@@ -3544,7 +3546,7 @@ export default function SdlcScreen(): ReactElement {
                 value={artifactAiPrompt}
                 onChange={event => setArtifactAiPrompt(event.target.value)}
                 className='h-[74px] min-h-0 resize-none text-[13.5px]'
-                placeholder='e.g. focus on retry semantics and the ledger contract; skip the mobile flow.'
+                placeholder={t('routes.sdlcScreen.aiFocusInstructionsPlaceholder')}
                 data-track-category='SdlcHub'
                 data-track-name='ArtifactAiPromptChanged'
               />
@@ -3641,7 +3643,7 @@ export default function SdlcScreen(): ReactElement {
             value={typeName}
             onChange={event => setTypeName(event.target.value)}
             className='mt-2 h-10'
-            placeholder='e.g. API Spec, RFC, Runbook'
+            placeholder={t('routes.sdlcScreen.artifactTypeExamplePlaceholder')}
           />
           <div className='mt-6 flex justify-end gap-2'>
             <Button
@@ -3694,7 +3696,7 @@ export default function SdlcScreen(): ReactElement {
             value={newFolderName}
             onChange={event => setNewFolderName(event.target.value)}
             className='mt-2 h-10'
-            placeholder='e.g. Hub split, Approved, Archive'
+            placeholder={t('routes.sdlcScreen.artifactStatusExamplePlaceholder')}
             maxLength={TRACK_NAME_LIMIT}
           />
           <div className='mt-6 flex justify-end gap-2'>
@@ -3932,7 +3934,7 @@ export default function SdlcScreen(): ReactElement {
                 value={linkTargetId}
                 onChange={event => setLinkTargetId(event.target.value)}
                 className='mt-2 h-10 w-full rounded-md border bg-background px-3'
-                placeholder='Paste stable entity ID'
+                placeholder={t('routes.sdlcScreen.pasteEntityIdPlaceholder')}
                 data-track-category='SdlcHub'
                 data-track-name='LinkTargetChanged'
               />

@@ -1046,6 +1046,25 @@
     "sdlcHubSidebar": {
       "selectHubPlaceholder": "Seleccionar hub",
       "searchHubsAndRepositoriesPlaceholder": "Buscar hubs y repositorios..."
+    },
+    "sdlcScreen": {
+      "trackPurposePlaceholder": "¿Para qué es este track?",
+      "workstreamNameExamplePlaceholder": "p. ej. Renovación de pagos",
+      "workstreamDescriptionPlaceholder": "¿De qué trata este workstream?",
+      "artifactTitlePlaceholder": "Título claro y orientado a resultados",
+      "selectTrackPlaceholder": "Seleccionar un track",
+      "searchTracksPlaceholder": "Buscar tracks...",
+      "searchArtifactsInTrackPlaceholder": "Buscar artefactos en este track…",
+      "aiFocusInstructionsPlaceholder": "p. ej. enfócate en la semántica de reintentos y el contrato del ledger; omite el flujo móvil.",
+      "artifactTypeExamplePlaceholder": "p. ej. Especificación de API, RFC, Runbook",
+      "artifactStatusExamplePlaceholder": "p. ej. División de hub, Aprobado, Archivo",
+      "pasteEntityIdPlaceholder": "Pega el ID estable de la entidad"
+    },
+    "sdlcWikiSection": {
+      "startCommitShaPlaceholder": "SHA de commit inicial de 40 caracteres",
+      "searchWikiTitlesPlaceholder": "Buscar títulos o rutas de repositorio",
+      "filterDocumentsPlaceholder": "Filtrar documentos",
+      "filterFilesPlaceholder": "Filtrar archivos"
     }
   }
 }

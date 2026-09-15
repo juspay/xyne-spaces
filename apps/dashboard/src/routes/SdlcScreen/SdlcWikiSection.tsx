@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   BookOpen,
   Check,
@@ -103,6 +104,7 @@ function WikiRunControls(props: {
   onCancel: () => Promise<void>;
   onDebug: () => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState<'20' | '50' | 'FULL' | 'CUSTOM'>('FULL');
   const [customSha, setCustomSha] = useState('');
@@ -336,7 +338,7 @@ function WikiRunControls(props: {
                   onChange={event => setCustomSha(event.target.value)}
                   data-track-category='SdlcWiki'
                   data-track-name='CustomShaChanged'
-                  placeholder='40-character start commit SHA'
+                  placeholder={t('routes.sdlcWikiSection.startCommitShaPlaceholder')}
                   className='mt-2 h-9 w-full rounded-md border bg-background px-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring'
                 />
               ) : null}
@@ -655,6 +657,7 @@ export function SdlcWikiSidebarTree(props: {
   onRetry: () => void;
   onOpen: (page: SdlcWikiPage) => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
@@ -703,7 +706,11 @@ export function SdlcWikiSidebarTree(props: {
           <input
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder={repoKnowledge ? 'Filter documents' : 'Filter files'}
+            placeholder={
+              repoKnowledge
+                ? t('routes.sdlcWikiSection.filterDocumentsPlaceholder')
+                : t('routes.sdlcWikiSection.filterFilesPlaceholder')
+            }
             aria-label={repoKnowledge ? 'Filter Repo Knowledge documents' : 'Filter Wiki files'}
             className='h-9 w-full rounded-md border border-sidebar-border-muted bg-background/80 pl-9 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-sidebar-accent-ring dark:bg-sidebar-accent/30 dark:text-sidebar-accent-foreground dark:placeholder:text-sidebar-foreground/55'
             data-track-category='SdlcHub'
@@ -856,6 +863,7 @@ export function SdlcWikiSection(props: {
   onCancelRun: () => Promise<void>;
   onDebugRun: () => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['', 'domains', 'overview']));
   const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
@@ -921,7 +929,7 @@ export function SdlcWikiSection(props: {
             <input
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder='Search titles or repository paths'
+              placeholder={t('routes.sdlcWikiSection.searchWikiTitlesPlaceholder')}
               className='h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring'
               aria-label='Search Wiki pages'
               data-track-category='SdlcHub'
