@@ -1,5 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  useParams,
+  useNavigate,
+  useSearchParams,
+  useLocation,
+  useNavigationType,
+} from 'react-router-dom';
 import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -200,6 +206,9 @@ import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { ticketCountBucket } from '../../services/Analytics/ticketTracking';
+import { readTrackSource } from '../../services/Analytics/trackSource';
 import {
   readViewDraft,
   writeViewDraft,
@@ -686,6 +695,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     if (createTicketLinkConsumedRef.current) return;
     createTicketLinkConsumedRef.current = true;
+    setCreateTicketSource('share_link');
     setIsCreateModalOpen(true);
   }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
@@ -726,6 +736,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const shouldUseLegacyTicketsQuery = !isKanbanLayout;
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
+  const [createTicketSource, setCreateTicketSource] = useState('kanban_header');
   const activeViewKey = `active-view-${state.context.storageKey}`;
   const hasRestoredActiveView = useRef<string | null>(null);
   const groupByKey = typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy;
@@ -3475,7 +3487,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [activeTicket]);
 
   const handleTicketClick = useCallback(
-    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
+    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket, trackSource = 'kanban_card') => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
 
@@ -3486,7 +3498,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           window.open(`${ws ? `/${ws}` : ''}${sdlcUrl}`, '_blank');
           return;
         }
-        void navigate(sdlcUrl);
+        void navigate(sdlcUrl, { state: { trackSource } });
         return;
       }
 
@@ -3499,7 +3511,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           return;
         }
         void navigate(supportUrl, {
-          state: { conversationId: ticket.conversationId, ticketId: ticket.id },
+          state: { conversationId: ticket.conversationId, ticketId: ticket.id, trackSource },
         });
         return;
       }
@@ -3526,7 +3538,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
 
       const currentUrl = window.location.pathname + window.location.search;
-      const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl } };
+      const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl, trackSource } };
 
       // Desk/support ticket -> Support desk email view (channelId + xyneId).
       if (isDeskTicket) {
@@ -3562,6 +3574,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
     }): void => {
       setCreateTicketSeed(seed);
+      setCreateTicketSource('kanban_column');
       setIsCreateModalOpen(true);
     },
     [],
@@ -3670,6 +3683,59 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const isTicketsSyncing = isKanbanLayout
     ? !hasSearchTerm && kanbanCounts.isLoading
     : ticketsDetails.type !== 'complete';
+
+  // TICKET_LIST_VIEWED: one event per list arrival (scope + layout), once the
+  // tickets have resolved so the size can ride along. Latched so filter churn
+  // and re-renders inside the same list don't refire; a layout switch is a new
+  // list and does fire again. Filter *names* only — never the values.
+  const listLocation = useLocation();
+  const listNavigationType = useNavigationType();
+  const viewedListKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isTicketsSyncing) return;
+    const listKey = `${viewMode}:${layoutView}:${channelId ?? ''}:${effectiveProjectId ?? ''}:${boardId ?? ''}`;
+    if (viewedListKeyRef.current === listKey) return;
+    viewedListKeyRef.current = listKey;
+
+    const activeFilterKeys = Object.entries(filters as Record<string, unknown>)
+      .filter(([, value]) =>
+        Array.isArray(value)
+          ? value.length > 0
+          : value !== undefined && value !== null && value !== '' && value !== false,
+      )
+      .map(([key]) => key);
+    const knownCount = filteredTickets?.length ?? allProjectTickets?.length;
+
+    globalClickTracker.trackManualEvent('Tickets', 'TICKET_LIST_VIEWED', undefined, {
+      viewMode: layoutView,
+      scope: viewMode,
+      ...(channelId && { channelId }),
+      ...(effectiveProjectId && { projectId: effectiveProjectId }),
+      ...(boardId && { boardId }),
+      groupBy: groupBy || null,
+      activeFilterKeys,
+      activeFilterCount: activeFilterKeys.length,
+      hasSearchTerm,
+      savedViewApplied: !!selectedViewId,
+      ...(typeof knownCount === 'number' && { ticketCountBucket: ticketCountBucket(knownCount) }),
+      source: readTrackSource(listLocation.state, listNavigationType),
+    });
+  }, [
+    isTicketsSyncing,
+    viewMode,
+    layoutView,
+    channelId,
+    effectiveProjectId,
+    boardId,
+    groupBy,
+    filters,
+    hasSearchTerm,
+    selectedViewId,
+    filteredTickets,
+    allProjectTickets,
+    listLocation.state,
+    listNavigationType,
+  ]);
 
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
@@ -4146,9 +4212,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   data-track-event='BUTTON_CLICK'
                   data-track-category='Tickets'
                   data-track-name='CREATE_TICKET_KANBAN'
-                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  data-track-metadata={JSON.stringify({
+                    boardId,
+                    channelId,
+                    source: 'kanban_header',
+                  })}
                   onClick={() => {
                     setCreateTicketSeed(null);
+                    setCreateTicketSource('kanban_header');
                     setIsCreateModalOpen(true);
                   }}
                   className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
@@ -4657,7 +4728,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <div className='flex-1 overflow-hidden bg-background'>
           <CalendarView
             tickets={filteredTickets ?? []}
-            onTicketClick={(ticket: Ticket) => handleTicketClick({} as React.MouseEvent, ticket)}
+            onTicketClick={(ticket: Ticket) =>
+              handleTicketClick({} as React.MouseEvent, ticket, 'calendar')
+            }
           />
         </div>
       ) : layoutView === 'flow' ? (
@@ -4716,6 +4789,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       // Ask AI sidebar, seeded with this run's root ticket.
                       xyneAIActor.send({
                         type: 'OPEN',
+                        trackSource: 'kanban_board',
                         ...(selectedFlowRunRootTicket?.channelId && {
                           channelId: selectedFlowRunRootTicket.channelId,
                         }),
@@ -4769,6 +4843,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         // previous value when the key is absent.
                         xyneAIActor.send({
                           type: 'OPEN',
+                          trackSource: 'kanban_board',
                           ...(channelId && { channelId }),
                           threadInfo: null,
                           startFreshChat: true,
@@ -5639,6 +5714,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           channelId={channel.id}
           projectId={effectiveProjectId}
           selectedBoardId={currentBoardId}
+          trackSource={createTicketSource}
           initialStatus={createTicketSeed?.status ?? null}
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
@@ -5656,6 +5732,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           }}
           channelId=''
           isFromSubTicket
+          trackSource={createTicketSource}
           initialStatus={createTicketSeed?.status ?? null}
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}

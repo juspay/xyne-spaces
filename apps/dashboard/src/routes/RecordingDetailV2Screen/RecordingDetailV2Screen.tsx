@@ -842,6 +842,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'recording_detail',
       startFreshChat: true,
       contextType: 'general',
       initialContextSelections: {

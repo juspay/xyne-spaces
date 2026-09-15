@@ -440,7 +440,11 @@ const AppRoot = (): ReactElement => {
         void navigate(`${base}/${encodeURIComponent(sessionId)}`);
         return;
       }
-      xyneAIActor.send({ type: 'OPEN', focusSessionId: sessionId });
+      xyneAIActor.send({
+        type: 'OPEN',
+        trackSource: 'completion_toast',
+        focusSessionId: sessionId,
+      });
     });
     return () => xyneAIStreamManager.setCompletionToastNavigator(null);
   }, [navigate, routeWorkspaceId]);

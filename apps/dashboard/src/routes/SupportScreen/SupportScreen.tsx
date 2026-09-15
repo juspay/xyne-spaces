@@ -225,7 +225,6 @@ import {
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
-import { trackAskAIOpened } from '../../services/otel/xyneAIMetrics';
 import {
   channelService,
   CreateChannelFormData,
@@ -2867,10 +2866,11 @@ const SupportScreen = (): ReactElement => {
                           <button
                             onClick={() => {
                               if (!selectedChannelId) return;
-                              trackAskAIOpened(
-                                emailChannels?.find(c => c.id === selectedChannelId)?.scopeType,
-                              );
-                              xyneAIActor.send({ type: 'OPEN', channelId: selectedChannelId });
+                              xyneAIActor.send({
+                                type: 'OPEN',
+                                channelId: selectedChannelId,
+                                trackSource: 'support_screen',
+                              });
                             }}
                             className='p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-accent'
                             data-track-category='Support'
@@ -4417,7 +4417,7 @@ export const SupportTicketDetail = ({
   const openDraftAgentSession = useCallback(
     (explicitSessionId?: string): void => {
       if (!conversationId || !channelId) {
-        xyneAIActor.send({ type: 'OPEN' });
+        xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
         return;
       }
       setSelectedAgentSlug(draftAgentSlug);
@@ -4435,6 +4435,7 @@ export const SupportTicketDetail = ({
       const threadInfo = { conversationId, previewText: title ?? '' };
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'support_screen',
         contextType: 'chat',
         channelId,
         threadInfo,
@@ -5532,11 +5533,11 @@ export const SupportTicketDetail = ({
                           if (isAIPanelOpen) {
                             xyneAIActor.send({ type: 'CLOSE' });
                           } else {
-                            xyneAIActor.send({ type: 'OPEN' });
+                            xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
                           }
                         }}
                         onOpenAskAISidebarFresh={() => {
-                          xyneAIActor.send({ type: 'OPEN' });
+                          xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
                         }}
                         onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
                         hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}

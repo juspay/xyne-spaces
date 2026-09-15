@@ -9,6 +9,7 @@ import { X, Users, MessageSquare, Hash, Sparkles, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { sanitizeHtmlString } from '../../utils/sanitizer';
 import { ChannelScopeType } from '@xyne/shared';
 
@@ -258,6 +259,18 @@ export const Summary = (props: SummaryProps): ReactElement => {
   const loadedFromCache = useRef(false);
   const currentIdRef = useRef(id);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // When the summarize request left, for SUMMARY_GENERATED / SUMMARY_FAILED
+  // latency. Cache hits never set it — they generate nothing.
+  const fetchStartedAtRef = useRef<number | null>(null);
+  const summaryKind = isThread ? 'thread' : 'channel';
+  const trackSummaryFailed = (errorKind: string): void => {
+    globalClickTracker.trackManualEvent('CHAT_SUMMARY', 'SUMMARY_FAILED', undefined, {
+      kind: summaryKind,
+      errorKind,
+      latencyMs: fetchStartedAtRef.current === null ? null : Date.now() - fetchStartedAtRef.current,
+      messageCount: metadataRef.current.messageCount,
+    });
+  };
   const metadataRef = useRef<{ messageCount: number; participantCount: number }>({
     messageCount: 0,
     participantCount: 0,
@@ -335,6 +348,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
+      fetchStartedAtRef.current = Date.now();
 
       // Reset state
       loadedFromCache.current = false;
@@ -493,6 +507,27 @@ export const Summary = (props: SummaryProps): ReactElement => {
                       setState('complete');
                       hasReceivedComplete = true;
 
+                      // Outcome: the summary actually arrived. Copy / jump /
+                      // close clicks below only mean something against this.
+                      globalClickTracker.trackManualEvent(
+                        'CHAT_SUMMARY',
+                        'SUMMARY_GENERATED',
+                        undefined,
+                        {
+                          kind: summaryKind,
+                          messageCount: completeOutput.messageCount,
+                          participantCount: completeOutput.participantCount,
+                          keyPointsCount: finalKeyPoints.length,
+                          citationsCount: Object.keys(finalParsed.citations).length,
+                          hasTopicSections: !!data.output.topicSections,
+                          hasDateRange: !!(dateFrom || dateTo),
+                          latencyMs:
+                            fetchStartedAtRef.current === null
+                              ? null
+                              : Date.now() - fetchStartedAtRef.current,
+                        },
+                      );
+
                       if (isThread) {
                         setThreadSummary(fetchId, {
                           summary: completeOutput,
@@ -516,6 +551,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
                   case 'error':
                     setError(data.error || 'An error occurred');
                     setState('error');
+                    trackSummaryFailed('stream');
                     break;
 
                   case 'no_messages':
@@ -547,6 +583,9 @@ export const Summary = (props: SummaryProps): ReactElement => {
         if (currentIdRef.current === fetchId) {
           setError(err instanceof Error ? err.message : 'Failed to fetch summary');
           setState('error');
+          trackSummaryFailed(
+            err instanceof Error && err.message.startsWith('HTTP error') ? 'http' : 'network',
+          );
         }
       }
     },

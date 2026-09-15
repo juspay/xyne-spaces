@@ -1,5 +1,5 @@
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload, PanelRightOpen } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
@@ -17,6 +17,8 @@ import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen
 import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
 import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
@@ -27,6 +29,7 @@ const AIScreen = (): ReactElement => {
     sessionId?: string;
   }>();
   const location = useLocation();
+  const navigationType = useNavigationType();
   /** '' for the landing page — `chat/new` is the literal, not a session id. */
   const sessionFromUrl = routeSessionId && routeSessionId !== 'new' ? routeSessionId : '';
 
@@ -119,6 +122,45 @@ const AIScreen = (): ReactElement => {
     xyneAIStreamManager.setOnAIPage(true);
     return () => {
       xyneAIStreamManager.setOnAIPage(false);
+    };
+  }, []);
+
+  // XYNE_AI_OPENED for the full page. Once per mount: switching threads inside
+  // the page is SELECT_CONVERSATION / NEW_CHAT, not a new open. `source` comes
+  // from the navigating surface's `state.trackSource`; back/forward reports
+  // history_pop and a pasted link reports direct (see readTrackSource).
+  // The open is a single moment, so the effect has no reactive inputs: it
+  // reads the arrival attribution off a per-render snapshot ref instead of
+  // depending on it, which would re-report an open on every thread switch.
+  const pageOpenSnapshotRef = useRef({
+    locationState: location.state as unknown,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  });
+  pageOpenSnapshotRef.current = {
+    locationState: location.state as unknown,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  };
+  useEffect(() => {
+    const snap = pageOpenSnapshotRef.current;
+    const source = readTrackSource(snap.locationState, snap.navigationType);
+    const openedAt = Date.now();
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'page',
+      source,
+      contextType: 'general',
+      resumedConversation: !!snap.sessionFromUrl,
+      agentSlug: snap.effectiveAgentSlug ?? 'ask-ai',
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'page',
+        source,
+        msOpen: Date.now() - openedAt,
+      });
     };
   }, []);
 

@@ -341,6 +341,7 @@ const RecordingsV2Screen = (): ReactElement => {
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'recordings',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
