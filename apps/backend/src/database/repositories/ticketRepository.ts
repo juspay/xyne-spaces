@@ -60,6 +60,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   id: string;
   workspaceId: string;
   boardId: string | null;
+  channelId: string | null;
   projectId: string | null;
   stageName: string;
   statusV2: TicketStatusV2;
@@ -75,6 +76,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   id: ticket.id,
   workspaceId: ticket.workspaceId,
   boardId: ticket.boardId,
+  channelId: ticket.channelId,
   projectId: ticket.projectId,
   stageName: ticket.stageName,
   statusV2: ticket.statusV2,
