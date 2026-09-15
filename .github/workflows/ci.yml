@@ -117,6 +117,95 @@ jobs:
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
+  test:
+    name: Automation tests
+    # Always self-hosted (not gated on USE_SELF_HOSTED_CI): needs Docker for the compose
+    # stack and network access to SPACES_URL for the report push.
+    runs-on: ci-cluster-github-runners
+    env:
+      TEST_ENV: test
+      BROWSER: chromium
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-automation...
+
+      - name: Install Playwright browser
+        run: pnpm --filter xyne-automation exec playwright install chromium
+
+      - name: Run automation tests
+        run: pnpm run test
+
+      - name: Show container states and logs
+        if: always()
+        run: |
+          find tools/xyne-automation/reports -type f \( -name '*.log' -o -name '*.txt' \) | sort | while read -r f; do
+            echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
+          done
+
+      - name: Push report to Spaces
+        if: always()
+        env:
+          JWT: ${{ secrets.TESTCASES_JWT }}
+          CHANNELID: ${{ secrets.TESTCASES_CHANNELID }}
+          SPACES_URL: ${{ secrets.SPACES_URL }}
+        run: |
+          set -euo pipefail
+          # Secrets are empty on fork PRs; don't turn a green test job red over the upload.
+          if [ -z "${JWT:-}" ] || [ -z "${CHANNELID:-}" ] || [ -z "${SPACES_URL:-}" ]; then
+            echo "::notice::Spaces upload secrets not available — skipping report push"
+            exit 0
+          fi
+
+          RUN_DIR=$(find tools/xyne-automation/reports -maxdepth 1 -mindepth 1 -type d -name '*-runner' -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+          REPORT_DIR=$(find tools/xyne-automation/reports -type d -name html-report -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+          DOCKER_LOGS_DIR=$(find tools/xyne-automation/reports -maxdepth 2 -type d -name docker-logs -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
+
+          UPLOAD_ARGS=()
+          # One-click view: a self-contained summary page (failures + screenshots, passes collapsed)
+          # built from Gauge's json-report. Uploaded first so it's the first thing in the message.
+          if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/json-report/result.json" ]; then
+            node tools/xyne-automation/scripts/build-summary-report.mjs "$RUN_DIR" "$RUNNER_TEMP/automation-report.html"
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/automation-report.html;type=text/html")
+          fi
+          # Full detail: the endpoint accepts at most 10 files, and Gauge's html-report needs its
+          # css/fonts/images siblings to render — ship each directory as one archive.
+          if [ -n "$DOCKER_LOGS_DIR" ]; then
+            tar -czf "$RUNNER_TEMP/docker-logs.tgz" -C "$DOCKER_LOGS_DIR" .
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/docker-logs.tgz;type=application/gzip")
+          fi
+          if [ -n "$REPORT_DIR" ]; then
+            tar -czf "$RUNNER_TEMP/html-report.tgz" -C "$REPORT_DIR" .
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/html-report.tgz;type=application/gzip")
+          fi
+
+          if [ ${#UPLOAD_ARGS[@]} -eq 0 ]; then
+            echo "::error::Nothing to push — no html-report and no docker-logs found"
+            exit 1
+          fi
+
+          # Success is a FILE_UPLOADED event; a rejected upload comes back 2xx with {"success":false,...}.
+          RESPONSE=$(curl -sS --fail-with-body -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+            -H "Authorization: Bearer $JWT" \
+            -F "channelId=$CHANNELID" \
+            -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
+            "${UPLOAD_ARGS[@]}") || { echo "$RESPONSE"; echo "::error::Report push failed"; exit 1; }
+          echo "$RESPONSE"
+          if echo "$RESPONSE" | grep -q '"success":false'; then
+            echo "::error::Report push rejected"; exit 1
+          fi
+
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
