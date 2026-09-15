@@ -5,6 +5,7 @@ import { FlowRenderer } from './FlowRenderer';
 import type { FlowDefinition, AppActionResponse, FlowState } from '@xyne/shared';
 import { toast } from 'sonner';
 import type { FlowMessageContext } from './FlowContext';
+import { dismissEphemeralMessage } from '../../hooks/useEphemeralMessages';
 
 interface FlowScreenManagerProps {
   /** Initial screen — rendered inline inside the message bubble */
@@ -25,7 +26,8 @@ interface FlowScreenManagerProps {
  * Navigation:
  * - open_screen:        push new screen (opens popup)
  * - next_screen:        replace top screen
- * - close_screen:       pop; returns to inline when stack reaches 1
+ * - close_screen:       pop; returns to inline when stack reaches 1, and
+ *                       dismisses the message entirely if it was ephemeral
  * - update_screen_data: merge data into current screen
  */
 export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
@@ -86,6 +88,14 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
             // Always collapse the entire popup back to inline
             return [prev[0]!];
           });
+          // An ephemeral card IS the flow — when the app closes it there is no
+          // message underneath to return to, so remove it outright. Done at every
+          // stack depth, not just 1, because the usual last step is a summary
+          // popup closing over the card that opened it.
+          //
+          // A no-op for an ordinary flow message, whose id is not in the store:
+          // those are persisted rows and must survive close_screen as before.
+          dismissEphemeralMessage(messageId);
           break;
 
         case 'update_screen_data': {
@@ -116,7 +126,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
           break;
       }
     },
-    [onClose],
+    [onClose, messageId],
   );
 
   const closePopup = useCallback(() => {
