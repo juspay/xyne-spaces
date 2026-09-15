@@ -10,6 +10,7 @@ import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useEncryptionBootstrap } from '@xyne/shared/hooks';
+import { attachZeroDiagnostics, detachZeroDiagnostics } from '../services/diagnostics/sources/zero';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -97,6 +98,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
       // logout can scope its drop after the client has been torn down.
       rememberZeroLane(zeroObj.idbName);
 
+      // Observe connection health on the instance itself rather than from a
+      // component, so drops are recorded even while nothing is rendering.
+      attachZeroDiagnostics(zeroObj);
+
       setZero(prev => {
         void prev?.close();
         return zeroObj;
@@ -106,6 +111,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     };
 
     void initZero();
+
+    return () => {
+      detachZeroDiagnostics();
+    };
   }, [user, refreshCount, encryptionReady]);
 
   if (!zero) {
