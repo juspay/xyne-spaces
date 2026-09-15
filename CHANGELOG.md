@@ -1,3 +1,10 @@
+## [1.321.0](https://github.com/juspay/xyne-spaces/compare/v1.320.0...v1.321.0) (2026-09-15)
+
+
+### Features
+
+* desk metrics breakdown dropdown and guest visibility settings ([#1796](https://github.com/juspay/xyne-spaces/issues/1796)) ([7875358](https://github.com/juspay/xyne-spaces/commit/7875358355f8d93e78e3ec3c5bd7a8a94ac904cd))
+
 ## [1.320.0](https://github.com/juspay/xyne-spaces/compare/v1.319.1...v1.320.0) (2026-09-15)
 
 
