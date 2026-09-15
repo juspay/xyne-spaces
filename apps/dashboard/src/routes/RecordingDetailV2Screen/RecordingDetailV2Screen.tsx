@@ -1,5 +1,5 @@
 /**
-  The Xyne Scribe Details Screen 
+  The Xyne Scribe Details Screen
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -653,9 +653,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const data = await recordingService.getRecordingDetail(id);
       loadedRecordingIdRef.current = id;
       setRecording(prev =>
-        prev && data.durationMs === null && prev.durationMs !== null
-          ? { ...data, durationMs: prev.durationMs }
-          : data,
+        prev ? { ...prev, ...data, durationMs: data.durationMs ?? prev.durationMs } : data,
       );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.loadRecording', err);
