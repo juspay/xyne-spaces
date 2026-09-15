@@ -30,7 +30,7 @@ const credentialsSchema = z.object({
   keyId: z
     .string()
     .trim()
-    .regex(/^[A-Z0-9]{10}$/),
+    .regex(/^[A-Z0-9]{10,20}$/),
   privateKey: z.string().trim().min(1),
 });
 
@@ -93,7 +93,7 @@ async function resolveApplications(
         if (error instanceof AppStoreApiError && error.status === 401) {
           throw new AppStoreConnectError(
             401,
-            'Invalid App Store Connect credentials. Check the Issuer ID, Key ID and .p8 key.',
+            'Invalid App Store Connect credentials. Check the Key ID and .p8 key.',
           );
         }
         throw error;

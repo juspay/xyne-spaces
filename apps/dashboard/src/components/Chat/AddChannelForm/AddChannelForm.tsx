@@ -153,7 +153,8 @@ function createAppStoreApplication(): AppStoreApplicationRow {
   return { id: crypto.randomUUID(), bundleId: '' };
 }
 
-const APP_STORE_KEY_ID_PATTERN = /^[A-Z0-9]{10}$/;
+// Team key ids are 10 chars, individual key ids are longer.
+const APP_STORE_KEY_ID_PATTERN = /^[A-Z0-9]{10,20}$/;
 
 // Apple never shows the .p8 again after download, so the only check we can make is shape.
 function isAppStorePrivateKey(value: string): boolean {
@@ -492,7 +493,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'APP_STORE') {
         if (!APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()))
-          return 'Enter the 10-character Key ID';
+          return 'Enter the Key ID from App Store Connect';
         if (!isAppStorePrivateKey(appStorePrivateKey))
           return 'Paste the contents of the .p8 private key file';
         if (
