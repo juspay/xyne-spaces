@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Plus, Trash2 } from 'lucide-react';
@@ -34,6 +35,7 @@ export const ReleaseMappingForm = ({
   isSubmitting,
   onPhaseChange,
 }: ReleaseMappingFormProps) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const form = useForm<ReleaseMappingFormValues>({
     defaultValues: {
@@ -339,7 +341,7 @@ export const ReleaseMappingForm = ({
             <Combobox
               ref={releaseSearchRef}
               label='Release Ticket *'
-              placeholder='Search release tickets'
+              placeholder={t('routes.rcaScreen.releaseMappingForm.searchReleaseTicketsPlaceholder')}
               queryString={selectedReleaseItem?.label ?? releaseSearch}
               onInputValueChange={value => {
                 if (value === '' && selectedReleaseItem) return;
@@ -363,7 +365,9 @@ export const ReleaseMappingForm = ({
             <Combobox
               label='Application Release (optional)'
               placeholder={
-                selectedReleaseId ? 'Search application releases' : 'Select a release ticket first'
+                selectedReleaseId
+                  ? t('routes.rcaScreen.releaseMappingForm.searchApplicationReleasesPlaceholder')
+                  : t('routes.rcaScreen.releaseMappingForm.selectReleaseTicketFirstPlaceholder')
               }
               queryString={selectedAppReleaseItem?.label ?? appReleaseSearch}
               onInputValueChange={value => {
@@ -387,7 +391,7 @@ export const ReleaseMappingForm = ({
             <Combobox
               ref={rootCauseSearchRef}
               label='Root Cause Ticket (optional)'
-              placeholder='Search tickets'
+              placeholder={t('routes.rcaScreen.releaseMappingForm.searchTicketsPlaceholder')}
               queryString={selectedRootCauseTicketItem?.label ?? rootCauseTicketSearch}
               onInputValueChange={value => {
                 if (value === '' && selectedRootCauseTicketItem) return;
@@ -408,7 +412,7 @@ export const ReleaseMappingForm = ({
           <div className='space-y-1.5 w-full max-w-2xl'>
             <Combobox
               label='Confidence'
-              placeholder='Select confidence'
+              placeholder={t('routes.rcaScreen.releaseMappingForm.selectConfidencePlaceholder')}
               queryString={selectedConfidenceItem?.label ?? ''}
               onInputValueChange={() => {}}
               items={confidenceOptions}

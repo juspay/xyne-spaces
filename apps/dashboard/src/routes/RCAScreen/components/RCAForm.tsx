@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
 import { cn } from '../../../utils/classNames';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { toast } from 'sonner';
@@ -59,6 +60,7 @@ export const RCAForm = ({
   onSubmit,
   controllerRef,
 }: RCAFormComponentProps) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { isMobile } = usePlatform();
   const [showErrors, setShowErrors] = useState(false);
@@ -335,7 +337,7 @@ export const RCAForm = ({
                   <Combobox
                     ref={ownerComboboxRef}
                     label='Owner *'
-                    placeholder='Search and select owner...'
+                    placeholder={t('routes.rcaScreen.searchSelectOwnerPlaceholder')}
                     queryString={ownerDisplayValue}
                     onInputValueChange={value => {
                       if (value === '' && selectedOwner) return;
@@ -372,7 +374,7 @@ export const RCAForm = ({
               onBlur={() => handleFieldBlur('title')}
               data-track-category='RCA'
               data-track-name='RcaTitleInput'
-              placeholder='Short RCA title...'
+              placeholder={t('routes.rcaScreen.rcaForm.titlePlaceholder')}
               readOnly={!isRcaEditable}
               className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500'
             />
@@ -389,7 +391,7 @@ export const RCAForm = ({
               value={formValues.summary}
               onChange={e => handleFieldChange('summary', e.target.value)}
               onBlur={() => handleFieldBlur('summary')}
-              placeholder='Short RCA overview...'
+              placeholder={t('routes.rcaScreen.rcaForm.overviewPlaceholder')}
               rows={3}
               readOnly={!isRcaEditable}
               aria-invalid={showErrors && !!getFieldError('summary')}
@@ -413,7 +415,7 @@ export const RCAForm = ({
                 value={formValues.rootCause}
                 onChange={e => handleFieldChange('rootCause', e.target.value)}
                 onBlur={() => handleFieldBlur('rootCause')}
-                placeholder='Describe the root cause...'
+                placeholder={t('routes.rcaScreen.rcaForm.rootCausePlaceholder')}
                 rows={4}
                 readOnly={!isRcaEditable}
                 aria-invalid={showErrors && !!getFieldError('rootCause')}

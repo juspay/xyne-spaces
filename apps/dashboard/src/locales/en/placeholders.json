@@ -960,6 +960,28 @@
       "fullNamePlaceholder": "Enter your full name",
       "rolePlaceholder": "Ex: Product Manager",
       "companyNamePlaceholder": "Ex: Nike"
+    },
+    "rcaScreen": {
+      "searchSelectOwnerPlaceholder": "Search and select owner...",
+      "coeForm": {
+        "describeActionPlaceholder": "Describe the action to address the RCA...",
+        "selectQuickFixesPlaceholder": "Select quick fixes"
+      },
+      "impactForm": {
+        "describeImpactPlaceholder": "Describe the impact..."
+      },
+      "rcaForm": {
+        "titlePlaceholder": "Short RCA title...",
+        "overviewPlaceholder": "Short RCA overview...",
+        "rootCausePlaceholder": "Describe the root cause..."
+      },
+      "releaseMappingForm": {
+        "searchReleaseTicketsPlaceholder": "Search release tickets",
+        "searchApplicationReleasesPlaceholder": "Search application releases",
+        "selectReleaseTicketFirstPlaceholder": "Select a release ticket first",
+        "searchTicketsPlaceholder": "Search tickets",
+        "selectConfidencePlaceholder": "Select confidence"
+      }
     }
   }
 }
