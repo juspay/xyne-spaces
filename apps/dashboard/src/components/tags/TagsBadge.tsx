@@ -1,5 +1,6 @@
 import { ChevronDown, Loader2, Plus, Tag, X } from 'lucide-react';
 import { JSX, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../utils/classNames';
 
 import { Popover } from '../ui/Popover/Popover';
@@ -79,6 +80,7 @@ export const TagEditorContent = ({
   sourceType: string;
   sourceId: string;
 }): JSX.Element => {
+  const { t } = useTranslation('placeholders');
   const { groups, isLoading, mutating, error, addTag, removeTag } = useTagEditor({
     sourceType,
     sourceId,
@@ -243,7 +245,7 @@ export const TagEditorContent = ({
                             <input
                               autoFocus
                               type='text'
-                              placeholder='custom-tag'
+                              placeholder={t('tags.badge.customTagPlaceholder')}
                               data-track-category='Support'
                               data-track-name='AddCustomTag'
                               value={customInput[group.category] ?? ''}

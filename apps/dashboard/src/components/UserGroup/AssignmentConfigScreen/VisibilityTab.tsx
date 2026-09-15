@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { cn } from '../../../utils/classNames';
@@ -51,6 +52,7 @@ export function VisibilityTab({
   userGroupMappings,
   maxWorkload,
 }: VisibilityTabProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const hasMaxWorkload = maxWorkload !== null && maxWorkload !== undefined;
 
   const scoreRows = useMemo(
@@ -102,7 +104,7 @@ export function VisibilityTab({
             onValueChange={value => onSelectBoard(value === ALL_BOARDS_VALUE ? null : value)}
           >
             <SelectTrigger className='w-full max-w-[320px]' aria-label='Filter by board'>
-              <SelectValue placeholder='All boards' />
+              <SelectValue placeholder={t('userGroups.assignment.allBoards')} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_BOARDS_VALUE}>All boards</SelectItem>

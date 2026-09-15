@@ -792,5 +792,59 @@
   },
   "teamIntelligence": {
     "selectRange": "Seleccionar rango"
+  },
+  "preferences": {
+    "keywordPlaceholder": "Agregar una palabra clave y presionar Enter",
+    "currentPassword": "Contraseña actual",
+    "newPassword": "Nueva contraseña (mín. 8 caracteres)",
+    "confirmPassword": "Confirmar nueva contraseña"
+  },
+  "tags": {
+    "decisionPane": {
+      "labelPlaceholder": "Solicitud de función",
+      "summaryPlaceholder": "Algo está roto. Se completa cuando esté corregido y verificado.",
+      "descriptionPlaceholder": "Describe cuándo aplica este tipo, como si instruyeras a alguien que nunca ha visto el hilo."
+    },
+    "review": {
+      "searchNameOrEmail": "Buscar nombre o correo"
+    },
+    "badge": {
+      "customTagPlaceholder": "etiqueta-personalizada"
+    },
+    "threadMenu": {
+      "searchOrAddTag": "Buscar o agregar una etiqueta"
+    }
+  },
+  "userGroups": {
+    "assignment": {
+      "infinitySymbol": "∞",
+      "maxWorkloadPlaceholder": "ej. 20",
+      "boardWeightPlaceholder": "1",
+      "selectInterval": "Seleccionar un intervalo",
+      "allBoards": "Todos los tableros",
+      "selectRoles": "Seleccionar roles..."
+    },
+    "form": {
+      "namePlaceholder": "Ingresar nombre del grupo de usuarios",
+      "aliasPlaceholder": "ej., frontend-team, backend-devs (opcional)",
+      "descriptionPlaceholder": "Ingresar descripción del grupo de usuarios (opcional)"
+    },
+    "userList": {
+      "searchPlaceholder": "Buscar miembros o agregar personas",
+      "selectRole": "Seleccionar rol",
+      "searchRoles": "Buscar roles..."
+    }
+  },
+  "userGuide": {
+    "mock": {
+      "messageChannel": "Mensaje #engineering",
+      "messageDM": "Mensaje a Alice Chen"
+    }
+  },
+  "slackMigration": {
+    "tokenPlaceholder": "xoxp-…",
+    "slackChannelId": "C0…",
+    "destinationChannel": "Canal de destino",
+    "startDatePlaceholder": "Desde el principio"
   }
 }

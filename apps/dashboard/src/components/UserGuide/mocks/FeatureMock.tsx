@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   BarChart2,
@@ -281,6 +282,7 @@ interface FeatureMockProps {
 }
 
 export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   switch (visualKey) {
     /* GROUP A — Chat ─────────────────────────────────────────────────────── */
 
@@ -300,7 +302,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                 Staging looks good — ready for review 👍
               </Msg>
             </div>
-            <MsgBar placeholder='Message #engineering' />
+            <MsgBar placeholder={t('userGuide.mock.messageChannel')} />
           </ChatShell>
         </MockFrame>
       );
@@ -321,7 +323,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                 Thanks! No rush 🙏
               </Msg>
             </div>
-            <MsgBar placeholder='Message Alice Chen' />
+            <MsgBar placeholder={t('userGuide.mock.messageDM')} />
           </ChatShell>
         </MockFrame>
       );
@@ -488,7 +490,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                 </button>
               </div>
             </div>
-            <MsgBar placeholder='Message #engineering' />
+            <MsgBar placeholder={t('userGuide.mock.messageChannel')} />
           </ChatShell>
         </MockFrame>
       );

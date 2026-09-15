@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import * as Select from '@radix-ui/react-select';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
@@ -84,6 +85,7 @@ interface StatusEditViewProps extends StatusViewProps {
 
 // Status Suggestions View - Shows when user hasn't started typing
 export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) => {
+  const { t } = useTranslation('placeholders');
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
   const { data: customEmojis } = useCustomEmojis();
@@ -186,7 +188,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                   height={400}
                   theme={emojiPickerTheme}
                   lazyLoadEmojis={true}
-                  searchPlaceHolder='Search emoji...'
+                  searchPlaceHolder={t('appSidebar.updateStatus.searchEmoji')}
                   previewConfig={{ showPreview: true }}
                   customEmojis={customEmojis || []}
                 />
@@ -199,7 +201,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           type='text'
           value={statusText}
           onChange={handleTextChange}
-          placeholder='Update your status'
+          placeholder={t('appSidebar.updateStatus.placeholder')}
           className='w-full pl-10 text-foreground'
           maxLength={100}
           autoFocus={!isMobile}
@@ -270,6 +272,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
 
 // Status Edit View - Shows when user is editing status
 export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initialData }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const user = useSelf();
   const [statusText, setStatusText] = useState('');
@@ -470,7 +473,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
                   height={400}
                   theme={emojiPickerTheme}
                   lazyLoadEmojis={true}
-                  searchPlaceHolder='Search emoji...'
+                  searchPlaceHolder={t('appSidebar.updateStatus.searchEmoji')}
                   previewConfig={{ showPreview: true }}
                   customEmojis={customEmojis || []}
                 />
@@ -483,7 +486,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           type='text'
           value={statusText}
           onChange={handleTextChange}
-          placeholder='Update your status'
+          placeholder={t('appSidebar.updateStatus.placeholder')}
           className='flex-1 bg-transparent border-none outline-none text-sm text-foreground'
           maxLength={100}
           data-track-category='STATUS'
@@ -547,7 +550,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
             onSelect={date => setCustomDate(date ?? undefined)}
             minDate={getStartOfToday()}
             showClearButton={false}
-            placeholder='Select date'
+            placeholder={t('ui.datePicker.selectDate')}
             inputClassName='h-9 flex-1 w-full'
             contentClassName='z-[100]'
           />

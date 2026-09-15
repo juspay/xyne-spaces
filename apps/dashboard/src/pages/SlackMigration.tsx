@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   MessageSquare,
   Hash,
@@ -652,6 +653,7 @@ const inputCls =
 
 // ── page ─────────────────────────────────────────────────────────────────────
 export default function SlackMigration(): React.JSX.Element {
+  const { t } = useTranslation('placeholders');
   const [mine, setMine] = useState<MigrationJobView[]>([]);
   const [all, setAll] = useState<MigrationJobView[] | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -869,7 +871,7 @@ export default function SlackMigration(): React.JSX.Element {
                         <Input
                           id='mig-token'
                           type='password'
-                          placeholder='xoxp-…'
+                          placeholder={t('slackMigration.tokenPlaceholder')}
                           value={token}
                           onChange={e => setToken(e.target.value)}
                           className='flex-1 font-mono'
@@ -907,7 +909,7 @@ export default function SlackMigration(): React.JSX.Element {
                         </label>
                         <Input
                           id='mig-slack-channel'
-                          placeholder='C0…'
+                          placeholder={t('slackMigration.slackChannelId')}
                           value={channel.slackChannelId}
                           onChange={e => setChannel({ ...channel, slackChannelId: e.target.value })}
                           data-track-category='SLACK_MIGRATION'
@@ -924,7 +926,7 @@ export default function SlackMigration(): React.JSX.Element {
                         </label>
                         <Input
                           id='mig-xyne-channel'
-                          placeholder='Destination channel'
+                          placeholder={t('slackMigration.destinationChannel')}
                           value={channel.xyneChannelId}
                           onChange={e => setChannel({ ...channel, xyneChannelId: e.target.value })}
                           data-track-category='SLACK_MIGRATION'
@@ -946,7 +948,7 @@ export default function SlackMigration(): React.JSX.Element {
                             startDate: d ? d.toISOString().slice(0, 10) : '',
                           })
                         }
-                        placeholder='From the beginning'
+                        placeholder={t('slackMigration.startDatePlaceholder')}
                         maxDate={new Date()}
                         showClearButton
                         inputClassName={inputCls}

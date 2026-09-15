@@ -1,4 +1,5 @@
 import { JSX, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Plus } from 'lucide-react';
 import { DropdownMenuItem, DropdownMenuSeparator } from '../ui/dropdown-menu';
 import { normalizeThreadTypeName } from '@xyne/shared';
@@ -22,6 +23,7 @@ const normalize = (value: string): string => value.trim().toLowerCase();
  * Anything else is reached by typing it.
  */
 export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProps): JSX.Element => {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const query = normalize(search);
   const { entries } = useThreadTypeVocabulary();
@@ -94,7 +96,7 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
           }
         }}
         maxLength={MAX_TAG_LENGTH}
-        placeholder='Search or add a tag'
+        placeholder={t('tags.threadMenu.searchOrAddTag')}
         data-track-category='Tags'
         data-track-name='ThreadTagSearch'
         aria-label='Search or add a thread tag'

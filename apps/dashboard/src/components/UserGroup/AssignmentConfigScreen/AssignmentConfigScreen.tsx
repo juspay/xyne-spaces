@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
@@ -51,6 +52,7 @@ const isPausedFromAssignment = (user: User | undefined): boolean => {
 export const AssignmentConfigScreen = ({
   userGroupId,
 }: AssignmentConfigScreenProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const zero = useZero();
   const { userID } = useAuthContextValues();
@@ -963,7 +965,7 @@ export const AssignmentConfigScreen = ({
                     inputMode='numeric'
                     value={getLocalMaxTickets(user.id) === -1 ? '' : getLocalMaxTickets(user.id)}
                     onChange={e => handleMaxTicketsChange(user.id, e.target.value)}
-                    placeholder='∞'
+                    placeholder={t('userGroups.assignment.infinitySymbol')}
                     className='w-16 text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                   />
                 </td>
@@ -1167,7 +1169,7 @@ export const AssignmentConfigScreen = ({
                           data-track-category='UserGroups'
                           data-track-name='ChangeRotationInterval'
                         >
-                          <SelectValue placeholder='Select an interval' />
+                          <SelectValue placeholder={t('userGroups.assignment.selectInterval')} />
                         </SelectTrigger>
                         <SelectContent>
                           {ROTATION_INTERVAL_OPTIONS.map(option => (
@@ -1275,7 +1277,7 @@ export const AssignmentConfigScreen = ({
                       id='max-workload'
                       value={maxWorkloadInput}
                       onChange={e => handleMaxWorkloadChange(e.target.value)}
-                      placeholder='e.g. 20'
+                      placeholder={t('userGroups.assignment.maxWorkloadPlaceholder')}
                       className='mt-1 w-24 text-sm'
                       data-track-event='change'
                       data-track-category='UserGroups'
@@ -1304,7 +1306,7 @@ export const AssignmentConfigScreen = ({
                       data-track-category='UserGroups'
                       data-track-name='SelectBoardFilter'
                     >
-                      <SelectValue placeholder='All boards' />
+                      <SelectValue placeholder={t('userGroups.assignment.allBoards')} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={ALL_BOARDS_VALUE}>All boards</SelectItem>
@@ -1350,7 +1352,7 @@ export const AssignmentConfigScreen = ({
                           setHasChanges(true);
                         }
                       }}
-                      placeholder='1'
+                      placeholder={t('userGroups.assignment.boardWeightPlaceholder')}
                       className='mt-1 w-24 text-sm'
                       data-track-event='change'
                       data-track-category='UserGroups'
@@ -1398,7 +1400,7 @@ export const AssignmentConfigScreen = ({
                         }))}
                         selectedValues={selectedNotifyRoleIds}
                         onChange={setSelectedNotifyRoleIds}
-                        placeholder='Select roles...'
+                        placeholder={t('userGroups.assignment.selectRoles')}
                       />
                     </div>
                     <Button

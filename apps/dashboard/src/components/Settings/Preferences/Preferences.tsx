@@ -1,4 +1,5 @@
 import { FC, ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   X,
   Palette,
@@ -305,6 +306,7 @@ const KEYWORD_ERROR_MESSAGES: Record<'duplicate' | 'too_long' | 'limit_reached',
 };
 
 const NotificationKeywordsCard: FC = () => {
+  const { t } = useTranslation('placeholders');
   const { keywords, addKeyword, removeKeyword } = useNotificationKeywords();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -360,7 +362,7 @@ const NotificationKeywordsCard: FC = () => {
             handleAdd();
           }
         }}
-        placeholder='Add a keyword and press Enter'
+        placeholder={t('preferences.keywordPlaceholder')}
         className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
         data-track-category='PREFERENCES'
         data-track-name='AddNotificationKeyword'
@@ -905,6 +907,7 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 // ─── Password ───────────────────────────────────────────────────────────────
 const PasswordSection: FC = () => {
+  const { t } = useTranslation('placeholders');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -955,7 +958,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showCurrent ? 'text' : 'password'}
-              placeholder='Current password'
+              placeholder={t('preferences.currentPassword')}
               value={currentPassword}
               onChange={e => setCurrentPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
@@ -976,7 +979,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showNew ? 'text' : 'password'}
-              placeholder='New password (min 8 characters)'
+              placeholder={t('preferences.newPassword')}
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
@@ -997,7 +1000,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showConfirm ? 'text' : 'password'}
-              placeholder='Confirm new password'
+              placeholder={t('preferences.confirmPassword')}
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
