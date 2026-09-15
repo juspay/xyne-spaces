@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
+  SDLC_ARTIFACT_REPOSITORY_RELATION,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
@@ -90,6 +91,20 @@ export async function findSdlcMembershipForActor(
   return membership?.channelId && role ? { channelId: membership.channelId, role } : null;
 }
 
+export async function repoIdsForChannel(db: Db, channelId: string): Promise<string[]> {
+  const edges = await db.sdlcEntityLink.findMany({
+    where: {
+      channelId,
+      sourceType: 'CHANNEL',
+      targetType: 'REPOSITORY',
+      relationType: SDLC_MEMBERSHIP_RELATION,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { targetId: true },
+  });
+  return [...new Set(edges.map((edge) => edge.targetId))];
+}
+
 /**
  * The tracks of a hub. Tracks carry no scope column; the CHANNEL -> TRACK edge is
  * what places one, so the id list comes from the link table.
@@ -139,4 +154,23 @@ export async function isCanvasInChannel(
     select: { artifactId: true },
   });
   return Boolean(artifact);
+}
+
+export async function canvasIdsForRepos(
+  db: Db,
+  channelId: string,
+  repoIds: readonly string[]
+): Promise<string[]> {
+  if (repoIds.length === 0) return [];
+  const edges = await db.sdlcEntityLink.findMany({
+    where: {
+      channelId,
+      sourceType: 'CANVAS',
+      targetType: 'REPOSITORY',
+      targetId: { in: [...repoIds] },
+      relationType: SDLC_ARTIFACT_REPOSITORY_RELATION,
+    },
+    select: { sourceId: true },
+  });
+  return [...new Set(edges.map(edge => edge.sourceId))];
 }

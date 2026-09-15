@@ -136,6 +136,8 @@ export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
  */
 export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
+export const SDLC_ARTIFACT_REPOSITORY_RELATION = "CONTEXT";
+
 /**
  * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
  * holds on the target. Shares its name with track membership because a root-level
@@ -668,9 +670,22 @@ export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
 
+export const SDLC_AGENT_SLUG = "sdlc-agent" as const;
+
+export const resolveSdlcAgentRepositorySchema = z.object({
+  agentSlug: z.literal(SDLC_AGENT_SLUG),
+  repoId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  conversationId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
+});
+export type ResolveSdlcAgentRepositoryInput = z.infer<
+  typeof resolveSdlcAgentRepositorySchema
+>;
+
 export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
-    agentSlug: z.literal("sdlc-agent"),
+    agentSlug: z.literal(SDLC_AGENT_SLUG),
     repoId: z.string().min(1),
     operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
     sandboxId: z.string().min(1).max(256),
@@ -681,9 +696,20 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
 
+export const sdlcRepoIdsSchema = z.array(z.string().min(1)).max(50).optional();
+
+export function sdlcRepoIds(input: {
+  repoId?: string | undefined;
+  repoIds?: string[] | undefined;
+}): string[] {
+  if (input.repoIds) return [...new Set(input.repoIds)];
+  return input.repoId ? [input.repoId] : [];
+}
+
 export const createSdlcClawArtifactSchema = z
   .object({
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
+    repoIds: sdlcRepoIdsSchema,
     // The hub to write into. A repository sits in several, so it cannot be inferred.
     channelId: z.string().min(1).optional(),
     kind: sdlcArtifactKindSchema.optional(),
@@ -711,6 +737,12 @@ export const createSdlcClawArtifactSchema = z
           "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
       });
     }
+    if (value.kind === "BASELINE" && sdlcRepoIds(value).length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Baseline artifacts belong to exactly one repository",
+      });
+    }
     const isArtifact = value.kind !== "BASELINE";
     if (isArtifact) {
       if (!value.folderId) {
@@ -732,7 +764,8 @@ export type CreateSdlcClawArtifactInput = z.infer<
 >;
 
 export const updateSdlcClawArtifactSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1).optional(),
   canvasId: z.string().min(1),
   title: z.string().trim().min(1).max(255).optional(),
   markdown: z.string().min(1).max(5_000_000),
@@ -781,23 +814,31 @@ export const createSdlcLinkSchema = z.object({
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
-export const createSdlcTrackSchema = z.object({
-  repoId: z.string().min(1),
+export const createSdlcClawLinkSchema = createSdlcLinkSchema.extend({
   channelId: z.string().min(1).optional(),
+  repoId: z.string().min(1).optional(),
+  repoIds: sdlcRepoIdsSchema,
+});
+export type CreateSdlcClawLinkInput = z.infer<typeof createSdlcClawLinkSchema>;
+
+export const createSdlcTrackSchema = z.object({
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).optional(),
 });
 export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
 export const createSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
-  channelId: z.string().min(1).optional(),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   name: z.string().trim().min(1).max(80),
 });
 export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
 
 export const renameSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
+  repoId: z.string().min(1).optional(),
+  channelId: z.string().min(1),
   folderId: z.string().min(1),
   name: z.string().trim().min(1).max(80),
 });
