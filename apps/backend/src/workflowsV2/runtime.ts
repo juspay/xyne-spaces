@@ -60,6 +60,7 @@ class ClawConnector extends BaseConnector {
   readonly version = '1.0.0';
   readonly name = 'Xyne Claw';
   readonly description = 'Agents configured on xyne-claw';
+  readonly icon = 'bot';
   readonly credentials = [];
   readonly triggers = [];
   readonly steps: readonly AnyStep[] = [
