@@ -1887,6 +1887,11 @@ export const ReactionView = ({
                 }}
                 data-track-category='MESSAGE'
                 data-track-name='TOGGLE_REACTION'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  emojiName: reaction.emojiName,
+                  hadReacted: reaction.userHasReacted,
+                })}
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1949,6 +1954,10 @@ export const ReactionView = ({
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  source: 'message_bubble',
+                })}
               >
                 <span className='text-sm font-medium'>+</span>
               </button>
