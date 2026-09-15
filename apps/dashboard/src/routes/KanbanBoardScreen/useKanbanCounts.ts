@@ -109,16 +109,6 @@ const getTicketCountsRoom = (
     return null;
   }
 
-  if (request.viewMode === 'user-tickets') {
-    if (request.userId) return `ticket-counts:user:${request.userId}`;
-    return null;
-  }
-
-  if (request.viewMode === 'group-tickets') {
-    if (request.groupId) return `ticket-counts:group:${request.groupId}`;
-    return null;
-  }
-
   if (request.viewMode === 'my-tickets' && currentUserId) {
     return `ticket-counts:user:${currentUserId}`;
   }
@@ -220,17 +210,6 @@ const matchesRequest = (
   if (request.boardId && snapshot.boardId !== request.boardId) return false;
   if (request.projectId && !request.boardId && snapshot.projectId !== request.projectId)
     return false;
-  if (request.userId && request.viewMode === 'user-tickets') {
-    if (
-      !matchesIdentity(snapshot.assignedTo, request.userId) &&
-      !matchesIdentity(snapshot.createdBy, request.userId)
-    ) {
-      return false;
-    }
-  }
-  if (request.groupId && request.viewMode === 'group-tickets') {
-    if (!matchesIdentity(snapshot.userGroupId, request.groupId)) return false;
-  }
   if (request.viewMode === 'my-tickets' && currentUserId) {
     const assignedMatch = matchesIdentity(snapshot.assignedTo, currentUserId);
     const createdMatch = matchesIdentity(snapshot.createdBy, currentUserId);

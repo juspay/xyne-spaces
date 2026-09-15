@@ -1,16 +1,17 @@
-import { ReactElement, useMemo, useState } from 'react';
+import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   ChevronDown,
-  PlusDefault as Plus,
+  Lock02Close,
   Star,
   Share02 as Share2,
   PencilEdit as Pencil,
   DeleteDustbin01 as Trash2,
 } from '@xyne/icons';
+import { PanelsTopLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { SavedConfigEntityName } from '@xyne/shared';
+import { SavedConfigEntityName, SavedConfigVisibility } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -20,9 +21,9 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { cn } from '../../../utils/classNames';
 import { Dialog } from '../../ui/Dialog';
+import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import CompactActionsMenu from '../../ui/CompactActionsMenu';
-import SidebarItem from './SidebarItem';
 import DirectorySectionHeader from '../../Chat/DirectorySectionHeader';
 
 type ConfigValue = {
@@ -34,41 +35,38 @@ type ConfigValue = {
 type SavedView = {
   id: string;
   name: string;
+  userId: string;
   contextId: string;
   createdAt: number;
+  visibility?: string;
   isStarred?: boolean;
   values?: readonly ConfigValue[];
+  viewAccess?: readonly { id: string }[];
 };
 
-// How many views to show before the "Show more" affordance (mirrors the Persons section).
+// How many views to show before the "Show more" affordance.
 const PAGE_SIZE = 6;
 
-const boardCountOf = (view: SavedView): number =>
-  (view.values ?? []).filter(v => v.fieldName === 'boards').length;
+// Shared either way the ACL allows it: workspace-wide via visibility, or per-user via view_access.
+const isViewShared = (view: SavedView): boolean =>
+  view.visibility === SavedConfigVisibility.PUBLIC || (view.viewAccess ?? []).length > 0;
+
+const matchesQuery = (name: string, query: string): boolean =>
+  name.toLowerCase().includes(query.trim().toLowerCase());
 
 interface ViewRowProps {
-  view: SavedView;
+  label: string;
+  isShared: boolean;
   isActive: boolean;
+  ownerId?: string | null;
   onOpen: () => void;
-  onRename: () => void;
-  onShare: () => void;
-  onToggleStar: () => void;
-  onDelete: () => void;
+  menu?: ReactNode;
 }
 
-// A view row is a div[role=button] (NOT SidebarItem's <button>) so the ⋯ menu — itself a button —
+// A view row is a div[role=button] (NOT a <button>) so the ⋯ menu — itself a button —
 // can live inside without nesting buttons. The menu is revealed on hover OR keyboard focus.
-function ViewRow({
-  view,
-  isActive,
-  onOpen,
-  onRename,
-  onShare,
-  onToggleStar,
-  onDelete,
-}: ViewRowProps): ReactElement {
-  const starred = isViewStarred(view);
-  const count = boardCountOf(view);
+function ViewRow({ label, isShared, isActive, ownerId, onOpen, menu }: ViewRowProps): ReactElement {
+  const Icon = isShared ? PanelsTopLeft : Lock02Close;
 
   return (
     <div
@@ -87,77 +85,35 @@ function ViewRow({
         }
       }}
       className={cn(
-        'group/viewrow relative w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-transparent cursor-pointer',
-        'text-sm font-medium tracking-[-0.14px] transition-colors',
+        'group/viewrow relative w-full flex items-center gap-2 px-3 py-2 rounded-[10px] cursor-pointer',
+        'text-sm tracking-[-0.14px] transition-[background-color,box-shadow,color]',
         'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        isActive ? 'bg-sidebar-accent' : 'bg-transparent hover:bg-sidebar-accent',
+        isActive
+          ? 'bg-sidebar-accent shadow-sm font-semibold text-sidebar-accent-foreground'
+          : 'font-medium text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
       )}
       data-track-category='Projects'
       data-track-name='OpenView'
     >
-      <span
-        className={cn(
-          'flex-1 min-w-0 text-left truncate block',
-          isActive
-            ? 'text-sidebar-accent-foreground'
-            : 'text-foreground group-hover/viewrow:text-sidebar-accent-foreground',
-        )}
-      >
-        {view.name}
-      </span>
+      <Icon className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
 
-      {/* Board count — fades out on hover/focus so it never collides with the ⋯ menu. */}
-      {count > 0 && (
-        <span className='text-[11px] tabular-nums text-muted-foreground transition-opacity group-hover/viewrow:opacity-0 group-focus-within/viewrow:opacity-0'>
-          {count}
-        </span>
+      <span className='flex-1 min-w-0 text-left truncate block'>{label}</span>
+
+      {/* Owner avatar — says who shared the view; presence is off, it means nothing here. */}
+      {ownerId && (
+        <Avatar userId={ownerId} size='sm' showActiveStatus={false} className='shrink-0' />
       )}
 
-      {/* ⋯ actions — absolute so it overlays the count slot; revealed on hover or keyboard focus.
-          `data-view-actions` lets the row's handlers skip navigation when the menu is used. */}
-      <div
-        data-view-actions
-        className='absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/viewrow:opacity-100 group-focus-within/viewrow:opacity-100'
-      >
-        <CompactActionsMenu
-          contentAlign='end'
-          triggerClassName={cn(
-            'size-7 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
-            'active:scale-[0.96] transition-[transform,background-color,color]',
-          )}
-          items={[
-            {
-              icon: <Pencil className='size-4' />,
-              label: 'Rename',
-              onSelect: onRename,
-              testId: 'view-rename',
-            },
-            {
-              icon: <Share2 className='size-4' />,
-              label: 'Share',
-              onSelect: onShare,
-              testId: 'view-share',
-            },
-            {
-              icon: <Star className={cn('size-4', starred && 'fill-current text-yellow-500')} />,
-              label: starred ? 'Unstar' : 'Star',
-              onSelect: onToggleStar,
-              testId: 'view-star',
-            },
-            {
-              icon: <Trash2 className='size-4' />,
-              label: 'Delete',
-              onSelect: onDelete,
-              testId: 'view-delete',
-            },
-          ]}
-        />
-      </div>
+      {menu}
     </div>
   );
 }
 
-const ViewsSidebarSection = (): ReactElement => {
+interface ViewsSidebarSectionProps {
+  searchQuery?: string;
+}
+
+const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): ReactElement => {
   const navigate = useNavigate();
   const location = useLocation();
   const zero = useZero();
@@ -174,7 +130,7 @@ const ViewsSidebarSection = (): ReactElement => {
   );
 
   const [isViewsExpanded, setIsViewsExpanded] = useState(true);
-  const [isFavoritesExpanded, setIsFavoritesExpanded] = useState(true);
+  const [isStarredExpanded, setIsStarredExpanded] = useState(true);
   const [isSharedExpanded, setIsSharedExpanded] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
@@ -183,27 +139,51 @@ const ViewsSidebarSection = (): ReactElement => {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
 
+  const query = searchQuery.trim();
+
   const allViews = useMemo(() => (views ?? []) as readonly SavedView[], [views]);
   const allSharedViews = useMemo(
     () =>
-      (sharedViews ?? []).map(va => va.view).filter((v): v is NonNullable<typeof v> => Boolean(v)),
+      (sharedViews ?? [])
+        .map(va => va.view)
+        .filter((v): v is NonNullable<typeof v> => Boolean(v)) as readonly SavedView[],
     [sharedViews],
   );
 
-  // Starred-first; Array.sort is stable so each group keeps the query's createdAt-desc order.
-  const sortedViews = useMemo(
-    () => [...allViews].sort((a, b) => Number(isViewStarred(b)) - Number(isViewStarred(a))),
-    [allViews],
+  const matching = useMemo(
+    () => (list: readonly SavedView[]) =>
+      query ? list.filter(view => matchesQuery(view.name, query)) : list,
+    [query],
   );
-  const starredViews = useMemo(() => allViews.filter(isViewStarred), [allViews]);
 
-  const visibleViews = sortedViews.slice(0, visibleCount);
-  const hiddenCount = sortedViews.length - visibleViews.length;
+  // Starred views are lifted out of Views entirely, so a view is listed exactly once.
+  const starredViews = useMemo(
+    () => matching(allViews.filter(isViewStarred)),
+    [allViews, matching],
+  );
+  const unstarredViews = useMemo(
+    () => matching(allViews.filter(view => !isViewStarred(view))),
+    [allViews, matching],
+  );
+  const visibleSharedViews = useMemo(() => matching(allSharedViews), [allSharedViews, matching]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [query]);
+
+  const visibleViews = unstarredViews.slice(0, visibleCount);
+  const hiddenCount = unstarredViews.length - visibleViews.length;
 
   const isOnView = (id: string): boolean => location.pathname.endsWith(`/projects/views/${id}`);
   const isMyTicketsActive =
     !projectId && !boardId && !location.pathname.includes('/projects/views');
-  const isCreateActive = location.pathname.endsWith('/projects/views/new');
+  const showMyTickets = !query || matchesQuery('My tickets', query);
+  const hasNoMatches =
+    !!query &&
+    !showMyTickets &&
+    starredViews.length === 0 &&
+    unstarredViews.length === 0 &&
+    visibleSharedViews.length === 0;
 
   const handleShare = (view: SavedView): void => {
     setShareTarget({ id: view.id, name: view.name });
@@ -246,13 +226,71 @@ const ViewsSidebarSection = (): ReactElement => {
     }
   };
 
+  // ⋯ actions — absolute so it overlays the avatar slot; revealed on hover or keyboard focus.
+  // `data-view-actions` lets the row's handlers skip navigation when the menu is used.
+  const ownerMenu = (view: SavedView): ReactElement => (
+    <div
+      data-view-actions
+      className='absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/viewrow:opacity-100 group-focus-within/viewrow:opacity-100'
+    >
+      <CompactActionsMenu
+        contentAlign='end'
+        triggerClassName={cn(
+          'size-7 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+          'active:scale-[0.96] transition-[transform,background-color,color]',
+        )}
+        items={[
+          {
+            icon: <Pencil className='size-4' />,
+            label: 'Rename',
+            onSelect: () => openRename(view),
+            testId: 'view-rename',
+          },
+          {
+            icon: <Share2 className='size-4' />,
+            label: 'Share',
+            onSelect: () => handleShare(view),
+            testId: 'view-share',
+          },
+          {
+            icon: (
+              <Star
+                className={cn('size-4', isViewStarred(view) && 'fill-current text-yellow-500')}
+              />
+            ),
+            label: isViewStarred(view) ? 'Unstar' : 'Star',
+            onSelect: () => toggleStar(view),
+            testId: 'view-star',
+          },
+          {
+            icon: <Trash2 className='size-4' />,
+            label: 'Delete',
+            onSelect: () => setDeleteTarget({ id: view.id, name: view.name }),
+            testId: 'view-delete',
+          },
+        ]}
+      />
+    </div>
+  );
+
+  const ownedRow = (view: SavedView): ReactElement => (
+    <ViewRow
+      key={view.id}
+      label={view.name}
+      isShared={isViewShared(view)}
+      isActive={isOnView(view.id)}
+      onOpen={() => void navigate(`/projects/views/${view.id}`)}
+      menu={ownerMenu(view)}
+    />
+  );
+
   return (
     <>
-      {/* FAVORITES — only present once at least one view is starred. */}
+      {/* STARRED — only present once at least one view is starred. */}
       <AnimatePresence initial={false}>
         {starredViews.length > 0 && (
           <motion.div
-            key='favorites'
+            key='starred'
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
@@ -260,22 +298,11 @@ const ViewsSidebarSection = (): ReactElement => {
             className='mb-4'
           >
             <DirectorySectionHeader
-              title='Favorites'
-              isExpanded={isFavoritesExpanded}
-              onToggle={() => setIsFavoritesExpanded(prev => !prev)}
+              title='Starred'
+              isExpanded={isStarredExpanded}
+              onToggle={() => setIsStarredExpanded(prev => !prev)}
             />
-            {isFavoritesExpanded && (
-              <div className='mt-1'>
-                {starredViews.map(view => (
-                  <SidebarItem
-                    key={view.id}
-                    label={view.name}
-                    isActive={isOnView(view.id)}
-                    onClick={() => void navigate(`/projects/views/${view.id}`)}
-                  />
-                ))}
-              </div>
-            )}
+            {isStarredExpanded && <div className='mt-1'>{starredViews.map(ownedRow)}</div>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -289,24 +316,22 @@ const ViewsSidebarSection = (): ReactElement => {
         />
         {isViewsExpanded && (
           <div className='mt-1'>
-            <SidebarItem
-              label='My Tickets'
-              isActive={isMyTicketsActive}
-              onClick={() => void navigate('/projects')}
-            />
-
-            {visibleViews.map(view => (
+            {showMyTickets && (
               <ViewRow
-                key={view.id}
-                view={view}
-                isActive={isOnView(view.id)}
-                onOpen={() => void navigate(`/projects/views/${view.id}`)}
-                onRename={() => openRename(view)}
-                onShare={() => handleShare(view)}
-                onToggleStar={() => toggleStar(view)}
-                onDelete={() => setDeleteTarget({ id: view.id, name: view.name })}
+                label='My tickets'
+                isShared={false}
+                isActive={isMyTicketsActive}
+                onOpen={() => void navigate('/projects')}
               />
-            ))}
+            )}
+
+            {visibleViews.map(ownedRow)}
+
+            {hasNoMatches && (
+              <div className='px-3 py-3 text-[13px] text-muted-foreground text-center'>
+                No matching views
+              </div>
+            )}
 
             {hiddenCount > 0 && (
               <button
@@ -315,35 +340,21 @@ const ViewsSidebarSection = (): ReactElement => {
                 data-track-category='Projects'
                 data-track-name='ShowMoreViews'
               >
-                <ChevronDown className='size-2 text-muted-foreground' />
-                <span className='text-[10px] tabular-nums text-muted-foreground'>
+                <span className='size-4 flex items-center justify-center shrink-0'>
+                  <ChevronDown className='size-3 text-muted-foreground' />
+                </span>
+                <span className='text-[13px] tabular-nums text-muted-foreground'>
                   Show more ({hiddenCount})
                 </span>
               </button>
             )}
-
-            <button
-              onClick={() => void navigate('/projects/views/new')}
-              className={cn(
-                'mt-1.5 w-full flex items-center gap-3 px-3 py-2 rounded-[10px] border border-dashed',
-                'text-sm font-medium tracking-[-0.14px] transition-[transform,color,border-color,background-color] active:scale-[0.96]',
-                isCreateActive
-                  ? 'border-border bg-sidebar-accent text-foreground'
-                  : 'border-border/70 text-muted-foreground hover:text-sidebar-accent-foreground hover:border-border hover:bg-sidebar-accent',
-              )}
-              data-track-category='Projects'
-              data-track-name='CreateNewView'
-            >
-              <Plus className='size-4 shrink-0' />
-              <span>Create new view</span>
-            </button>
           </div>
         )}
       </div>
 
       {/* SHARED WITH ME — views shared with the current user via view_access. */}
       <AnimatePresence initial={false}>
-        {allSharedViews.length > 0 && (
+        {visibleSharedViews.length > 0 && (
           <motion.div
             key='shared'
             initial={{ opacity: 0, y: -4 }}
@@ -359,12 +370,14 @@ const ViewsSidebarSection = (): ReactElement => {
             />
             {isSharedExpanded && (
               <div className='mt-1'>
-                {allSharedViews.map(view => (
-                  <SidebarItem
+                {visibleSharedViews.map(view => (
+                  <ViewRow
                     key={view.id}
                     label={view.name}
+                    isShared
                     isActive={isOnView(view.id)}
-                    onClick={() => void navigate(`/projects/views/${view.id}`)}
+                    ownerId={view.userId}
+                    onOpen={() => void navigate(`/projects/views/${view.id}`)}
                   />
                 ))}
               </div>

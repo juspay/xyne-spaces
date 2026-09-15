@@ -29,12 +29,7 @@ export const createTicket = async (payload: CreateTicketRequest): Promise<Create
   return response.data;
 };
 
-export type KanbanCountsViewMode =
-  | 'project'
-  | 'board'
-  | 'my-tickets'
-  | 'user-tickets'
-  | 'group-tickets';
+export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanCountsGroupBy =
   | 'none'

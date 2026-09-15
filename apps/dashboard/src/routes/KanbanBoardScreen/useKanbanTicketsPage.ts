@@ -22,7 +22,7 @@ export type KanbanTicketsPageRow = Ticket & {
   formEntityValues?: Array<FormEntityValues & { formField?: unknown }>;
 };
 
-export type KanbanViewMode = 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanPageGroupBy =
   | 'none'

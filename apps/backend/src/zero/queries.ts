@@ -5590,6 +5590,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     return zql.saved_user_configurations
       .where('userId', userId)
       .related('values')
+      .related('viewAccess')
       .orderBy('createdAt', 'desc');
   }),
 
