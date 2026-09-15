@@ -1353,6 +1353,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),

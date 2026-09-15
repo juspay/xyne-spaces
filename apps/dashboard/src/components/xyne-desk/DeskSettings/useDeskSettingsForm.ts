@@ -6,6 +6,7 @@ import {
   ChannelType,
   ChannelRole,
   isDeskChannelType,
+  parseDeskMetricsGuestVisibility,
 } from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import {
@@ -207,6 +208,7 @@ export function useDeskSettingsForm(
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
+    metricsGuestVisibility: emailChannelPreference?.metricsGuestVisibility ?? null,
     appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
     deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
     deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
@@ -239,6 +241,7 @@ export function useDeskSettingsForm(
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
   const metricsEnabled = pref.draft.metricsEnabled;
   const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
+  const guestVisibility = parseDeskMetricsGuestVisibility(pref.draft.metricsGuestVisibility);
   const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
   const deskReportEnabled = pref.draft.deskReportEnabled;
   const deskReportAgentSlug = pref.draft.deskReportAgentSlug;
@@ -295,6 +298,11 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  const toggleGuestVisibility = (key: string) =>
+    pref.setField(
+      'metricsGuestVisibility',
+      JSON.stringify({ ...guestVisibility, [key]: guestVisibility[key] === false }),
+    );
 
   const setClassificationEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -372,6 +380,9 @@ export function useDeskSettingsForm(
       if (d.frtStageNames !== s.frtStageNames) {
         const names = parseFrtStageNames(d.frtStageNames);
         patch.frtStageNames = names.length > 0 ? JSON.stringify(names) : null;
+      }
+      if (d.metricsGuestVisibility !== s.metricsGuestVisibility) {
+        patch.metricsGuestVisibility = d.metricsGuestVisibility;
       }
       if (d.deskReportEnabled !== s.deskReportEnabled) {
         patch.deskReportEnabled = d.deskReportEnabled;
@@ -492,6 +503,8 @@ export function useDeskSettingsForm(
     setMetricsEnabled,
     frtStageNames,
     setFrtStageNames,
+    guestVisibility,
+    toggleGuestVisibility,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
     deskReportEnabled,
