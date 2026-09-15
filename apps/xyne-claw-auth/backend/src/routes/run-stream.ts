@@ -475,7 +475,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ? await resolveSdlcRepositoryForUser(
           userId,
           researchContext && typeof researchContext === "object" && !Array.isArray(researchContext)
-            ? researchContext as { type?: unknown; id?: unknown }
+            ? researchContext as { type?: unknown; id?: unknown; channelId?: unknown }
             : undefined,
           convId,
         )

@@ -14,6 +14,7 @@ export interface SdlcRepositoryContext {
 export interface ResearchRepositoryContext {
   type?: unknown;
   id?: unknown;
+  channelId?: unknown;
 }
 
 export type SdlcRepositoryResolution =
@@ -34,9 +35,12 @@ export async function resolveSdlcRepositoryForUser(
     return { ok: false, status: 401, error: "Spaces credentials are required to resolve the SDLC repository" };
   }
 
+  const channelId =
+    typeof researchContext.channelId === "string" ? researchContext.channelId.trim() : "";
+
   try {
     const response = await spacesFetch(
-      `/api/sdlc/repositories/${encodeURIComponent(researchContext.id.trim())}/context?conversationId=${encodeURIComponent(conversationId)}`,
+      `/api/sdlc/repositories/${encodeURIComponent(researchContext.id.trim())}/context?conversationId=${encodeURIComponent(conversationId)}${channelId ? `&channelId=${encodeURIComponent(channelId)}` : ""}`,
       undefined,
       { ...auth, baseUrl: CONFIG.spacesInternalUrl },
     ) as {
