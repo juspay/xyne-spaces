@@ -71,7 +71,7 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
-import { useCanvasTableFilters } from '../useCanvasTableFilters';
+import { useCanvasTableFilters, type CanvasTableTicketDraft } from '../useCanvasTableFilters';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useTheme } from '../../../hooks/useTheme';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -90,6 +90,8 @@ import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { toast } from 'sonner';
+import { CanvasBulkTicketCreationFlow } from '../CanvasBulkTicketCreationFlow/CanvasBulkTicketCreationFlow';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
@@ -548,7 +550,6 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
 
-    useCanvasTableFilters(containerRef);
     const getCanvasCommentEditor = useCallback(
       () =>
         editor
@@ -591,6 +592,21 @@ export const CollaborativeCanvasEditor = forwardRef<
       containerRef,
       getEditor: getCanvasCommentEditor,
       ready: isEditorReady,
+    });
+
+    const [tableTicketDraft, setTableTicketDraft] = useState<CanvasTableTicketDraft | null>(null);
+    const handleCreateTicketsFromTable = useCallback((draft: CanvasTableTicketDraft): void => {
+      if (draft.titles.length < 2) {
+        toast.error('Add at least two rows to create tickets from this table');
+        return;
+      }
+      setTableTicketDraft(draft);
+    }, []);
+    const closeTableTicketModal = useCallback((): void => setTableTicketDraft(null), []);
+
+    useCanvasTableFilters(containerRef, {
+      canCreateTickets: editable && !isReadOnly && !isTicketChannelArchived,
+      onCreateTickets: handleCreateTicketsFromTable,
     });
 
     // Expose presentation and comment drawer methods via ref
@@ -893,6 +909,12 @@ export const CollaborativeCanvasEditor = forwardRef<
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+
+        <CanvasBulkTicketCreationFlow
+          draft={tableTicketDraft}
+          channelId={channelId}
+          onClose={closeTableTicketModal}
         />
 
         {/* Presentation Modal */}
