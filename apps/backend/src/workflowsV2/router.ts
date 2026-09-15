@@ -38,7 +38,7 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
 
-const buildRouteRequest = (req: Request): RouteRequest => {
+const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest => {
   const body: unknown = req.body;
 
   if (body && typeof body === 'object' && !Array.isArray(body) && 'name' in body) {
@@ -62,9 +62,11 @@ const buildRouteRequest = (req: Request): RouteRequest => {
     bytes: new Uint8Array(f.buffer),
   }));
 
-  // express.raw() leaves a Buffer on req.body for routes marked `rawBody`. The SDK
-  // verifies a webhook's signature over these exact bytes.
-  const rawBody = Buffer.isBuffer(body) ? new Uint8Array(body) : undefined;
+  const rawBody = Buffer.isBuffer(body)
+    ? new Uint8Array(body)
+    : rawBodyRoute
+      ? new Uint8Array()
+      : undefined;
 
   return {
     params: req.params as Record<string, string>,
@@ -117,11 +119,21 @@ const sendRouteResponse = async (
     return;
   }
 
+  const contentType = Object.entries(response.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === 'content-type',
+  )?.[1];
+  if (typeof response.body === 'string' && contentType?.toLowerCase().startsWith('text/plain')) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.status(response.status).send(response.body);
+    return;
+  }
+
   res.status(response.status).json(response.body);
 };
 
 const PUBLIC_ALLOWED_ROUTES = new Set([
-  'POST /webhooks/:workflowId'
+  'POST /webhooks/:workflowId',
+  'GET /webhooks/:workflowId',
 ]);
 
 const CLAW_ALLOWED_ROUTES = new Set([
@@ -193,7 +205,7 @@ const mount = (
       void (async () => {
         try {
           const ctx = authenticated ? ctxFromRequest(req) : null;
-          const routeRequest = buildRouteRequest(req);
+          const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
           if (ctx && ATTRIBUTE_INJECTED_ROUTES.has(key)) {
             const body = (routeRequest.body ?? {}) as Record<string, unknown>;
