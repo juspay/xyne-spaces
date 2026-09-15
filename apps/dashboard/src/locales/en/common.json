@@ -178,6 +178,53 @@
     },
     "promptMarkerRail": {
       "yourPromptsAriaLabel": "Your prompts"
+    },
+    "aiAgentSelector": {
+      "askAiLabel": "Ask AI",
+      "clearButton": "Clear",
+      "loadingAgents": "Loading agents…",
+      "noAgentsMatch": "No agents match “{{query}}”",
+      "agentCount_one": "{{count}} agent",
+      "agentCount_other": "{{count}} agents"
+    },
+    "composerVoiceButton": {
+      "transcriptionFailedTitle": "Voice transcription failed",
+      "unknownError": "Unknown error",
+      "notSupported": "Voice recording is not supported in this browser",
+      "micPermissionDenied": "Microphone permission denied",
+      "failedToStart": "Failed to start voice recording",
+      "recordingFailedUnexpectedly": "Voice recording failed unexpectedly",
+      "stopVoiceInput": "Stop voice input",
+      "startVoiceInput": "Start voice input",
+      "transcribing": "Transcribing…",
+      "voiceInput": "Voice input"
+    },
+    "modelThinkingSelector": {
+      "defaultLabel": "Default",
+      "offLabel": "Off",
+      "minimalLabel": "Minimal",
+      "lowLabel": "Low",
+      "mediumLabel": "Medium",
+      "highLabel": "High",
+      "recommendedParenthetical": "Recommended ({{model}})",
+      "recommendedModelTitle": "Recommended model",
+      "modelAndThinkingAriaLabel": "Model and thinking",
+      "recommendedLabel": "Recommended",
+      "recommendedTag": "(Recommended)",
+      "noModelsMatch": "No models match",
+      "thinkingLabel": "Thinking"
+    },
+    "composerCollectionPicker": {
+      "selectCollectionsLabel": "Select collections",
+      "backLabel": "Back",
+      "searchThisFolderPlaceholder": "Search this folder…",
+      "searchCollectionsPlaceholder": "Search collections…",
+      "noMatches": "No matches",
+      "folderEmpty": "This folder is empty",
+      "clickToSelectDoubleClickToOpen": "Click to select · double-click to open",
+      "selectedLabel": "Selected",
+      "noCollections": "No collections",
+      "noCollectionsFound": "No collections found"
     }
   }
 }

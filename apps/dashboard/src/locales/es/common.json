@@ -178,6 +178,53 @@
     },
     "promptMarkerRail": {
       "yourPromptsAriaLabel": "Tus mensajes"
+    },
+    "aiAgentSelector": {
+      "askAiLabel": "Preguntar a la IA",
+      "clearButton": "Limpiar",
+      "loadingAgents": "Cargando agentes…",
+      "noAgentsMatch": "Ningún agente coincide con “{{query}}”",
+      "agentCount_one": "{{count}} agente",
+      "agentCount_other": "{{count}} agentes"
+    },
+    "composerVoiceButton": {
+      "transcriptionFailedTitle": "Error en la transcripción de voz",
+      "unknownError": "Error desconocido",
+      "notSupported": "La grabación de voz no es compatible con este navegador",
+      "micPermissionDenied": "Permiso de micrófono denegado",
+      "failedToStart": "Error al iniciar la grabación de voz",
+      "recordingFailedUnexpectedly": "La grabación de voz falló inesperadamente",
+      "stopVoiceInput": "Detener entrada de voz",
+      "startVoiceInput": "Iniciar entrada de voz",
+      "transcribing": "Transcribiendo…",
+      "voiceInput": "Entrada de voz"
+    },
+    "modelThinkingSelector": {
+      "defaultLabel": "Predeterminado",
+      "offLabel": "Desactivado",
+      "minimalLabel": "Mínimo",
+      "lowLabel": "Bajo",
+      "mediumLabel": "Medio",
+      "highLabel": "Alto",
+      "recommendedParenthetical": "Recomendado ({{model}})",
+      "recommendedModelTitle": "Modelo recomendado",
+      "modelAndThinkingAriaLabel": "Modelo y razonamiento",
+      "recommendedLabel": "Recomendado",
+      "recommendedTag": "(Recomendado)",
+      "noModelsMatch": "Ningún modelo coincide",
+      "thinkingLabel": "Razonamiento"
+    },
+    "composerCollectionPicker": {
+      "selectCollectionsLabel": "Seleccionar colecciones",
+      "backLabel": "Atrás",
+      "searchThisFolderPlaceholder": "Buscar en esta carpeta…",
+      "searchCollectionsPlaceholder": "Buscar colecciones…",
+      "noMatches": "Sin coincidencias",
+      "folderEmpty": "Esta carpeta está vacía",
+      "clickToSelectDoubleClickToOpen": "Clic para seleccionar · doble clic para abrir",
+      "selectedLabel": "Seleccionado",
+      "noCollections": "Sin colecciones",
+      "noCollectionsFound": "No se encontraron colecciones"
     }
   }
 }

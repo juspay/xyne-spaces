@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BookOpen, ChevronRight, ArrowLeft, Folder, FileText } from 'lucide-react';
 import { useQuery as useZeroQuery } from '../../hooks/useQuery';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -55,6 +56,7 @@ export function ComposerCollectionPicker({
   open: controlledOpen,
   onOpenChange,
 }: ComposerCollectionPickerProps): ReactElement {
+  const { t } = useTranslation('common');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
@@ -217,8 +219,8 @@ export function ComposerCollectionPicker({
         <button
           type='button'
           onClick={() => setOpen(!open)}
-          aria-label='Select collections'
-          title='Select collections'
+          aria-label={t('composerCollectionPicker.selectCollectionsLabel')}
+          title={t('composerCollectionPicker.selectCollectionsLabel')}
           className={cn(
             'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
             // Accent only while something is actually scoped — idle matches the
@@ -247,7 +249,7 @@ export function ComposerCollectionPicker({
                     setNavStack(prev => prev.slice(0, -1));
                   }}
                   className='flex items-center hover:text-foreground'
-                  aria-label='Back'
+                  aria-label={t('composerCollectionPicker.backLabel')}
                   data-track-category='XyneAI'
                   data-track-name='KB_FOLDER_BACK'
                 >
@@ -260,7 +262,11 @@ export function ComposerCollectionPicker({
               type='text'
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder={inFolderView ? 'Search this folder…' : 'Search collections…'}
+              placeholder={
+                inFolderView
+                  ? t('composerCollectionPicker.searchThisFolderPlaceholder')
+                  : t('composerCollectionPicker.searchCollectionsPlaceholder')
+              }
               className='w-full rounded-md border border-border bg-popover px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
               data-track-category='XyneAI'
               data-track-name={inFolderView ? 'KB_FOLDER_SEARCH_INPUT' : 'COLLECTION_SEARCH_INPUT'}
@@ -271,7 +277,9 @@ export function ComposerCollectionPicker({
             {inFolderView ? (
               currentSubfolders.length === 0 && currentFiles.length === 0 ? (
                 <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                  {search.trim() ? 'No matches' : 'This folder is empty'}
+                  {search.trim()
+                    ? t('composerCollectionPicker.noMatches')
+                    : t('composerCollectionPicker.folderEmpty')}
                 </div>
               ) : (
                 <div className='py-1'>
@@ -287,13 +295,17 @@ export function ComposerCollectionPicker({
                           'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent',
                           isSelected && 'bg-accent',
                         )}
-                        title='Click to select · double-click to open'
+                        title={t('composerCollectionPicker.clickToSelectDoubleClickToOpen')}
                         data-track-category='XyneAI'
                         data-track-name='SELECT_KB_FOLDER'
                       >
                         <Folder className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{folder.name}</span>
-                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
+                        {isSelected && (
+                          <span className='text-xs text-claw-ai-fg'>
+                            {t('composerCollectionPicker.selectedLabel')}
+                          </span>
+                        )}
                         <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
                       </button>
                     );
@@ -314,7 +326,11 @@ export function ComposerCollectionPicker({
                       >
                         <FileText className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{file.name}</span>
-                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
+                        {isSelected && (
+                          <span className='text-xs text-claw-ai-fg'>
+                            {t('composerCollectionPicker.selectedLabel')}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -322,12 +338,14 @@ export function ComposerCollectionPicker({
               )
             ) : filteredCollections.length === 0 ? (
               <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                {search.length === 0 ? 'No collections' : 'No collections found'}
+                {search.length === 0
+                  ? t('composerCollectionPicker.noCollections')
+                  : t('composerCollectionPicker.noCollectionsFound')}
               </div>
             ) : (
               <div className='py-1'>
                 <div className='px-3 pb-1 text-[11px] text-muted-foreground'>
-                  Click to select · double-click to open
+                  {t('composerCollectionPicker.clickToSelectDoubleClickToOpen')}
                 </div>
                 {filteredCollections.map(collection => {
                   const isSelected = collections.some(c => c.id === collection.id);
@@ -343,13 +361,17 @@ export function ComposerCollectionPicker({
                         'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent',
                         isSelected && 'bg-accent',
                       )}
-                      title='Click to select · double-click to open'
+                      title={t('composerCollectionPicker.clickToSelectDoubleClickToOpen')}
                       data-track-category='XyneAI'
                       data-track-name='SELECT_COLLECTION'
                     >
                       <BookOpen className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                       <span className='flex-1 truncate'>{collection.name}</span>
-                      {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
+                      {isSelected && (
+                        <span className='text-xs text-claw-ai-fg'>
+                          {t('composerCollectionPicker.selectedLabel')}
+                        </span>
+                      )}
                       <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
                     </button>
                   );

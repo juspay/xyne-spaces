@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
@@ -24,6 +25,7 @@ export function ComposerVoiceButton({
   disabled = false,
   className,
 }: ComposerVoiceButtonProps): ReactElement {
+  const { t } = useTranslation('common');
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -53,8 +55,8 @@ export function ComposerVoiceButton({
         const text = transcript.text.trim();
         if (text) onTranscript(text);
       } catch (err) {
-        toast.error('Voice transcription failed', {
-          description: err instanceof Error ? err.message : 'Unknown error',
+        toast.error(t('composerVoiceButton.transcriptionFailedTitle'), {
+          description: err instanceof Error ? err.message : t('composerVoiceButton.unknownError'),
         });
       } finally {
         setIsTranscribing(false);
@@ -72,7 +74,7 @@ export function ComposerVoiceButton({
 
   const startRecording = useCallback(async (): Promise<void> => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error('Voice recording is not supported in this browser');
+      toast.error(t('composerVoiceButton.notSupported'));
       return;
     }
     try {
@@ -102,7 +104,7 @@ export function ComposerVoiceButton({
       recorder.onerror = () => {
         setIsRecording(false);
         stopStream();
-        toast.error('Voice recording failed unexpectedly');
+        toast.error(t('composerVoiceButton.recordingFailedUnexpectedly'));
       };
 
       recorderRef.current = recorder;
@@ -111,7 +113,11 @@ export function ComposerVoiceButton({
     } catch (err) {
       const isDenied = err instanceof DOMException && err.name === 'NotAllowedError';
       stopStream();
-      toast.error(isDenied ? 'Microphone permission denied' : 'Failed to start voice recording');
+      toast.error(
+        isDenied
+          ? t('composerVoiceButton.micPermissionDenied')
+          : t('composerVoiceButton.failedToStart'),
+      );
     }
   }, [stopStream, transcribe]);
 
@@ -138,8 +144,18 @@ export function ComposerVoiceButton({
       type='button'
       onClick={handleToggle}
       disabled={disabled || isTranscribing}
-      aria-label={isRecording ? 'Stop voice input' : 'Start voice input'}
-      title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop voice input' : 'Voice input'}
+      aria-label={
+        isRecording
+          ? t('composerVoiceButton.stopVoiceInput')
+          : t('composerVoiceButton.startVoiceInput')
+      }
+      title={
+        isTranscribing
+          ? t('composerVoiceButton.transcribing')
+          : isRecording
+            ? t('composerVoiceButton.stopVoiceInput')
+            : t('composerVoiceButton.voiceInput')
+      }
       className={cn(
         'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
         isRecording
