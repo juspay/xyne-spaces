@@ -602,6 +602,12 @@ async function main(): Promise<void> {
 
   stopProgressMonitoring();
   fs.rmSync(retryReportsDirectory, { recursive: true, force: true });
+  // json-report/result.json keeps the pre-retry status; persist what the end-of-run
+  // passes changed so build-summary-report can show the final outcome.
+  fs.writeFileSync(
+    path.join(runArtifactDirectory, 'retry-recovery.json'),
+    JSON.stringify({ retriedAtEnd: failedAfterInlineRetries, stillFailing: remainingFailedItems }, null, 2)
+  );
 
   const specOf = (item: string): string => item.replace(/:\d+$/, '');
   const finalFailedSpecs = new Set(remainingFailedItems.map(specOf));

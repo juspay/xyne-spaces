@@ -31,6 +31,7 @@ RUN corepack prepare pnpm@10.15.0 --activate \
   && : > /home/pwuser/.gauge/config/gauge.properties \
   && pnpm exec gauge install ts \
   && pnpm exec gauge install html-report \
+  && pnpm exec gauge install json-report \
   && pnpm exec gauge install screenshot
 
 CMD ["tail", "-f", "/dev/null"]

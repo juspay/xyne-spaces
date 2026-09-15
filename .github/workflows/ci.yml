@@ -165,14 +165,22 @@ jobs:
             exit 0
           fi
 
+          RUN_DIR=$(find tools/xyne-automation/reports -maxdepth 1 -mindepth 1 -type d -name '*-runner' -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
           REPORT_DIR=$(find tools/xyne-automation/reports -type d -name html-report -printf '%T@ %p\n' \
             | sort -n | tail -n1 | cut -d' ' -f2-)
           DOCKER_LOGS_DIR=$(find tools/xyne-automation/reports -maxdepth 2 -type d -name docker-logs -printf '%T@ %p\n' \
             | sort -n | tail -n1 | cut -d' ' -f2-)
 
-          # The endpoint accepts at most 10 files, and Gauge's html-report needs its css/fonts/images
-          # siblings to render — ship each directory as one archive.
           UPLOAD_ARGS=()
+          # One-click view: a self-contained summary page (failures + screenshots, passes collapsed)
+          # built from Gauge's json-report. Uploaded first so it's the first thing in the message.
+          if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/json-report/result.json" ]; then
+            node tools/xyne-automation/scripts/build-summary-report.mjs "$RUN_DIR" "$RUNNER_TEMP/automation-report.html"
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/automation-report.html;type=text/html")
+          fi
+          # Full detail: the endpoint accepts at most 10 files, and Gauge's html-report needs its
+          # css/fonts/images siblings to render — ship each directory as one archive.
           if [ -n "$DOCKER_LOGS_DIR" ]; then
             tar -czf "$RUNNER_TEMP/docker-logs.tgz" -C "$DOCKER_LOGS_DIR" .
             UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/docker-logs.tgz;type=application/gzip")
