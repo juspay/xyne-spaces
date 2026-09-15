@@ -230,21 +230,16 @@ function useListKeyNav(
     [length, activeIndex, onSelect, onClose, scrollActiveIntoView],
   );
 
+  // Arrows are left to bubble to `handleKeyDown` on the popover, which already starts at the
+  // first/last item from -1 and scrolls. Handling them here too ran both on every press —
+  // this reset to 0, then that stepped to 1 — pinning the highlight on the second row.
   const handleInputKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIndex(0);
-        scrollActiveIntoView(0);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIndex(length - 1);
-        scrollActiveIntoView(length - 1);
-      } else if (e.key === 'Escape') {
+      if (e.key === 'Escape') {
         onClose();
       }
     },
-    [length, onClose, scrollActiveIntoView],
+    [onClose],
   );
 
   return { activeIndex, setActiveIndex, handleKeyDown, handleInputKeyDown, listRef };

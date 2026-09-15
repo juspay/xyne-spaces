@@ -12,7 +12,6 @@ import {
   Building2,
   CalendarDays,
   LayoutGrid,
-  Loader2,
   Search,
   SignalHigh,
   SlidersHorizontal,
@@ -32,6 +31,7 @@ import { useShortcut } from '../../../shortcuts';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { SearchResultsFilters } from '../../../hooks/useSearchResultsScreen';
 import { useQuerySuggestions } from './filters/useQuerySuggestions';
+import { parseSearchFilters } from '../../../utils/searchFilterParser';
 
 /** An applied filter, shown as a token inside the box the way Slack shows them. */ // HMRPROBE2
 export interface QueryToken {
@@ -71,8 +71,6 @@ interface SearchQueryInputProps {
    * only `onSubmit` (Enter) commits the query to the URL/history.
    */
   onLiveChange: (next: string) => void;
-  /** True while a search is in flight — swaps the leading icon for a spinner. */
-  isSearching: boolean;
 }
 
 /**
@@ -125,7 +123,6 @@ export function SearchQueryInput({
   onFiltersChange,
   onSubmit,
   onLiveChange,
-  isSearching,
 }: SearchQueryInputProps): ReactElement {
   const { userID: currentUserId } = useAuthContextValues();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -159,9 +156,12 @@ export function SearchQueryInput({
   valueRef.current = value;
 
   // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). The URL
-  // catching up to what was typed would otherwise fight the caret mid-word.
+  // catching up to what was typed would otherwise fight the caret mid-word. The URL gets the
+  // text the search actually ran — filter syntax stripped — so a half-typed `issue from:`
+  // commits `issue`; that is still a catch-up, not a reason to wipe the `from:`.
   useEffect(() => {
-    if (query === valueRef.current.trim()) return;
+    const typed = valueRef.current.trim();
+    if (query === typed || query === parseSearchFilters(typed).searchText.trim()) return;
     setValue(query);
   }, [query]);
 
@@ -259,11 +259,8 @@ export function SearchQueryInput({
         'transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20',
       )}
     >
-      {isSearching ? (
-        <Loader2 size={16} className='shrink-0 animate-spin text-primary' />
-      ) : (
-        <Search size={16} className='shrink-0 text-muted-foreground' />
-      )}
+      {/* No in-flight spinner here: the results list shows the loading skeleton, as in Cmd+K. */}
+      <Search size={16} className='shrink-0 text-muted-foreground' />
       {tokens.map(token => (
         <span
           key={token.key}
