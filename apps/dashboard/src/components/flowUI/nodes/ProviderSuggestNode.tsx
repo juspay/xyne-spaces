@@ -1,13 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { cn } from '../../../utils/classNames';
 import type { FlowComponent } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button, buttonVariants } from '../../ui/Button/Button';
-import { listProviderCredentials } from '../../../services/claw/clawSettingsService';
 import { AgentKeysDialog } from '../../../routes/AIScreen/library/agents/detail/persona/credentials/AgentKeysDialog';
 import { userCredentialScope } from '../../../routes/AIScreen/library/agents/detail/persona/credentials/credentialScope';
+import { useUserProviderCredentials } from '../../../hooks/useUserProviderCredentials';
 import { CardShell } from './cardPrimitives';
 
 /**
@@ -45,12 +44,7 @@ export const ProviderSuggestNode: React.FC<{ node: FlowComponent; children?: Rea
   const { user } = useAuth();
   const [connectFor, setConnectFor] = useState<string | null>(null);
 
-  const { data: credentials, refetch } = useQuery({
-    queryKey: ['claw-user-provider-credentials', user?.id],
-    queryFn: () => listProviderCredentials(user?.id as string),
-    enabled: Boolean(user?.id),
-    staleTime: 30_000,
-  });
+  const { data: credentials, refetch } = useUserProviderCredentials();
 
   const connectedProviders = useMemo(
     () => new Set((credentials ?? []).map(c => c.provider)),
@@ -83,7 +77,9 @@ export const ProviderSuggestNode: React.FC<{ node: FlowComponent; children?: Rea
 
         <div className='flex flex-col'>
           {providers.map(item => {
-            const isConnected = connectedProviders.has(item.provider) || (item.connected ?? false);
+            const isConnected = credentials
+              ? connectedProviders.has(item.provider)
+              : (item.connected ?? false);
             const connectable = item.connectMethod !== 'none';
 
             return (
