@@ -103,6 +103,7 @@ export class MobiusWebhookService {
 
         await this.recordActivity({
           ticketId: ticket.id,
+          workspaceId,
           botId: bot.id,
           channelId: ticket.channelId,
           value: {
@@ -163,6 +164,7 @@ export class MobiusWebhookService {
           if (ev.id && seen.has(ev.id)) continue;
           await this.recordActivity({
             ticketId,
+            workspaceId,
             botId: bot.id,
             channelId: ticket.channelId,
             value: {
@@ -192,6 +194,7 @@ export class MobiusWebhookService {
 
   private async recordActivity(params: {
     ticketId: string;
+    workspaceId: string;
     botId: string;
     channelId: string | null;
     value: Record<string, unknown>;
@@ -200,6 +203,7 @@ export class MobiusWebhookService {
     await prisma.ticketActivity.create({
       data: {
         ticketId: params.ticketId,
+        workspaceId: params.workspaceId,
         updatedBy: params.botId,
         activityType: ActivityType.MOBIUS_RELEASE_UPDATE,
         value: params.value as Prisma.InputJsonValue,
