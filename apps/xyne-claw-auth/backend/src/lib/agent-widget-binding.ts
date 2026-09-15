@@ -32,12 +32,12 @@ export type WidgetKind = "pr" | "plan";
  * "PROJECT/repo" while the webhook exposes project.key + repo.slug separately).
  */
 export function normalizePrUrl(url: string): string {
-  return url
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/[?#].*$/, "")
-    .replace(/\/+$/, "");
+  const withoutScheme = url.trim().toLowerCase().replace(/^https?:\/\//, "");
+  const cut = withoutScheme.search(/[?#]/);
+  const path = cut === -1 ? withoutScheme : withoutScheme.slice(0, cut);
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 47) end -= 1;
+  return path.slice(0, end);
 }
 
 export interface WidgetBindingInput {

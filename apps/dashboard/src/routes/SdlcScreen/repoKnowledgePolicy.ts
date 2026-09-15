@@ -141,3 +141,10 @@ export function canDebugRepoKnowledge(input: {
 }): boolean {
   return Boolean(input.isAdmin && input.executionId && input.conversationId);
 }
+
+export type RepoSetupExecution = {
+  id: string;
+  status: string;
+  context: string | null;
+  updatedAt: number | null;
+};

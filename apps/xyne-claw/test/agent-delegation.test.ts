@@ -50,6 +50,43 @@ describe("A2A delegation governor", () => {
     expect(order).toEqual(["start:A", "end:A", "start:B", "end:B"]);
   });
 
+  it("concurrency = Infinity: two calls in one turn RUN IN PARALLEL (interleave)", async () => {
+    const order: string[] = [];
+    const g = new AgentDelegationGovernor({
+      ownerSlug: "xyne",
+      maxDelegationsPerRun: 5,
+      concurrency: Number.POSITIVE_INFINITY,
+    });
+    const [tool] = buildCallableAgentTools([infra], g, runner(order, 40));
+    await Promise.all([tool.execute("a", { task: "A" }), tool.execute("b", { task: "B" })]);
+    // Parallel ⇒ both start before either ends.
+    expect(order.slice(0, 2).sort()).toEqual(["start:A", "start:B"]);
+    expect(order).toHaveLength(4);
+  });
+
+  it("unlimited concurrency still honours the per-run budget", async () => {
+    const order: string[] = [];
+    const g = new AgentDelegationGovernor({
+      ownerSlug: "xyne",
+      maxDelegationsPerRun: 1,
+      concurrency: Number.POSITIVE_INFINITY,
+    });
+    const [tool] = buildCallableAgentTools([infra], g, runner(order, 10));
+    const results = await Promise.all([tool.execute("a", { task: "A" }), tool.execute("b", { task: "B" })]);
+    // One runs, the other is refused as tool output (never thrown).
+    expect(results.filter((r) => r.isError)).toHaveLength(1);
+    expect(order.filter((o) => o.startsWith("start:"))).toHaveLength(1);
+  });
+
+  it("childGovernor inherits the parent's concurrency", () => {
+    const g = new AgentDelegationGovernor({
+      ownerSlug: "xyne",
+      maxDepth: 2,
+      concurrency: Number.POSITIVE_INFINITY,
+    });
+    expect(g.childGovernor("infra-doctor").concurrency).toBe(Number.POSITIVE_INFINITY);
+  });
+
   it("depth cap = 1: a delegated agent is handed zero delegate tools", () => {
     const g = new AgentDelegationGovernor({ ownerSlug: "xyne-doctor", maxDepth: 1 });
     const child = g.childGovernor("infra-doctor"); // depth 1

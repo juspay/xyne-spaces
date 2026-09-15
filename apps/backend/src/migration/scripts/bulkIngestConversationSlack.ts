@@ -54,13 +54,16 @@ function enqueueMessageVespa(messageId: string, workspaceId: string | undefined,
     .catch((e) => logger.warn('[BulkIngest] vespa enqueue failed (non-fatal)', { messageId, error: e instanceof Error ? e.message : String(e) }));
 }
 
-/** Attachment full-text feed job (fileSchema) — mirrors conversationService.pushVespaJobForAttachments: supported MIME
- *  types only, backfill-routed by age, so migrated files (PDF/DOCX/TXT…) become searchable like the per-message path. */
+/** Attachment feed job (fileSchema) — mirrors conversationService.pushVespaJobForAttachments: supported MIME
+ *  types only, backfill-routed by age, so migrated files (PDF/DOCX/TXT…) become searchable like the per-message path.
+ *  FILE_CONTENT_ENABLED=false downgrades this to a single metadata-only (nameOnly) feed: the worker then skips the
+ *  GCS download + parse and never routes the file to the OCR scheduler — searchable by name, no content. */
 function enqueueAttachmentVespa(attachmentId: string, mimeType: string, workspaceId: string | undefined, createdAt: Date): void {
   if (!isSupportedMimeType(mimeType)) return;
   const historical = Date.now() - createdAt.getTime() > VESPA_BACKFILL_AGE_DAYS * 86_400_000;
   const q = historical ? vespaBackfillQueue : vespaQueue;
-  void q.addJob({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...(workspaceId ? { workspaceId } : {}) })
+  const metadataOnly = !config.fileContentFeed.enabled;
+  void q.addJob({ schema: fileSchema, jobType: 'feed', docId: attachmentId, app: SubApp.CHAT_ATTACHMENT, ...(workspaceId ? { workspaceId } : {}), ...(metadataOnly ? { nameOnly: true } : {}) })
     .catch((e) => logger.warn('[BulkIngest] attachment vespa enqueue failed (non-fatal)', { attachmentId, error: e instanceof Error ? e.message : String(e) }));
 }
 

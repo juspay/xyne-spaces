@@ -982,6 +982,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='start-instant-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
@@ -1002,6 +1003,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsScheduleModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='schedule-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>

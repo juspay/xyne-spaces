@@ -90,6 +90,14 @@ export function CallRow({
           }}
           data-track-category='CALLS'
           data-track-name='JOIN_UPCOMING_CALL'
+          data-track-metadata={JSON.stringify({
+            source: 'upcoming_calls_list',
+            callId: call.externalId,
+            callStatus: call.status,
+            minutesFromScheduledStart: call.startsAt
+              ? Math.round((Date.now() - new Date(call.startsAt).getTime()) / 60000)
+              : null,
+          })}
           className={cn(
             'shrink-0 text-sm',
             isActive
