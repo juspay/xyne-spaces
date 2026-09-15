@@ -2,7 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent } from './redisService';
+import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
@@ -48,6 +48,15 @@ interface TicketCountsRoomSubscriptionData {
 }
 
 class WebSocketService {
+  /**
+   * The only room shape a client is allowed to subscribe to. Used on BOTH sides: the
+   * subscribe handler rejects anything else, and the publish path warns when a derived
+   * room would fail it — otherwise such a room is emitted to forever with no members and
+   * no trace.
+   */
+  private static readonly TICKET_COUNTS_ROOM_PATTERN =
+    /^ticket-counts:(project|board|user|group):[^:]+$/;
+
   private io: SocketIOServer | null = null;
   private channelRepository: ChannelRepository;
   // private conversationRepository: ConversationRepository;
@@ -194,6 +203,8 @@ class WebSocketService {
 
     // Setup global presence subscription (for multi-server support)
     this.setupPresenceSubscription();
+
+    void this.setupTicketCountsSubscription();
 
     logger.info('WebSocket server initialized');
   }
@@ -1392,72 +1403,129 @@ class WebSocketService {
     this.io.to(roomName).emit(event, data);
   }
 
-  broadcastTicketCountsUpdate(payload: {
-    operation: 'insert' | 'update' ;
-    ticket: {
-      id: string;
-      workspaceId: string;
-      boardId: string | null;
-      projectId: string | null;
-      stageName: string | null;
-      statusV2: string | null;
-      priority: string | null;
-      assignedTo: string | null;
-      createdBy: string | null;
-      userGroupId: string | null;
-      ticketType: string | null;
-      eta: number | null;
-      createdAt: number;
-      tags?: string[];
-      prReviewers?: string[];
-      qaAssigned?: string[];
-      roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
-      formFieldValues?: Record<string, unknown>;
-    };
-    previousTicket?: {
-      id: string;
-      workspaceId: string;
-      boardId: string | null;
-      projectId: string | null;
-      stageName: string | null;
-      statusV2: string | null;
-      priority: string | null;
-      assignedTo: string | null;
-      createdBy: string | null;
-      userGroupId: string | null;
-      ticketType: string | null;
-      eta: number | null;
-      createdAt: number;
-      tags?: string[];
-      prReviewers?: string[];
-      qaAssigned?: string[];
-      roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
-      formFieldValues?: Record<string, unknown>;
-    } | null;
-  }): void {
-    if (!this.io) {
-      logger.warn('WebSocket server not initialized');
-      return;
-    }
-
-    const rooms = new Set<string>();
-    for (const room of this.getTicketCountsRooms(payload.ticket)) {
-      rooms.add(room);
-    }
-    if (payload.previousTicket) {
-      for (const room of this.getTicketCountsRooms(payload.previousTicket)) {
-        rooms.add(room);
-      }
-    }
-
-    const eventPayload = {
+  /**
+   * Payload shape is the shared wire type, not a local copy. The previous inline
+   * duplicate had drifted from what producers actually send — it was missing channelId
+   * and isStageOverdue, both of which the client filters on — so a producer omitting
+   * them type-checked fine and silently mis-counted.
+   */
+  broadcastTicketCountsUpdate(payload: Omit<TicketCountsEvent, 'timestamp'>): void {
+    // Published, not emitted. `ticket-counts:*` room membership lives in each pod's
+    // in-memory Socket.IO adapter, so emitting here would only reach sockets on the pod
+    // that happened to serve the mutation — the board open on any other pod would never
+    // hear about it. The event goes out on Redis and comes back to EVERY pod, this one
+    // included, through setupTicketCountsSubscription below, which does the local emit.
+    //
+    // Deliberately no `this.io` guard: a process with no websocket server still has a
+    // Redis publisher, so worker-driven ticket changes (automations, ETA deadlines) now
+    // reach users instead of being dropped at the guard.
+    const event: TicketCountsEvent = {
       ...payload,
       timestamp: new Date().toISOString(),
     };
 
-    for (const room of rooms) {
-      this.io.to(room).emit('ticket_counts_room_updated', eventPayload);
+    // Routing is validated HERE rather than on the delivery side so a broken event is
+    // reported once, by the pod holding the mutation context, instead of once per pod.
+    const rooms = this.collectTicketCountsRooms(event);
+
+    if (rooms.length === 0) {
+      logger.warn(
+        `[TICKET-COUNTS] Ticket ${event.ticket.id} (${event.operation}) has no boardId, projectId, assignedTo, createdBy or userGroupId — no room can be derived, so no client can ever receive this. Skipping publish.`,
+      );
+      return;
     }
+
+    // A room the subscribe handler would reject can never have members, so emitting to it
+    // is a silent no-op. Most likely cause: an identity value stored `user:`-prefixed,
+    // which yields `ticket-counts:user:user:<id>`.
+    const malformed = rooms.filter(room => !WebSocketService.TICKET_COUNTS_ROOM_PATTERN.test(room));
+    if (malformed.length > 0) {
+      logger.warn(
+        `[TICKET-COUNTS] Ticket ${event.ticket.id} produced room name(s) no client can subscribe to: ${malformed.join(', ')}. These will reach nobody.`,
+      );
+    }
+
+    logger.info(
+      `[TICKET-COUNTS] Publishing ${event.operation} for ticket ${event.ticket.id} to ${rooms.length} room(s): ${rooms.join(', ')}`,
+    );
+
+    void redisService.broadcastTicketCountsEvent(event);
+  }
+
+  /**
+   * Rooms an event must reach, from the ticket and (for moves) its previous state.
+   * Pure function of the payload, so the publishing pod and every receiving pod agree.
+   */
+  private collectTicketCountsRooms(event: TicketCountsEvent): string[] {
+    const rooms = new Set<string>();
+    for (const room of this.getTicketCountsRooms(event.ticket)) {
+      rooms.add(room);
+    }
+    if (event.previousTicket) {
+      for (const room of this.getTicketCountsRooms(event.previousTicket)) {
+        rooms.add(room);
+      }
+    }
+    return [...rooms];
+  }
+
+  /**
+   * Subscribe once per pod to the global ticket-counts channel. Mirrors
+   * setupPresenceSubscription — the Redis message router dispatches by channel name,
+   * so no extra wiring is needed beyond registering the callback.
+   */
+  private async setupTicketCountsSubscription(): Promise<void> {
+    try {
+      logger.info('[TICKET-COUNTS] Setting up global ticket counts subscription...');
+
+      await redisService.subscribeToTicketCountsEvents((event: TicketCountsEvent) => {
+        this.handleTicketCountsEvent(event);
+      });
+
+      logger.info('[TICKET-COUNTS] Global ticket counts subscription active');
+    } catch (error) {
+      logger.error('[TICKET-COUNTS] Error setting up ticket counts subscription:', error);
+    }
+  }
+
+  /**
+   * Deliver a ticket-counts event to this pod's sockets. Rooms are derived here rather
+   * than carried on the wire so the mapping stays in one place; it is a pure function of
+   * the ticket, so every pod computes the same set.
+   */
+  private handleTicketCountsEvent(event: TicketCountsEvent): void {
+    // Worker processes subscribe too but hold no sockets — nothing to deliver to.
+    if (!this.io) {
+      logger.debug(
+        `[TICKET-COUNTS] Received event for ticket ${event.ticket.id} but this process has no websocket server — nothing to deliver`,
+      );
+      return;
+    }
+
+    const rooms = this.collectTicketCountsRooms(event);
+    const io = this.io;
+
+    // Counted before emitting, so the log says how many sockets actually received it
+    // rather than how many rooms we shouted into.
+    let recipients = 0;
+    const perRoom: string[] = [];
+    for (const room of rooms) {
+      const size = io.sockets.adapter.rooms.get(room)?.size ?? 0;
+      recipients += size;
+      perRoom.push(`${room}=${size}`);
+      io.to(room).emit('ticket_counts_room_updated', event);
+    }
+
+    if (recipients > 0) {
+      logger.info(
+        `[TICKET-COUNTS] Delivered ${event.operation} for ticket ${event.ticket.id} to ${recipients} socket(s) [${perRoom.join(' ')}]`,
+      );
+      return;
+    }
+
+    logger.debug(
+      `[TICKET-COUNTS] No local subscribers for ticket ${event.ticket.id} [${perRoom.join(' ')}]`,
+    );
   }
 
   async broadcastToUser(userId: string, event: string, data: any): Promise<void> {
@@ -1527,10 +1595,15 @@ class WebSocketService {
   }
 
   private handleTicketCountsSubscription(socket: AuthenticatedSocket, room: string): void {
-    if (!room || typeof room !== 'string') return;
+    if (!room || typeof room !== 'string') {
+      logger.warn(
+        `[TICKET-COUNTS] Ignored subscribe with no room from user ${socket.userId} (socket ${socket.id})`,
+      );
+      return;
+    }
 
     // Only allow well-formed ticket-counts rooms — never an arbitrary room string.
-    if (!/^ticket-counts:(project|board|user|group):[^:]+$/.test(room)) {
+    if (!WebSocketService.TICKET_COUNTS_ROOM_PATTERN.test(room)) {
       logger.warn(`[TICKET-COUNTS] Rejected malformed room "${room}" from user ${socket.userId}`);
       return;
     }
@@ -1545,12 +1618,28 @@ class WebSocketService {
     }
 
     socket.join(room);
+
+    // Logged because its ABSENCE is the whole diagnosis. A subscribe frame can leave the
+    // browser and never reach a handler (Socket.IO drops events with no listener bound,
+    // and these handlers are registered after handleConnection's awaits), in which case
+    // the client believes it is subscribed and silently receives nothing forever. If the
+    // client sent a subscribe and no line below exists for that socket, that is what
+    // happened.
+    const members = this.io?.sockets.adapter.rooms.get(room)?.size ?? 0;
+    logger.info(
+      `[TICKET-COUNTS] Socket ${socket.id} (user ${socket.userId}) joined "${room}" — room now has ${members} member(s)`,
+    );
   }
 
   private handleTicketCountsUnsubscription(socket: AuthenticatedSocket, room: string): void {
     if (!room) return;
 
     socket.leave(room);
+
+    const members = this.io?.sockets.adapter.rooms.get(room)?.size ?? 0;
+    logger.info(
+      `[TICKET-COUNTS] Socket ${socket.id} (user ${socket.userId}) left "${room}" — room now has ${members} member(s)`,
+    );
   }
 
   // Debug method to get subscription stats
