@@ -1,3 +1,10 @@
+## [1.318.0](https://github.com/juspay/xyne-spaces/compare/v1.317.6...v1.318.0) (2026-09-15)
+
+
+### Features
+
+* add handleOpenChange fallback in EntityMultiSelector ([#1861](https://github.com/juspay/xyne-spaces/issues/1861)) ([13cf451](https://github.com/juspay/xyne-spaces/commit/13cf4514da7b50d36c867585128a4df081612704))
+
 ## [1.317.6](https://github.com/juspay/xyne-spaces/compare/v1.317.5...v1.317.6) (2026-09-15)
 
 
