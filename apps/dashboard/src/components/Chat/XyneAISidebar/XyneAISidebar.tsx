@@ -43,13 +43,8 @@ import type {
 } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { attachmentCitationPreviewStore } from '../../FileViewer/AttachmentCitationPreview';
-import {
-  trackCitationClicked,
-  trackWebSearchQuery,
-  trackDeepResearchQuery,
-  trackCanvasModeQuery,
-  trackAttachmentsAdded,
-} from '../../../services/otel/xyneAIMetrics';
+import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
 import { cn } from '../../../utils/classNames';
@@ -155,6 +150,9 @@ interface XyneAISidebarProps {
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
   onFinalResponse?: (content: string) => void;
+  /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
+   *  directly (not opened through xyneAIActor OPEN, which carries its own). */
+  trackSource?: string;
 }
 
 const XyneAISidebar = ({
@@ -188,6 +186,7 @@ const XyneAISidebar = ({
   researchContext,
   onStreamingChange,
   onFinalResponse,
+  trackSource: trackSourceProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -293,6 +292,60 @@ const XyneAISidebar = ({
   // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
+  const autoSendTriggerRef = useRef<'auto_send' | null>(null);
+
+  // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
+  // panel is open (AppRoot renders it conditionally; embedded callers mount it
+  // for their own lifetime), so mount and unmount are the open and close.
+  // The one exception is AppRoot's `visible={false}` copy, kept mounted in a
+  // hidden div so an in-flight stream survives closing the drawer: nobody is
+  // looking at it, so it must not count as an open (or a close).
+  // `source` is whichever surface dispatched OPEN (machine `openSource`), or
+  // the prop for embedded instances. The otel ask_ai_opened counter rides the
+  // same effect so every entry point counts, not just the two that used to
+  // call it directly. No label: the channel name for a DM is a person's name.
+  const openedAtRef = useRef<number>(Date.now());
+  const messagesSentWhileOpenRef = useRef(0);
+  useEffect(() => {
+    if (!visible) return;
+    const ctx = xyneAIActor.getSnapshot().context;
+    const source = trackSourceProp ?? ctx.openSource ?? 'unknown';
+    openedAtRef.current = Date.now();
+    messagesSentWhileOpenRef.current = 0;
+    trackAskAIOpened(scopeType || undefined);
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'panel',
+      variant,
+      source,
+      contextType: ctx.contextType,
+      startFreshChat: ctx.startFreshChat,
+      hasThreadInfo: !!ctx.threadInfo,
+      hasCanvasInfo: !!ctx.canvasInfo || ctx.canvasContexts.length > 0,
+      hasInitialQuery: !!ctx.initialQuery,
+      hasWorkflowContext: !!ctx.workflowInfo,
+      hasResearchContext: !!ctx.researchContext,
+      kbScope: ctx.kbDocId
+        ? 'file'
+        : ctx.kbFolderId
+          ? 'folder'
+          : ctx.kbCollectionId
+            ? 'collection'
+            : 'none',
+      resumedConversation: !!ctx.focusSessionId || !!initialConversationId,
+      ...(forcedAgentSlug && { agentSlug: forcedAgentSlug }),
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'panel',
+        variant,
+        source,
+        msOpen: Date.now() - openedAtRef.current,
+        messagesSentWhileOpen: messagesSentWhileOpenRef.current,
+      });
+    };
+    // Mount/unmount only: the open is a single moment, not a render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
     if (!initialQuery?.trim()) return;
@@ -773,6 +826,8 @@ const XyneAISidebar = ({
 
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
+    surface: 'panel',
+    contextType: xyneAIActor.getSnapshot().context.contextType,
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
     collectionIds: selectedCollectionIds ?? [],
@@ -811,6 +866,17 @@ const XyneAISidebar = ({
     modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
     thinkingLevel,
   });
+
+  // Dimensions every act-on-answer click carries (see MessageItem).
+  const messageTrackContext = useMemo(
+    () => ({
+      surface: 'panel',
+      ...(conversationId && { conversationId }),
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+      ...(selectedModel && { model: selectedModel }),
+    }),
+    [conversationId, effectiveAgentSlug, selectedModel],
+  );
 
   // Start fresh chat when startFreshChat flag is set
   // This is triggered when XyneAI is invoked from "Ask AI" button
@@ -1769,11 +1835,13 @@ const XyneAISidebar = ({
 
     const currentAttachments = attachments;
 
-    // Track submission-time metrics
-    if (webSearchEnabled) trackWebSearchQuery();
-    if (deepResearchEnabled) trackDeepResearchQuery();
-    if (createCanvasEnabled) trackCanvasModeQuery();
-    if (currentAttachments.length > 0) trackAttachmentsAdded(currentAttachments.length);
+    // Submission-time otel counters fire inside useXyneAIStream.submitQuery now,
+    // so the /ai page and this panel count the same way.
+    messagesSentWhileOpenRef.current += 1;
+    // The auto-send effect below clears autoSendPendingQueryRef before calling
+    // handleSubmit, so read the trigger off a flag it sets for this one call.
+    const sendTrigger = autoSendTriggerRef.current;
+    autoSendTriggerRef.current = null;
 
     // Convert attachments to MessageAttachment format for display
     const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
@@ -1868,6 +1936,11 @@ const XyneAISidebar = ({
         displayContent,
         userTagsForMessage,
         parentMessageId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        sendTrigger ? { trigger: sendTrigger } : undefined,
       );
     } finally {
       // The attachment belongs to the message it was sent with, not to the
@@ -1916,6 +1989,7 @@ const XyneAISidebar = ({
       inputValue === autoSendPendingQueryRef.current
     ) {
       autoSendPendingQueryRef.current = null;
+      autoSendTriggerRef.current = 'auto_send';
       void handleSubmit();
     }
   }, [inputValue, handleSubmit]);
@@ -2312,6 +2386,7 @@ const XyneAISidebar = ({
                                   onSummarizerCitationClick={handleSummarizerCitationClick}
                                   feedbackValue={feedbackMap[message.id] || null}
                                   isV2={isV2}
+                                  trackContext={messageTrackContext}
                                   onRatingChange={handleRatingChange}
                                   onRegenerate={
                                     !isLegacyConversation && isLatestBotMessage

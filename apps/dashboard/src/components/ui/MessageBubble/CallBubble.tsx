@@ -167,6 +167,7 @@ const ChatWithAskAIButton: React.FC<{
     // Open sidebar with thread info
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'call_bubble',
       channelId,
       threadInfo,
     });

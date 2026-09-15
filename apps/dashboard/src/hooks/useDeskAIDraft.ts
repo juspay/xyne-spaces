@@ -12,6 +12,54 @@ import {
   extractInlineCitations,
   type InlineCitation,
 } from '../components/ui/TipTapExtensions/CitationMark';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import { lengthBucket } from '../services/Analytics/trackSource';
+
+/** How the current desk draft was produced. */
+export type DeskDraftRunKind = 'manual' | 'refine' | 'quick_rewrite' | 'custom_rewrite';
+
+/**
+ * What DraftCard stamps onto its Insert / Discard / Refine clicks so they join
+ * back to DRAFT_GENERATED. One desk composer is open at a time, so a single
+ * module-level record is enough; `generatedAt` is a timestamp rather than a
+ * delta because the attribute is baked at render, not at the click.
+ */
+let deskDraftTracking: { generatedAt: number | null; refineCount: number; kind: DeskDraftRunKind } =
+  { generatedAt: null, refineCount: 0, kind: 'manual' };
+
+export function getDeskDraftTrackingSnapshot(): {
+  generatedAt: number | null;
+  refineCount: number;
+  kind: DeskDraftRunKind;
+} {
+  return deskDraftTracking;
+}
+
+function trackDeskDraftOutcome(
+  ok: boolean,
+  extra: {
+    kind: DeskDraftRunKind;
+    draftMode: 'reply' | 'compose';
+    startedAt: number | null;
+    contentLength?: number;
+    sourcesCount?: number;
+    hasTicketContext?: boolean;
+    errorKind?: string;
+  },
+): void {
+  const { startedAt, contentLength, ...rest } = extra;
+  globalClickTracker.trackManualEvent(
+    'AIDraft',
+    ok ? 'DRAFT_GENERATED' : 'DRAFT_FAILED',
+    undefined,
+    {
+      ...rest,
+      latencyMs: startedAt === null ? null : Date.now() - startedAt,
+      ...(contentLength !== undefined && { draftLengthBucket: lengthBucket(contentLength) }),
+      refineCount: deskDraftTracking.refineCount,
+    },
+  );
+}
 export interface DeskAIDraftHeaders {
   from?: string | null;
   to?: ReadonlyArray<string> | null;
@@ -135,6 +183,47 @@ export function useDeskAIDraft({
   }, [sessionId]);
 
   const isComposeMode = mode === 'compose';
+
+  // DRAFT_GENERATED / DRAFT_FAILED bookkeeping. Streamed runs resolve in the
+  // subscription below; the inline rewrites resolve in `rewriteTracked`.
+  const runStartedAtRef = useRef<number | null>(null);
+  const runKindRef = useRef<DeskDraftRunKind>('manual');
+  const prevStreamStatusRef = useRef<StreamState['status'] | null>(null);
+  const beginRun = useCallback((kind: DeskDraftRunKind): void => {
+    runKindRef.current = kind;
+    runStartedAtRef.current = Date.now();
+    if (kind !== 'manual') deskDraftTracking.refineCount += 1;
+    else deskDraftTracking = { generatedAt: null, refineCount: 0, kind };
+    deskDraftTracking.kind = kind;
+  }, []);
+  const rewriteTracked = useCallback(
+    async (kind: DeskDraftRunKind, query: string): Promise<{ rewrittenText: string }> => {
+      beginRun(kind);
+      const startedAt = runStartedAtRef.current;
+      try {
+        const result = await rewriteEmailText({ query });
+        deskDraftTracking.generatedAt = Date.now();
+        trackDeskDraftOutcome(true, {
+          kind,
+          draftMode: mode,
+          startedAt,
+          contentLength: result.rewrittenText.length,
+          hasTicketContext: !!ticketId,
+        });
+        return result;
+      } catch (error) {
+        trackDeskDraftOutcome(false, {
+          kind,
+          draftMode: mode,
+          startedAt,
+          hasTicketContext: !!ticketId,
+          errorKind: error instanceof Error ? error.name : 'unknown',
+        });
+        throw error;
+      }
+    },
+    [beginRun, mode, ticketId],
+  );
   const threadId = channelId
     ? isComposeMode
       ? `${channelId}_compose`
@@ -278,8 +367,27 @@ export function useDeskAIDraft({
       const raw = state.messages[state.messages.length - 1]?.content ?? '';
       setDraftInlineCitations(extractInlineCitations(raw));
       setIsStreaming(state.status === 'streaming');
+
+      // Outcome of a streamed run, on the streaming → completed/error edge only
+      // so the many streaming ticks stay silent. Aborts returned above.
+      const prevStatus = prevStreamStatusRef.current;
+      prevStreamStatusRef.current = state.status;
+      if (prevStatus === 'streaming' && state.status !== 'streaming') {
+        const ok = state.status === 'completed';
+        if (ok) deskDraftTracking.generatedAt = Date.now();
+        trackDeskDraftOutcome(ok, {
+          kind: runKindRef.current,
+          draftMode: mode,
+          startedAt: runStartedAtRef.current,
+          contentLength: content?.length ?? 0,
+          sourcesCount: latestBotSources(state.messages).length,
+          hasTicketContext: !!ticketId,
+          ...(!ok && { errorKind: 'stream' }),
+        });
+        runStartedAtRef.current = null;
+      }
     });
-  }, [threadId, clearStorage]);
+  }, [threadId, clearStorage, mode, ticketId]);
 
   const submit = useCallback(
     async (query: string, displayContent: string, options?: { disableTools?: boolean }) => {
@@ -300,6 +408,7 @@ export function useDeskAIDraft({
       const prior = await loadPriorMessages(threadId, effectiveSessionId ?? null, agentSlug);
       const lastPriorId = prior[prior.length - 1]?.id;
 
+      prevStreamStatusRef.current = null;
       try {
         ourStreamIdRef.current = await xyneAIStreamManager.startStream(
           threadId,
@@ -348,9 +457,17 @@ export function useDeskAIDraft({
           error: error instanceof Error ? error.message : String(error),
         });
         setIsStreaming(false);
+        trackDeskDraftOutcome(false, {
+          kind: runKindRef.current,
+          draftMode: mode,
+          startedAt: runStartedAtRef.current,
+          hasTicketContext: !!ticketId,
+          errorKind: 'start',
+        });
+        runStartedAtRef.current = null;
       }
     },
-    [threadId, channelId, conversationId, ticketId, isComposeMode, agentSlug],
+    [threadId, channelId, conversationId, ticketId, isComposeMode, agentSlug, mode],
   );
 
   const basePrompt =
@@ -360,8 +477,9 @@ export function useDeskAIDraft({
 
   const triggerDraft = useCallback(() => {
     const display = isComposeMode ? 'Draft an email' : 'Draft a reply';
+    beginRun('manual');
     void submit(basePrompt, display);
-  }, [submit, basePrompt, isComposeMode]);
+  }, [submit, basePrompt, isComposeMode, beginRun]);
 
   const askAIRefine = useCallback(
     (instruction: string, sourceText: string) => {
@@ -376,13 +494,15 @@ export function useDeskAIDraft({
       if (trimmedInstruction) {
         parts.push(`Additional guidance from the user: "${trimmedInstruction}"`);
       }
+      beginRun('refine');
       void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
     },
-    [submit, basePrompt],
+    [submit, basePrompt, beginRun],
   );
 
   const refineDraft = useCallback(
     async (instruction: string, options?: { selectedText?: string }) => {
+      const rewriteKind: DeskDraftRunKind = 'refine';
       const trimmedInstruction = instruction.trim();
       const trimmedSelectedText = options?.selectedText?.trim() ?? '';
       const parts = [basePrompt];
@@ -415,7 +535,7 @@ export function useDeskAIDraft({
       setDraftInlineCitations([]);
 
       try {
-        const result = await rewriteEmailText({ query });
+        const result = await rewriteTracked(rewriteKind, query);
 
         setDraftContent(result.rewrittenText);
         setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
@@ -430,11 +550,12 @@ export function useDeskAIDraft({
         setIsStreaming(false);
       }
     },
-    [draftContent, basePrompt, threadId, conversationId, writeStorage],
+    [draftContent, basePrompt, threadId, conversationId, writeStorage, rewriteTracked],
   );
 
   const quickRewrite = useCallback(
     async (action: AIRefineQuickAction, sourceText: string) => {
+      const rewriteKind: DeskDraftRunKind = 'quick_rewrite';
       const trimmedSource = sourceText.trim();
       if (!trimmedSource) return;
 
@@ -478,7 +599,7 @@ export function useDeskAIDraft({
       setDraftInlineCitations([]);
 
       try {
-        const result = await rewriteEmailText({ query });
+        const result = await rewriteTracked(rewriteKind, query);
 
         setDraftContent(result.rewrittenText);
         setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
@@ -493,11 +614,12 @@ export function useDeskAIDraft({
         setIsStreaming(false);
       }
     },
-    [headers, threadId, conversationId, writeStorage],
+    [headers, threadId, conversationId, writeStorage, rewriteTracked],
   );
 
   const customRewrite = useCallback(
     async (instruction: string, sourceText: string) => {
+      const rewriteKind: DeskDraftRunKind = 'custom_rewrite';
       const trimmedSource = sourceText.trim();
       const trimmedInstruction = instruction.trim();
       if (!trimmedSource || !trimmedInstruction) return;
@@ -531,7 +653,7 @@ export function useDeskAIDraft({
       setDraftInlineCitations([]);
 
       try {
-        const result = await rewriteEmailText({ query });
+        const result = await rewriteTracked(rewriteKind, query);
 
         setDraftContent(result.rewrittenText);
         setDraftInlineCitations(extractInlineCitations(result.rewrittenText));
@@ -546,7 +668,7 @@ export function useDeskAIDraft({
         setIsStreaming(false);
       }
     },
-    [headers, threadId, conversationId, writeStorage],
+    [headers, threadId, conversationId, writeStorage, rewriteTracked],
   );
 
   const acceptDraft = useCallback(() => {

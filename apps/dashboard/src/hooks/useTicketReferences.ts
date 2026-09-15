@@ -5,6 +5,7 @@ import { TicketReferenceRelation } from '@xyne/shared';
 import type { SelectorOption } from '../components/ui/EntitySelector/EntitySelector.types';
 import { mutators } from '../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
+import { trackTicketOutcome } from '../services/Analytics/ticketTracking';
 
 type ReferenceOut = Pick<TicketReferenceMapping, 'id' | 'targetTicketId' | 'relationType'>;
 
@@ -155,6 +156,14 @@ export const useTicketReferences = ({
             referenceId: uuidv4(),
           }),
         );
+        trackTicketOutcome(
+          'TICKET_LINKED',
+          { id: ticketId },
+          {
+            surface: 'details',
+            relation: TicketReferenceRelation.LINKED,
+          },
+        );
       }
     } catch (error) {
       setReferenceError(
@@ -166,11 +175,22 @@ export const useTicketReferences = ({
   };
 
   const handleRemoveReference = (referenceId: string): void => {
+    const removed = referencesOut?.find(reference => reference.id === referenceId);
     void zero.mutate(
       mutators.ticketReference.delete({
         id: referenceId,
       }),
     );
+    if (ticketId) {
+      trackTicketOutcome(
+        'TICKET_UNLINKED',
+        { id: ticketId },
+        {
+          surface: 'details',
+          relation: removed?.relationType ?? 'reference',
+        },
+      );
+    }
   };
 
   const handleReferenceRelationChange = (
@@ -184,6 +204,17 @@ export const useTicketReferences = ({
         timestamp: Date.now(),
       }),
     );
+    if (ticketId) {
+      trackTicketOutcome(
+        'TICKET_LINKED',
+        { id: ticketId },
+        {
+          surface: 'details',
+          relation: relationType,
+          relationChanged: true,
+        },
+      );
+    }
   };
 
   return {

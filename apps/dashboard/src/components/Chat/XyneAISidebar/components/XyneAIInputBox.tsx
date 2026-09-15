@@ -1975,7 +1975,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           : 'bg-muted text-muted-foreground cursor-not-allowed'
                     }`}
                     data-track-category='XyneAI'
-                    data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
+                    data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SEND_BUTTON_CLICK'}
                   >
                     {isStreaming ? (
                       <StopIcon className='w-2.5 h-2.5' />

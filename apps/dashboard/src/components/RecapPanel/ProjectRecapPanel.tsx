@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useEffect, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useNavigate } from 'react-router-dom';
 import { Clock, TrendingUp, TrendingDown, FolderOpen } from 'lucide-react';
@@ -8,6 +8,7 @@ import {
   type ProjectRecapPoint,
 } from '../../hooks/useProjectRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 // ─── Greetings ────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,22 @@ const ProjectRecapPanel = (): ReactElement => {
   const { recaps, isLoading, error, isAccessDenied } = useProjectRecapData();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+
+  // Impression for the project tab, once per mount with data. Project recaps
+  // are always yesterday's, so the panel itself is the latch — a re-render with
+  // the same rows must not count twice.
+  const projectRecapViewedRef = useRef(false);
+  useEffect(() => {
+    if (projectRecapViewedRef.current || isLoading || recaps.length === 0) return;
+    projectRecapViewedRef.current = true;
+    globalClickTracker.trackManualEvent('RECAP_PANEL', 'RECAP_VIEWED', undefined, {
+      recapType: 'project',
+      projectCount: recaps.length,
+      channelCount: recaps.reduce((sum, r) => sum + (r.channelCount ?? 0), 0),
+      totalMessages: recaps.reduce((sum, r) => sum + (r.messageCount ?? 0), 0),
+      isToday: true,
+    });
+  }, [isLoading, recaps]);
 
   // Same navigation logic as RecapPanel: drill into message → conversation → channel
   const handleCitationClick = (point: ProjectRecapPoint): void => {

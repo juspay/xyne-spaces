@@ -33,6 +33,7 @@ export const XyneAIQuickMenu = ({
     <QuickNavList heading='Xyne AI'>
       <Link
         to={prefixWs('/ai/chat/new')}
+        state={{ trackSource: 'sidebar_quick_menu' }}
         onClick={() => handleClick('New chat')}
         className={QUICK_NAV_ROW_CLASS}
         data-track-category='App_Sidebar'
@@ -48,6 +49,7 @@ export const XyneAIQuickMenu = ({
           <Link
             key={item.key}
             to={prefixWs(item.to)}
+            state={{ trackSource: 'sidebar_quick_menu' }}
             onClick={() => handleClick(item.label)}
             className={QUICK_NAV_ROW_CLASS}
             data-track-category='App_Sidebar'

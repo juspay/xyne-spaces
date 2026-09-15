@@ -35,6 +35,7 @@ import {
   TagsCellEditor,
 } from './CellEditor';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import {
   dueDateToEta,
   MAX_BULK_TICKETS,
@@ -197,7 +198,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 }),
               ),
               'Failed to update title',
-            );
+            ).then(ok => {
+              if (ok && params.data) {
+                trackTicketOutcome('TICKET_FIELD_UPDATED', params.data, {
+                  surface: 'table_inline',
+                  field: 'title',
+                });
+              }
+            });
           } else if (!newTitle) {
             params.node?.setDataValue('title', oldValue);
           }
@@ -222,7 +230,11 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             const ticketChannel = allChannels.find(c => c.id === params.data!.channelId);
             if (isDeskChannelType(ticketChannel?.type) && params.data.xyneId) {
               void navigate(`/support/${params.data.channelId}/${params.data.xyneId}`, {
-                state: { conversationId: params.data.conversationId, ticketId: params.data.id },
+                state: {
+                  conversationId: params.data.conversationId,
+                  ticketId: params.data.id,
+                  trackSource: 'ticket_table_row',
+                },
               });
               return;
             }
@@ -233,7 +245,13 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             }
 
             const currentUrl = window.location.pathname + window.location.search;
-            const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl } };
+            const navState = {
+              state: {
+                fromMyTickets: false,
+                returnToUrl: currentUrl,
+                trackSource: 'ticket_table_row',
+              },
+            };
 
             // Desk/support tickets (EMAIL / SLACK / APP channels) open in the
             // Support desk email view (/support/:channelId/:xyneId), not chat.
@@ -369,7 +387,16 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 }),
               ),
               'Failed to update assignee',
-            );
+            ).then(ok => {
+              if (ok && params.data) {
+                trackTicketOutcome('TICKET_ASSIGNED', params.data, {
+                  surface: 'table_inline',
+                  unassigned: !params.newValue,
+                  toGroup:
+                    typeof params.newValue === 'string' && params.newValue.startsWith('group:'),
+                });
+              }
+            });
           }
         },
       },
@@ -431,7 +458,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 }),
               ),
               'Failed to update status',
-            );
+            ).then(ok => {
+              if (ok && params.data) {
+                trackTicketOutcome('TICKET_STATUS_CHANGED', params.data, {
+                  surface: 'table_inline',
+                  to: String(params.newValue),
+                  previous: params.oldValue ?? null,
+                });
+              }
+            });
           }
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => {
@@ -473,7 +508,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 }),
               ),
               'Failed to update priority',
-            );
+            ).then(ok => {
+              if (ok && params.data) {
+                trackTicketOutcome('TICKET_PRIORITY_CHANGED', params.data, {
+                  surface: 'table_inline',
+                  to: params.newValue,
+                  previous: params.oldValue ?? null,
+                });
+              }
+            });
           }
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => {
@@ -631,6 +674,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               );
             }
           });
+          if (params.data && (toAdd.length > 0 || toRemove.length > 0)) {
+            trackTicketOutcome('TICKET_FIELD_UPDATED', params.data, {
+              surface: 'table_inline',
+              field: 'tags',
+              addedCount: toAdd.length,
+              removedCount: toRemove.length,
+            });
+          }
           return false;
         },
         cellRenderer: (params: ICellRendererParams<Ticket>) => {

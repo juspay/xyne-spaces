@@ -8,6 +8,7 @@ import { useActiveUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 
 /**
  * The slice of a selected row the bulk actions actually need. Structural rather
@@ -206,6 +207,17 @@ export const useBulkTicketActions = (): BulkTicketActions => {
     ): Promise<void> => {
       const message = await stageChange(ticketId, boardId, toStageName, toStageStatusV2);
       if (message) toast.error(message);
+      else {
+        trackTicketOutcome(
+          'TICKET_STAGE_CHANGED',
+          { id: ticketId, boardId },
+          {
+            surface: 'table_inline',
+            to: toStageName,
+            ...(toStageStatusV2 && { toStatus: toStageStatusV2 }),
+          },
+        );
+      }
     },
     [stageChange],
   );
@@ -216,7 +228,34 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
       const boardTypes = new Map<string, Promise<string | undefined>>();
-      for (const ticket of capSelection(tickets)) {
+      const selection = capSelection(tickets);
+      // One outcome row per bulk action (not per ticket), reported once the fan-out
+      // settles so a fully rejected batch counts as nothing.
+      const trackBulkOutcome = (results: ReadonlyArray<string | null>): void => {
+        const succeeded = results.filter(r => r === null).length;
+        if (succeeded === 0) return;
+        const extra = { surface: 'bulk' as const, bulkCount: selection.length, succeeded };
+        if (stage) {
+          trackTicketOutcome('TICKET_STAGE_CHANGED', null, { ...extra, to: stage.name });
+        }
+        const f = fields as Record<string, unknown>;
+        if (typeof f['statusV2'] === 'string') {
+          trackTicketOutcome('TICKET_STATUS_CHANGED', null, { ...extra, to: f['statusV2'] });
+        }
+        if (typeof f['priority'] === 'string') {
+          trackTicketOutcome('TICKET_PRIORITY_CHANGED', null, { ...extra, to: f['priority'] });
+        }
+        if ('assignedTo' in f || 'userGroupId' in f) {
+          trackTicketOutcome('TICKET_ASSIGNED', null, {
+            ...extra,
+            unassigned: !f['assignedTo'] && !f['userGroupId'],
+          });
+        }
+        if ('eta' in f) {
+          trackTicketOutcome('TICKET_FIELD_UPDATED', null, { ...extra, field: 'eta' });
+        }
+      };
+      for (const ticket of selection) {
         if (stage) {
           pending.push(
             stageChange(ticket.id, ticket.boardId, stage.name, stage.statusV2, boardTypes),
@@ -234,6 +273,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
         }
       }
       void reportBulkErrors(pending);
+      void Promise.all(pending).then(trackBulkOutcome);
     },
     [zero, stageChange],
   );
@@ -264,6 +304,16 @@ export const useBulkTicketActions = (): BulkTicketActions => {
         }
       }
       void reportBulkErrors(pending);
+      void Promise.all(pending).then(results => {
+        if (results.some(r => r === null)) {
+          trackTicketOutcome('TICKET_FIELD_UPDATED', null, {
+            surface: 'bulk',
+            field: 'tags',
+            bulkCount: capSelection(tickets).length,
+            addedCount: tagNames.length,
+          });
+        }
+      });
     },
     [zero],
   );

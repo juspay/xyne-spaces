@@ -11,6 +11,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import {
   SDLC_ENTITY_TYPES,
   SDLC_RELATION_TYPES,
@@ -517,6 +518,8 @@ export default function SdlcScreen(): ReactElement {
   // State, not a ref: the folder page only portals its tabs once the node exists.
   const [folderTabsSlot, setFolderTabsSlot] = useState<HTMLElement | null>(null);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
+  // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
+  const [createTicketSource, setCreateTicketSource] = useState('sdlc_header');
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
   const [linkTargetType, setLinkTargetType] = useState('MESSAGE');
   const [linkTargetId, setLinkTargetId] = useState('');
@@ -1035,13 +1038,36 @@ export default function SdlcScreen(): ReactElement {
       ?.scrollIntoView({ block: 'nearest' });
   };
   const ticketBind = { enabled: ticketsFocused };
-  useShortcutById('tickets.down', () => moveTicketFocus(1), ticketBind);
-  useShortcutById('tickets.up', () => moveTicketFocus(-1), ticketBind);
+  // Shortcuts fire no DOM click, so the delegated tracker never sees them.
+  const trackKeyboardNav = (action: 'down' | 'up' | 'open'): void => {
+    globalClickTracker.trackManualEvent('Tickets', 'KEYBOARD_NAV', undefined, {
+      action,
+      surface: 'sdlc',
+      listSize: trackTicketList.length,
+    });
+  };
+  useShortcutById(
+    'tickets.down',
+    () => {
+      trackKeyboardNav('down');
+      moveTicketFocus(1);
+    },
+    ticketBind,
+  );
+  useShortcutById(
+    'tickets.up',
+    () => {
+      trackKeyboardNav('up');
+      moveTicketFocus(-1);
+    },
+    ticketBind,
+  );
   useShortcutById(
     'tickets.open',
     () => {
       const ticket = trackTicketList[focusedTicketIndex];
       if (!ticket) return;
+      trackKeyboardNav('open');
       setDiscussionUrl({
         open: true,
         conversationId: ticket.conversationId,
@@ -1339,12 +1365,16 @@ export default function SdlcScreen(): ReactElement {
           variant='ghost'
           aria-label='Create ticket'
           title='Create ticket'
-          onClick={() => setCreateTicketOpen(true)}
+          onClick={() => {
+            setCreateTicketSource('sdlc_header');
+            setCreateTicketOpen(true);
+          }}
           data-track-category='SdlcHub'
           data-track-name='HeaderCreateTicketClicked'
           data-track-metadata={JSON.stringify({
             place,
             scope: entityLinkScope?.sourceType ?? null,
+            source: 'sdlc_header',
           })}
         >
           <TicketToken size={16} />
@@ -1640,6 +1670,7 @@ export default function SdlcScreen(): ReactElement {
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'sdlc_panel',
         contextType: 'chat',
         contextId: repo.channelId,
         channelId: repo.channelId,
@@ -1667,6 +1698,7 @@ export default function SdlcScreen(): ReactElement {
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'sdlc_panel',
         contextType: 'chat',
         contextId: repo.channelId,
         channelId: repo.channelId,
@@ -2999,9 +3031,13 @@ export default function SdlcScreen(): ReactElement {
           <div className='h-px min-w-[20px] flex-1 bg-border' aria-hidden='true' />
           <Button
             size='sm'
-            onClick={() => setCreateTicketOpen(true)}
+            onClick={() => {
+              setCreateTicketSource('sdlc_track');
+              setCreateTicketOpen(true);
+            }}
             data-track-category='SdlcHub'
             data-track-name='TrackTicketCreateOpened'
+            data-track-metadata={JSON.stringify({ source: 'sdlc_track' })}
           >
             <Plus />
             Create ticket
@@ -3046,7 +3082,7 @@ export default function SdlcScreen(): ReactElement {
                 )}
                 data-track-category='SdlcHub'
                 data-track-name='TrackTicketOpened'
-                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id, source: 'sdlc_track' })}
               >
                 <span className='shrink-0 font-mono text-[11px] text-muted-foreground'>
                   {ticket.xyneId}
@@ -3926,6 +3962,7 @@ export default function SdlcScreen(): ReactElement {
             onClose={() => setCreateTicketOpen(false)}
             channelId={repo.channelId}
             projectId={repo.project?.id ?? ''}
+            trackSource={createTicketSource}
             onTicketCreated={() => setCreateTicketOpen(false)}
           />
         </EntityLinkContext.Provider>
