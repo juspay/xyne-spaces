@@ -5586,13 +5586,21 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .orderBy('createdAt', 'desc');
   }),
 
-  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
-    return zql.saved_user_configurations
-      .where('userId', userId)
-      .related('values')
-      .related('viewAccess')
-      .orderBy('createdAt', 'desc');
-  }),
+  // viewAccess is scoped to the caller's own grants: defineQuery applies the root ACL
+  // only, so a bare .related('viewAccess') would sync view_access rows unfiltered by
+  // ViewAccessACL and leak who every readable view was shared with. Only the owner can
+  // grant (ViewAccessACL.canInsert) and the mutator stamps sharedBy, so this still
+  // answers "is my view shared".
+  savedConfigsByUser: defineQuery(
+    z.object({ userId: z.string() }),
+    ({ ctx, args: { userId } }) => {
+      return zql.saved_user_configurations
+        .where('userId', userId)
+        .related('values')
+        .related('viewAccess', va => va.where('sharedBy', '=', ctx.userID))
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),

@@ -41,8 +41,6 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   channelId?: string;
   projectId?: string;
   boardId?: string;
-  userId?: string;
-  groupId?: string;
   searchTerm?: string;
   groupBy?: KanbanPageGroupBy;
   groupKey?: string;
@@ -268,8 +266,6 @@ export const buildKanbanTicketsPageArgs = (
       viewMode: options.viewMode,
       projectId: options.projectId,
       boardId: options.boardId,
-      userId: options.userId,
-      groupId: options.groupId,
       excludeFlowSteps: options.excludeFlowSteps,
       columnType: options.columnType,
       stageName: options.stageName,

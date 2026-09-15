@@ -431,8 +431,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     projectId?: string;
     boardId?: string;
   }>();
-  // Null everywhere this screen is mounted outside ProjectsScreen (channel tabs, panels).
-  const projectsScreenContext = useOutletContext<ProjectsScreenOutletContext | null>();
+  // Not null outside ProjectsScreen: the channel tickets tab sits under ChatScreen's
+  // own `{ shouldStackThread }` outlet, and `leftHeaderSlot` is not a unique key —
+  // CanvasPanel publishes one too. Guard on shape rather than trusting the cast.
+  const outletContext = useOutletContext<unknown>();
+  const projectsScreenContext =
+    outletContext && typeof outletContext === 'object' && 'leftHeaderSlot' in outletContext
+      ? (outletContext as ProjectsScreenOutletContext)
+      : null;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -1726,8 +1732,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
-      userId?: string;
-      groupId?: string;
       formEntityValueFieldIds?: string[];
     } = { viewMode: queryViewMode };
 

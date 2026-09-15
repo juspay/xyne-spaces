@@ -69,8 +69,6 @@ export interface KanbanCountsRequest extends FlowStepVisibilityOptions {
   projectId?: string;
   boardId?: string;
   boardIds?: string[];
-  userId?: string;
-  groupId?: string;
   filters?: KanbanCountsFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
