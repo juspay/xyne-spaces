@@ -48,8 +48,25 @@ RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
-# Accept build argument for API URL
-ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
+# API URL for the changelog link etc. Localhost default: real deployments
+# inject --build-arg VITE_API_URL=... (the Makefile forwards it; CI exports it).
+ARG VITE_API_URL=http://localhost:3001/api
+ENV VITE_API_URL=$VITE_API_URL
+
+# Electron renderer backends + apps assets origin (see apps/dashboard/src/config.ts).
+# Localhost/same-origin defaults; CI injects the deployment values via build-args.
+ARG VITE_ELECTRON_PROD_BACKEND_URL=http://localhost:3001
+ENV VITE_ELECTRON_PROD_BACKEND_URL=$VITE_ELECTRON_PROD_BACKEND_URL
+ARG VITE_ELECTRON_SANDBOX_BACKEND_URL=
+ENV VITE_ELECTRON_SANDBOX_BACKEND_URL=$VITE_ELECTRON_SANDBOX_BACKEND_URL
+ARG VITE_APPS_PUBLIC_BASE_URL=
+ENV VITE_APPS_PUBLIC_BASE_URL=$VITE_APPS_PUBLIC_BASE_URL
+ARG VITE_APPS_SANDBOX_BASE_URL=
+ENV VITE_APPS_SANDBOX_BASE_URL=$VITE_APPS_SANDBOX_BASE_URL
+ARG VITE_INTERNAL_LINK_HOSTS=
+ENV VITE_INTERNAL_LINK_HOSTS=$VITE_INTERNAL_LINK_HOSTS
+ARG VITE_TRUSTED_ORIGINS=
+ENV VITE_TRUSTED_ORIGINS=$VITE_TRUSTED_ORIGINS
 
 # --- Deployment lane -------------------------------------------------------
 # Defaults build the main bundle. The SDLC image adds:
@@ -59,7 +76,7 @@ ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
 #
 # VITE_ZERO_SERVER is deliberately NOT set here. config.ts reads it when present,
 # and baking an absolute URL made it win over the serving host — a bundle on
-# app.spaces.xyne.juspay.net opened wss://spaces.xyne.juspay.net/zero. Unset, the
+# one host opened a wss:// socket pinned to a second host. Unset, the
 # URL derives from whatever host serves the bundle. Local dev, sandbox and the
 # test compose file still set it themselves via their own .env files.
 ARG BUILD_SCRIPT=build

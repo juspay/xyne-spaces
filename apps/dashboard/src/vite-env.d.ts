@@ -17,6 +17,11 @@ interface ImportMetaEnv {
   readonly VITE_GENIUS_URL: string;
   readonly VITE_ENABLE_SUMMARY_ACTION_BUTTONS: string;
   readonly VITE_APPS_PUBLIC_BASE_URL?: string;
+  readonly VITE_APPS_SANDBOX_BASE_URL?: string;
+  readonly VITE_ELECTRON_PROD_BACKEND_URL?: string;
+  readonly VITE_ELECTRON_SANDBOX_BACKEND_URL?: string;
+  readonly VITE_INTERNAL_LINK_HOSTS?: string;
+  readonly VITE_TRUSTED_ORIGINS?: string;
   readonly VITE_CLAW_API_BASE_URL?: string;
 }
 
