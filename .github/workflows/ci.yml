@@ -119,6 +119,8 @@ jobs:
 
   test:
     name: Automation tests
+    # Always self-hosted (not gated on USE_SELF_HOSTED_CI): needs Docker for the compose
+    # stack and network access to SPACES_URL for the report push.
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
@@ -129,7 +131,6 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -158,19 +159,27 @@ jobs:
           SPACES_URL: ${{ secrets.SPACES_URL }}
         run: |
           set -euo pipefail
-          REPORT_HTML=$(find tools/xyne-automation/reports -type f -path '*/html-report/index.html' -printf '%T@ %p\n' \
-            | sort -n | tail -n1 | cut -d' ' -f2-)
+          # Secrets are empty on fork PRs; don't turn a green test job red over the upload.
+          if [ -z "${JWT:-}" ] || [ -z "${CHANNELID:-}" ] || [ -z "${SPACES_URL:-}" ]; then
+            echo "::notice::Spaces upload secrets not available — skipping report push"
+            exit 0
+          fi
 
+          REPORT_DIR=$(find tools/xyne-automation/reports -type d -name html-report -printf '%T@ %p\n' \
+            | sort -n | tail -n1 | cut -d' ' -f2-)
           DOCKER_LOGS_DIR=$(find tools/xyne-automation/reports -maxdepth 2 -type d -name docker-logs -printf '%T@ %p\n' \
             | sort -n | tail -n1 | cut -d' ' -f2-)
+
+          # The endpoint accepts at most 10 files, and Gauge's html-report needs its css/fonts/images
+          # siblings to render — ship each directory as one archive.
           UPLOAD_ARGS=()
           if [ -n "$DOCKER_LOGS_DIR" ]; then
-            for log in "$DOCKER_LOGS_DIR"/*.log "$DOCKER_LOGS_DIR"/*.txt; do
-              [ -e "$log" ] && UPLOAD_ARGS+=(-F "files=@${log};type=text/plain")
-            done
+            tar -czf "$RUNNER_TEMP/docker-logs.tgz" -C "$DOCKER_LOGS_DIR" .
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/docker-logs.tgz;type=application/gzip")
           fi
-          if [ -n "$REPORT_HTML" ]; then
-            UPLOAD_ARGS+=(-F "files=@${REPORT_HTML};type=text/html")
+          if [ -n "$REPORT_DIR" ]; then
+            tar -czf "$RUNNER_TEMP/html-report.tgz" -C "$REPORT_DIR" .
+            UPLOAD_ARGS+=(-F "files=@$RUNNER_TEMP/html-report.tgz;type=application/gzip")
           fi
 
           if [ ${#UPLOAD_ARGS[@]} -eq 0 ]; then
@@ -178,11 +187,13 @@ jobs:
             exit 1
           fi
 
-          curl -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+          RESPONSE=$(curl -sS -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
             -H "Authorization: Bearer $JWT" \
             -F "channelId=$CHANNELID" \
             -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
-            "${UPLOAD_ARGS[@]}"
+            "${UPLOAD_ARGS[@]}")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"success":true' || { echo "::error::Report push rejected"; exit 1; }
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:

@@ -8,7 +8,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --no-fr
 
 RUN cd node_modules/@getgauge/cli && \
     version=$(node -pe "require('./package.json').version") && \
-    url="https://github.com/getgauge/gauge/releases/download/v${version}/gauge-${version}-linux.x86_64.zip" && \
+    case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch: $(uname -m)" && exit 1 ;; esac && \
+    url="https://github.com/getgauge/gauge/releases/download/v${version}/gauge-${version}-linux.${arch}.zip" && \
     curl -fsSL -o /tmp/gauge.zip "$url" && \
     node -e "const AdmZip=require('adm-zip'); new AdmZip('/tmp/gauge.zip').extractAllTo('bin', true, true)" && \
     rm /tmp/gauge.zip
