@@ -1,0 +1,17 @@
+{
+  "users": [
+    {
+      "userId": "performance-user-01",
+      "token": "replace-with-a-short-lived-token",
+      "workspaceId": "performance-workspace-id",
+      "conversationId": "performance-conversation-id",
+      "channelId": "optional-performance-channel-id"
+    },
+    {
+      "userId": "performance-user-02",
+      "token": "replace-with-a-short-lived-token",
+      "workspaceId": "performance-workspace-id",
+      "conversationId": "performance-conversation-id-2"
+    }
+  ]
+}
