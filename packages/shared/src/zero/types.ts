@@ -369,6 +369,7 @@ export enum ActivityType {
   EMAIL_SENT = 'EMAIL_SENT',
   TICKET_CREATED = 'TICKET_CREATED',
   CSAT_RECEIVED = 'CSAT_RECEIVED',
+  MOBIUS_RELEASE_UPDATE = 'MOBIUS_RELEASE_UPDATE',
   // ETA risk-detection / automatic-recalculation feature (see
   // packages/shared/src/tickets/etaActivityValues.ts for each type's stored
   // `value` shape). Distinct from the existing ETA/STAGE_ETA field-change

@@ -73,6 +73,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     aiPriority: null,
     firstRespondedAt: null,
     emailReplyEnabled: true,
+    mobiusReleaseId: null,
   };
 };
 

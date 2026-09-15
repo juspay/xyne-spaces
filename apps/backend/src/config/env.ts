@@ -390,6 +390,10 @@ const envSchema = Joi.object({
   OTEL_SERVICE_NAME: Joi.string().default('xyne-spaces-backend'),
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
   SCM_WEBHOOK_SECRET: Joi.string().default(''),
+  MOBIUS_WEBHOOK_API_KEY: Joi.string().allow('').default(''),
+  MOBIUS_API_BASE_URL: Joi.string().allow('').default(''),
+  MOBIUS_API_KEY: Joi.string().allow('').default(''),
+  MOBIUS_API_COOKIE: Joi.string().allow('').default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
@@ -978,6 +982,12 @@ export const config = {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,
     token: envVars.GITHUB_TOKEN,
     apiUrl: envVars.GITHUB_API_URL,
+  },
+  mobius: {
+    webhookApiKey: envVars.MOBIUS_WEBHOOK_API_KEY, // inbound webhook x-api-key
+    apiBaseUrl: envVars.MOBIUS_API_BASE_URL, // outbound calls (env-specific)
+    apiKey: envVars.MOBIUS_API_KEY,
+    apiCookie: envVars.MOBIUS_API_COOKIE, // optional, for a cookie-fronted ingress
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,
