@@ -18,6 +18,7 @@ import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { TicketTagMappingsSideEffectHandler } from './tables/ticket-tag-mappings-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
+import { ConversationLabelMappingsSideEffectHandler } from './tables/conversation-label-mappings-handler';
 import { ChannelUserStatusSideEffectHandler } from './tables/channel-user-status-handler';
 import { ConversationParticipantsSideEffectHandler } from './tables/conversation-participants-handler';
 import { FormEntityValuesSideEffectHandler } from './tables/form-entity-values-handler';
@@ -72,6 +73,8 @@ export class SideEffectHandlerFactory {
         return new ChannelsSideEffectHandler(ctx);
       case 'email_reads':
         return new EmailReadsSideEffectHandler(ctx);
+      case 'conversation_label_mappings':
+        return new ConversationLabelMappingsSideEffectHandler(ctx);
       case 'channel_user_status':
         return new ChannelUserStatusSideEffectHandler(ctx);
       case 'conversation_participants':

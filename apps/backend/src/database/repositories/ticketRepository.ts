@@ -60,6 +60,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   id: string;
   workspaceId: string;
   boardId: string | null;
+  channelId: string | null;
   projectId: string | null;
   stageName: string;
   statusV2: TicketStatusV2;
@@ -75,6 +76,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   id: ticket.id,
   workspaceId: ticket.workspaceId,
   boardId: ticket.boardId,
+  channelId: ticket.channelId,
   projectId: ticket.projectId,
   stageName: ticket.stageName,
   statusV2: ticket.statusV2,
@@ -342,6 +344,10 @@ export class TicketRepository {
       operation: 'insert',
       ticket: createdSnapshot,
     });
+    if (createdSnapshot.channelId) {
+      // Desk label unread badges: a new ticket can enter filtered label views.
+      websocketService.broadcastLabelUnreadCountsUpdate(createdSnapshot.channelId);
+    }
 
 
     void (async (): Promise<void> => {
@@ -891,6 +897,9 @@ export class TicketRepository {
         assignedTo: currentTicket.assignedTo,
       },
     });
+    if (updatedSnapshot.channelId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(updatedSnapshot.channelId);
+    }
 
     // Thread system message for the status change (activity rows for PR/STAGE_NAME/STATUS/ETA
     // were already written inside the transaction above). Messages are posted post-commit,
@@ -1140,6 +1149,10 @@ export class TicketRepository {
         assignedTo: previousAssigneeId,
       },
     });
+    if (assigneeSnapshot.channelId) {
+      // Desk payloads filter on assignedTo, so label badges invalidate on reassign.
+      websocketService.broadcastLabelUnreadCountsUpdate(assigneeSnapshot.channelId);
+    }
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -1435,6 +1448,9 @@ export class TicketRepository {
           priority: prevSnapshot.priority,
         },
       });
+      if (metadataSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(metadataSnapshot.channelId);
+      }
     }
   }
 
