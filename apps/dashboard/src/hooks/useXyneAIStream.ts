@@ -472,47 +472,52 @@ export const useXyneAIStream = ({
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
 
-      // SEND_MESSAGE lives here, not on the send button: this is the one
-      // function every submit passes through (button, Enter, regenerate, edit,
+      // SEND_MESSAGE for every send the button cannot see: this is the one
+      // function every submit passes through (Enter, regenerate, edit,
       // auto-sent initialQuery, suggestion chips) on both the panel and the
       // /ai page. Fires before the request so a failed run still counts as an
       // ask; the run's outcome is RESPONSE_* from the stream manager.
+      // A button send is already a click row under the button's own name
+      // (SEND_MESSAGE on the page, SUBMIT_MESSAGE in the panel) with the run
+      // dims baked into its metadata, so it is not repeated here.
       const trigger: XyneAiSendTrigger = isRegenerate
         ? 'regenerate'
         : isEditUserMessage
           ? 'edit'
           : (ov?.trigger ?? 'submit');
-      globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
-        ...aiRunTrackingMetadata({
-          surface,
-          contextType,
-          agentSlug,
-          model: eModel,
-          modelProvider: eModelProvider,
-          thinkingLevel: eThinkingLevel,
-          webSearchEnabled: eWebSearchEnabled,
-          deepResearchEnabled: eDeepResearchEnabled,
-          createCanvasEnabled: eCreateCanvasEnabled,
-          instant: eInstant,
-          attachmentsCount: attachments.length,
-          channelCount: eChannelIds.length,
-          fileCount: eFileIds.length,
-          folderCount: eFolderIds.length,
-          collectionCount: eCollectionIds.length,
-          canvasCount: eCanvasIds?.length ?? 0,
-          ticketCount: eTicketIds?.length ?? 0,
-          callCount: eCallIds?.length ?? 0,
-          hasSelectionContext: !!selectionContexts?.length,
-          hasResearchContext: !!eResearchContext,
-          hasWorkflowContext: !!workflowContext,
-          queryLength: query.length,
-          isRegenerate: !!isRegenerate,
-          isEdit: !!isEditUserMessage,
-          conversationId,
-        }),
-        turnIndex: currentMessages.filter(m => m.type === 'user').length,
-        trigger,
-      });
+      if (trigger !== 'button') {
+        globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
+          ...aiRunTrackingMetadata({
+            surface,
+            contextType,
+            agentSlug,
+            model: eModel,
+            modelProvider: eModelProvider,
+            thinkingLevel: eThinkingLevel,
+            webSearchEnabled: eWebSearchEnabled,
+            deepResearchEnabled: eDeepResearchEnabled,
+            createCanvasEnabled: eCreateCanvasEnabled,
+            instant: eInstant,
+            attachmentsCount: attachments.length,
+            channelCount: eChannelIds.length,
+            fileCount: eFileIds.length,
+            folderCount: eFolderIds.length,
+            collectionCount: eCollectionIds.length,
+            canvasCount: eCanvasIds?.length ?? 0,
+            ticketCount: eTicketIds?.length ?? 0,
+            callCount: eCallIds?.length ?? 0,
+            hasSelectionContext: !!selectionContexts?.length,
+            hasResearchContext: !!eResearchContext,
+            hasWorkflowContext: !!workflowContext,
+            queryLength: query.length,
+            isRegenerate: !!isRegenerate,
+            isEdit: !!isEditUserMessage,
+            conversationId,
+          }),
+          turnIndex: currentMessages.filter(m => m.type === 'user').length,
+          trigger,
+        });
+      }
       // OpenTelemetry counters ride the same choke point so the /ai page counts too.
       if (eWebSearchEnabled) trackWebSearchQuery();
       if (eDeepResearchEnabled) trackDeepResearchQuery();

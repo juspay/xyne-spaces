@@ -129,26 +129,39 @@ const AIScreen = (): ReactElement => {
   // the page is SELECT_CONVERSATION / NEW_CHAT, not a new open. `source` comes
   // from the navigating surface's `state.trackSource`; back/forward reports
   // history_pop and a pasted link reports direct (see readTrackSource).
-  const pageOpenedAtRef = useRef(Date.now());
+  // The open is a single moment, so the effect has no reactive inputs: it
+  // reads the arrival attribution off a per-render snapshot ref instead of
+  // depending on it, which would re-report an open on every thread switch.
+  const pageOpenSnapshotRef = useRef({
+    locationState: location.state as unknown,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  });
+  pageOpenSnapshotRef.current = {
+    locationState: location.state as unknown,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  };
   useEffect(() => {
-    const source = readTrackSource(location.state, navigationType);
-    pageOpenedAtRef.current = Date.now();
+    const snap = pageOpenSnapshotRef.current;
+    const source = readTrackSource(snap.locationState, snap.navigationType);
+    const openedAt = Date.now();
     globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
       surface: 'page',
       source,
       contextType: 'general',
-      resumedConversation: !!sessionFromUrl,
-      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+      resumedConversation: !!snap.sessionFromUrl,
+      agentSlug: snap.effectiveAgentSlug ?? 'ask-ai',
     });
     return () => {
       globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
         surface: 'page',
         source,
-        msOpen: Date.now() - pageOpenedAtRef.current,
+        msOpen: Date.now() - openedAt,
       });
     };
-    // Mount/unmount only — the open is a single moment, not a render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Drag and drop on the main content area — routes dropped files into

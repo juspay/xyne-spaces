@@ -109,6 +109,53 @@ export function trackTicketOutcome(
   });
 }
 
+/**
+ * CREATE_TICKET_SUCCEEDED: the "it exists now" row, fired only after
+ * POST /tickets returned an id. Every create path (the modal, its popout, the
+ * composer's direct Support create) reports through here so the key set is
+ * one set. Counts and booleans only — never the title or description.
+ */
+export function trackTicketCreateSucceeded(
+  ticket: TrackableTicket,
+  extra: Record<string, unknown> & { source: string },
+): void {
+  globalClickTracker.trackManualEvent('Tickets', 'CREATE_TICKET_SUCCEEDED', undefined, {
+    ...ticketTrackingMetadata(ticket),
+    aiOriginated: isAiOriginatedSource(extra.source),
+    ...extra,
+  });
+}
+
+export type TicketCreateErrorKind = 'network' | 'validation' | 'server';
+
+/**
+ * Classify a failed create from the thrown error: no HTTP response means the
+ * request never landed, a 4xx is the form's fault, anything else is the
+ * server's. Axios and fetch-style errors both carry `response.status`.
+ */
+export function ticketCreateFailureMetadata(error: unknown): {
+  errorKind: TicketCreateErrorKind;
+  httpStatus?: number;
+} {
+  const httpStatus =
+    typeof error === 'object' && error !== null && 'response' in error
+      ? (error as { response?: { status?: number } }).response?.status
+      : undefined;
+  if (httpStatus === undefined) return { errorKind: 'network' };
+  return { errorKind: httpStatus >= 500 ? 'server' : 'validation', httpStatus };
+}
+
+/** CREATE_TICKET_FAILED, the failure sibling of `trackTicketCreateSucceeded`. */
+export function trackTicketCreateFailed(
+  error: unknown,
+  extra: Record<string, unknown> & { source: string },
+): void {
+  globalClickTracker.trackManualEvent('Tickets', 'CREATE_TICKET_FAILED', undefined, {
+    ...ticketCreateFailureMetadata(error),
+    ...extra,
+  });
+}
+
 /** Coarse list-size dimension for `TICKET_LIST_VIEWED`. */
 export function ticketCountBucket(count: number): '0' | '1-10' | '11-50' | '51-200' | '200+' {
   if (count <= 0) return '0';

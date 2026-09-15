@@ -57,7 +57,10 @@ import {
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
-import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import {
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
+} from '../../../services/Analytics/ticketTracking';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -1225,21 +1228,17 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
                           const created = await createTicket(ticketPayload);
                           // No modal on this path, so the create outcome is reported here.
-                          globalClickTracker.trackManualEvent(
-                            'Tickets',
-                            'CREATE_TICKET_SUCCEEDED',
-                            undefined,
-                            {
-                              ...(created?.id && { ticketId: created.id }),
-                              ticketType: BaseTicketType.Support,
-                              channelId,
-                              source: 'chat_composer',
-                              aiOriginated: false,
-                              fromSourceMessage: false,
-                              hasAssignee: false,
-                              attachmentsCount: 0,
-                            },
-                          );
+                          if (created?.id) {
+                            trackTicketCreateSucceeded(
+                              { id: created.id, ticketType: BaseTicketType.Support, channelId },
+                              {
+                                source: 'chat_composer',
+                                fromSourceMessage: false,
+                                hasAssignee: false,
+                                attachmentsCount: 0,
+                              },
+                            );
+                          }
 
                           inputBoxRef.current?.clearContent();
                           toast.success('Support Ticket Created', {
@@ -1255,12 +1254,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });
-                          globalClickTracker.trackManualEvent(
-                            'Tickets',
-                            'CREATE_TICKET_FAILED',
-                            undefined,
-                            { source: 'chat_composer', errorKind: 'server' },
-                          );
+                          trackTicketCreateFailed(error, { source: 'chat_composer' });
                         }
                       } else {
                         setTicketDescription(description || '');

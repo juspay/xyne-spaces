@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
@@ -2081,6 +2082,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       text: string,
       attachments?: AIComposerAttachment[],
       context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
     ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
@@ -2128,7 +2130,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        context ? toStreamOverrides(context) : undefined,
+        context || trigger
+          ? { ...(context ? toStreamOverrides(context) : {}), ...(trigger && { trigger }) }
+          : undefined,
       );
     },
     [submitQuery, isLegacyConversation, displayMessages, messages],
@@ -2461,8 +2465,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments, context): void => {
-                void handleSubmit(text, attachments, context);
+              onSubmit={(text, attachments, context, trigger): void => {
+                void handleSubmit(text, attachments, context, trigger);
               }}
               onAgentChange={onAgentChange}
               showAgentSelector={isV2}

@@ -2,7 +2,49 @@ import { lengthBucket } from './trackSource';
 
 export type XyneAiSurface = 'panel' | 'page';
 
-export type XyneAiSendTrigger = 'submit' | 'regenerate' | 'edit' | 'auto_send' | 'suggestion';
+/**
+ * What caused a send. `button` is special: the send button keeps its own
+ * `data-track-name` (`SEND_MESSAGE` on the /ai page, `SUBMIT_MESSAGE` in the
+ * panel) so the click series that predate the manual event keep flowing, and
+ * the manual SEND_MESSAGE is skipped for that trigger so no send counts twice.
+ */
+export type XyneAiSendTrigger =
+  | 'button'
+  | 'enter'
+  | 'programmatic'
+  | 'submit'
+  | 'regenerate'
+  | 'edit'
+  | 'auto_send'
+  | 'suggestion';
+
+/**
+ * Run dimensions a send button can bake into `data-track-metadata` at render
+ * time, so its click row carries the same keys as the manual SEND_MESSAGE.
+ * Attachment and context counts are omitted where the button cannot see them.
+ */
+export function aiSendButtonTrackingMetadata(args: {
+  surface: XyneAiSurface;
+  agentSlug?: string | null | undefined;
+  model?: string | null | undefined;
+  thinkingLevel?: string | null | undefined;
+  webSearchEnabled?: boolean | undefined;
+  deepResearchEnabled?: boolean | undefined;
+  createCanvasEnabled?: boolean | undefined;
+  attachmentsCount?: number | undefined;
+}): Record<string, unknown> {
+  return {
+    surface: args.surface,
+    trigger: 'button' satisfies XyneAiSendTrigger,
+    agentSlug: args.agentSlug ?? 'ask-ai',
+    ...(args.model && { model: args.model }),
+    ...(args.thinkingLevel && { thinkingLevel: args.thinkingLevel }),
+    webSearchEnabled: !!args.webSearchEnabled,
+    deepResearchEnabled: !!args.deepResearchEnabled,
+    createCanvasEnabled: !!args.createCanvasEnabled,
+    ...(typeof args.attachmentsCount === 'number' && { attachmentsCount: args.attachmentsCount }),
+  };
+}
 
 export interface AiRunTrackingArgs {
   surface: XyneAiSurface | undefined;
