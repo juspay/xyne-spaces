@@ -876,6 +876,26 @@
       "searchByUserName": "Buscar por nombre de usuario",
       "searchByUserChannelGroup": "Buscar por usuario, canal o nombre de grupo",
       "searchParticipantsPlaceholder": "Buscar participantes..."
+    },
+    "confluenceMigrationScreen": {
+      "spaceKeyPlaceholder": "JR",
+      "autoResolveProjectPlaceholder": "Resolver automáticamente por nombre del espacio",
+      "searchProjectsPlaceholder": "Buscar proyectos...",
+      "selectChannelPlaceholder": "Seleccionar canal",
+      "searchChannelsPlaceholder": "Buscar canales..."
+    },
+    "dailyBriefScreen": {
+      "instructionsPlaceholder": "Ej.: Mantenlo en menos de seis líneas. Prioriza todo lo relacionado con pagos y siempre menciona a quién estoy esperando."
+    },
+    "dashboardCreation": {
+      "namePlaceholder": "Ingresa el nombre del panel",
+      "descriptionPlaceholder": "Ingresa una descripción (opcional)"
+    },
+    "formScreen": {
+      "searchPlaceholder": "Buscar formularios"
+    },
+    "intentPlaygroundScreen": {
+      "messagePlaceholder": "Escribe un mensaje como aparecería en un canal…"
     }
   }
 }

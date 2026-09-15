@@ -876,6 +876,26 @@
       "searchByUserName": "Search by user name",
       "searchByUserChannelGroup": "Search by user, channel, or group name",
       "searchParticipantsPlaceholder": "Search participants..."
+    },
+    "confluenceMigrationScreen": {
+      "spaceKeyPlaceholder": "JR",
+      "autoResolveProjectPlaceholder": "Auto resolve by space name",
+      "searchProjectsPlaceholder": "Search projects...",
+      "selectChannelPlaceholder": "Select channel",
+      "searchChannelsPlaceholder": "Search channels..."
+    },
+    "dailyBriefScreen": {
+      "instructionsPlaceholder": "e.g. Keep it under six lines. Lead with anything touching payments, and always name who I am waiting on."
+    },
+    "dashboardCreation": {
+      "namePlaceholder": "Enter dashboard name",
+      "descriptionPlaceholder": "Enter description (optional)"
+    },
+    "formScreen": {
+      "searchPlaceholder": "Search Forms"
+    },
+    "intentPlaygroundScreen": {
+      "messagePlaceholder": "Type a message as it would appear in a channel…"
     }
   }
 }

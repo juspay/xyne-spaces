@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Fuse from 'fuse.js';
 import { PlusDefault, SearchDefault } from '@xyne/icons';
 import type { Form } from '@xyne/shared';
@@ -9,6 +10,7 @@ import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 
 const FormScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // Fetch all forms using zero
   const [forms] = useCachedQuery(queries.getAllForms());
 
@@ -107,7 +109,7 @@ const FormScreen = (): ReactElement => {
                 onKeyDown={e => {
                   if (e.key === 'Escape') setQuery('');
                 }}
-                placeholder='Search Forms'
+                placeholder={t('routes.formScreen.searchPlaceholder')}
                 aria-label='Search forms'
                 data-track-category='Forms'
                 data-track-name='Search forms'
