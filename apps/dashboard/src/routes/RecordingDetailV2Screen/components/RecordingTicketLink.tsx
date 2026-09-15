@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { LinkChainSlant, TicketToken } from '@xyne/icons';
@@ -49,6 +50,7 @@ export function RecordingTicketLink({
   isUpdating = false,
   onChange,
 }: RecordingTicketLinkProps): ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -155,8 +157,10 @@ export function RecordingTicketLink({
       options={options}
       selectedValue={null}
       onSelect={handleSelect}
-      placeholder='Link'
-      searchPlaceholder='Search by ID or title'
+      placeholder={t('routes.recordingDetailV2Screen.recordingTicketLink.linkPlaceholder')}
+      searchPlaceholder={t(
+        'routes.recordingDetailV2Screen.recordingTicketLink.searchByIdOrTitlePlaceholder',
+      )}
       isOpen={isOpen}
       onOpenChange={setIsOpen}
       onSearchChange={setSearch}

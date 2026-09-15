@@ -1,4 +1,5 @@
 import { type ReactElement, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import DOMPurify from 'dompurify';
 import {
   FileText,
@@ -123,6 +124,7 @@ const RecipientLine = ({
   actions,
   trackCategory,
 }: RecipientLineProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const rowRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [inputValue, setInputValue] = useState('');
@@ -190,7 +192,11 @@ const RecipientLine = ({
           ref={inputRef}
           type='text'
           value={inputValue}
-          placeholder={emails.length === 0 ? 'Add people...' : ''}
+          placeholder={
+            emails.length === 0
+              ? t('routes.recordingDetailV2Screen.postRecordingToEmailModal.addPeoplePlaceholder')
+              : ''
+          }
           onChange={event => {
             setInputValue(event.target.value);
             setHighlightedIndex(0);
@@ -224,6 +230,7 @@ export const PostRecordingToEmailModal = ({
   isRecording = true,
   trackCategory = 'RecordingDetailV2',
 }: PostRecordingToEmailModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // Not named `subject` — that already belongs to the email's own subject line.
   const entityLabel = isRecording ? 'recording' : 'call';
   const users = useUsers();
@@ -494,7 +501,9 @@ export const PostRecordingToEmailModal = ({
             value={subject}
             onChange={event => setSubject(event.target.value)}
             className='min-w-0 bg-transparent py-1 text-sm font-medium text-foreground outline-none placeholder:text-muted-foreground'
-            placeholder='Add a subject'
+            placeholder={t(
+              'routes.recordingDetailV2Screen.postRecordingToEmailModal.subjectPlaceholder',
+            )}
             aria-label='Email subject'
             data-track-category={trackCategory}
             data-track-name='recording_email_subject_input'
@@ -525,7 +534,9 @@ export const PostRecordingToEmailModal = ({
           <EmailEditor
             value={body}
             onChange={setBody}
-            placeholder='Write the recording recap...'
+            placeholder={t(
+              'routes.recordingDetailV2Screen.postRecordingToEmailModal.recapPlaceholder',
+            )}
             disabled={isSending}
             className='recording-email-editor min-h-[280px]'
           />

@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Search, Share2, Users, X } from 'lucide-react';
 import { useRecordingParticipants } from '../../../hooks/useRecordingParticipants';
@@ -23,6 +24,7 @@ export function RecordingParticipants({
   recordingParticipants,
   shares,
 }: RecordingParticipantsProps): ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const reduceMotion = useReducedMotion();
   const {
     self,
@@ -134,7 +136,9 @@ export function RecordingParticipants({
             aria-autocomplete='list'
             aria-controls='recording-participant-results'
             aria-activedescendant={results[activeIndex]?.id}
-            placeholder='Add someone by name or email'
+            placeholder={t(
+              'routes.recordingDetailV2Screen.recordingParticipants.addPersonPlaceholder',
+            )}
             className='h-9 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground'
             data-track-category='RecordingDetailV2'
             data-track-name='search_recording_participants'

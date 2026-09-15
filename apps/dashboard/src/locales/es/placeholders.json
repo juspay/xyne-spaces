@@ -982,6 +982,34 @@
         "searchTicketsPlaceholder": "Buscar tickets",
         "selectConfidencePlaceholder": "Seleccionar confianza"
       }
+    },
+    "recordingDetailScreen": {
+      "detailedSummaryPlaceholder": "Resumen detallado...",
+      "notesPlaceholder": "Notas de la grabación..."
+    },
+    "recordingDetailV2Screen": {
+      "detailedSummaryPlaceholder": "Resumen detallado",
+      "notesPlaceholder": "Agrega tus notas aquí, puedes ver la transcripción en vivo en la pestaña de transcripción",
+      "recordingParticipants": {
+        "addPersonPlaceholder": "Agregar a alguien por nombre o correo"
+      },
+      "postRecordingToEmailModal": {
+        "addPeoplePlaceholder": "Agregar personas...",
+        "subjectPlaceholder": "Agregar un asunto",
+        "recapPlaceholder": "Escribe el resumen de la grabación..."
+      },
+      "summaryTemplatesModal": {
+        "sectionTitlePlaceholder": "Título de la sección",
+        "sectionInstructionsPlaceholder": "Instrucciones para esta sección…",
+        "searchTemplatesPlaceholder": "Buscar plantillas...",
+        "untitledTemplatePlaceholder": "Plantilla sin título",
+        "meetingDescriptionPlaceholder": "Describe la reunión y el resumen que deseas…",
+        "templateInstructionsPlaceholder": "Genera o escribe las instrucciones usadas para crear resúmenes con esta plantilla…"
+      },
+      "recordingTicketLink": {
+        "linkPlaceholder": "Enlace",
+        "searchByIdOrTitlePlaceholder": "Buscar por ID o título"
+      }
     }
   }
 }

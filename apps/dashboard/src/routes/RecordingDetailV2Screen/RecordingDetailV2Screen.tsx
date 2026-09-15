@@ -3,6 +3,7 @@
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
@@ -1631,6 +1632,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
 }
 
 function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [canvasData] = useCachedQuery(queries.getCanvas({ canvasId }), { enabled: !!canvasId });
   const canvas = canvasData as unknown as Canvas | undefined;
 
@@ -1651,7 +1653,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       channelId={canvas.channelId || undefined}
       title={canvas.title}
       editable={true}
-      placeholder='Add your notes here, you can view the transcript live in the transcript tab'
+      placeholder={t('routes.recordingDetailV2Screen.notesPlaceholder')}
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2
@@ -1669,6 +1671,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
 }
 
 function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [canvasData] = useCachedQuery(queries.getCanvas({ canvasId }), { enabled: !!canvasId });
   const canvas = canvasData as unknown as Canvas | undefined;
 
@@ -1687,7 +1690,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       channelId={canvas.channelId || undefined}
       title={canvas.title}
       editable={true}
-      placeholder='Detailed summary'
+      placeholder={t('routes.recordingDetailV2Screen.detailedSummaryPlaceholder')}
       autoFocus={false}
       trackEditedRecordingSummaryBlocks={true}
       className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}

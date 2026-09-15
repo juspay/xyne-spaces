@@ -3,6 +3,7 @@
  */
 
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -144,6 +145,7 @@ function RecordingCanvasSection({
 }
 
 export default function RecordingDetailScreen(): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
@@ -543,7 +545,7 @@ export default function RecordingDetailScreen(): ReactElement {
             icon={<ScrollText className='w-4 h-4 text-muted-foreground' />}
             loadingLabel='Loading detailed summary...'
             errorLabel='Failed to load detailed summary.'
-            placeholder='Detailed summary...'
+            placeholder={t('routes.recordingDetailScreen.detailedSummaryPlaceholder')}
           />
         )}
 
@@ -555,7 +557,7 @@ export default function RecordingDetailScreen(): ReactElement {
             icon={<FileText className='w-4 h-4 text-muted-foreground' />}
             loadingLabel='Loading notes...'
             errorLabel='Failed to load notes.'
-            placeholder='Recording notes...'
+            placeholder={t('routes.recordingDetailScreen.notesPlaceholder')}
           />
         )}
 

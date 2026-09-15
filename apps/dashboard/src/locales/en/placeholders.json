@@ -982,6 +982,34 @@
         "searchTicketsPlaceholder": "Search tickets",
         "selectConfidencePlaceholder": "Select confidence"
       }
+    },
+    "recordingDetailScreen": {
+      "detailedSummaryPlaceholder": "Detailed summary...",
+      "notesPlaceholder": "Recording notes..."
+    },
+    "recordingDetailV2Screen": {
+      "detailedSummaryPlaceholder": "Detailed summary",
+      "notesPlaceholder": "Add your notes here, you can view the transcript live in the transcript tab",
+      "recordingParticipants": {
+        "addPersonPlaceholder": "Add someone by name or email"
+      },
+      "postRecordingToEmailModal": {
+        "addPeoplePlaceholder": "Add people...",
+        "subjectPlaceholder": "Add a subject",
+        "recapPlaceholder": "Write the recording recap..."
+      },
+      "summaryTemplatesModal": {
+        "sectionTitlePlaceholder": "Section title",
+        "sectionInstructionsPlaceholder": "Instructions for this section…",
+        "searchTemplatesPlaceholder": "Search templates...",
+        "untitledTemplatePlaceholder": "Untitled template",
+        "meetingDescriptionPlaceholder": "Describe the meeting and the summary you want…",
+        "templateInstructionsPlaceholder": "Generate or write the instructions used to create summaries with this template…"
+      },
+      "recordingTicketLink": {
+        "linkPlaceholder": "Link",
+        "searchByIdOrTitlePlaceholder": "Search by ID or title"
+      }
     }
   }
 }
