@@ -243,6 +243,9 @@ const electronAPI = {
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 
+  // Performance counters for the in-app diagnostics panel.
+  getDiagnosticsSample: () => ipcRenderer.invoke('diagnostics:get-sample'),
+
   // Browser Settings APIs
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),

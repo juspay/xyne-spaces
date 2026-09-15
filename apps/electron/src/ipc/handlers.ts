@@ -38,6 +38,7 @@ import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
 import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
+import { getDiagnosticsSample } from '../services/diagnostics';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -271,6 +272,12 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('logger:get-client-session-id', () => {
     return Logger.getClientSessionId();
+  });
+
+  // Read-only performance counters for the in-app diagnostics panel. Exposes no
+  // user data — process CPU/memory for this app plus machine-level CPU totals.
+  ipcMain.handle('diagnostics:get-sample', () => {
+    return getDiagnosticsSample();
   });
 
   ipcMain.handle('error-report:get-native-logs', async (event) => {

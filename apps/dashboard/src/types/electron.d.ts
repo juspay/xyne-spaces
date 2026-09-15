@@ -17,6 +17,26 @@ export interface ErrorReportRecordingInfo {
   elapsedSeconds?: number;
 }
 
+/** Mirrors `DiagnosticsSample` in apps/electron/src/services/diagnostics.ts. */
+export interface ElectronDiagnosticsSample {
+  at: number;
+  processes: {
+    pid: number;
+    type: string;
+    name: string;
+    cpuPercent: number;
+    workingSetMb: number;
+    idleWakeupsPerSecond: number;
+  }[];
+  appCpuPercent: number;
+  systemCpuPercent: number | null;
+  appSharePercent: number | null;
+  coreCount: number;
+  thermalState: string | null;
+  onBatteryPower: boolean | null;
+  appVersion: string;
+}
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -91,6 +111,7 @@ export interface ElectronAPI {
   getDeviceInfo: () => Promise<unknown>;
   setUserEmail: (email: string) => void;
   getClientSessionId: () => Promise<string>;
+  getDiagnosticsSample: () => Promise<ElectronDiagnosticsSample | null>;
   toggleCompactMode: () => void;
   getBrowserSettings: () => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   setBrowserSettings: (
