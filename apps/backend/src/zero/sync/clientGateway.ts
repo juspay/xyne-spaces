@@ -158,6 +158,22 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
       return;
     }
+    // GATE-ONLY shareability (defense in depth behind the build-time CI guard): refuse a query whose
+    // ACL doesn't collapse to a gate — per-row admission (calls' membership arms, per-row visibleTo/
+    // createdBy) is not served here. The client falls back to native Zero on this sync:error.
+    const collapse = gate.collapsibility(meta.partitionColumn);
+    if (!collapse.ok) {
+      syncEngine.unsubscribe(dataInstanceKey, connId);
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'not-gate-collapsible' });
+      logger.error('[SyncGateway] non-gate-collapsible ACL — refusing subscribe', {
+        queryName,
+        rootTable: meta.rootTable,
+        partitionColumn: meta.partitionColumn,
+        reason: collapse.reason,
+      });
+      socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
+      return;
+    }
     const grantByTable = new Map<string, string>();
     const grantInstanceKeys: string[] = [];
     // A transitive per-scope chain (attachments' conversation→channel) can't be materialized as one
