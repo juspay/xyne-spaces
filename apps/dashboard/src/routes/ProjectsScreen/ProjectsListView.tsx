@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
@@ -16,6 +17,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { DownloadDown as Download } from '@xyne/icons';
 
 const ProjectsListView = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<ZeroProject | null>(null);
@@ -133,7 +135,7 @@ const ProjectsListView = (): ReactElement => {
               type='text'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder='Search by name or project code...'
+              placeholder={t('routes.projectsListView.searchPlaceholder')}
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Projects'
               data-track-name='SearchProjects'

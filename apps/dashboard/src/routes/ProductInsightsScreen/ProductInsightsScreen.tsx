@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo, useEffect, createElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Ticket as TicketIcon,
@@ -393,6 +394,7 @@ const EmptyState = ({
 // --- Main Screen ---
 
 const ProductInsightsScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [selectedMetaTheme, setSelectedMetaTheme] = useState<MetaTheme | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const { theme } = useTheme();
@@ -574,8 +576,8 @@ const ProductInsightsScreen = (): ReactElement => {
               onSelect={val => {
                 if (val) setProjectId(val);
               }}
-              placeholder='Select project'
-              searchPlaceholder='Search projects...'
+              placeholder={t('routes.productInsightsScreen.selectProjectPlaceholder')}
+              searchPlaceholder={t('routes.productInsightsScreen.searchProjectsPlaceholder')}
               showSearch={false}
               inputClassName='px-1.5 py-1.5 text-xs rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               showIndicator={true}

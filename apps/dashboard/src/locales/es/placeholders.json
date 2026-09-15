@@ -941,6 +941,25 @@
         "commentPlaceholder": "Comentario (obligatorio para rechazar)"
       },
       "memberEmailPlaceholder": "Ingresa una dirección de correo..."
+    },
+    "productInsightsScreen": {
+      "selectProjectPlaceholder": "Seleccionar proyecto",
+      "searchProjectsPlaceholder": "Buscar proyectos..."
+    },
+    "projectsListView": {
+      "searchPlaceholder": "Buscar por nombre o código de proyecto..."
+    },
+    "releaseManagerView": {
+      "searchPlaceholder": "Buscar por nombre o código de proyecto...",
+      "searchAttachableProjectsPlaceholder": "Buscar proyectos..."
+    },
+    "projectDetailScreen": {
+      "repositoryUrlPlaceholder": "https://github.com/org/repository.git"
+    },
+    "questionnaireScreen": {
+      "fullNamePlaceholder": "Ingresa tu nombre completo",
+      "rolePlaceholder": "Ej.: Gerente de Producto",
+      "companyNamePlaceholder": "Ej.: Nike"
     }
   }
 }

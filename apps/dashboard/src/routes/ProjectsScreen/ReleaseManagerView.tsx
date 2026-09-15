@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BoardType, type Project } from '@xyne/shared';
 import { Button as BlendButton, ButtonType, Modal } from '@juspay/blend-design-system';
 import { ProjectCard } from '../../components/Project';
@@ -8,6 +9,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import ReleaseRepoConfigModal from './ReleaseRepoConfigModal';
 
 const ReleaseManagerView = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [configuringProject, setConfiguringProject] = useState<Project | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -78,7 +80,7 @@ const ReleaseManagerView = (): ReactElement => {
               type='text'
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder='Search by name or project code...'
+              placeholder={t('routes.releaseManagerView.searchPlaceholder')}
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchReleaseProjects'
@@ -143,7 +145,7 @@ const ReleaseManagerView = (): ReactElement => {
               type='text'
               value={pickerQuery}
               onChange={e => setPickerQuery(e.target.value)}
-              placeholder='Search projects...'
+              placeholder={t('routes.releaseManagerView.searchAttachableProjectsPlaceholder')}
               className='mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchAttachableProjects'
