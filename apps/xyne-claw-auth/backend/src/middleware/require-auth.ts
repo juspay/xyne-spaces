@@ -83,6 +83,25 @@ export function s2sKeyMatches(provided: string | string[] | undefined): boolean 
   return timingSafeEqual(a, b);
 }
 
+// Verified-identity marker for rate limiting (rate-limiters.ts). `x-user-id`
+// is a plain header: on pre-auth mounts (app-level apiLimiter) and on
+// optionalAuth'd public routes it is CLIENT-CONTROLLED, so keying rate-limit
+// buckets on it lets any caller mint fresh buckets by rotating header values.
+// Auth middlewares call markVerifiedUser() only when the identity was derived
+// from a trusted source (verified Spaces cookie, hashed CLI token, or a
+// validated S2S key); requesterKey trusts only the marker, never the raw
+// header.
+const VERIFIED_USER_ID = Symbol("verifiedUserId");
+
+export function markVerifiedUser(req: Request, userId: string): void {
+  req.headers["x-user-id"] = userId;
+  (req as unknown as Record<symbol, string>)[VERIFIED_USER_ID] = userId;
+}
+
+export function getVerifiedUserId(req: Request): string | undefined {
+  return (req as unknown as Record<symbol, string | undefined>)[VERIFIED_USER_ID];
+}
+
 // Memoize the Spaces /api/auth/me lookup per request. Routes now stack
 // mount-level auth (main.ts) with per-route auth (defense-in-depth), and
 // without this each layer would re-fetch /me for the same request.
@@ -158,7 +177,7 @@ export async function requireAuth(
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
+    markVerifiedUser(req, userId);
     // Phase-1 org context (additive; requireAuth only).
     await attachOrgContext(req, userId);
     next();
@@ -173,7 +192,7 @@ export async function requireAuth(
       return null;
     });
     if (token) {
-      req.headers["x-user-id"] = token.userId;
+      markVerifiedUser(req, token.userId);
       req.headers["x-org-id"] = token.orgId;
       // Route-level policy (e.g. service-token scope enforcement in /run)
       // needs the verified token record, not just the identity headers.
@@ -191,6 +210,7 @@ export async function requireAuth(
   if (s2sKeyMatches(s2sKey)) {
     const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
     if (pinnedUserId) {
+      markVerifiedUser(req, pinnedUserId);
       await attachOrgContext(req, pinnedUserId);
     }
     next();
@@ -213,7 +233,7 @@ export async function optionalAuth(
       await ensureUserExists(userId, "require-auth").catch((err) => {
         log.warn(`[optional-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
       });
-      req.headers["x-user-id"] = userId;
+      markVerifiedUser(req, userId);
       await attachOrgContext(req, userId);
     } else {
       const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
@@ -239,6 +259,7 @@ export async function requireS2S(
   if (s2sKeyMatches(s2sKey)) {
     const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
     if (pinnedUserId) {
+      markVerifiedUser(req, pinnedUserId);
       await attachOrgContext(req, pinnedUserId);
     }
     next();
@@ -250,7 +271,7 @@ export async function requireS2S(
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
-    req.headers["x-user-id"] = userId;
+    markVerifiedUser(req, userId);
     await attachOrgContext(req, userId);
     next();
     return;
@@ -361,7 +382,7 @@ export async function requireUserAuth(
   await ensureUserExists(userId, "require-auth").catch((err) => {
     log.warn(`[require-user-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
   });
-  req.headers["x-user-id"] = userId;
+  markVerifiedUser(req, userId);
   await attachOrgContext(req, userId);
   next();
 }
