@@ -1,5 +1,6 @@
 import { useConnectionState } from '@rocicorp/zero/react';
 import { ComponentType, ReactElement, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   WifiExclamationMark,
   WifiOff,
@@ -17,9 +18,9 @@ type ConnectionStateName = ReturnType<typeof useConnectionState>['name'];
 interface StatusPresentation {
   icon: ComponentType<PikaIconProps>;
   iconVariant: PikaStyle;
-  label: string;
+  labelKey: string;
   /** Appended to the tooltip when clicking the icon does something. */
-  hint?: string;
+  hintKey?: string;
   tone: string;
   /** Only the states Zero won't recover from on its own are clickable. */
   actionable: boolean;
@@ -31,15 +32,15 @@ const CONNECTION_STATUS: Record<Exclude<ConnectionStateName, 'connected'>, Statu
   connecting: {
     icon: WifiOn,
     iconVariant: 'Duo Stroke',
-    label: 'Connecting…',
+    labelKey: 'zeroConnectionStatus.states.connecting',
     tone: 'text-amber-500 dark:text-amber-400 animate-pulse',
     actionable: false,
   },
   disconnected: {
     icon: WifiOff,
     iconVariant: 'Stroke',
-    label: 'Disconnected',
-    hint: 'click to reconnect',
+    labelKey: 'zeroConnectionStatus.states.disconnected',
+    hintKey: 'zeroConnectionStatus.hints.clickToReconnect',
     tone: 'text-red-500 dark:text-red-400',
     actionable: true,
   },
@@ -47,24 +48,24 @@ const CONNECTION_STATUS: Record<Exclude<ConnectionStateName, 'connected'>, Statu
   'needs-auth': {
     icon: WifiExclamationMark,
     iconVariant: 'Stroke',
-    label: 'Session expired',
-    hint: 'click to reconnect',
+    labelKey: 'zeroConnectionStatus.states.sessionExpired',
+    hintKey: 'zeroConnectionStatus.hints.clickToReconnect',
     tone: 'text-amber-500 dark:text-amber-400',
     actionable: true,
   },
   error: {
     icon: WifiExclamationMark,
     iconVariant: 'Stroke',
-    label: 'Connection error',
-    hint: 'click to retry',
+    labelKey: 'zeroConnectionStatus.states.connectionError',
+    hintKey: 'zeroConnectionStatus.hints.clickToRetry',
     tone: 'text-red-500 dark:text-red-400',
     actionable: true,
   },
   closed: {
     icon: WifiOff,
     iconVariant: 'Duo Stroke',
-    label: 'Connection closed',
-    hint: 'click to reconnect',
+    labelKey: 'zeroConnectionStatus.states.connectionClosed',
+    hintKey: 'zeroConnectionStatus.hints.clickToReconnect',
     tone: 'text-muted-foreground',
     actionable: true,
   },
@@ -75,6 +76,7 @@ export const ZeroConnectionStatus = ({
 }: {
   className?: string;
 }): ReactElement | null => {
+  const { t } = useTranslation('common');
   const connectionState = useConnectionState();
 
   const refreshConnection = useCallback(() => {
@@ -88,7 +90,9 @@ export const ZeroConnectionStatus = ({
 
   const status = CONNECTION_STATUS[connectionState.name] ?? CONNECTION_STATUS.disconnected;
   const Icon = status.icon;
-  const tooltip = status.hint ? `${status.label} — ${status.hint}` : status.label;
+  const label = t(status.labelKey);
+  const hint = status.hintKey ? t(status.hintKey) : undefined;
+  const tooltip = hint ? `${label} — ${hint}` : label;
   const shell = cn(
     'size-8 flex items-center justify-center rounded-lg border border-transparent transition-colors',
     status.tone,
@@ -106,7 +110,10 @@ export const ZeroConnectionStatus = ({
           type='button'
           onClick={refreshConnection}
           data-ph-capture-attribute-track-id='reconnect_zero_connection'
-          aria-label={`Connection status: ${status.label}. ${status.hint ?? ''}`.trim()}
+          aria-label={t('zeroConnectionStatus.connectionStatusAriaLabel', {
+            label,
+            hint: hint ?? '',
+          }).trim()}
           data-testid='zero-connection-status'
           data-connection-state={connectionState.name}
           data-track-category='ZERO_CONNECTION'
@@ -118,7 +125,7 @@ export const ZeroConnectionStatus = ({
       ) : (
         <div
           role='status'
-          aria-label={`Connection status: ${status.label}`}
+          aria-label={t('zeroConnectionStatus.connectionStatusAriaLabelNoHint', { label })}
           data-testid='zero-connection-status'
           data-connection-state={connectionState.name}
           className={cn(shell, 'cursor-default')}

@@ -1,9 +1,11 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSelector } from '@xstate/react';
 import { webviewActor } from '../../machines/webviewMachine';
 import TabWebView from './TabWebView';
 
 const WebView = (): ReactElement => {
+  const { t } = useTranslation('common');
   const tabs = useSelector(webviewActor, state => state.context.tabs);
   const activeTab = useSelector(webviewActor, state => state.context.activeTab);
 
@@ -33,8 +35,8 @@ const WebView = (): ReactElement => {
       <div className='flex flex-col items-center justify-center h-full w-full bg-background'>
         <div className='text-muted-foreground text-center'>
           <span className='text-6xl mb-4 block'>🌐</span>
-          <h3 className='text-lg font-semibold mb-2'>No tabs open</h3>
-          <p className='text-sm'>Add a tab to start browsing</p>
+          <h3 className='text-lg font-semibold mb-2'>{t('webView.noTabsOpen')}</h3>
+          <p className='text-sm'>{t('webView.addTabHint')}</p>
         </div>
       </div>
     );
@@ -73,7 +75,7 @@ const WebView = (): ReactElement => {
                   handleTabClose(tab.currentUrl);
                 }}
                 className='px-2 py-2 hover:bg-red-100 hover:text-red-600 transition-colors'
-                title='Close tab'
+                title={t('webView.closeTab')}
                 data-track-category='WebView'
                 data-track-name='CloseTab'
                 data-track-metadata={JSON.stringify({ url: tab.currentUrl })}

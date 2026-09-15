@@ -1,4 +1,5 @@
 import { Component, ReactNode, ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { isRouteErrorResponse, useRouteError } from 'react-router-dom';
 import { logger, Event } from '../../utils/logger';
 import NotFoundScreen from '../../routes/NotFoundScreen/NotFoundScreen';
@@ -29,6 +30,7 @@ const formatError = (error: unknown): string => {
 };
 
 const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
+  const { t } = useTranslation('common');
   const isDevelopment =
     window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const handleBackToHome = (): void => {
@@ -42,12 +44,15 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
     >
       <div className='flex flex-col items-center text-center space-y-4 max-w-4xl px-4'>
         <div className='flex flex-col items-center space-y-4 select-none'>
-          <img src='/svgs/icons/error.svg' alt='Error' className='w-40 h-36' draggable='false' />
+          <img
+            src='/svgs/icons/error.svg'
+            alt={t('errorBoundary.errorAlt')}
+            className='w-40 h-36'
+            draggable='false'
+          />
           <div className='space-y-2'>
-            <p className='text-xl font-semibold text-foreground'>Oops! Something went wrong</p>
-            <p className='text-md text-muted-foreground'>
-              We couldn&apos;t complete your request. Please try again
-            </p>
+            <p className='text-xl font-semibold text-foreground'>{t('errorBoundary.heading')}</p>
+            <p className='text-md text-muted-foreground'>{t('errorBoundary.subtitle')}</p>
           </div>
         </div>
 
@@ -56,7 +61,9 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
             <div className='bg-muted border border-border rounded-lg p-4 space-y-4'>
               <div>
                 <p className='text-sm font-semibold text-foreground mb-2'>
-                  {error instanceof Error ? 'Error Message:' : 'Error Details:'}
+                  {error instanceof Error
+                    ? t('errorBoundary.errorMessageLabel')
+                    : t('errorBoundary.errorDetailsLabel')}
                 </p>
                 <pre className='text-xs text-red-600 bg-background p-3 rounded border border-red-200 overflow-x-auto'>
                   {formatError(error)}
@@ -64,7 +71,9 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
               </div>
               {error instanceof Error && error.stack && (
                 <div>
-                  <p className='text-sm font-semibold text-foreground mb-2'>Stack Trace:</p>
+                  <p className='text-sm font-semibold text-foreground mb-2'>
+                    {t('errorBoundary.stackTraceLabel')}
+                  </p>
                   <pre className='text-xs text-muted-foreground bg-background p-3 rounded border border-border overflow-x-auto max-h-64 overflow-y-auto'>
                     {error.stack}
                   </pre>
@@ -72,7 +81,9 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
               )}
               {errorInfo?.componentStack && (
                 <div>
-                  <p className='text-sm font-semibold text-foreground mb-2'>Component Stack:</p>
+                  <p className='text-sm font-semibold text-foreground mb-2'>
+                    {t('errorBoundary.componentStackLabel')}
+                  </p>
                   <pre className='text-xs text-muted-foreground bg-background p-3 rounded border border-border overflow-x-auto max-h-64 overflow-y-auto'>
                     {errorInfo.componentStack}
                   </pre>
@@ -88,7 +99,7 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
           data-track-category='ErrorBoundary'
           data-track-name='Back_To_Home'
         >
-          Back to Home
+          {t('errorBoundary.backToHome')}
         </button>
       </div>
     </div>

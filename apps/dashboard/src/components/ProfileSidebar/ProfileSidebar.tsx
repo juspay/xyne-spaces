@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useUser } from '../../hooks/useUsers';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -14,6 +15,7 @@ interface ProfileSidebarProps {
 }
 
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => {
+  const { t } = useTranslation('common');
   const navigate = useNavigate();
   const { channelId, conversationId, userId } = useParams<{
     channelId?: string;
@@ -44,7 +46,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
     return (
       <div className={`h-full flex items-center justify-center bg-background ${className}`}>
         <div className='text-center text-muted-foreground'>
-          <div className='mb-4'>User not found</div>
+          <div className='mb-4'>{t('profileSidebar.profileModal.userNotFound')}</div>
           <Button
             onClick={handleClose}
             variant='outline'
@@ -52,7 +54,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             data-track-name='CloseProfile'
             data-track-metadata={JSON.stringify({ channelId, userId })}
           >
-            Go Back
+            {t('profileSidebar.sidebar.goBack')}
           </Button>
         </div>
       </div>
@@ -70,8 +72,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
           <div className='flex-1'>
             <h1 className='text-lg font-semibold text-foreground truncate'>
               {isOwnProfile
-                ? 'Profile'
-                : `${user?.name || userProfile?.displayName || 'Unknown User'}`}
+                ? t('profileSidebar.profileModal.profileTitle')
+                : `${user?.name || userProfile?.displayName || t('profileSidebar.profileModal.unknownUser')}`}
             </h1>
           </div>
           <Button
@@ -79,7 +81,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             size='sm'
             onClick={handleClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
-            title='Close'
+            title={t('profileSidebar.profileModal.close')}
             data-track-category='PROFILE'
             data-track-name='CloseProfileSidebar'
             data-track-metadata={JSON.stringify({ channelId, userId })}

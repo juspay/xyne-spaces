@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -57,6 +58,7 @@ export const stopSosSiren = (): void => {
  * Renders SOS alerts
  */
 export const SosAlertBanner: React.FC = () => {
+  const { t } = useTranslation('common');
   const { user } = useAuthContext();
   const navigate = useNavigate();
   const { workspaceId: activeWorkspaceId } = useParams<{ workspaceId?: string }>();
@@ -160,7 +162,7 @@ export const SosAlertBanner: React.FC = () => {
             message: String('[SosAlert] Workspace switch failed:'),
             error: error,
           });
-          toast.error('Failed to switch workspace. Please try again.');
+          toast.error(t('sosAlert.switchWorkspaceFailed'));
           return;
         }
       }
@@ -168,7 +170,7 @@ export const SosAlertBanner: React.FC = () => {
       acknowledge(alert.id);
       void navigate(resolvedUrl);
     },
-    [acknowledge, activeWorkspaceId, navigate],
+    [acknowledge, activeWorkspaceId, navigate, t],
   );
 
   useEffect(() => {
@@ -183,7 +185,7 @@ export const SosAlertBanner: React.FC = () => {
         description: alert.message,
         duration: Infinity, // stays until the user closes or clicks it
         action: {
-          label: 'View',
+          label: t('sosAlert.view'),
           onClick: (): void => {
             globalClickTracker.trackManualEvent('CALLS', 'VIEW_SOS_ALERT');
             void view(alert);
@@ -209,7 +211,7 @@ export const SosAlertBanner: React.FC = () => {
         toast.dismiss(shownId);
       }
     }
-  }, [alerts, view, acknowledge]);
+  }, [alerts, view, acknowledge, t]);
 
   return null;
 };

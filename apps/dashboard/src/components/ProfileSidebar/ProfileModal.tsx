@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
@@ -24,6 +25,7 @@ interface ProfileModalProps {
  * "Profile" action has somewhere to open without bouncing the user into chat.
  */
 export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onClose }) => {
+  const { t } = useTranslation('common');
   const context = useAuthContextValues();
   const user = useUser(userId || '');
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId: userId || '' }), {
@@ -52,7 +54,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
   if (!userId) return null;
 
   const isOwnProfile = user?.id === context.userID;
-  const title = isOwnProfile ? 'Profile' : user?.name || userProfile?.displayName || 'Unknown User';
+  const title = isOwnProfile
+    ? t('profileSidebar.profileModal.profileTitle')
+    : user?.name || userProfile?.displayName || t('profileSidebar.profileModal.unknownUser');
 
   return (
     <Dialog
@@ -71,7 +75,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
             size='sm'
             onClick={onClose}
             className='!p-2 border border-border rounded-md hover:bg-accent'
-            title='Close'
+            title={t('profileSidebar.profileModal.close')}
             data-track-category='PROFILE'
             data-track-name='CloseProfileModal'
             data-track-metadata={JSON.stringify({ userId })}
@@ -89,7 +93,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ userId, isOpen, onCl
               className='border-0 shadow-none rounded-none'
             />
           ) : (
-            <div className='p-8 text-center text-muted-foreground'>User not found</div>
+            <div className='p-8 text-center text-muted-foreground'>
+              {t('profileSidebar.profileModal.userNotFound')}
+            </div>
           )}
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw, X } from 'lucide-react';
 import { isElectronApp } from '../../utils/electronApp';
 import { logger, Event as LoggerEvent } from '../../utils/logger';
@@ -11,6 +12,7 @@ interface ZeroConnectionFailureModalProps {
 export const ZeroConnectionFailureModal = ({
   onClose,
 }: ZeroConnectionFailureModalProps = {}): ReactElement => {
+  const { t } = useTranslation('common');
   const isElectron = isElectronApp();
   const { logout } = useAuth();
 
@@ -38,7 +40,7 @@ export const ZeroConnectionFailureModal = ({
           <button
             onClick={onClose}
             className='absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors'
-            aria-label='Close modal'
+            aria-label={t('zeroConnectionStatus.closeModal')}
             data-track-category='ZERO_CONNECTION'
             data-track-name='CLOSE_CONNECTION_FAILURE_MODAL'
           >
@@ -67,14 +69,14 @@ export const ZeroConnectionFailureModal = ({
 
         {/* Title */}
         <h2 id='modal-title' className='text-xl font-semibold text-foreground text-center mb-2'>
-          Connection Lost
+          {t('zeroConnectionStatus.title')}
         </h2>
 
         {/* Description */}
         <p id='modal-description' className='text-muted-foreground text-center mb-6'>
           {isElectron
-            ? 'The connection to the server has been lost. Click below to reload the app.'
-            : 'The connection to the server has been lost. Click below to refresh.'}
+            ? t('zeroConnectionStatus.descriptionElectron')
+            : t('zeroConnectionStatus.descriptionWeb')}
         </p>
 
         {/* Refresh Button — behaviour differs between Electron and web */}
@@ -86,7 +88,11 @@ export const ZeroConnectionFailureModal = ({
           data-track-name='RELOAD_APP_ON_CONNECTION_FAILURE'
         >
           <RefreshCw className='w-5 h-5' strokeWidth={2.5} />
-          <span>{isElectron ? 'Reload App' : 'Refresh Connection'}</span>
+          <span>
+            {isElectron
+              ? t('zeroConnectionStatus.reloadApp')
+              : t('zeroConnectionStatus.refreshConnection')}
+          </span>
         </button>
       </div>
     </div>

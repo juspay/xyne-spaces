@@ -1096,5 +1096,64 @@
     "back": "Back",
     "forward": "Forward",
     "search": "Search"
+  },
+  "shortcutsHelpModal": {
+    "heading": "Keyboard Shortcuts",
+    "subtitle": "Quick actions to boost your productivity",
+    "close": "Close",
+    "composerHint": "These shortcuts work when chat input is focused",
+    "press": "Press",
+    "toClose": "to close"
+  },
+  "errorBoundary": {
+    "errorAlt": "Error",
+    "heading": "Oops! Something went wrong",
+    "subtitle": "We couldn't complete your request. Please try again",
+    "errorMessageLabel": "Error Message:",
+    "errorDetailsLabel": "Error Details:",
+    "stackTraceLabel": "Stack Trace:",
+    "componentStackLabel": "Component Stack:",
+    "backToHome": "Back to Home"
+  },
+  "webView": {
+    "noTabsOpen": "No tabs open",
+    "addTabHint": "Add a tab to start browsing",
+    "closeTab": "Close tab"
+  },
+  "profileSidebar": {
+    "profileModal": {
+      "profileTitle": "Profile",
+      "unknownUser": "Unknown User",
+      "close": "Close",
+      "userNotFound": "User not found"
+    },
+    "sidebar": {
+      "goBack": "Go Back"
+    }
+  },
+  "sosAlert": {
+    "switchWorkspaceFailed": "Failed to switch workspace. Please try again.",
+    "view": "View"
+  },
+  "zeroConnectionStatus": {
+    "closeModal": "Close modal",
+    "title": "Connection Lost",
+    "descriptionElectron": "The connection to the server has been lost. Click below to reload the app.",
+    "descriptionWeb": "The connection to the server has been lost. Click below to refresh.",
+    "reloadApp": "Reload App",
+    "refreshConnection": "Refresh Connection",
+    "states": {
+      "connecting": "Connecting…",
+      "disconnected": "Disconnected",
+      "sessionExpired": "Session expired",
+      "connectionError": "Connection error",
+      "connectionClosed": "Connection closed"
+    },
+    "hints": {
+      "clickToReconnect": "click to reconnect",
+      "clickToRetry": "click to retry"
+    },
+    "connectionStatusAriaLabel": "Connection status: {{label}}. {{hint}}",
+    "connectionStatusAriaLabelNoHint": "Connection status: {{label}}"
   }
 }

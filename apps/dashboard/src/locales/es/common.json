@@ -1096,5 +1096,64 @@
     "back": "Atrás",
     "forward": "Adelante",
     "search": "Buscar"
+  },
+  "shortcutsHelpModal": {
+    "heading": "Atajos de teclado",
+    "subtitle": "Acciones rápidas para aumentar tu productividad",
+    "close": "Cerrar",
+    "composerHint": "Estos atajos funcionan cuando el campo de chat está enfocado",
+    "press": "Presiona",
+    "toClose": "para cerrar"
+  },
+  "errorBoundary": {
+    "errorAlt": "Error",
+    "heading": "¡Ups! Algo salió mal",
+    "subtitle": "No pudimos completar tu solicitud. Inténtalo de nuevo",
+    "errorMessageLabel": "Mensaje de error:",
+    "errorDetailsLabel": "Detalles del error:",
+    "stackTraceLabel": "Seguimiento de pila:",
+    "componentStackLabel": "Pila de componentes:",
+    "backToHome": "Volver al inicio"
+  },
+  "webView": {
+    "noTabsOpen": "No hay pestañas abiertas",
+    "addTabHint": "Agrega una pestaña para empezar a navegar",
+    "closeTab": "Cerrar pestaña"
+  },
+  "profileSidebar": {
+    "profileModal": {
+      "profileTitle": "Perfil",
+      "unknownUser": "Usuario desconocido",
+      "close": "Cerrar",
+      "userNotFound": "Usuario no encontrado"
+    },
+    "sidebar": {
+      "goBack": "Volver"
+    }
+  },
+  "sosAlert": {
+    "switchWorkspaceFailed": "No se pudo cambiar de espacio de trabajo. Inténtalo de nuevo.",
+    "view": "Ver"
+  },
+  "zeroConnectionStatus": {
+    "closeModal": "Cerrar modal",
+    "title": "Conexión perdida",
+    "descriptionElectron": "Se perdió la conexión con el servidor. Haz clic abajo para recargar la aplicación.",
+    "descriptionWeb": "Se perdió la conexión con el servidor. Haz clic abajo para actualizar.",
+    "reloadApp": "Recargar aplicación",
+    "refreshConnection": "Actualizar conexión",
+    "states": {
+      "connecting": "Conectando…",
+      "disconnected": "Desconectado",
+      "sessionExpired": "Sesión expirada",
+      "connectionError": "Error de conexión",
+      "connectionClosed": "Conexión cerrada"
+    },
+    "hints": {
+      "clickToReconnect": "haz clic para reconectar",
+      "clickToRetry": "haz clic para reintentar"
+    },
+    "connectionStatusAriaLabel": "Estado de conexión: {{label}}. {{hint}}",
+    "connectionStatusAriaLabelNoHint": "Estado de conexión: {{label}}"
   }
 }

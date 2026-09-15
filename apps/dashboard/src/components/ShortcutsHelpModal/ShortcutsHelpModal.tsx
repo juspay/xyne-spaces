@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dialog } from '../ui/Dialog';
 import { getShortcutsByCategory, formatShortcut } from '../../shortcuts';
 import { X, Keyboard } from 'lucide-react';
@@ -17,6 +18,7 @@ interface ShortcutsHelpModalProps {
 }
 
 export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps): ReactElement => {
+  const { t } = useTranslation('common');
   const { isMac } = usePlatform();
   const shortcuts = getShortcutsByCategory();
 
@@ -49,7 +51,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
     <Dialog
       open={isOpen}
       onOpenChange={onClose}
-      title='Keyboard Shortcuts'
+      title={t('shortcutsHelpModal.heading')}
       className='max-w-2xl w-[90vw]'
     >
       <div className='flex flex-col max-h-[80vh]'>
@@ -61,17 +63,17 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
             </div>
             <div>
               <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
-                Keyboard Shortcuts
+                {t('shortcutsHelpModal.heading')}
               </h2>
               <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
-                Quick actions to boost your productivity
+                {t('shortcutsHelpModal.subtitle')}
               </p>
             </div>
           </div>
           <button
             onClick={() => onClose()}
             className='p-2 text-muted-foreground hover:text-muted-foreground dark:hover:text-muted hover:bg-muted dark:hover:bg-gray-700 rounded-lg transition-colors'
-            aria-label='Close'
+            aria-label={t('shortcutsHelpModal.close')}
             data-track-category='Help'
             data-track-name='CloseShortcutsModal'
           >
@@ -90,7 +92,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
                   </h3>
                   {category === 'Composer' && (
                     <p className='text-xs text-muted-foreground dark:text-muted-foreground mt-1'>
-                      These shortcuts work when chat input is focused
+                      {t('shortcutsHelpModal.composerHint')}
                     </p>
                   )}
                 </div>
@@ -128,11 +130,11 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
         {/* Footer */}
         <div className='px-6 py-3 border-t border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-b-lg'>
           <div className='flex items-center justify-center gap-2 text-xs text-muted-foreground dark:text-muted-foreground'>
-            <span>Press</span>
+            <span>{t('shortcutsHelpModal.press')}</span>
             <kbd className='inline-flex items-center justify-center px-2 py-0.5 font-mono font-medium bg-background dark:bg-gray-700 text-muted-foreground dark:text-muted rounded border border-border dark:border-gray-600 shadow-sm'>
               Esc
             </kbd>
-            <span>to close</span>
+            <span>{t('shortcutsHelpModal.toClose')}</span>
           </div>
         </div>
       </div>
