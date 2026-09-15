@@ -1035,7 +1035,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       studioMode?: "design";
       designArtifactAttachmentId?: string;
       designSelection?: unknown;
-      researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
+      researchContext?: { type?: unknown; id?: unknown; name?: unknown; channelId?: unknown } | null;
       /** Per-message provider fast mode (composer toggle). Rides the agent's
        *  modelSettings.speed for this run only — same credential, same model,
        *  Anthropic's faster tier. Omitted = agent default. */

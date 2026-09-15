@@ -168,8 +168,8 @@ export function SdlcHubDialog({
         <h2 className='text-lg font-semibold tracking-tight'>{title}</h2>
         <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
           {editing
-            ? 'Repositories this hub covers. A hub always keeps at least one.'
-            : 'A private workspace covering one or more repositories. It never appears in Chat.'}
+            ? 'Repositories this hub covers.'
+            : 'A private workspace for a project. Attach repositories now or later; it never appears in Chat.'}
         </p>
 
         <div className='mt-6 space-y-5'>
@@ -235,7 +235,9 @@ export function SdlcHubDialog({
               collapsedLabel='repositories'
             />
             {repoIds.length === 0 && (
-              <p className='mt-2 text-xs text-muted-foreground'>Pick at least one repository.</p>
+              <p className='mt-2 text-xs text-muted-foreground'>
+                Optional — attach one later. Wiki and Repo Knowledge stay hidden until you do.
+              </p>
             )}
           </div>
         </div>
@@ -253,7 +255,7 @@ export function SdlcHubDialog({
           <Button
             type='submit'
             loading={busy}
-            disabled={repoIds.length === 0 || (!editing && (!name.trim() || !activeProjectId))}
+            disabled={!editing && (!name.trim() || !activeProjectId)}
             data-track-category='SdlcHub'
             data-track-name={editing ? 'HubRepositoriesSaved' : 'HubCreated'}
           >
