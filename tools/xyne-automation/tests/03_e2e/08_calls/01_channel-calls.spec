@@ -15,6 +15,8 @@
 * clicking on selector "[data-testid='confirm-call-button']" with text "Okay" if visible
 * waiting up to "60" seconds for "[data-testid='call-window']" to appear
 * verifying "[data-testid='participant-count']" is visible
+* clicking on "[data-testid='end-call-button']"
+* waiting for "[data-testid='call-window']" to disappear
 
 ## User joins ongoing call from channel
 * Using browser
