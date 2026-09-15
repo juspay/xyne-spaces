@@ -80,6 +80,10 @@ export interface AclGate {
    * per-row `createdBy==me`) makes admission PER-ROW ⇒ NOT shareable ⇒ served by native Zero.
    * `partitionDetermines` is the audited escape hatch: columns functionally determined by the
    * partition through a DB-enforced FK (NO silent data invariants). See checkGateCollapsible.
+   * NOTE (dead plumbing today — neither the CI guard nor the runtime refuse passes it): when first
+   * plumbed it must reach BOTH call sites AND the determined columns must be re-added to
+   * `client.scope` in clientGateway — else `evaluate` reads the top-level simple's column from a
+   * scope missing it → undefined → silent deny-all. (review-6aa1638218 scope-column rider.)
    */
   collapsibility(partitionColumn: string, partitionDetermines?: readonly string[]): CollapseResult;
   /**
@@ -156,12 +160,22 @@ export function validateGateAst(cond: Cond): void {
         throw new Error(`ACL gate: unsupported operator '${cond.op}'`);
       }
       return;
-    case 'correlatedSubquery':
+    case 'correlatedSubquery': {
       if (cond.op !== 'EXISTS' && cond.op !== 'NOT EXISTS') {
         throw new Error(`ACL gate: unsupported subquery op '${cond.op}'`);
       }
+      // Both the collapsibility partition-anchor check AND evalCond's join read only
+      // parentField[0]/childField[0]. A COMPOUND correlation would (a) pass collapsibility on [0]
+      // while varying per row at [1], and (b) have evalCond drop the remaining join conjuncts →
+      // match MORE child rows → EXISTS over-fires → OVER-ADMISSION (leak-shaped). Refuse the shape
+      // here (→ ungateable-refuse path) so the single-field read in both places stays sound.
+      const { parentField, childField } = cond.related.correlation;
+      if (parentField.length !== 1 || childField.length !== 1) {
+        throw new Error('ACL gate: unsupported compound correlation');
+      }
       if (cond.related.subquery.where) validateGateAst(cond.related.subquery.where);
       return;
+    }
     default:
       throw new Error(`ACL gate: unsupported condition '${(cond as { type: string }).type}'`);
   }
@@ -200,9 +214,11 @@ function checkGateCollapsible(
         }
         return;
       case 'correlatedSubquery': {
-        const key = c.related.correlation.parentField[0];
-        if (!anchored.has(key)) {
-          reason = `top-level exists('${c.related.subquery.table}') is correlated on per-row column '${key}', not the partition '${partitionColumn}'`;
+        // validateGateAst already refused compound correlations, so parentField is single-field
+        // here; check EVERY field anyway (belt-and-braces) so a per-row join key can never anchor.
+        const unanchored = c.related.correlation.parentField.find((k) => !anchored.has(k));
+        if (unanchored !== undefined) {
+          reason = `top-level exists('${c.related.subquery.table}') is correlated on per-row column '${unanchored}', not the partition '${partitionColumn}'`;
         }
         return; // do NOT descend — inside the subquery is the grant/scope side
       }

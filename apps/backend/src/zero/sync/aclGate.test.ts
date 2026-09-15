@@ -152,6 +152,18 @@ test('validateGateAst: unsupported op nested in a subquery where is rejected', (
   assert.throws(() => validateGateAst(ast), /unsupported operator '>'/);
 });
 
+test('validateGateAst: COMPOUND correlation is refused (would over-admit — collapsibility+evalCond read field[0] only)', () => {
+  const ast = {
+    type: 'correlatedSubquery',
+    op: 'EXISTS',
+    related: {
+      correlation: { parentField: ['channelId', 'perRowCol'], childField: ['id', 'other'] },
+      subquery: { table: 'channels' },
+    },
+  } as unknown as Cond;
+  assert.throws(() => validateGateAst(ast), /unsupported compound correlation/);
+});
+
 test('real allowlisted ACLs derive without over-rejecting', () => {
   assert.doesNotThrow(() => deriveAclGate('conversations'));
   assert.doesNotThrow(() => deriveAclGate('message_attachments'));

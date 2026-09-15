@@ -61,7 +61,7 @@ const cache = new Map<string, QueryMeta>();
 function metaCacheKey(queryName: string, sampleArgs: unknown): string {
   if (!isGrantQuery(queryName)) return queryName;
   const entry = (Array.isArray(sampleArgs) ? sampleArgs[0] : sampleArgs) as Record<string, unknown> | undefined;
-  const scopeCol = entry ? Object.keys(entry)[0] : undefined; // scope column is key[0] (grant + struct)
+  const scopeCol = entry ? Object.keys(entry)[0] : undefined; // grant scope column is key[0]
   return scopeCol ? `${queryName}:${scopeCol}` : queryName;
 }
 
