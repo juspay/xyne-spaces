@@ -2377,6 +2377,9 @@ model Message {
   @@index([msgType, createdAt])
 
   @@index([conversationId, createdAt, messageId])
+  // Zero's related-messages source fill runs `WHERE conversationId = ? ORDER BY
+  // messageId` — without this, every thread fetch pays a temp B-tree sort.
+  @@index([conversationId, messageId])
   @@map("messages")
   @@schema("public")
 }
