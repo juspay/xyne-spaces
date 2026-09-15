@@ -140,8 +140,8 @@ import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
-import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
@@ -183,7 +183,6 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
-import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -202,7 +201,7 @@ import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
-import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { encryptedFieldsConfig } from '@xyne/shared';
@@ -610,11 +609,6 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
-    this.app.post(
-      '/api/internal/sdlc/claw-callback/:executionId/:step',
-      validateS2SKey,
-      handleSdlcClawCallback,
-    );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
     // resolves the gate from it.
@@ -624,6 +618,7 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
@@ -636,6 +631,7 @@ export class App {
       );
       res.json({ encryptedFields });
     });
+
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -958,9 +954,6 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    logger.info('Initializing SDLC queue (producer)...');
-    await sdlcQueue.initialize();
-
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -1184,9 +1177,6 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
-
-      // Close SDLC producer queue
-      await sdlcQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
