@@ -180,7 +180,7 @@ export function estimateMessageHeight(
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   // Ephemeral cards render the same header (see MessageBubble), so the
   // virtualizer has to allocate the same extra height or the row is mis-sized.
-  const isEphemeralNotice = metadata?.['ephemeral'] === true;
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
   if (isPrivateSystemNotice || isEphemeralNotice) height += PRIVATE_NOTICE_HEADER;
 
