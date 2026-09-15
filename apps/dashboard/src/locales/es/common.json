@@ -248,6 +248,9 @@
       "cancelButton": "Cancelar",
       "recentsLabel": "Recientes",
       "newChatTooltip": "Nuevo chat"
+    },
+    "aiShell": {
+      "aiSidebarAriaLabel": "Barra lateral de IA"
     }
   },
   "citationDocsPanel": {
