@@ -12,7 +12,7 @@ import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/conne
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
+import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
@@ -46,7 +46,6 @@ import {
   injectDefaults as injectAttachedContextDefaults,
 } from "../mcp/attached-context-injector.js";
 import { loadRunScalars } from "../mcp/run-scalars.js";
-import { injectSdlcBaselineRunContext } from "../mcp/sdlc-baseline-run-context.js";
 import { KB_TOOLS, KB_TOOL_NAMES, type KbToolName } from "../mcp/kb-tools.js";
 import {
   handleKbListResources,
@@ -1772,17 +1771,6 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // attached, this is a no-op fast path.
     const attachedItems = await loadAttachedContextForSession(req.params.sessionId);
     let effectiveParams = injectAttachedContextDefaults(serverType, tool, params ?? {}, attachedItems);
-
-    // Baseline identity is trusted run state, not model memory. Compaction can
-    // remove the original task, so force-inject persisted values on every call.
-    if (
-      serverType === "xyne-spaces" &&
-      tool === SDLC_TOOL_NAMES.mutateArtifact &&
-      effectiveParams["artifactType"] === "BASELINE"
-    ) {
-      const run = await agentRunRepository.findBySessionId(req.params.sessionId).catch(() => null);
-      effectiveParams = injectSdlcBaselineRunContext(effectiveParams, run?.metadata);
-    }
 
     // xyne-dashboard: force-set the run's dashboard scalars (stored in /run,
     // see mcp/run-scalars.ts). Authoritative — overwrites anything the model

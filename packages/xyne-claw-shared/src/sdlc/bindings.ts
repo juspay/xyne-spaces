@@ -31,13 +31,11 @@ export function trustedSdlcToolBindings(
   }
 
   const execution = record(context["execution"]);
-  const executionId = execution?.["workflowExecutionId"];
-  const sessionId = execution?.["sessionId"];
-  const hasExecution = typeof executionId === "string" && typeof sessionId === "string";
   const workspaceId = context["workspaceId"];
   const actorUserId = context["actorUserId"];
   const interactiveGrant = context["interactiveGrant"];
   const conversationId = execution?.["conversationId"];
+  const generationCommit = context["generationCommit"];
   const hasRepositoryIdentity =
     typeof workspaceId === "string" && typeof actorUserId === "string";
   const bindings: TrustedMcpToolBindings = {};
@@ -45,21 +43,6 @@ export function trustedSdlcToolBindings(
 
   for (const capability of SDLC_TOOL_CAPABILITIES) {
     if (capability.transport !== "direct" || capability.trustedBinding === "none") continue;
-    if (
-      context["operation"] === "wiki" &&
-      hasExecution &&
-      (capability.name === SDLC_TOOL_NAMES.listArtifacts ||
-        capability.name === SDLC_TOOL_NAMES.mutateArtifact)
-    ) {
-      bindings[capability.name] = {
-        executionId,
-        sessionId,
-        ...repoBinding,
-        ...channelBinding,
-        ...(hasRepositoryIdentity ? { workspaceId, actorUserId } : {}),
-      };
-      continue;
-    }
     if (capability.trustedBinding === "hub" && hasRepositoryIdentity) {
       bindings[capability.name] = { workspaceId, actorUserId, ...channelBinding };
       continue;
@@ -70,23 +53,16 @@ export function trustedSdlcToolBindings(
         workspaceId,
         actorUserId,
         ...channelBinding,
+        ...(capability.name === SDLC_TOOL_NAMES.mutateArtifact && typeof generationCommit === "string" && generationCommit
+          ? { generationCommit }
+          : {}),
       };
       continue;
     }
     // Single-repository tools, createPullRequest included: a hub run gets none.
-    if (!repoId) continue;
     if (
-      hasExecution &&
-      (capability.trustedBinding === "execution" ||
-        capability.trustedBinding === "execution_or_interactive" ||
-        (capability.trustedBinding === "wiki_execution" && context["operation"] === "wiki"))
-    ) {
-      bindings[capability.name] = { executionId, sessionId, repoId };
-      continue;
-    }
-    if (
-      capability.trustedBinding === "execution_or_interactive" &&
-      context["operation"] === "interactive" &&
+      repoId &&
+      capability.trustedBinding === "interactive" &&
       typeof interactiveGrant === "string" &&
       typeof conversationId === "string"
     ) {

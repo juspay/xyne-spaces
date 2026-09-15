@@ -885,7 +885,7 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
 - **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
-- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
