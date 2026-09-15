@@ -1,3 +1,10 @@
+## [1.322.0](https://github.com/juspay/xyne-spaces/compare/v1.321.0...v1.322.0) (2026-09-15)
+
+
+### Features
+
+* add canvas title icon picker ([#1844](https://github.com/juspay/xyne-spaces/issues/1844)) ([cae0164](https://github.com/juspay/xyne-spaces/commit/cae0164a892ec9e8a7cc5689178d1b9de816c243))
+
 ## [1.321.0](https://github.com/juspay/xyne-spaces/compare/v1.320.0...v1.321.0) (2026-09-15)
 
 
