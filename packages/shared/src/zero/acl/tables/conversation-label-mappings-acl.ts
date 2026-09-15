@@ -23,8 +23,10 @@ export class ConversationLabelMappingsACL extends BaseQueryACL<'conversation_lab
       return own.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
+    // Pin the join direction — see tickets-acl.ts for the full rationale.
     return own.whereExists('channel', (ch) =>
       ch.where(channelAccessWhere(this.ctx)),
+      { flip: false },
     );
   }
 }
