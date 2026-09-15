@@ -1,1 +1,23 @@
-{}
+{
+  "clawMetricsScreen": {
+    "workspaceMetricsHeading": "Workspace metrics",
+    "agentHeading": "Agent · {{agent}}",
+    "workspaceDescription": "Latency, throughput, errors, and provider performance across your accessible runs.",
+    "agentDescription": "Latency, throughput, sentiment, and tool performance for {{agent}}.",
+    "showAllOrgsAriaLabel": "Show metrics across all organizations",
+    "allOrganizationsLabel": "All organizations",
+    "viewLabel": "View",
+    "allWorkspaceOption": "All workspace",
+    "failedToLoadMetrics": "Failed to load metrics: {{message}}",
+    "llmLatencyTitle": "LLM latency by provider and model",
+    "llmLatencyDescription": "Compare model pairs by median latency, slow tail, time to first token, throughput, and errors.",
+    "agentsLeaderboardTitle": "Agents leaderboard",
+    "agentsLeaderboardDescription": "Agents ranked by run count. Select a row to drill into its metrics.",
+    "userSentimentTitle": "User sentiment and feedback",
+    "userSentimentDescription": "Explicit ratings and behavioral signals for the selected window.",
+    "toolLatencyTitle": "Tool latency",
+    "toolLatencyDescription": "Tools ranked by cumulative time to identify the largest bottlenecks.",
+    "slowestSessionsTitle": "Slowest sessions",
+    "slowestSessionsDescription": "Slow runs ranked by total wall-clock time. Expand a row for its tool breakdown."
+  }
+}

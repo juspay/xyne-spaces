@@ -1,1 +1,23 @@
-{}
+{
+  "clawMetricsScreen": {
+    "workspaceMetricsHeading": "Métricas del espacio de trabajo",
+    "agentHeading": "Agente · {{agent}}",
+    "workspaceDescription": "Latencia, rendimiento, errores y desempeño del proveedor en todas tus ejecuciones accesibles.",
+    "agentDescription": "Latencia, rendimiento, sentimiento y desempeño de herramientas para {{agent}}.",
+    "showAllOrgsAriaLabel": "Mostrar métricas de todas las organizaciones",
+    "allOrganizationsLabel": "Todas las organizaciones",
+    "viewLabel": "Vista",
+    "allWorkspaceOption": "Todo el espacio de trabajo",
+    "failedToLoadMetrics": "Error al cargar las métricas: {{message}}",
+    "llmLatencyTitle": "Latencia de LLM por proveedor y modelo",
+    "llmLatencyDescription": "Compara pares de modelos por latencia media, cola lenta, tiempo al primer token, rendimiento y errores.",
+    "agentsLeaderboardTitle": "Clasificación de agentes",
+    "agentsLeaderboardDescription": "Agentes clasificados por número de ejecuciones. Selecciona una fila para ver sus métricas en detalle.",
+    "userSentimentTitle": "Sentimiento y comentarios del usuario",
+    "userSentimentDescription": "Calificaciones explícitas y señales de comportamiento para el período seleccionado.",
+    "toolLatencyTitle": "Latencia de herramientas",
+    "toolLatencyDescription": "Herramientas clasificadas por tiempo acumulado para identificar los mayores cuellos de botella.",
+    "slowestSessionsTitle": "Sesiones más lentas",
+    "slowestSessionsDescription": "Ejecuciones lentas clasificadas por tiempo total transcurrido. Expande una fila para ver su desglose por herramienta."
+  }
+}
