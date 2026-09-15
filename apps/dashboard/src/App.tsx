@@ -21,6 +21,8 @@ import { ShortcutsProvider } from './shortcuts';
 import { TooltipProvider } from './components/ui/Tooltip';
 import Wallpaper from './components/Wallpaper/Wallpaper';
 import { initializeTelemetry } from './services/otel/init';
+import { startDiagnostics } from './services/diagnostics';
+import { DiagnosticsHost } from './components/Diagnostics/DiagnosticsHost';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
 import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
@@ -44,6 +46,9 @@ const App = (): ReactElement => {
 
   useEffect(() => {
     initializeTelemetry();
+    // Collection runs from app start, not from panel open, so a user who hits
+    // jank and only then opens diagnostics still sees what happened.
+    return startDiagnostics();
   }, []);
 
   useEffect(() => {
@@ -157,6 +162,7 @@ const App = (): ReactElement => {
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />
+                    <DiagnosticsHost />
                     <RecordingInterruptGuard />
                     <WorkspaceSwitchToastListener />
                     <Toaster

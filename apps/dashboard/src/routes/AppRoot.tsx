@@ -149,6 +149,10 @@ import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
 import { logger } from '../utils/logger';
+import { DockedDiagnosticsPanel } from '../components/Diagnostics/DockedDiagnosticsPanel';
+import { useDiagnosticsPanelStore } from '../store/useDiagnosticsPanelStore';
+import { noteNavigation } from '../services/diagnostics';
+import { recordZeroLogForDiagnostics } from '../services/diagnostics/zeroInstrumentation';
 import {
   zeroQueryLatency,
   zeroQueryOperations,
@@ -159,8 +163,28 @@ import {
   safeRecordMetric,
 } from '../services/otel';
 
+/**
+ * The real logger, with Zero query/mutation completions mirrored into the
+ * diagnostics store on the way through. The log stream is used rather than the
+ * metrics recorder below because the recorder's calls are suppressed whenever
+ * `wasInterrupted()` reports skew — see `zeroInstrumentation.ts`.
+ */
+const diagnosticsLogger: Instrumentation['logger'] = {
+  ...logger,
+  debug: (event, extra) => logger.debug(event, extra),
+  info: (event, extra) => {
+    recordZeroLogForDiagnostics(event, extra);
+    logger.info(event, extra);
+  },
+  warn: (event, extra) => logger.warn(event, extra),
+  error: (event, extra) => {
+    recordZeroLogForDiagnostics(event, extra);
+    logger.error(event, extra);
+  },
+};
+
 const dashboardInstrumentation: Instrumentation = {
-  logger,
+  logger: diagnosticsLogger,
   metrics: {
     recordLatency: (name: string, durationMs: number, attributes?: Record<string, string>) => {
       safeRecordMetric(() => {
@@ -367,6 +391,7 @@ const AppRoot = (): ReactElement => {
 
   // Panel ref for the Calendar sidebar (Week/Month force-max its own slot width)
   const xyneCalendarPanelRef = useRef<PanelImperativeHandle>(null);
+  const diagnosticsPanelRef = useRef<PanelImperativeHandle>(null);
 
   const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
   const browserPanelRightRef = useRef<PanelImperativeHandle>(null);
@@ -527,6 +552,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
+  const isDiagnosticsPanelOpen = useDiagnosticsPanelStore(state => state.open);
+  const closeDiagnosticsPanel = useDiagnosticsPanelStore(state => state.hide);
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
   useSdlcFrameBridge();
@@ -602,18 +629,56 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
+  // Whichever the user opened last gets the slot. Diagnostics sits at the top of
+  // the chain, so opening it hides the others without touching their state (they
+  // come back when it closes); opening Ask AI has to close diagnostics
+  // explicitly, otherwise the chain would keep hiding it.
+  // The embedded webview / SDLC lane deliberately renders no right panels, so
+  // the docked panel has nowhere to go there; DiagnosticsHost falls back to a
+  // full-screen overlay under the same condition, which keeps the shortcut from
+  // ever being a silent no-op.
+  const showDiagnosticsPanel = isDiagnosticsPanelOpen && !isMobile && !isInPanelWebview;
+
+  // Opens a measurement window for how long the incoming screen blocks the
+  // main thread. Purely an observer — it starts a timer, it does not gate paint.
+  useEffect(() => {
+    noteNavigation(location.pathname);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (isXyneAIDrawerOpen && isDiagnosticsPanelOpen) closeDiagnosticsPanel();
+    // Deliberately keyed on the Ask AI flag alone: reacting to the diagnostics
+    // flag as well would close diagnostics the instant it opened over Ask AI.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isXyneAIDrawerOpen]);
+
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isSdlcRoute;
+    isXyneAIDrawerOpen &&
+    !isMobile &&
+    !isOnAIChatExperiencePage &&
+    !isSdlcRoute &&
+    !showDiagnosticsPanel;
 
-  const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
+  const showCalendarPanel =
+    isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel && !showDiagnosticsPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
   // branch), so this is what decides whether that in-frame panel is showing.
   const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
-  const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
+  const showBrowserPanel =
+    browserPanelState === 'open' &&
+    !location.pathname.endsWith('/browser') &&
+    !showDiagnosticsPanel;
 
   const renderPanels: SidebarPanelDescriptor[] = [
+    {
+      id: 'diagnostics',
+      isActive: showDiagnosticsPanel,
+      size: { default: 35, min: 25, max: 60 },
+      panelRef: diagnosticsPanelRef,
+      content: <DockedDiagnosticsPanel onClose={closeDiagnosticsPanel} />,
+    },
     {
       id: 'xyneai',
       isActive: showXyneAIPanel,

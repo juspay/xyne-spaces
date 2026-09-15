@@ -27,6 +27,7 @@ import {
   AlertCircle,
   TicketToken,
   UserPlus,
+  BubbleChart,
 } from '@xyne/icons';
 import { WorkspaceType } from '@xyne/shared';
 
@@ -65,6 +66,7 @@ import { toast } from 'sonner';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
 import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
+import { useDiagnosticsPanelStore } from '../../store/useDiagnosticsPanelStore';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import WorkspaceInviteDialog from './WorkspaceInviteDialog';
@@ -236,6 +238,7 @@ const AppSidebar = (): ReactElement => {
   const [openQuickMenu, setOpenQuickMenu] = useState<string | null>(null);
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const showDiagnosticsPanel = useDiagnosticsPanelStore(state => state.show);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -652,6 +655,10 @@ const AppSidebar = (): ReactElement => {
                 setIsSupportOpen(false);
                 void navigate(prefixWs('/chat/my-tickets'));
               }}
+              onOpenDiagnostics={() => {
+                setIsSupportOpen(false);
+                showDiagnosticsPanel();
+              }}
             />
           </Popover>
 
@@ -841,9 +848,11 @@ const SidebarMoreMenu = ({
 const SidebarSupportMenu = ({
   onReportIssue,
   onViewMyTickets,
+  onOpenDiagnostics,
 }: {
   onReportIssue: () => void;
   onViewMyTickets: () => void;
+  onOpenDiagnostics: () => void;
 }): ReactElement => {
   return (
     <div className='flex flex-col'>
@@ -877,6 +886,21 @@ const SidebarSupportMenu = ({
               <TicketToken size={16} />
             </span>
             <span className='flex-1 truncate text-left'>View my tickets</span>
+          </button>
+        </li>
+        <li>
+          <button
+            type='button'
+            onClick={onOpenDiagnostics}
+            data-testid='support-performance-diagnostics'
+            data-track-category='App_Sidebar'
+            data-track-name='Sidebar_Support_Diagnostics'
+            className='flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-popover-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+          >
+            <span className='flex size-5 shrink-0 items-center justify-center'>
+              <BubbleChart size={16} />
+            </span>
+            <span className='flex-1 truncate text-left'>Check performance</span>
           </button>
         </li>
       </ul>

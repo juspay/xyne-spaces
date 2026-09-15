@@ -150,6 +150,15 @@ export const shortcuts = {
     allowInInputs: true,
     preventDefault: true,
   },
+  'global.openDiagnostics': {
+    keys: 'mod+shift+p',
+    scope: 'global',
+    description: 'Open performance diagnostics',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    preventDefault: true,
+  },
   'global.setStatus': {
     keys: 'mod+shift+y',
     scope: 'global',
