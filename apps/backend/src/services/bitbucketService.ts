@@ -37,6 +37,38 @@ export class BitbucketService {
     return `${webBase}/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}#${filePath}`;
   }
 
+  /**
+   * Every file path in the repo (recursive) at the given ref, or the default
+   * branch when omitted. Paginates Bitbucket Server's files endpoint and caps
+   * the total so a huge monorepo can't unbounded-grow the AI-suggestion input.
+   */
+  async listFilePaths(ref?: string): Promise<string[]> {
+    const { projectKey, repositorySlug } = this.config;
+    if (!projectKey || !repositorySlug) {
+      throw new Error('projectKey and repositorySlug are required to list files');
+    }
+    const paths: string[] = [];
+    const PAGE = 1000;
+    const MAX = 10000;
+    let start = 0;
+    for (;;) {
+      const params = new URLSearchParams({ limit: String(PAGE), start: String(start) });
+      if (ref) params.set('at', ref);
+      const page = await this.makeRequest<{
+        values?: string[];
+        isLastPage?: boolean;
+        nextPageStart?: number | null;
+      }>(`/projects/${projectKey}/repos/${repositorySlug}/files?${params.toString()}`);
+      const before = paths.length;
+      for (const p of page.values ?? []) paths.push(p);
+      if (page.isLastPage || page.nextPageStart == null || paths.length >= MAX || paths.length === before) {
+        break;
+      }
+      start = page.nextPageStart;
+    }
+    return paths;
+  }
+
   private getRetryDelay(attempt: number): number {
     // Exponential backoff: baseDelay * 2^attempt, capped at maxDelay
     const exponentialDelay = this.BASE_DELAY_MS * Math.pow(2, attempt);

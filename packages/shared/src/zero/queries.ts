@@ -4430,6 +4430,18 @@ export const queries = defineQueries({
     },
   ),
 
+  // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
+  // belongs to (one row per release × per-app SubTicket; callers dedupe by
+  // releaseId). Keep in sync with the backend copy.
+  applicationReleaseTicketsByDevTicketId: defineQuery(
+    z.object({ ticketId: z.string().min(1) }),
+    ({ args: { ticketId } }) => {
+      return zql.application_release_tickets
+        .where('ticketId', ticketId)
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   // Audit log of everything that happened on a release ticket — commit analysis
   // runs, SubTicket provisioning, env/migration captures, ART-write failures,
   // canvas publishes. Powers the Timeline tab on the Release Detail screen.
