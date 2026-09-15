@@ -38,6 +38,13 @@ router.post(
 	controller.chatUpdate,
 );
 
+router.post(
+	"/chat.delete",
+	requirePermission("chat:delete"),
+	slackChannelValidation("body"),
+	controller.chatDelete,
+);
+
 router.get(
 	"/conversations.history",
 	requirePermission("channels:read"),

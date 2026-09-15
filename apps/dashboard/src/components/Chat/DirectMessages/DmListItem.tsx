@@ -20,10 +20,11 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { sanitizeHtmlString } from '../../../utils/sanitizer';
+import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface DmListItemProps {
   channel: Channel;
@@ -83,8 +84,15 @@ export const DmListItem = ({
       }
     }
 
-    const rawContent =
-      lastMessage.content || (lastMessage.hasAttachment ? 'Sent an attachment' : 'Message');
+    // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
+    // which is truthy but renders blank. Fall back to a label whenever the message
+    // has no visible text, so an attachment preview is not shown as an empty line.
+    const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    const rawContent = hasVisibleText
+      ? lastMessage.content
+      : lastMessage.hasAttachment
+        ? 'Sent an attachment'
+        : lastMessage.content || 'Message';
 
     return sanitizeHtmlString(rawContent);
   }, [lastMessage]);
@@ -156,8 +164,12 @@ export const DmListItem = ({
   };
 
   const handleClick = (): void => {
-    // Navigate to /chat/dm/:channelId for both mobile and desktop
-    void navigate(`/chat/dm/${channel.id}?fromDM=true`);
+    // Navigate to /chat/dm/:channelId for both mobile and desktop. `trackSource`
+    // rides the navigation so CHANNEL_VIEWED can say where the open came from —
+    // the arrival fires for deep links and history too, which no click can cover.
+    void navigate(`/chat/dm/${channel.id}?fromDM=true`, {
+      state: { trackSource: 'sidebar_dm' },
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -177,7 +189,11 @@ export const DmListItem = ({
         aria-label={`Open conversation with ${displayName}`}
         data-track-category='DM_LIST'
         data-track-name='OpenDMConversation'
-        data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
+        data-track-label='Open DM conversation'
+        data-track-metadata={JSON.stringify({
+          ...channelTrackingMetadata(channel),
+          source: 'sidebar_dm',
+        })}
       >
         <DMItemAvatar
           userId={avatarUserId || null}
@@ -281,7 +297,12 @@ export const DmListItem = ({
       aria-label={`Open conversation with ${displayName}`}
       data-track-category='DM'
       data-track-name='OPEN_DM_CONVERSATION'
-      data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
+      data-track-label='Open DM conversation'
+      data-track-metadata={JSON.stringify({
+        ...channelTrackingMetadata(channel),
+        source: 'sidebar_dm',
+        isUnread,
+      })}
     >
       <div className='relative flex-shrink-0'>
         {isGroupDMChannel(channel.scopeType) ? (

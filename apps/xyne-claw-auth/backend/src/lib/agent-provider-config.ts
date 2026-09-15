@@ -57,7 +57,7 @@ export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openroute
  *
  * An explicit `subagentProviders[name]` override ALWAYS wins over this default.
  * Stored on the agent's JSONB config as `subagentProviderMode`, alongside the
- * existing `provider` / `providerOrder` / `providerAlwaysOn` settings. Undefined ⇒
+ * existing `provider` / `providerOrder` settings. Undefined ⇒
  * "spaces".
  */
 export type SubagentProviderMode = "parent" | "spaces" | "fast-model";
@@ -269,22 +269,18 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
 /**
  * Resolve the provider credentials + fallback order for a HEADLESS run (event
  * trigger, scheduled job, automation) that executes under the agent's app
- * identity — no human session, no personal creds, no `/upgrade` escalation.
+ * identity — no human session and no personal creds.
  *
  * This is the agent-scoped subset of the human-chat resolver in webhook.ts
  * (~1465–1648): agent-level credentials only, agent's configured provider order,
- * and the same `providerAlwaysOn` policy switch. Without it, headless runs
+ * ranking. Without it, headless runs
  * silently drop to the platform default (spaces/LiteLLM) instead of the agent's
  * configured premium provider.
  *
  * Policy:
- *  - `providerAlwaysOn !== false` (default / legacy): the agent's provider wins
- *    — providerOrder → legacy `config.provider` → any provider with creds.
- *  - `providerAlwaysOn === false` (kimi-first): the agent's provider is
- *    escalation-only, and headless runs have no escalation path, so we return
- *    NO order ⇒ the run uses the platform default (the owner's deliberate
- *    cheap-by-default choice). Creds are still returned so a future escalation
- *    path could use them.
+ *    used as a default, so we return NO order ⇒ the run uses the platform
+ *    default (the owner's deliberate cheap-by-default choice). Creds are still
+ *    returned for callers that gate on their own order.
  */
 export async function resolveAgentProviderConfigs(
   agent: { id: string; config?: unknown },
@@ -317,7 +313,7 @@ export async function resolveAgentProviderConfigs(
     if (KNOWN_PROVIDERS.has(automationProvider)) {
       const bulkAgent = {
         id: agent.id,
-        config: { ...(cfg ?? {}), provider: automationProvider, providerOrder: [automationProvider], providerAlwaysOn: true },
+        config: { ...(cfg ?? {}), provider: automationProvider, providerOrder: [automationProvider] },
       };
       log.info(`Provider resolution (headless-bulk): agent=${agent.id} automationProvider=${automationProvider} → forced parent`);
       return resolveAgentProviderConfigs(bulkAgent, { speed });
@@ -374,14 +370,6 @@ export async function resolveAgentProviderConfigs(
     }
   }
 
-  // kimi-first agents: no escalation path headless ⇒ defer to the platform default.
-  const providerAlwaysOn = cfg?.["providerAlwaysOn"] !== false;
-  if (!providerAlwaysOn) {
-    log.info(`Provider resolution (headless): agent=${agent.id} mode=kimi-first → platform default; creds=[${Object.keys(providerConfigs).join(",")}]`);
-    return { providerConfigs, providerOrder: [] };
-  }
-
-  // always-on: the agent's provider wins. Resolve the parent, then the order.
   // STRICT RANKING — the order is the source of truth, top first. "spaces" is
   // the keyless platform provider and can ALWAYS serve, so an explicit spaces
   // entry wins over lower-ranked saved credentials; a credential only routes

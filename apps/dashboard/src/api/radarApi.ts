@@ -19,6 +19,9 @@ export interface RadarFeedItem {
 }
 
 export interface RadarThreadCard {
+  /** A thread, or a whole DM. Bulk actions address the card through this. */
+  scopeKey: string;
+  /** Representative conversation only — open an item by its own conversationId. */
   conversationId: string;
   channelId: string;
   threadPreview: string | null;
@@ -65,6 +68,15 @@ export function fetchRadarPendingMe(): Promise<RadarThreadCard[]> {
 export function fetchRadarWaitingOn(): Promise<RadarThreadCard[]> {
   return unwrap(
     apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/waiting-on'),
+  ).then(d => d.threads);
+}
+
+/** Open items held by anyone but the viewer, whoever asked — the "All" half of
+ *  the Others filter. Waiting On is the same feed narrowed to the viewer's own
+ *  asks, so the two are never fetched together. */
+export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-others'),
   ).then(d => d.threads);
 }
 
@@ -133,10 +145,10 @@ export function resolveRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function resolveAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function resolveAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/resolve-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/resolve-all`,
     ),
   );
 }
@@ -150,10 +162,10 @@ export function dismissRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function dismissAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function dismissAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/dismiss-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/dismiss-all`,
     ),
   );
 }

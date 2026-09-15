@@ -216,6 +216,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       board,       // Board name/ID
       tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
       threadType,  // Thread classification type(s) - comma-separated; matches thread roots
+      entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
       messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
@@ -228,6 +229,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callEndsAt,      // Call visible range end timestamp
       stage,       // Ticket stage
       assignee,    // Assigned user name
+      userGroup,   // User group ID(s) - comma-separated
       filterOnly,  // Flag for filter-only search (no query text)
       collectionId, // KB collection id(s) - comma-separated; restricts file results to those clIds
       fileId,      // KB file id(s) - comma-separated; restricts file results to those Vespa docIds (collectionItem.fileId)
@@ -616,6 +618,30 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Ticket tags search — uses Vespa grouping to get distinct tag values.
+    // Short-circuits the normal search pipeline and returns just tag strings.
+    if (String(type).trim() === 'ticket_tags') {
+      const projectIds = projectId ? toFilterValues(projectId, 'projectId') : undefined;
+      const boardIds = board ? toFilterValues(board, 'board') : undefined;
+      const { tags: tagResults, total } = await vespaService.searchService.searchTicketTags(
+        workspaceId,
+        {
+          projectId: projectIds?.[0],
+          boardIds,
+          query: q ? String(q) : undefined,
+          limit: limit ? Number(limit) : 100,
+        },
+      );
+      res.json({
+        success: true,
+        data: {
+          tags: tagResults,
+          total,
+        },
+      });
+      return;
+    }
+
     const isFilterOnlyDynamicFieldSearch =
       filterOnly === 'true' &&
       (dynamicFieldValues !== undefined || dynamicFieldDateRanges !== undefined);
@@ -840,6 +866,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.messageActs = tagValues;
     }
 
+    // Entity filter — same values for both schemas; AND-ed inside YqlBuilder so a doc must
+    // mention every requested entity.
+    if (entity) {
+      const entityNames = toFilterValues(entity, 'entity');
+      options.slack.entityNames = entityNames;
+      options.ticket.entityNames = entityNames;
+    }
+
     if (dynamicFieldValues) {
       options.ticket.dynamicFieldValues = toFilterValues(dynamicFieldValues, 'dynamicFieldValues');
     }
@@ -883,6 +917,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (assignee) {
       options.ticket.assignedTo = toFilterValues(assignee, 'assignee');
+    }
+
+    if (userGroup) {
+      options.ticket.userGroupId = toFilterValues(userGroup, 'userGroup');
     }
 
     if (subApp) {

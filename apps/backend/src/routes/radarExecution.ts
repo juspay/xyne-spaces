@@ -5,11 +5,16 @@ import { radarFeedService } from '@/services/radar/radarFeedService';
 
 const router = Router();
 
-function getAuthContext(req: Request): { userId: string; workspaceId: string } | null {
+function getAuthContext(
+  req: Request
+): { userId: string; workspaceId: string; role: string } | null {
   const userId = req.user?.id;
   const workspaceId = req.user?.workspaceId;
-  if (!userId || !workspaceId) return null;
-  return { userId, workspaceId };
+  const role = req.user?.role;
+  // Guests are limited to explicit grants, so a request with no role resolved
+  // is refused rather than evaluated under the member rule.
+  if (!userId || !workspaceId || !role) return null;
+  return { userId, workspaceId, role };
 }
 
 function sendUnauthorized(res: Response): void {
@@ -59,16 +64,18 @@ router.post('/items/:itemId/dismiss', async (req: Request<{ itemId: string }>, r
   }
 });
 
+// The param is a SCOPE key, not always a conversation id: a DM card covers its
+// whole channel, so "all" has to mean everything that card shows.
 router.post(
-  '/threads/:conversationId/dismiss-all',
-  async (req: Request<{ conversationId: string }>, res: Response) => {
+  '/threads/:scopeKey/dismiss-all',
+  async (req: Request<{ scopeKey: string }>, res: Response) => {
     try {
       const auth = getAuthContext(req);
       if (!auth) {
         sendUnauthorized(res);
         return;
       }
-      const result = await radarManualActions.dismissAllInThread(auth, req.params.conversationId);
+      const result = await radarManualActions.dismissAllInScope(auth, req.params.scopeKey);
       res.json({ success: true, data: result });
     } catch (err) {
       if (err instanceof RadarActionError) {
@@ -78,19 +85,21 @@ router.post(
       logger.error('[radar-execution] dismiss-all failed:', err);
       res.status(500).json({ success: false, error: 'Failed to dismiss thread items' });
     }
-  },
+  }
 );
 
+// The param is a SCOPE key, not always a conversation id: a DM card covers its
+// whole channel, so "all" has to mean everything that card shows.
 router.post(
-  '/threads/:conversationId/resolve-all',
-  async (req: Request<{ conversationId: string }>, res: Response) => {
+  '/threads/:scopeKey/resolve-all',
+  async (req: Request<{ scopeKey: string }>, res: Response) => {
     try {
       const auth = getAuthContext(req);
       if (!auth) {
         sendUnauthorized(res);
         return;
       }
-      const result = await radarManualActions.resolveAllInThread(auth, req.params.conversationId);
+      const result = await radarManualActions.resolveAllInScope(auth, req.params.scopeKey);
       res.json({ success: true, data: result });
     } catch (err) {
       if (err instanceof RadarActionError) {
@@ -100,7 +109,7 @@ router.post(
       logger.error('[radar-execution] resolve-all failed:', err);
       res.status(500).json({ success: false, error: 'Failed to resolve thread items' });
     }
-  },
+  }
 );
 
 router.get('/feed/pending-me', async (req: Request, res: Response) => {
@@ -174,6 +183,21 @@ router.get('/feed/waiting-on', async (req: Request, res: Response) => {
     res.json({ success: true, data: { threads } });
   } catch (err) {
     logger.error('[radar-execution] waiting-on feed failed:', err);
+    res.status(500).json({ success: false, error: 'Failed to load feed' });
+  }
+});
+
+router.get('/feed/pending-others', async (req: Request, res: Response) => {
+  try {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const threads = await radarFeedService.pendingOthers(auth);
+    res.json({ success: true, data: { threads } });
+  } catch (err) {
+    logger.error('[radar-execution] pending-others feed failed:', err);
     res.status(500).json({ success: false, error: 'Failed to load feed' });
   }
 });

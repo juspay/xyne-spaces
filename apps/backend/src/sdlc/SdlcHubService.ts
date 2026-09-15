@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
+  SDLC_CONTAINMENT_RELATION,
   SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   CanvasVisibility,
@@ -592,6 +594,19 @@ export class SdlcHubService implements SdlcHub {
     return { executionId: execution.id, status: execution.status };
   }
 
+  async getRepositorySetupExecution(
+    actor: SdlcActor,
+    repoId: string
+  ): Promise<{ id: string; status: string; context: string | null; updatedAt: number } | null> {
+    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    if (!repo.sdlcSetupExecutionId) return null;
+    const execution = await this.prisma.workflowExecution.findFirst({
+      where: { id: repo.sdlcSetupExecutionId, workspaceId: actor.workspaceId },
+      select: { id: true, status: true, context: true, updatedAt: true },
+    });
+    return execution ? { ...execution, updatedAt: execution.updatedAt.getTime() } : null;
+  }
+
   async getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
@@ -916,7 +931,19 @@ export class SdlcHubService implements SdlcHub {
                 sourceId: input.trackId,
                 targetType: 'CANVAS',
                 targetId: canvas.id,
-                relationType: 'TRACK_ITEM',
+                relationType: SDLC_CONTAINMENT_RELATION,
+                createdBy: actor.userId,
+              },
+            });
+            await tx.sdlcEntityLink.create({
+              data: {
+                workspaceId: actor.workspaceId,
+                channelId: repo.channelId,
+                sourceType: 'TRACK',
+                sourceId: input.trackId,
+                targetType: 'CANVAS',
+                targetId: canvas.id,
+                relationType: SDLC_TRACK_FLAT_RELATION,
                 createdBy: actor.userId,
               },
             });
@@ -1060,7 +1087,7 @@ export class SdlcHubService implements SdlcHub {
     return commitAndSyncCanvasArtifact(
       () =>
         this.prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT "id" FROM "public"."workflow_executions" WHERE "id" = ${input.setupExecutionId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "workflow"."workflow_executions" WHERE "id" = ${input.setupExecutionId} FOR UPDATE`;
           const execution = await tx.workflowExecution.findFirst({
             where: {
               id: input.setupExecutionId,
@@ -1523,7 +1550,7 @@ export class SdlcHubService implements SdlcHub {
             sourceType: 'TRACK',
             targetType: 'CANVAS',
             targetId: input.sourceId,
-            relationType: 'TRACK_ITEM',
+            relationType: SDLC_TRACK_FLAT_RELATION,
           },
           select: { sourceId: true },
         });

@@ -57,32 +57,45 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
 
   // Escape names for regex and join with '|' to create one pattern
   const patternParts = allCleanNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const pattern = new RegExp(`@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`, 'gi');
+  // Require a boundary before '@' (start-of-string, whitespace, ZWSP, '(', a tag
+  // close '>', or an &nbsp; entity — TipTap serializes leading/repeated spaces as
+  // &nbsp;) so an '@' embedded in an email/word — e.g. "user@Juspay.in" — is never
+  // treated as a mention. Mirrors the composer's mention trigger regex.
+  const pattern = new RegExp(
+    `(^|[\\s\\u200B(>]|&nbsp;)@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`,
+    'gi',
+  );
 
   // Perform a single replace operation
-  return htmlContent.replace(pattern, (match, capturedName: string, offset: number) => {
-    // Check if the match is inside an existing mention span using the correct offset
-    const beforeMatch = htmlContent.substring(0, offset);
-    const lastOpenSpan = beforeMatch.lastIndexOf('<span');
-    const lastCloseSpan = beforeMatch.lastIndexOf('</span>');
+  return htmlContent.replace(
+    pattern,
+    (match, leadingChar: string, capturedName: string, offset: number) => {
+      // Check if the match is inside an existing mention span using the correct offset.
+      // `offset` points at the captured boundary char, so skip past it to reach the
+      // '@' — otherwise a match right after `</span>` truncates the closing tag and
+      // is misread as being inside that span.
+      const beforeMatch = htmlContent.substring(0, offset + leadingChar.length);
+      const lastOpenSpan = beforeMatch.lastIndexOf('<span');
+      const lastCloseSpan = beforeMatch.lastIndexOf('</span>');
 
-    if (lastOpenSpan > lastCloseSpan) {
-      const spanTag = beforeMatch.substring(lastOpenSpan);
-      if (spanTag.includes('data-mention')) {
-        return match; // Don't replace, it's already a mention
+      if (lastOpenSpan > lastCloseSpan) {
+        const spanTag = beforeMatch.substring(lastOpenSpan);
+        if (spanTag.includes('data-mention')) {
+          return match; // Don't replace, it's already a mention
+        }
       }
-    }
 
-    const user = userMap.get(capturedName.toLowerCase());
-    if (!user) return match; // Safe fallback
+      const user = userMap.get(capturedName.toLowerCase());
+      if (!user) return match; // Safe fallback
 
-    // Create the new mention span (use original name casing from user object)
-    // Apply HTML escaping to prevent XSS attacks
-    const originalName = user.name.replace(/ \(you\)$/, '');
-    const escapedName = escapeHtml(originalName);
-    const escapedId = escapeHtml(user.id);
-    return `<span data-mention="" data-mention-type="user" data-user-id="${escapedId}" data-username="${escapedName}" class="chat-input-mention">@${escapedName}</span>`;
-  });
+      // Create the new mention span (use original name casing from user object)
+      // Apply HTML escaping to prevent XSS attacks
+      const originalName = user.name.replace(/ \(you\)$/, '');
+      const escapedName = escapeHtml(originalName);
+      const escapedId = escapeHtml(user.id);
+      return `${leadingChar}<span data-mention="" data-mention-type="user" data-user-id="${escapedId}" data-username="${escapedName}" class="chat-input-mention">@${escapedName}</span>`;
+    },
+  );
 };
 
 /**

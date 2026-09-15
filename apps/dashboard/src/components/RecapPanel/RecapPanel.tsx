@@ -435,10 +435,16 @@ const RecapPanel = (): ReactElement => {
             <div className='flex items-center gap-2 text-foreground font-semibold text-base'>
               <Link
                 to={`/chat/dir/${card.channelId}`}
+                state={{ trackSource: 'recap' }}
                 className='flex items-center gap-2 rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
                 title={`Go to #${card.channelName}`}
                 data-track-category='RECAP_PANEL'
                 data-track-name='OPEN_CHANNEL_FROM_RECAP'
+                data-track-label='Open channel from recap'
+                data-track-metadata={JSON.stringify({
+                  channelId: card.channelId,
+                  source: 'recap',
+                })}
               >
                 <Hash size={16} className='text-muted-foreground' />
                 <span>{card.channelName}</span>

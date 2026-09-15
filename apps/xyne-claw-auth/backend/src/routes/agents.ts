@@ -9,7 +9,6 @@ import { validateSubagentInput, ValidationError as SubagentValidationError } fro
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
@@ -424,16 +423,26 @@ router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
 
   const record = agent as unknown as Record<string, unknown>;
   const viewerId = getRequesterId(req);
-  let canEdit = s2sKeyMatches(req.headers["x-s2s-key"]);
+  const isS2S = s2sKeyMatches(req.headers["x-s2s-key"]);
+  let canEdit = isS2S;
   if (!canEdit && viewerId) {
     const access = await getAgentEditAccess(viewerId, req.params.slug, getOrgId(req)).catch(() => null);
     canEdit = Boolean(access?.canEdit) || (await isClawAdmin(viewerId));
   }
-  // Any org viewer may READ the full agent: sanitizeAgent scrubs the only
-  // inline secrets (signingSecret/spacesAppToken), and provider/MCP creds live
-  // behind their own ACL'd endpoints. Read-only is enforced by the write
-  // routes, NOT by hiding fields — so return the full shape (non-admins get a
-  // complete read-only view) plus a canEdit flag for the UI to gate editing.
+  // The slug is caller-supplied, so org scope alone is tenant isolation, not
+  // authorization: a same-org user must not read another user's private agent
+  // (system prompt / tools / knowledge base) by guessing its slug. Gate the
+  // full read to agents the viewer may actually see — owned, shared, or global —
+  // the same visibility used on the execution path. Editors/admins (canEdit) and
+  // internal S2S callers are already past this. A not-visible agent resolves to
+  // 404, never 403, so the slug is not confirmed to someone probing.
+  if (!canEdit) {
+    const visible = await agentRepository.findBySlugVisibleTo(req.params.slug, orgId, viewerId);
+    if (!visible) {
+      logAgentScopedMiss(req, "agents/get", req.params.slug, orgId);
+      throw notFound("Agent not found");
+    }
+  }
   ok(res, { ...sanitizeAgent(record), canEdit });
 }));
 
@@ -2740,10 +2749,7 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
     res.json({
       success: true,
-      // `inherited` separates "never picked one" from an explicit "spaces" pick.
-      // Both report provider "spaces", but only the former follows the user's
-      // account-wide default harness (User.localHarnessDefaultProvider).
-      data: { provider: config?.provider ?? "spaces", inherited: !config },
+      data: { provider: config?.provider ?? "spaces" },
     });
   } catch (err) {
     log.error("[agents] get user-config error:", err);
@@ -2754,15 +2760,8 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
 router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { provider } = req.body as { provider?: string };
-    const allowedProviders = [
-      "spaces",
-      "copilot",
-      "claude",
-      "codex",
-      ...(CONFIG.localHarnessEnabled ? LOCAL_HARNESS_PROVIDERS : []),
-    ];
-    if (!provider || !allowedProviders.includes(provider)) {
-      res.status(400).json({ success: false, error: `provider must be one of: ${allowedProviders.join(", ")}` });
+    if (!provider || !["spaces", "copilot", "claude", "codex"].includes(provider)) {
+      res.status(400).json({ success: false, error: "provider must be 'spaces', 'copilot', 'claude', or 'codex'" });
       return;
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
@@ -4407,6 +4406,17 @@ router.post(
       const apiKey = (body.apiKey ?? "").trim();
       const model = (body.model ?? "").trim() || null;
       const baseUrl = (body.baseUrl ?? "").trim() || null;
+      // A custom provider baseUrl is fetched server-side at model-probe and at
+      // runtime; refuse an internal / private / metadata destination at save so
+      // one can never be persisted (the probe/runtime paths validate too).
+      if (baseUrl) {
+        try {
+          await assertSafeOutboundUrl(baseUrl);
+        } catch {
+          res.status(400).json({ success: false, error: "baseUrl must be a public https(s) endpoint" });
+          return;
+        }
+      }
       const authType = (body.authType ?? "").trim() || null;
       const rawEffort = typeof body.reasoningEffort === "string" ? body.reasoningEffort.trim() : body.reasoningEffort;
       let reasoningEffort: string | null;

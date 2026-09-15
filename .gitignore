@@ -239,3 +239,6 @@ security-reports/
 /vespa-core/generated
 #vespa models
 /vespa-core/vespa/models/*
+
+# Build exports (make export-dashboard-bundle)
+out/

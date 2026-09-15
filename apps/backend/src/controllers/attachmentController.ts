@@ -19,8 +19,33 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
+import { repositories } from '@/database/repositories';
+import { callShareService } from '@/services/callShareService';
 
 const db = DatabaseClient.getInstance();
+
+const TRANSCRIPTION_BUCKET_TYPES = new Set(['transcript', 'identified_transcript', 'recording']);
+const NO_CACHE_TYPES = new Set(['transcript', 'identified_transcript']);
+
+const getAttachmentType = (attachment: MessageAttachment): string =>
+  (attachment.metadata as { type?: string } | null)?.type ?? '';
+
+/** Transcripts and call recordings live in the transcription bucket. */
+const getAttachmentStorage = (attachment: MessageAttachment): typeof storageService =>
+  TRANSCRIPTION_BUCKET_TYPES.has(getAttachmentType(attachment))
+    ? getStorageService(config.gcs.transcriptionBucketName)
+    : storageService;
+
+/** Transcripts can be rewritten, so they are never cached; other files are. */
+const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment): void => {
+  if (NO_CACHE_TYPES.has(getAttachmentType(attachment))) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else {
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+  }
+};
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -97,6 +122,7 @@ export class AttachmentController {
    *  2. DRAFT / DELAYED_MESSAGE — only the creator may read it.
    *  3. Chat attachments (those carrying a conversationId) — the caller must be
    *     a participant of the owning channel. Mirrors streamAttachment.
+   *  4. RECORDING — the caller must be able to view the call's recordings.
    * Non-chat types without a conversation (TICKET, EMAIL, FORM_ENTITY_VALUE,
    * IMPACT, …) are bounded by the workspace check only, preserving existing
    * in-workspace access.
@@ -152,6 +178,26 @@ export class AttachmentController {
           body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
         };
       }
+    }
+
+    // 2.6) Note-taker recordings — same rule as the recording download endpoints.
+    if (attachment.entityType === AttachmentEntityType.RECORDING) {
+      const recording = await repositories.callRecordings.findById(attachment.entityId);
+      const call = recording ? await repositories.calls.findById(recording.callId) : null;
+      if (!call || call.workspaceId !== workspaceId) {
+        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+      }
+      if (!(await callShareService.canViewRecordings(call, userId))) {
+        logger.warn(
+          `Unauthorized recording attachment access: user ${userId} -> ${attachment.id} (call ${call.id})`,
+        );
+        return {
+          ok: false,
+          status: 403,
+          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+        };
+      }
+      return { ok: true };
     }
 
     // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
@@ -295,11 +341,7 @@ export class AttachmentController {
         return;
       }
 
-      // Transcripts live in a separate bucket
-      const meta = attachment.metadata as { type?: string };
-      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript'
-        ? getStorageService(config.gcs.transcriptionBucketName)
-        : storageService;
+      const service = getAttachmentStorage(attachment);
 
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
 
@@ -312,14 +354,7 @@ export class AttachmentController {
         filename: attachment.originalFilename,
       });
 
-      // Disable caching for transcripts (they can be updated), cache other files
-      if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      } else {
-        res.setHeader('Cache-Control', 'private, max-age=3600');
-      }
+      setAttachmentCacheHeaders(res, attachment);
 
       // Stream the file
       res.send(buffer);
@@ -436,11 +471,7 @@ export class AttachmentController {
         return;
       }
 
-      // Route transcript/recording attachments to their dedicated bucket
-      const meta = attachment.metadata as { type?: string };
-      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript' || meta?.type === 'recording'
-        ? getStorageService(config.gcs.transcriptionBucketName)
-        : storageService;
+      const service = getAttachmentStorage(attachment);
 
       const fileExists = await service.fileExists(filePath);
       if (!fileExists) {
@@ -465,13 +496,7 @@ export class AttachmentController {
         });
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
-        if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
-        } else {
-          res.setHeader('Cache-Control', 'private, max-age=3600');
-        }
+        setAttachmentCacheHeaders(res, attachment);
 
         const stream = await service.createReadStream(filePath);
         stream.pipe(res);
@@ -524,13 +549,7 @@ export class AttachmentController {
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Accept-Ranges', 'bytes');
-      if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      } else {
-        res.setHeader('Cache-Control', 'private, max-age=3600');
-      }
+      setAttachmentCacheHeaders(res, attachment);
 
       const stream = await service.createReadStream(filePath, { start, end });
       stream.pipe(res);

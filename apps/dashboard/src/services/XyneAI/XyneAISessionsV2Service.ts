@@ -10,6 +10,7 @@ import type {
   PendingAction,
   ToolInvocation,
   DebugArtifactBundle,
+  DebugEventRecord,
   ReactArtifactManifest,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
@@ -337,12 +338,183 @@ export async function rateV2Message(
   });
 }
 
+// ============================================================================
+// Debug trace payload types (xyne-claw v1 event stream, post-materialization)
+//
+// The shapes below mirror xyne-claw's `debug/materialize.ts` (`toV1Events`).
+// Nothing between claw and here filters keys, so these are descriptive, not
+// enforcing: every payload also keeps its index signature so an unmodelled
+// field still survives to the renderer instead of being a type error.
+// ============================================================================
+
+/**
+ * A payload the trace writer interned into the run's blob log instead of
+ * inlining. Arrives either in the field itself or in a SIBLING `<field>Ref` —
+ * on the live stream, and at capture level "metadata", the ref is all there is.
+ * `preview` (~200 chars) exists so a collapsed row renders without a fetch;
+ * a consumer that only accepts `typeof value === 'string'` renders a blank
+ * panel for every ref, which is the bug this type exists to prevent.
+ */
+export interface DebugBlobRef {
+  /** sha256 of the serialized content, first 16 hex chars. */
+  hash: string;
+  /** Stored bytes (post-truncation). */
+  bytes: number;
+  /** Present only when the value exceeded the blob cap. */
+  originalBytes?: number;
+  /** Present only when truncated — the writer never truncates silently. */
+  truncated?: true;
+  /** First ~200 chars of the payload. */
+  preview?: string;
+}
+
+export function isDebugBlobRef(value: unknown): value is DebugBlobRef {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { hash?: unknown }).hash === 'string' &&
+    typeof (value as { bytes?: unknown }).bytes === 'number'
+  );
+}
+
+/** A value that may arrive inline or interned. */
+export type MaybeBlobRef<T> = T | DebugBlobRef;
+
+/** One entry of the `<available_skills>` block the agent actually saw. */
+export interface DebugAvailableSkill {
+  name: string;
+  description?: string;
+  location?: string;
+}
+
+/** A tool as offered to the model, with its full JSON schema. */
+export interface DebugToolDefinition {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+}
+
+/** `cacheRead` is the prompt-cache HIT count: zero reads on a repeat turn is
+ *  the tell for a cache miss, so the raw numbers are kept, not a boolean. */
+export interface DebugResponseUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * The `data` payload of a trace event. Modelled around `session_prompt`, onto
+ * which the materializer folds its turn's `llm_request`/`llm_response`.
+ *
+ * Three encodings live here and every consumer has to handle all three:
+ *  1. blob refs — `<field>` may instead be a `<field>Ref` sibling;
+ *  2. back-references — the system prompt and tool catalog are identical on
+ *     every call, so they ship ONCE and later events carry
+ *     `<field>UnchangedFromSeq: <seq>`, resolved against that seq's event in
+ *     the same run. Without this, turn 2+ shows nothing where turn 1 shows it;
+ *  3. transcript cursor — `messagesTo` is a count into the RUN's
+ *     `snapshot.messages`, not an embedded copy (older traces still embed
+ *     `messages`; accept both).
+ */
+export interface DebugEventData {
+  /** The TRUE prompt pi sent, including the `<available_skills>` XML block —
+   *  not the persona prompt, which is what this field used to carry. */
+  systemPrompt?: MaybeBlobRef<string>;
+  systemPromptRef?: DebugBlobRef;
+  systemPromptUnchangedFromSeq?: number;
+
+  tools?: MaybeBlobRef<DebugToolDefinition[]>;
+  toolsRef?: DebugBlobRef;
+  toolsUnchangedFromSeq?: number;
+
+  toolNames?: MaybeBlobRef<string[]>;
+  toolNamesRef?: DebugBlobRef;
+  toolNamesUnchangedFromSeq?: number;
+
+  availableSkills?: MaybeBlobRef<DebugAvailableSkill[]>;
+  availableSkillsRef?: DebugBlobRef;
+  availableSkillsUnchangedFromSeq?: number;
+
+  /** Mid-run tool-palette diff. A `tool_palette_change` event spells the same
+   *  diff `added`/`removed`; a folded `session_prompt` uses these. Read both. */
+  paletteAdded?: string[];
+  paletteRemoved?: string[];
+  added?: string[];
+  removed?: string[];
+
+  /** Transcript range for this model call — slice `snapshot.messages`. */
+  messagesFrom?: number;
+  messagesTo?: number;
+  /** Older traces embedded the prefix instead of a cursor. */
+  messages?: MaybeBlobRef<unknown[]>;
+  messagesRef?: DebugBlobRef;
+
+  model?: string;
+  provider?: string;
+  temperature?: number;
+  maxTokens?: number;
+  thinkingLevel?: string;
+  fastMode?: boolean;
+
+  responseUsage?: DebugResponseUsage;
+  responseStopReason?: string;
+  ttftMs?: number;
+
+  /** Tool rows. `result` may be interned, in which case `resultRef.preview`
+   *  carries the same content — anything that filters one must filter both. */
+  result?: MaybeBlobRef<unknown>;
+  resultRef?: DebugBlobRef;
+  args?: MaybeBlobRef<unknown>;
+  argsRef?: DebugBlobRef;
+
+  /** Unmodelled fields reach the renderer untouched — the trace format grows
+   *  faster than this file does. */
+  [key: string]: unknown;
+}
+
+/** A trace event with its payload typed. Structurally a `DebugEventRecord`,
+ *  so it stays assignable wherever the looser shape is expected. */
+export interface DebugTraceEvent extends Omit<DebugEventRecord, 'data'> {
+  /** Kinds now include `llm_request`, `llm_response`, `message_append`
+   *  (bookkeeping — hide), `tool_palette_change`, `skill_loaded`,
+   *  `subagent_start`/`subagent_end`, `provider_fallback`, `delegation` and
+   *  `tool_invocation_update` (patches an existing tool row by toolCallId). */
+  data: DebugEventData;
+}
+
+/**
+ * The bundle as it actually arrives, with the fields the base type predates.
+ * Extends rather than edits `DebugArtifactBundle` so existing consumers keep
+ * working while new ones can read the pagination and warning surface.
+ */
+export interface DebugTraceBundle extends DebugArtifactBundle {
+  /** Runs in the whole conversation vs. this page — claw caps the page and
+   *  claw-auth restates both after its per-user ACL ("showing N of M").
+   *  `warnings` comes from the base type. */
+  totalRuns?: number;
+  truncated?: boolean;
+}
+
+/**
+ * Fetch the debug trace for a conversation.
+ *
+ * `before`/`limit` page the run list: claw caps a page (default 25) and reports
+ * `totalRuns`/`truncated`, so a long thread's older runs are reachable only by
+ * passing the last run's id back as `before`.
+ */
 export async function fetchV2DebugArtifacts(
   conversationId: string,
   agentSlug?: string | null,
-): Promise<DebugArtifactBundle> {
-  const query = agentSlug ? `?agentSlug=${encodeURIComponent(agentSlug)}` : '';
-  const response = await apiInstance.get<{ success: boolean; data: DebugArtifactBundle }>(
+  paging?: { limit?: number; before?: string },
+): Promise<DebugTraceBundle> {
+  const params = new URLSearchParams();
+  if (agentSlug) params.set('agentSlug', agentSlug);
+  if (paging?.limit !== undefined) params.set('limit', String(paging.limit));
+  if (paging?.before) params.set('before', paging.before);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await apiInstance.get<{ success: boolean; data: DebugTraceBundle }>(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}/debug${query}`,
   );
   if (!response.data.success) throw new Error('Failed to fetch debug artifacts');

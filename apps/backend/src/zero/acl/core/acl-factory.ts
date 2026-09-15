@@ -36,7 +36,6 @@ import { StageAcl } from '../tables/stage-acl';
 import { BoardAcl } from '../tables/boards-acl';
 import { TicketACl } from '../tables/tickets-acl';
 import { WOrkflowsAcl } from '../tables/workflows-acl';
-import { WorkflowExecutionsAcl } from '../tables/workflow-executions-acl';
 import { SubTicketsACL } from '../tables/sub-tickets-acl';
 import { TicketSubTicketMappingsACL } from '../tables/ticket-sub-ticket-mappings-acl';
 import { TicketActivitiesACL } from '../tables/ticket-activities-acl';
@@ -118,6 +117,7 @@ import { ReleaseChangesACL } from '../tables/release-changes-acl';
 import { ReleaseEventsACL } from '../tables/release-events-acl';
 import { ReposACL } from '../tables/repos-acl';
 import { SdlcEntityLinksACL } from '../tables/sdlc-entity-links-acl';
+import { SdlcFoldersACL } from '../tables/sdlc-folders-acl';
 import { SdlcTracksACL } from '../tables/sdlc-tracks-acl';
 import { StageApproversACL } from '../tables/stage-approvers-acl';
 import { StageTransitionsACL } from '../tables/stage-transitions-acl';
@@ -304,8 +304,6 @@ export class ACLFactory {
         return new UserWorkloadMappingsACL(ctx);
       case 'users':
         return new UsersACL(ctx);
-      case 'workflow_executions':
-        return new WorkflowExecutionsAcl(ctx);
       case 'workflows':
         return new WOrkflowsAcl(ctx);
       case 'channel_user_status': 
@@ -421,6 +419,8 @@ export class ACLFactory {
       case 'sdlc_artifacts':
         // Server-written provenance table: no client mutations (BaseACL denies all).
         return new BaseACL<any>(ctx);
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx);
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx);
       case 'stage_approvers':

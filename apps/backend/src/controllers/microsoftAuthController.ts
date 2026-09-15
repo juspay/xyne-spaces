@@ -704,7 +704,7 @@ export class MicrosoftAuthController {
           });
           res.cookie('xyne_last_workspace', workspaceId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
           if (sessionId) {
             res.cookie('user_session_id', sessionId, {
@@ -1078,7 +1078,7 @@ export class MicrosoftAuthController {
 
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const session = await this.userSessionService.createSession({
             userId: user.id,
@@ -1111,7 +1111,7 @@ export class MicrosoftAuthController {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
@@ -1122,7 +1122,7 @@ export class MicrosoftAuthController {
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
 
@@ -1424,7 +1424,7 @@ export class MicrosoftAuthController {
         let sessionId: string | null = null;
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const session = await this.userSessionService.createSession({
             userId: user.id,
             refreshToken: refreshToken || randomUUID(),
@@ -1451,12 +1451,12 @@ export class MicrosoftAuthController {
         });
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
         setOnboardingCookie(res, isNewUser, {

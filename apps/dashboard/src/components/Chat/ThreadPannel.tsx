@@ -29,6 +29,7 @@ import {
   FolderDefault,
   ClipboardCheck as ClipboardCheckIcon,
   ThreeDotsMenuVertical,
+  GitBranch,
 } from '@xyne/icons';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import {
@@ -64,6 +65,7 @@ import {
   ChannelScopeType,
   ChannelType,
   BaseTicketType,
+  isDeskChannelType,
   parseTicketMd,
 } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
@@ -105,7 +107,7 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca';
+type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets';
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -139,6 +141,8 @@ interface ThreadMessagesProps {
   /** Forces the initial active tab, overriding the ?selectedTab URL param. Used by modal hosts to avoid inheriting the outer page's tab state. */
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
+  tabbedView?: boolean;
+  overflowActionsOnly?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -163,6 +167,8 @@ export const ThreadMessages = ({
   onUserClick,
   defaultTab,
   headerActionsContainer,
+  overflowActionsOnly = false,
+  tabbedView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -794,6 +800,18 @@ export const ThreadMessages = ({
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
+  const showSubTicketsTab = isDeskChannelType(channel?.type);
+  // The panel is reused across threads, so this tab can vanish while still selected.
+  // A tab can be selected and then vanish, because the panel is reused across
+  // threads: subtickets when the channel type changes, and details/rca when the
+  // next thread has no ticket. Both leave the strip with nothing selected and an
+  // empty body, so they fall back to the one tab every thread has.
+  const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca';
+  const currentTab =
+    (!showSubTicketsTab && activeTab === 'subtickets') || (!derivedTicketId && ticketOnlyTab)
+      ? 'thread'
+      : activeTab;
+
   const tabs = useMemo(() => {
     const allTabs = [
       { value: 'thread' as const, label: 'Messages', icon: <ChatDefault size={14} /> },
@@ -804,6 +822,9 @@ export const ThreadMessages = ({
         count: files.length,
         icon: <FolderDefault size={14} />,
       },
+      ...(showSubTicketsTab
+        ? [{ value: 'subtickets' as const, label: 'Sub-tickets', icon: <GitBranch size={14} /> }]
+        : []),
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
@@ -811,7 +832,7 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1175,7 +1196,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!isStandaloneWindow() && (
+      {!overflowActionsOnly && !isStandaloneWindow() && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1201,7 +1222,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Initiate Call Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadCallButton
           onStartCall={handleInitiateCall}
           onScheduleCall={() => setIsScheduleCallModalOpen(true)}
@@ -1216,7 +1237,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Start Recording (Take Notes) Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadRecordingButton
           onStartRecording={handleStartRecordingFromThread}
           hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
@@ -1574,11 +1595,12 @@ export const ThreadMessages = ({
             </div>
           </div>
         )}
-        {/* Ticket Thread with Tabs - only when NOT simpleView */}
-        {!simpleView && derivedTicketId ? (
+        {/* Tabbed thread. A ticket brings Details and RCA with it; without one
+            the same layout still carries Messages and Files. */}
+        {!simpleView && (derivedTicketId || tabbedView) ? (
           /* Ticket Thread: Header with Tabs */
           <Tabs.Root
-            value={activeTab}
+            value={currentTab}
             onValueChange={value => {
               setActiveTab(value as TabType);
               // Mirror it back, or re-opening the same tab from outside is a no-op.
@@ -1592,8 +1614,11 @@ export const ThreadMessages = ({
             {headerActionsContainer
               ? createPortal(simpleViewHeaderActions, headerActionsContainer)
               : null}
-            {/* Header with title, close button, and tabs */}
-            <div className='w-full pl-2 pr-3 py-3'>
+            {/* Header with title, close button, and tabs. When the host draws its
+                own bar above this one, the generous padding reads as a gap
+                between the tabs and the first message rather than as breathing
+                room, so it tightens. */}
+            <div className={cn('w-full pl-2 pr-3', hideHeader ? 'pb-1 pt-1.5' : 'py-3')}>
               <div className='relative flex justify-between w-full'>
                 {/* Tabs List */}
                 <div className='overflow-x-auto no-scrollbar'>
@@ -1603,7 +1628,7 @@ export const ThreadMessages = ({
                         <button
                           className={cn(
                             'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors duration-100 cursor-pointer',
-                            activeTab === tab.value
+                            currentTab === tab.value
                               ? 'bg-muted text-foreground'
                               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                           )}
@@ -1714,12 +1739,24 @@ export const ThreadMessages = ({
             </Tabs.Content>
 
             {/* Details Tab Content */}
-            <Tabs.Content
-              value='details'
-              className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
-            >
-              <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
-            </Tabs.Content>
+            {derivedTicketId && (
+              <Tabs.Content
+                value='details'
+                className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
+              >
+                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
+              </Tabs.Content>
+            )}
+
+            {/* Sub-tickets Tab Content */}
+            {showSubTicketsTab && (
+              <Tabs.Content
+                value='subtickets'
+                className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
+              >
+                <TicketDetails ticketId={derivedTicketId} subTicketsOnly />
+              </Tabs.Content>
+            )}
 
             {/* RCA Tab Content */}
             {isFixTicket && (
