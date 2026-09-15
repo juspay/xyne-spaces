@@ -55,6 +55,9 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
         or(
           cmp('createdBy', '=', this.ctx.userID),
           exists('conversation', (c) =>
+            // Pin the join direction — see tickets-acl.ts for the full rationale.
+            // Prod: this arm flipped is the getConversationAttachementsV2
+            // 60k-channel scan (73s worst-case materializations, 2026-09-15).
             c.whereExists('channel', (ch) =>
               ch
                 .where('workspaceId', '=', this.ctx.workspaceId)
@@ -64,6 +67,7 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
                     exists2('participants', (p) => p.where('userId', this.ctx.userID)),
                   ),
                 ),
+              { flip: false },
             ),
           ),
         ),
