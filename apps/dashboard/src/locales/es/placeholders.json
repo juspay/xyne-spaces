@@ -896,6 +896,51 @@
     },
     "intentPlaygroundScreen": {
       "messagePlaceholder": "Escribe un mensaje como aparecería en un canal…"
+    },
+    "jiraMigrationScreen": {
+      "mapUserEmailPlaceholder": "Asignar a un correo de usuario de Xyne",
+      "searchUsersPlaceholder": "Buscar usuarios...",
+      "selectProjectPlaceholder": "Seleccionar proyecto",
+      "searchProjectsPlaceholder": "Buscar proyectos...",
+      "selectChannelPlaceholder": "Seleccionar canal",
+      "searchChannelsPlaceholder": "Buscar canales...",
+      "timestampExamplePlaceholder": "2026-05-19T13:23:47.000Z",
+      "noMigrationsFoundPlaceholder": "No se encontraron migraciones para este proyecto",
+      "selectJiraProjectPlaceholder": "Seleccionar proyecto de Jira",
+      "selectProjectFirstPlaceholder": "Selecciona primero un proyecto",
+      "searchJiraProjectsPlaceholder": "Buscar proyectos de Jira...",
+      "selectProjectFirstShortPlaceholder": "Selecciona un proyecto primero",
+      "projectKeyExampleAbcPlaceholder": "ABC",
+      "projectKeyExampleEulPlaceholder": "EUL",
+      "selectBoardPlaceholder": "Seleccionar tablero",
+      "searchBoardsPlaceholder": "Buscar tableros...",
+      "tagNamesExamplePlaceholder": "bug, urgente, escalamiento-cliente",
+      "issueKeysExamplePlaceholder": "JP-1234, JP-4566",
+      "selectXyneBoardPlaceholder": "Seleccionar tablero de Xyne",
+      "searchEpicsPlaceholder": "Buscar épicas...",
+      "searchAssigneesPlaceholder": "Buscar responsables...",
+      "searchReportersPlaceholder": "Buscar informantes...",
+      "searchCreatorsPlaceholder": "Buscar creadores...",
+      "searchLabelsPlaceholder": "Buscar etiquetas..."
+    },
+    "kanbanBoardScreen": {
+      "savedViewNameExamplePlaceholder": "P. ej. Mis PR abiertos",
+      "searchTicketsPlaceholder": "Buscar por ID o título del ticket"
+    },
+    "whatsAppMigrationPanel": {
+      "selectChannelOrUserPlaceholder": "Seleccionar canal o usuario",
+      "searchChannelsOrUsersPlaceholder": "Buscar canales o usuarios...",
+      "mappingsExamplePlaceholder": "Alice Doe, alice@example.com\nBob Ops, bob@example.com"
+    },
+    "organisationsScreen": {
+      "communityWorkspaceNamePlaceholder": "Ingresa el nombre del espacio de trabajo comunitario...",
+      "orgNamePlaceholder": "Ingresa el nombre de la organización...",
+      "workspaceNamePlaceholder": "Ingresa el nombre del espacio de trabajo...",
+      "ownerEmailPlaceholder": "propietario@ejemplo.com",
+      "joinRequests": {
+        "commentPlaceholder": "Comentario (obligatorio para rechazar)"
+      },
+      "memberEmailPlaceholder": "Ingresa una dirección de correo..."
     }
   }
 }

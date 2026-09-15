@@ -896,6 +896,51 @@
     },
     "intentPlaygroundScreen": {
       "messagePlaceholder": "Type a message as it would appear in a channel…"
+    },
+    "jiraMigrationScreen": {
+      "mapUserEmailPlaceholder": "Map to Xyne user email",
+      "searchUsersPlaceholder": "Search users...",
+      "selectProjectPlaceholder": "Select project",
+      "searchProjectsPlaceholder": "Search projects...",
+      "selectChannelPlaceholder": "Select channel",
+      "searchChannelsPlaceholder": "Search channels...",
+      "timestampExamplePlaceholder": "2026-05-19T13:23:47.000Z",
+      "noMigrationsFoundPlaceholder": "No migrations found for this project",
+      "selectJiraProjectPlaceholder": "Select Jira project",
+      "selectProjectFirstPlaceholder": "Select a project first",
+      "searchJiraProjectsPlaceholder": "Search Jira projects...",
+      "selectProjectFirstShortPlaceholder": "Select project first",
+      "projectKeyExampleAbcPlaceholder": "ABC",
+      "projectKeyExampleEulPlaceholder": "EUL",
+      "selectBoardPlaceholder": "Select board",
+      "searchBoardsPlaceholder": "Search boards...",
+      "tagNamesExamplePlaceholder": "bug, urgent, customer-escalation",
+      "issueKeysExamplePlaceholder": "JP-1234, JP-4566",
+      "selectXyneBoardPlaceholder": "Select Xyne board",
+      "searchEpicsPlaceholder": "Search epics...",
+      "searchAssigneesPlaceholder": "Search assignees...",
+      "searchReportersPlaceholder": "Search reporters...",
+      "searchCreatorsPlaceholder": "Search creators...",
+      "searchLabelsPlaceholder": "Search labels..."
+    },
+    "kanbanBoardScreen": {
+      "savedViewNameExamplePlaceholder": "e.g. My open PRs",
+      "searchTicketsPlaceholder": "Search ticket ID or title"
+    },
+    "whatsAppMigrationPanel": {
+      "selectChannelOrUserPlaceholder": "Select channel or user",
+      "searchChannelsOrUsersPlaceholder": "Search channels or users...",
+      "mappingsExamplePlaceholder": "Alice Doe, alice@example.com\nBob Ops, bob@example.com"
+    },
+    "organisationsScreen": {
+      "communityWorkspaceNamePlaceholder": "Enter community workspace name...",
+      "orgNamePlaceholder": "Enter organisation name...",
+      "workspaceNamePlaceholder": "Enter workspace name...",
+      "ownerEmailPlaceholder": "owner@example.com",
+      "joinRequests": {
+        "commentPlaceholder": "Comment (required for reject)"
+      },
+      "memberEmailPlaceholder": "Enter email address..."
     }
   }
 }
