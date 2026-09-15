@@ -8,7 +8,7 @@ import {
   ChannelType,
   WorkspaceRole,
   CanvasVisibility,
-  SDLC_REPO_KNOWLEDGE_FOLDER,
+  SDLC_HUB_KNOWLEDGE_FOLDER,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -229,21 +229,20 @@ class CanvasAuthService {
 
       const isCreator = canvas.createdBy === userId;
       const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
-      // By folder: legacy baseline rows share it. Channel type scopes the name to SDLC.
-      const isSdlcBaseline = canvas.folderId
+      const isHubKnowledge = canvas.folderId
         ? Boolean(
             await dbClient.canvasFolder.findFirst({
               where: {
                 id: canvas.folderId,
-                name: SDLC_REPO_KNOWLEDGE_FOLDER,
+                name: SDLC_HUB_KNOWLEDGE_FOLDER,
                 channel: { type: ChannelType.SDLC },
               },
               select: { id: true },
             })
           )
         : false;
-      const isSdlcBaselineChannelAdmin = Boolean(
-        isSdlcBaseline &&
+      const isHubKnowledgeChannelAdmin = Boolean(
+        isHubKnowledge &&
         canvas.channelId &&
         (await dbClient.channelParticipant.findFirst({
           where: { channelId: canvas.channelId, userId, role: ChannelRole.ADMIN },
@@ -295,7 +294,7 @@ class CanvasAuthService {
         groupParticipant as Parameters<typeof this.strongerRole>[0],
         channelParticipant
       );
-      const effectiveRole = isSdlcBaselineChannelAdmin
+      const effectiveRole = isHubKnowledgeChannelAdmin
         ? CanvasRole.EDITOR
         : (participant?.role ?? entityRole?.role);
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
@@ -308,7 +307,7 @@ class CanvasAuthService {
         dbClient
       );
 
-      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;
+      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isHubKnowledgeChannelAdmin;
 
       const canView =
         canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;

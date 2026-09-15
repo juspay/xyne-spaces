@@ -94,12 +94,14 @@ export const toStepRecord = (row: {
 export const toCredentialSummary = (row: {
   name: string;
   credType: string;
+  authType: string;
   status: string;
   createdAt: Date;
   updatedAt: Date;
 }): CredentialSummary => ({
   name: row.name,
-  authType: row.credType as CredentialAuthType,
+  credType: row.credType,
+  authType: row.authType as CredentialAuthType,
   status: row.status as CredentialStatus,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),

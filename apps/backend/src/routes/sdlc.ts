@@ -9,8 +9,6 @@ import {
   createSdlcLinkSchema,
   configureSdlcVcsCredentialSchema,
   sdlcVcsProviderSchema,
-  startSdlcWikiRunSchema,
-  refreshSdlcWikiRunSchema,
 } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
@@ -20,18 +18,16 @@ import {
   resetHubWorkflows,
   seedHubWorkflow,
 } from '@/sdlc/seedHubWorkflow';
-import { sdlcQueue } from '@/queues/sdlcQueue';
-import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
+import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
+import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
-import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
 const prisma = DatabaseClient.getInstance();
-const wikiPipeline = new SdlcWikiPipelineService(prisma, sdlcQueue);
 
 function actorFromRequest(req: Request): SdlcActor {
   const userId = req.user?.id;
@@ -99,6 +95,21 @@ router.post(
       success: true,
       ...(await resetHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
     });
+  })
+);
+
+const legacyCleanupSchema = z.object({
+  dryRun: z.boolean().default(true),
+  redis: z.boolean().default(false),
+});
+
+/** Spans every workspace, so it needs the migration admin role. */
+router.post(
+  '/admin/cleanup-legacy',
+  authorize('TICKET-MIGRATION', AccessType.ADMIN),
+  route(async (req, res) => {
+    const input = legacyCleanupSchema.parse(req.body ?? {});
+    res.status(200).json({ success: true, ...(await cleanupLegacySdlc(input)) });
   })
 );
 
@@ -251,76 +262,6 @@ router.get(
       conversationId
     );
     res.status(200).json({ success: true, context });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/wiki',
-  route(async (req, res) => {
-    const pages = await sdlcWiki.listPages(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, pages });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/wiki/run',
-  route(async (req, res) => {
-    const run = await wikiPipeline.getStatus(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/generate',
-  route(async (req, res) => {
-    const input = startSdlcWikiRunSchema.parse(req.body ?? {});
-    const run = await wikiPipeline.start(actorFromRequest(req), req.params.repoId, input);
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/refresh',
-  route(async (req, res) => {
-    const input = refreshSdlcWikiRunSchema.parse(req.body ?? {});
-    const run = await wikiPipeline.refresh(actorFromRequest(req), req.params.repoId, input);
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/runs/:executionId/retry',
-  route(async (req, res) => {
-    const run = await wikiPipeline.retry(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/runs/:executionId/cancel',
-  route(async (req, res) => {
-    const run = await wikiPipeline.cancel(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(200).json({ success: true, run });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/executions/:executionId/debug',
-  route(async (req, res) => {
-    const data = await sdlcHub.getExecutionDebug(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(200).json({ success: true, data });
   })
 );
 

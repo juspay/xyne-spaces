@@ -1,74 +1,73 @@
-import { SDLC_WORKFLOW_RELATION, sdlcHubWorkflowFolderId } from '@xyne/shared';
+import {
+  ChannelRole,
+  SDLC_HUB_KNOWLEDGE_FOLDER,
+  SDLC_WIKI_WORKFLOW_RELATION,
+  SDLC_WORKFLOW_RELATION,
+  sdlcHubWorkflowFolderId,
+} from '@xyne/shared';
 import type { WorkflowConfig, WorkflowStepConfig } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { logger } from '@/utils/logger';
 import { workflowRuntime } from '@/workflowsV2/runtime';
-import { SDLC_AUTHOR_METADATA_KEY } from '@/workflowsV2/agents/sdlc-artifact-provider';
-import { BASELINE_DEFINITIONS } from './baselineDefinitions';
+import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from '@/workflowsV2/agents/sdlc-dispatch';
+import { ensureHubKnowledgeFolder, ensureHubWikiFolder, ensureRepositoryWikiFolder } from './hubFolders';
+import { HUB_KNOWLEDGE_DEFINITIONS } from './hubKnowledgeDefinitions';
 import { repoIdsForChannel } from './sdlcChannelMembership';
 import type { SdlcActor } from './types';
-
-const WORKFLOW_NAME = 'Generate Repo Knowledge';
+import { buildWikiWorkflowConfig } from './wiki/wikiWorkflowConfig';
 
 function sdlcRootFolderId(workspaceId: string): string {
   return `sdlc-${workspaceId}`;
 }
 
-function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
-  return BASELINE_DEFINITIONS.map((definition) => ({
-    id: definition.kind.toLowerCase(),
-    type: 'CREATE_SDLC_ARTIFACT',
-    title: definition.title,
-    config: {
-      channelId: input.channelId,
-      // Snapshot: a repository added to the hub later needs a reset to appear here.
-      repoIds: input.repoIds,
-      artifactType: 'Repo Knowledge',
-      artifactTitle: definition.title,
-      sections: definition.sections.map((section) => ({
-        title: section.title,
-        description: section.instructions,
-      })),
-      task: definition.instructions,
-      outputType: 'json',
-      outputSchema: {
-        type: 'object',
-        properties: {
-          canvasId: { type: 'string' },
-          sections: { type: 'array', items: { type: 'string' } },
-          sourcePaths: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['canvasId'],
-      },
-    },
-  })) as WorkflowStepConfig[];
-}
-
-interface RepoKnowledgeInput {
-  channelId: string;
-  repoIds: string[];
-}
-
-export function buildRepoKnowledgeConfig(input: RepoKnowledgeInput): WorkflowConfig {
+export function buildHubKnowledgeConfig(channelId: string): WorkflowConfig {
   return {
     trigger: { type: 'MANUAL', config: {} },
-    steps: buildSteps(input),
+    steps: HUB_KNOWLEDGE_DEFINITIONS.map((definition) => ({
+      id: definition.id,
+      type: 'CREATE_SDLC_ARTIFACT',
+      title: definition.title,
+      config: {
+        channelId,
+        artifactType: 'Hub Knowledge',
+        artifactTitle: definition.title,
+        sections: definition.sections.map((section) => ({
+          title: section.title,
+          description: section.instructions,
+        })),
+        task: definition.instructions,
+        outputType: 'json',
+        outputSchema: {
+          type: 'object',
+          properties: { canvasId: { type: 'string' }, summary: { type: 'string' } },
+          required: ['canvasId'],
+        },
+      },
+    })) as WorkflowStepConfig[],
   };
 }
 
+const HUB_WORKFLOWS = [
+  { relation: SDLC_WORKFLOW_RELATION, name: 'Generate Hub Knowledge', build: buildHubKnowledgeConfig },
+  { relation: SDLC_WIKI_WORKFLOW_RELATION, name: 'Generate Wiki', build: buildWikiWorkflowConfig },
+] as const;
+
+type HubWorkflow = (typeof HUB_WORKFLOWS)[number];
+
 /** Presence, dangling included, means "seeded once": a deleted workflow stays deleted. */
-export async function findHubWorkflowLink(
+async function findHubWorkflowLink(
   channelId: string,
-): Promise<{ id: string; targetId: string; workspaceId: string } | null> {
+  relation: string,
+): Promise<{ id: string; targetId: string } | null> {
   return db.sdlcEntityLink.findFirst({
     where: {
       channelId,
       sourceType: 'CHANNEL',
       targetType: 'WORKFLOW',
-      relationType: SDLC_WORKFLOW_RELATION,
+      relationType: relation,
     },
-    select: { id: true, targetId: true, workspaceId: true },
+    select: { id: true, targetId: true },
   });
 }
 
@@ -109,20 +108,96 @@ async function ensureHubFolder(
   return hubId;
 }
 
-async function hubTargets(
-  channelId: string,
-): Promise<{ hubName: string; repoIds: string[] }> {
+interface Hub {
+  channelId: string;
+  folderId: string;
+}
+
+/** Idempotent, so seeds and resets both run it. */
+async function prepareHub(actor: SdlcActor, channelId: string): Promise<Hub> {
   const [channel, repoIds] = await Promise.all([
-    db.channel.findUnique({ where: { id: channelId }, select: { name: true } }),
+    db.channel.findUnique({ where: { id: channelId }, select: { name: true, projectId: true } }),
     repoIdsForChannel(db, channelId),
   ]);
-  if (!channel) throw new AppError('SDLC hub not found', 404);
-  return { hubName: channel.name, repoIds };
+  if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
+  const repos = await db.repo.findMany({
+    where: { id: { in: repoIds } },
+    select: { id: true, name: true },
+  });
+  await db.canvasFolder.upsert({
+    where: {
+      projectId_channelId_name: {
+        projectId: channel.projectId,
+        channelId,
+        name: SDLC_HUB_KNOWLEDGE_FOLDER,
+      },
+    },
+    create: {
+      workspaceId: actor.workspaceId,
+      projectId: channel.projectId,
+      channelId,
+      name: SDLC_HUB_KNOWLEDGE_FOLDER,
+      createdBy: actor.userId,
+    },
+    update: {},
+  });
+  await ensureHubKnowledgeFolder(db, actor, channelId);
+  await ensureHubWikiFolder(db, actor, channelId);
+  for (const repo of repos) {
+    await ensureRepositoryWikiFolder(db, actor, channelId, repo);
+  }
+  return { channelId, folderId: await ensureHubFolder(actor, channelId, channel.name) };
+}
+
+/** A workspace admin running backfill may not be in the hub, hence the oldest-admin fallback. */
+async function hubAuthor(actor: SdlcActor, channelId: string, current?: string): Promise<string> {
+  const candidates = [current, actor.userId].filter((userId): userId is string => Boolean(userId));
+  const participants = await db.channelParticipant.findMany({
+    where: { channelId, OR: [{ userId: { in: candidates } }, { role: ChannelRole.ADMIN }] },
+    orderBy: { joinedAt: 'asc' },
+    select: { userId: true, role: true },
+  });
+  const member = candidates.find((userId) => participants.some((participant) => participant.userId === userId));
+  const author = member ?? participants.find((participant) => participant.role === ChannelRole.ADMIN)?.userId;
+  if (!author) throw new AppError(`SDLC hub ${channelId} has no admin for its workflows to act as`, 409);
+  return author;
+}
+
+async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkflow): Promise<string> {
+  const record = await workflowRuntime.createWorkflow(
+    { userId: actor.userId, workspaceId: actor.workspaceId },
+    {
+      name: workflow.name,
+      config: workflow.build(hub.channelId),
+      folderId: hub.folderId,
+      metadata: { [SDLC_AUTHOR_METADATA_KEY]: await hubAuthor(actor, hub.channelId) },
+      attributes: { workspaceId: actor.workspaceId, createdByUserId: actor.userId },
+    },
+  );
+  try {
+    await db.sdlcEntityLink.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        channelId: hub.channelId,
+        sourceType: 'CHANNEL',
+        sourceId: hub.channelId,
+        targetType: 'WORKFLOW',
+        targetId: record.id,
+        relationType: workflow.relation,
+        createdBy: actor.userId,
+      },
+    });
+  } catch (error) {
+    // Unlinked, the next seed would add a second copy.
+    await db.workflow.delete({ where: { id: record.id } }).catch(() => undefined);
+    throw error;
+  }
+  logger.info(`[SDLC] seeded "${workflow.name}" workflow ${record.id} for hub ${hub.channelId}`);
+  return record.id;
 }
 
 export interface SeedHubWorkflowResult {
   status: 'seeded' | 'reset' | 'skipped';
-  workflowId?: string;
 }
 
 /** Call after createChannel commits: createWorkflow cannot join a Prisma transaction. */
@@ -130,72 +205,50 @@ export async function seedHubWorkflow(
   actor: SdlcActor,
   channelId: string,
 ): Promise<SeedHubWorkflowResult> {
-  if (await findHubWorkflowLink(channelId)) return { status: 'skipped' };
-
-  const { hubName, repoIds } = await hubTargets(channelId);
-  const folderId = await ensureHubFolder(actor, channelId, hubName);
-  const workflowId = await workflowRuntime.createWorkflow(
-    { userId: actor.userId, workspaceId: actor.workspaceId },
-    {
-      name: WORKFLOW_NAME,
-      config: buildRepoKnowledgeConfig({ channelId, repoIds }),
-      folderId,
-      metadata: { [SDLC_AUTHOR_METADATA_KEY]: actor.userId },
-      attributes: { workspaceId: actor.workspaceId, createdByUserId: actor.userId },
-    },
-  ).then((record) => record.id);
-
-  await db.sdlcEntityLink.create({
-    data: {
-      workspaceId: actor.workspaceId,
-      channelId,
-      sourceType: 'CHANNEL',
-      sourceId: channelId,
-      targetType: 'WORKFLOW',
-      targetId: workflowId,
-      relationType: SDLC_WORKFLOW_RELATION,
-      createdBy: actor.userId,
-    },
-  });
-
-  logger.info(`[SDLC] seeded Repo Knowledge workflow ${workflowId} for hub ${channelId}`);
-  return { status: 'seeded', workflowId };
+  const hub = await prepareHub(actor, channelId);
+  let seeded = false;
+  for (const workflow of HUB_WORKFLOWS) {
+    if (await findHubWorkflowLink(channelId, workflow.relation)) continue;
+    await createHubWorkflow(actor, hub, workflow);
+    seeded = true;
+  }
+  return { status: seeded ? 'seeded' : 'skipped' };
 }
 
 export async function resetHubWorkflow(
   actor: SdlcActor,
   channelId: string,
 ): Promise<SeedHubWorkflowResult> {
-  const link = await findHubWorkflowLink(channelId);
-  if (!link) return seedHubWorkflow(actor, channelId);
-
-  // Replace only a missing workflow: dropping the edge on other errors orphans its runs.
-  const existing = await db.workflow.findUnique({
-    where: { id: link.targetId },
-    select: { id: true },
-  });
-  if (!existing) {
-    logger.warn(`[SDLC] hub ${channelId} workflow ${link.targetId} is gone, reseeding`);
-    await db.sdlcEntityLink.delete({ where: { id: link.id } });
-    return seedHubWorkflow(actor, channelId);
+  const hub = await prepareHub(actor, channelId);
+  for (const workflow of HUB_WORKFLOWS) {
+    const link = await findHubWorkflowLink(channelId, workflow.relation);
+    // Replace only a missing workflow: dropping the edge on other errors orphans its runs.
+    const existing = link
+      ? await db.workflow.findUnique({ where: { id: link.targetId }, select: { id: true, metadata: true } })
+      : null;
+    if (!existing) {
+      if (link) {
+        logger.warn(`[SDLC] hub ${channelId} workflow ${link.targetId} is gone, reseeding`);
+        await db.sdlcEntityLink.delete({ where: { id: link.id } });
+      }
+      await createHubWorkflow(actor, hub, workflow);
+      continue;
+    }
+    await workflowRuntime.updateWorkflow(
+      { userId: actor.userId, workspaceId: actor.workspaceId },
+      existing.id,
+      {
+        name: workflow.name,
+        config: workflow.build(channelId),
+        folderId: hub.folderId,
+        metadata: {
+          [SDLC_AUTHOR_METADATA_KEY]: await hubAuthor(actor, channelId, sdlcAuthorOf(existing.metadata)),
+        },
+      },
+    );
+    logger.info(`[SDLC] reset "${workflow.name}" workflow ${existing.id} for hub ${channelId}`);
   }
-
-  const { hubName, repoIds } = await hubTargets(channelId);
-  const folderId = await ensureHubFolder(actor, channelId, hubName);
-
-  await workflowRuntime.updateWorkflow(
-    { userId: actor.userId, workspaceId: actor.workspaceId },
-    link.targetId,
-    {
-      name: WORKFLOW_NAME,
-      config: buildRepoKnowledgeConfig({ channelId, repoIds }),
-      folderId,
-      metadata: { [SDLC_AUTHOR_METADATA_KEY]: actor.userId },
-    },
-  );
-
-  logger.info(`[SDLC] reset Repo Knowledge workflow ${link.targetId} for hub ${channelId}`);
-  return { status: 'reset', workflowId: link.targetId };
+  return { status: 'reset' };
 }
 
 export interface BackfillResult {

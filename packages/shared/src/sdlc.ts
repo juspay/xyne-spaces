@@ -1,44 +1,10 @@
 import { z } from "zod";
 
-export const SDLC_BASELINE_KINDS = [
-  "CORE_CODE_MAP",
-  "FRONTEND_DESIGN_SYSTEM",
-  "BACKEND_DESIGN_SYSTEM",
-  "CODE_LINT_STANDARDS",
-  "COMMIT_STANDARDS",
-  "RUN_GUIDE",
-  "TEST_GUIDE",
-] as const;
+/** A Hub Knowledge document's sdlc_artifacts.artifactType. */
+export const SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE = "HUB_KNOWLEDGE";
 
-export const SDLC_BASELINE_COUNT = SDLC_BASELINE_KINDS.length;
-
-export const sdlcBaselineKindSchema = z.enum(SDLC_BASELINE_KINDS);
-export type SdlcBaselineKind = z.infer<typeof sdlcBaselineKindSchema>;
-
-export const SDLC_ARTIFACT_KINDS = ["BASELINE"] as const;
-export const sdlcArtifactKindSchema = z.enum(SDLC_ARTIFACT_KINDS);
-export type SdlcArtifactKind = z.infer<typeof sdlcArtifactKindSchema>;
-
-export const SDLC_CANVAS_TYPES = ["WIKI", ...SDLC_BASELINE_KINDS] as const;
-export type SdlcCanvasType = (typeof SDLC_CANVAS_TYPES)[number];
-
-export const BASELINE_CANVAS_TYPES: ReadonlySet<string> = new Set(
-  SDLC_BASELINE_KINDS,
-);
-
-export function isBaselineCanvasType(
-  value: string | null | undefined,
-): value is SdlcBaselineKind {
-  return typeof value === "string" && BASELINE_CANVAS_TYPES.has(value);
-}
-
-export function canvasTypeForSdlcArtifact(
-  baselineKind?: SdlcBaselineKind | null,
-): SdlcCanvasType {
-  if (!baselineKind) {
-    throw new Error("Baseline artifacts require a baselineKind");
-  }
-  return baselineKind;
+export function isHubKnowledgeArtifactType(value: string | null | undefined): boolean {
+  return value === SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE;
 }
 
 export const CANVAS_STATUS_ACTIVE = "ACTIVE";
@@ -139,10 +105,14 @@ export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
 export const SDLC_ARTIFACT_REPOSITORY_RELATION = "CONTEXT";
 
-/** Still "Baseline" on disk: renaming needs a migration across every hub. */
-export const SDLC_REPO_KNOWLEDGE_FOLDER = "Baseline";
+export const SDLC_HUB_KNOWLEDGE_FOLDER = "Hub Knowledge";
+
+export function sdlcHubKnowledgeFolderId(channelId: string): string {
+  return `sdlc-knowledge-${channelId}`;
+}
 
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
+export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
 
 export const SDLC_ACTIVE_RUN_STATUSES = [
   "NEW",
@@ -165,6 +135,27 @@ export function sdlcHubWorkflowFolderId(channelId: string): string {
  * parent is on the source side.
  */
 export const SDLC_CONTAINMENT_RELATION = "TRACK_ITEM";
+
+/** Separate from TRACK_ITEM so the hub link graph leaves the Wiki trees out and users cannot move them. */
+export const SDLC_HUB_ITEM_RELATION = "HUB_ITEM";
+
+/** A scope folder -> every item under it, so one repository's wiki is one lookup. */
+export const SDLC_HUB_ITEM_FLAT_RELATION = "HUB_ITEM_SECONDARY";
+
+export const SDLC_WIKI_FOLDER = "Wiki";
+export const SDLC_HUB_WIKI_FOLDER = "Hub";
+
+export function sdlcWikiFolderId(channelId: string): string {
+  return `sdlc-wiki-${channelId}`;
+}
+
+export function sdlcRepositoryWikiFolderId(channelId: string, repoId: string): string {
+  return `sdlc-wiki-${channelId}-${repoId}`;
+}
+
+export function sdlcHubWikiFolderId(channelId: string): string {
+  return `sdlc-wiki-hub-${channelId}`;
+}
 
 /**
  * What the folder tree renders. Tickets ride the same relationType from a track
@@ -189,6 +180,9 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_WORKFLOW_RELATION,
+  SDLC_WIKI_WORKFLOW_RELATION,
+  SDLC_HUB_ITEM_RELATION,
+  SDLC_HUB_ITEM_FLAT_RELATION,
 ] as const;
 
 /**
@@ -203,6 +197,9 @@ export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_WORKFLOW_RELATION,
+  SDLC_WIKI_WORKFLOW_RELATION,
+  SDLC_HUB_ITEM_RELATION,
+  SDLC_HUB_ITEM_FLAT_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */
@@ -211,7 +208,6 @@ export const SDLC_CONTENT_RELATION_TYPES = [
   "CONTEXT",
   "PULL_REQUEST",
   "DISCUSSION",
-  "WIKI_RUN",
   "TRACK_ITEM",
   "CALL",
 ] as const;
@@ -283,20 +279,6 @@ export const sdlcCallLinkSchema = z.object({
 });
 export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
 
-export const SDLC_SETUP_STATUSES = [
-  "NOT_STARTED",
-  "QUEUED",
-  "CLONING",
-  "GENERATING",
-  "PARTIALLY_FAILED",
-  "CANCELLED",
-  "READY_FOR_REVIEW",
-  "APPROVED",
-] as const;
-
-export const sdlcSetupStatusSchema = z.enum(SDLC_SETUP_STATUSES);
-export type SdlcSetupStatus = z.infer<typeof sdlcSetupStatusSchema>;
-
 export const createSdlcChannelSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
@@ -348,119 +330,6 @@ export type CheckSdlcRepositoryAccessInput = z.infer<
   typeof checkSdlcRepositoryAccessSchema
 >;
 
-export const SDLC_WIKI_HISTORY_PERCENTAGES = [20, 50] as const;
-export const sdlcWikiHistoryPercentageSchema = z.union([
-  z.literal(20),
-  z.literal(50),
-]);
-export type SdlcWikiHistoryPercentage = z.infer<
-  typeof sdlcWikiHistoryPercentageSchema
->;
-
-export const sdlcWikiHistoryRangeSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("LAST_PERCENT"),
-    percent: sdlcWikiHistoryPercentageSchema,
-  }),
-  z.object({ kind: z.literal("FULL") }),
-  z.object({
-    kind: z.literal("CUSTOM_SHA"),
-    sha: z
-      .string()
-      .trim()
-      .regex(/^[0-9a-f]{40}$/i),
-  }),
-]);
-export type SdlcWikiHistoryRange = z.infer<typeof sdlcWikiHistoryRangeSchema>;
-
-export const SDLC_WIKI_CHUNK_SIZES = [1, 10, 25, 50, 100] as const;
-export const sdlcWikiChunkSizeSchema = z.union([
-  z.literal(1),
-  z.literal(10),
-  z.literal(25),
-  z.literal(50),
-  z.literal(100),
-]);
-export type SdlcWikiChunkSize = z.infer<typeof sdlcWikiChunkSizeSchema>;
-
-export const SDLC_WIKI_QUALITIES = ["QUICK", "STANDARD"] as const;
-export const sdlcWikiQualitySchema = z.enum(SDLC_WIKI_QUALITIES);
-export type SdlcWikiQuality = z.infer<typeof sdlcWikiQualitySchema>;
-
-export const SDLC_WIKI_RUN_PHASES = [
-  "QUEUED",
-  "PREPARING",
-  "BOOTSTRAPPING",
-  "PROCESSING",
-  "VALIDATING",
-  "CORRECTING",
-  "COMPLETED",
-  "PARTIALLY_FAILED",
-  "CANCELLED",
-] as const;
-export const sdlcWikiRunPhaseSchema = z.enum(SDLC_WIKI_RUN_PHASES);
-export type SdlcWikiRunPhase = z.infer<typeof sdlcWikiRunPhaseSchema>;
-
-export const SDLC_WIKI_ERROR_CODES = [
-  "ACCESS_NOT_READY",
-  "ACTIVE_RUN_EXISTS",
-  "RUN_NOT_FOUND",
-  "RUN_NOT_RETRYABLE",
-  "RUN_CANCELLED",
-  "INVALID_HISTORY_RANGE",
-  "COMMIT_NOT_ASSIGNED",
-  "COMMIT_OUT_OF_ORDER",
-  "SESSION_MISMATCH",
-  "CONTENT_CONFLICT",
-  "INVALID_SOURCE_PATH",
-  "PARTIAL_APPLY",
-] as const;
-export const sdlcWikiErrorCodeSchema = z.enum(SDLC_WIKI_ERROR_CODES);
-export type SdlcWikiErrorCode = z.infer<typeof sdlcWikiErrorCodeSchema>;
-
-export const SDLC_WIKI_ROOT_BOOTSTRAP_REF = "ROOT_BOOTSTRAP" as const;
-export const sdlcWikiCommitRefSchema = z.union([
-  z
-    .string()
-    .trim()
-    .regex(/^[0-9a-f]{40}$/i),
-  z.literal(SDLC_WIKI_ROOT_BOOTSTRAP_REF),
-]);
-export type SdlcWikiCommitRef = z.infer<typeof sdlcWikiCommitRefSchema>;
-
-export const sdlcWikiAgentCommitRefSchema = z.union([
-  z
-    .string()
-    .trim()
-    .regex(/^[0-9a-f]{9,40}$/i),
-  z.literal(SDLC_WIKI_ROOT_BOOTSTRAP_REF),
-]);
-
-export const startSdlcWikiRunSchema = z.object({
-  historyRange: sdlcWikiHistoryRangeSchema.default({ kind: "FULL" }),
-  chunkSize: sdlcWikiChunkSizeSchema.default(1),
-  quality: sdlcWikiQualitySchema.default("STANDARD"),
-});
-export type StartSdlcWikiRunInput = z.infer<typeof startSdlcWikiRunSchema>;
-
-export const refreshSdlcWikiRunSchema = z.object({
-  chunkSize: sdlcWikiChunkSizeSchema.default(1),
-  quality: sdlcWikiQualitySchema.default("STANDARD"),
-});
-export type RefreshSdlcWikiRunInput = z.infer<typeof refreshSdlcWikiRunSchema>;
-
-const sdlcWikiPagePathSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(512)
-  .regex(
-    /^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i,
-    "Use a normalized relative Markdown path",
-  );
-const sdlcWikiSourcePathsSchema = z
-  .array(z.string().trim().min(1).max(1024))
-  .max(500);
 export const sdlcSourceReferenceInputSchema = z.object({
   path: z.string().trim().min(1).max(1024),
   symbol: z.string().trim().min(1).max(512).optional(),
@@ -476,204 +345,79 @@ export const sdlcSourceReferencesSchema = z
   .max(500)
   .optional();
 
-const sdlcWikiSourceReferencesSchema = sdlcSourceReferencesSchema;
-
-const sdlcWikiRevisionSourceReferenceSchema = z.object({
-  path: z.string().trim().min(1).max(1024),
-  commitSha: sdlcWikiCommitRefSchema,
-  symbol: z.string().trim().min(1).max(512).optional(),
-  startLine: z.number().int().positive().optional(),
-  endLine: z.number().int().positive().optional(),
-});
-
-const sdlcWikiCreateActionSchema = z.object({
-  action: z.literal("create"),
-  path: sdlcWikiPagePathSchema,
-  title: z.string().trim().min(1).max(255),
-  markdown: z.string().min(1).max(5_000_000),
-  sourcePaths: sdlcWikiSourcePathsSchema.min(1),
-  sourceReferences: sdlcWikiSourceReferencesSchema,
-});
-const sdlcWikiWriteActionFields = {
-  path: sdlcWikiPagePathSchema,
-  expectedContentHash: z.string().trim().min(1).max(128),
-  title: z.string().trim().min(1).max(255),
-  markdown: z.string().min(1).max(5_000_000),
-  sourcePaths: sdlcWikiSourcePathsSchema.min(1),
-  sourceReferences: sdlcWikiSourceReferencesSchema,
-};
-const sdlcWikiUpdateActionSchema = z.object({
-  action: z.literal("update"),
-  ...sdlcWikiWriteActionFields,
-});
-const sdlcWikiRestoreActionSchema = z.object({
-  action: z.literal("restore"),
-  ...sdlcWikiWriteActionFields,
-});
-const sdlcWikiArchiveActionSchema = z.object({
-  action: z.literal("archive"),
-  path: sdlcWikiPagePathSchema,
-  expectedContentHash: z.string().trim().min(1).max(128),
-  sourcePaths: sdlcWikiSourcePathsSchema,
-  sourceReferences: sdlcWikiSourceReferencesSchema,
-});
-const sdlcWikiSectionActionFields = {
-  path: sdlcWikiPagePathSchema,
-  expectedContentHash: z.string().trim().min(1).max(128),
-  heading: z.string().trim().min(1).max(255),
-  sourcePaths: sdlcWikiSourcePathsSchema.min(1),
-  sourceReferences: sdlcWikiSourceReferencesSchema,
-};
-const sdlcWikiReplaceSectionActionSchema = z.object({
-  action: z.literal("replace_section"),
-  ...sdlcWikiSectionActionFields,
-  markdown: z.string().min(1).max(1_000_000),
-});
-const sdlcWikiInsertSectionActionSchema = z.object({
-  action: z.literal("insert_section"),
-  ...sdlcWikiSectionActionFields,
-  markdown: z.string().min(1).max(1_000_000),
-});
-const sdlcWikiRemoveSectionActionSchema = z.object({
-  action: z.literal("remove_section"),
-  ...sdlcWikiSectionActionFields,
-  markdown: z.string().min(1).max(1_000_000).optional(),
-});
+const sdlcWikiFolderPathSchema = z
+  .string()
+  .trim()
+  .max(512)
+  .describe('Folders under the wiki scope, separated by "/". Empty is the scope root.');
+const sdlcWikiTitleSchema = z.string().trim().min(1).max(255);
+const sdlcWikiHeadingSchema = z.string().trim().min(1).max(255);
+const sdlcWikiCanvasIdSchema = z.string().min(1);
 
 export const sdlcWikiPageActionSchema = z.discriminatedUnion("action", [
-  sdlcWikiCreateActionSchema,
-  sdlcWikiUpdateActionSchema,
-  sdlcWikiRestoreActionSchema,
-  sdlcWikiArchiveActionSchema,
-  sdlcWikiReplaceSectionActionSchema,
-  sdlcWikiInsertSectionActionSchema,
-  sdlcWikiRemoveSectionActionSchema,
+  z.object({
+    action: z.literal("create"),
+    folderPath: sdlcWikiFolderPathSchema.optional(),
+    title: sdlcWikiTitleSchema,
+    markdown: z.string().min(1).max(5_000_000),
+  }),
+  z.object({
+    action: z.literal("update"),
+    canvasId: sdlcWikiCanvasIdSchema,
+    title: sdlcWikiTitleSchema.optional(),
+    markdown: z.string().min(1).max(5_000_000),
+  }),
+  z.object({
+    action: z.literal("replace_section"),
+    canvasId: sdlcWikiCanvasIdSchema,
+    heading: sdlcWikiHeadingSchema,
+    markdown: z.string().min(1).max(1_000_000),
+  }),
+  z.object({
+    action: z.literal("insert_section"),
+    canvasId: sdlcWikiCanvasIdSchema,
+    heading: sdlcWikiHeadingSchema,
+    markdown: z.string().min(1).max(1_000_000),
+  }),
+  z.object({
+    action: z.literal("remove_section"),
+    canvasId: sdlcWikiCanvasIdSchema,
+    heading: sdlcWikiHeadingSchema,
+  }),
+  z.object({ action: z.literal("archive"), canvasId: sdlcWikiCanvasIdSchema }),
+  z.object({ action: z.literal("restore"), canvasId: sdlcWikiCanvasIdSchema }),
+  z.object({
+    action: z.literal("move"),
+    canvasId: sdlcWikiCanvasIdSchema,
+    folderPath: sdlcWikiFolderPathSchema,
+    title: sdlcWikiTitleSchema.optional(),
+  }),
 ]);
 export type SdlcWikiPageAction = z.infer<typeof sdlcWikiPageActionSchema>;
 
-export const beginSdlcWikiCheckpointSchema = z.object({
-  executionId: z.string().min(1),
-  commitSha: sdlcWikiAgentCommitRefSchema,
+const sdlcWikiScopeSchema = z.object({
+  workspaceId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  channelId: z.string().min(1),
+  // Absent is the Hub Wiki.
+  repoId: z.string().min(1).optional(),
 });
-export type BeginSdlcWikiCheckpointInput = z.infer<
-  typeof beginSdlcWikiCheckpointSchema
->;
 
-export const writeSdlcWikiPageSchema = z.object({
-  executionId: z.string().min(1),
-  commitSha: sdlcWikiAgentCommitRefSchema,
+export const listSdlcWikiPagesSchema = sdlcWikiScopeSchema.extend({
+  includeArchived: z.boolean().optional(),
+});
+export type ListSdlcWikiPagesInput = z.infer<typeof listSdlcWikiPagesSchema>;
+
+export const writeSdlcWikiPageSchema = sdlcWikiScopeSchema.extend({
+  generationCommit: z.string().trim().min(1).max(255).optional(),
   page: sdlcWikiPageActionSchema,
 });
 export type WriteSdlcWikiPageInput = z.infer<typeof writeSdlcWikiPageSchema>;
 
-export const moveSdlcWikiPageSchema = z.object({
-  executionId: z.string().min(1),
-  commitSha: sdlcWikiAgentCommitRefSchema,
-  sourcePath: sdlcWikiPagePathSchema,
-  destinationPath: sdlcWikiPagePathSchema,
-  expectedContentHash: z.string().trim().min(1).max(128),
-  title: z.string().trim().min(1).max(255).optional(),
+const sdlcRunAuthoritySchema = z.object({
+  interactiveGrant: z.string().min(1),
+  conversationId: z.string().min(1),
 });
-export type MoveSdlcWikiPageInput = z.infer<typeof moveSdlcWikiPageSchema>;
-
-export const finalizeSdlcWikiCommitSchema = z.object({
-  executionId: z.string().min(1),
-  commitSha: sdlcWikiAgentCommitRefSchema,
-  outcome: z.enum(["changes", "noop"]),
-  summary: z.string().trim().min(1).max(4_000),
-});
-export type FinalizeSdlcWikiCommitInput = z.infer<
-  typeof finalizeSdlcWikiCommitSchema
->;
-
-export const sdlcWikiValidatorReportSchema = z.object({
-  complete: z.boolean(),
-  missingTopics: z.array(z.string().trim().min(1).max(1_000)).max(100),
-  issues: z.array(z.string().trim().min(1).max(1_000)).max(100),
-  suggestions: z.array(z.string().trim().min(1).max(1_000)).max(100),
-});
-export type SdlcWikiValidatorReport = z.infer<
-  typeof sdlcWikiValidatorReportSchema
->;
-
-export const sdlcWikiRevisionEvidenceSchema = z.object({
-  action: z.enum([
-    "created",
-    "updated",
-    "archived",
-    "restored",
-    "refined",
-    "moved",
-  ]),
-  commitSha: sdlcWikiCommitRefSchema,
-  canvasId: z.string().min(1),
-  canvasVersionId: z.string().min(1),
-  contentHash: z.string().trim().min(1).max(128),
-  sourcePaths: sdlcWikiSourcePathsSchema,
-  path: sdlcWikiPagePathSchema.optional(),
-  title: z.string().trim().min(1).max(500).optional(),
-  archived: z.boolean().optional(),
-  sourceReferences: z
-    .array(sdlcWikiRevisionSourceReferenceSchema)
-    .max(500)
-    .optional(),
-});
-export type SdlcWikiRevisionEvidence = z.infer<
-  typeof sdlcWikiRevisionEvidenceSchema
->;
-
-export const sdlcWikiCommitOutcomeSchema = z.object({
-  commitSha: sdlcWikiCommitRefSchema,
-  status: z.enum(["updated", "noop"]),
-  revisions: z.array(sdlcWikiRevisionEvidenceSchema),
-  completedAt: z.string().datetime(),
-});
-export type SdlcWikiCommitOutcome = z.infer<typeof sdlcWikiCommitOutcomeSchema>;
-
-export const SDLC_WIKI_FRESHNESS = ["CURRENT", "STALE", "UNKNOWN"] as const;
-export const sdlcWikiFreshnessSchema = z.enum(SDLC_WIKI_FRESHNESS);
-export type SdlcWikiFreshness = z.infer<typeof sdlcWikiFreshnessSchema>;
-
-export interface SdlcWikiRunProgress {
-  phase: SdlcWikiRunPhase;
-  total: number;
-  processed: number;
-  updated: number;
-  noop: number;
-  failed: number;
-  aggregated?: number;
-  cursorSha: string | null;
-  targetHeadSha: string | null;
-  error: string | null;
-  recovery?: {
-    attempts: number;
-    noProgressAttempts: number;
-    lastCause: string;
-    lastCauseAt: string;
-  };
-  windows?: {
-    total: number;
-    completed: number;
-    updated: number;
-    noop: number;
-    failed: number;
-    intermediate: number;
-  };
-  currentWindowBeforeSha?: string | null;
-  currentWindowAfterSha?: string | null;
-  activeCheckpointSha?: string | null;
-}
-
-const sdlcRunAuthoritySchema = z.union([
-  z.object({
-    executionId: z.string().min(1),
-    sessionId: z.string().min(1),
-  }),
-  z.object({
-    interactiveGrant: z.string().min(1),
-    conversationId: z.string().min(1),
-  }),
-]);
 
 export const createSdlcPullRequestSchema = z
   .object({
@@ -709,7 +453,7 @@ export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
     agentSlug: z.literal(SDLC_AGENT_SLUG),
     repoId: z.string().min(1),
-    operation: z.enum(["CLONE", "PUSH", "INTERACTIVE"]),
+    operation: z.literal("INTERACTIVE"),
     sandboxId: z.string().min(1).max(256),
     sandboxPublicKey: z.string().min(32).max(1024),
   })
@@ -728,51 +472,18 @@ export function sdlcRepoIds(input: {
   return input.repoId ? [input.repoId] : [];
 }
 
-export const createSdlcClawArtifactSchema = z
-  .object({
-    repoId: z.string().min(1).optional(),
-    repoIds: sdlcRepoIdsSchema,
-    // The hub to write into. A repository sits in several, so it cannot be inferred.
-    channelId: z.string().min(1).optional(),
-    kind: sdlcArtifactKindSchema.optional(),
-    folderId: z.string().min(1).optional(),
-    title: z.string().trim().min(1).max(255),
-    markdown: z.string().min(1).max(5_000_000),
-    baselineKind: sdlcBaselineKindSchema.optional(),
-    setupExecutionId: z.string().min(1).optional(),
-    workflowExecutionId: z.string().min(1).optional(),
-    relatedCanvasIds: z.array(z.string().min(1)).optional(),
-    trackId: z.string().min(1).optional(),
-    generationCommit: z.string().trim().max(255).optional(),
-    sourceReferences: sdlcSourceReferencesSchema,
-  })
-  .superRefine((value, ctx) => {
-    if (
-      value.kind === "BASELINE" &&
-      (!value.baselineKind ||
-        !value.setupExecutionId ||
-        !value.workflowExecutionId)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "Baseline artifacts require baselineKind, setupExecutionId, and workflowExecutionId",
-      });
-    }
-    if (value.kind === "BASELINE" && sdlcRepoIds(value).length !== 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Baseline artifacts belong to exactly one repository",
-      });
-    }
-    const isArtifact = value.kind !== "BASELINE";
-    if (isArtifact && !value.folderId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Artifact creation requires a folderId (the artifact type)",
-      });
-    }
-  });
+export const createSdlcClawArtifactSchema = z.object({
+  repoId: z.string().min(1).optional(),
+  repoIds: sdlcRepoIdsSchema,
+  // The hub to write into. A repository sits in several, so it cannot be inferred.
+  channelId: z.string().min(1).optional(),
+  folderId: z.string().min(1),
+  title: z.string().trim().min(1).max(255),
+  markdown: z.string().min(1).max(5_000_000),
+  relatedCanvasIds: z.array(z.string().min(1)).optional(),
+  trackId: z.string().min(1).optional(),
+  sourceReferences: sdlcSourceReferencesSchema,
+});
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
 >;
@@ -787,35 +498,6 @@ export const updateSdlcClawArtifactSchema = z.object({
 });
 export type UpdateSdlcClawArtifactInput = z.infer<
   typeof updateSdlcClawArtifactSchema
->;
-
-export const updateSdlcBaselineDraftSchema = z
-  .object({
-    repoId: z.string().min(1),
-    baselineKind: sdlcBaselineKindSchema,
-    setupExecutionId: z.string().min(1),
-    workflowExecutionId: z.string().min(1),
-    title: z.string().trim().min(1).max(255),
-    action: z.enum(["begin", "upsert_section", "finalize"]),
-    sectionKey: z.string().trim().min(1).max(80).optional(),
-    sectionTitle: z.string().trim().min(1).max(255).optional(),
-    markdown: z.string().min(1).max(1_000_000).optional(),
-    sourceReferences: sdlcSourceReferencesSchema,
-  })
-  .superRefine((value, ctx) => {
-    if (
-      value.action === "upsert_section" &&
-      (!value.sectionKey || !value.sectionTitle || !value.markdown)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "Section updates require sectionKey, sectionTitle, and markdown",
-      });
-    }
-  });
-export type UpdateSdlcBaselineDraftInput = z.infer<
-  typeof updateSdlcBaselineDraftSchema
 >;
 
 export const createSdlcLinkSchema = z.object({
@@ -872,7 +554,7 @@ export function inferRepositoryNameFromUrl(raw: string): string | null {
 export const SDLC_SECTIONS = [
   "overview",
   "wiki",
-  "baseline",
+  "knowledge",
   "tracks",
   "tickets",
   "artifacts",
@@ -899,12 +581,12 @@ export function parseSdlcNavTarget(value: unknown): SdlcNavTarget | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** Baselines and the wiki get their own sections; every other artifact a folder. */
+/** Hub Knowledge and the wiki get their own sections; every other artifact a folder. */
 export function sdlcSectionForCanvas(
   artifactType: string | null | undefined,
   folderId: string | null | undefined,
 ): { section: SdlcSection; folderId?: string } {
-  if (isBaselineCanvasType(artifactType)) return { section: "baseline" };
+  if (isHubKnowledgeArtifactType(artifactType)) return { section: "knowledge" };
   if (artifactType === "WIKI") return { section: "wiki" };
   return { section: "artifacts", ...(folderId ? { folderId } : {}) };
 }
@@ -944,100 +626,27 @@ export function buildSdlcPath(target: SdlcNavTarget): string {
 
 const nullableNonEmpty = z.string().min(1).nullable();
 
-export const SDLC_AGENT_OPERATIONS = [
-  "interactive",
-  "baseline",
-  "artifact",
-  "work",
-  "wiki",
-] as const;
+export const SDLC_AGENT_OPERATIONS = ["interactive"] as const;
 export const sdlcAgentOperationSchema = z.enum(SDLC_AGENT_OPERATIONS);
 export type SdlcAgentOperation = z.infer<typeof sdlcAgentOperationSchema>;
 
-export const SDLC_WIKI_AGENT_ROLES = [
-  "BOOTSTRAP_SURVEY",
-  "BOOTSTRAP_PAGE",
-  "BOOTSTRAP_EDITOR",
-  "BOOTSTRAP",
-  "GENERATOR",
-  "ARCHITECTURE_VALIDATOR",
-  "CORRECTOR",
-] as const;
-export const sdlcWikiAgentRoleSchema = z.enum(SDLC_WIKI_AGENT_ROLES);
-export type SdlcWikiAgentRole = z.infer<typeof sdlcWikiAgentRoleSchema>;
-
-
-export const sdlcAgentContextSchema = z
-  .object({
-    version: z.literal(1),
-    operation: sdlcAgentOperationSchema,
-    workspaceId: z.string().min(1),
-    projectId: z.string().min(1),
-    channelId: z.string().min(1),
-    actorUserId: z.string().min(1),
-    repository: z
-      .object({
-        id: z.string().min(1),
-        name: z.string().min(1),
-        url: z.string().min(1),
-        baseBranch: z.string().min(1),
-      })
-      .optional(),
-    permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
-    gates: z.object({
-      capabilities: z.array(z.unknown()),
-      allBaselinesApproved: z.boolean(),
-    }),
-    execution: z.object({
-      workflowExecutionId: nullableNonEmpty,
-      sessionId: nullableNonEmpty,
-      conversationId: nullableNonEmpty,
-    }),
-    interactiveGrant: nullableNonEmpty.optional(),
-    artifact: z.object({
-      kind: nullableNonEmpty,
-      id: nullableNonEmpty,
-      sourceType: nullableNonEmpty,
-      sourceId: nullableNonEmpty,
-    }),
-    ticketId: nullableNonEmpty.optional(),
-    setupExecutionId: nullableNonEmpty.optional(),
-    baselineKind: sdlcBaselineKindSchema.nullable().optional(),
-    generationCommit: nullableNonEmpty.optional(),
-    wiki: z
-      .object({
-        role: sdlcWikiAgentRoleSchema.nullable(),
-        assignedCommitShas: z.array(z.string()),
-        bootstrapRef: z.string().nullable(),
-        targetHeadSha: z.string().nullable(),
-      })
-      .optional(),
-  })
-  .superRefine((context, ctx) => {
-    const fail = (message: string) =>
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
-    const hasExecution =
-      Boolean(context.execution.workflowExecutionId) && Boolean(context.execution.sessionId);
-
-    switch (context.operation) {
-      case "baseline":
-        if (!context.setupExecutionId) fail("setupExecutionId is required for baseline runs");
-        if (!context.baselineKind) fail("baselineKind is required for baseline runs");
-        if (!hasExecution) fail("baseline runs require a bound execution");
-        break;
-      case "artifact":
-        if (!hasExecution) fail("artifact runs require a bound execution");
-        break;
-      case "work":
-        if (!context.ticketId) fail("ticketId is required for work runs");
-        if (!hasExecution) fail("work runs require a bound execution");
-        break;
-      case "interactive":
-        if (!context.execution.conversationId) fail("interactive runs require a conversationId");
-        if (!context.interactiveGrant) fail("interactive runs require an interactiveGrant");
-        break;
-      case "wiki":
-        break;
-    }
-  });
+export const sdlcAgentContextSchema = z.object({
+  version: z.literal(1),
+  operation: sdlcAgentOperationSchema,
+  workspaceId: z.string().min(1),
+  projectId: z.string().min(1),
+  channelId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  repository: z
+    .object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      url: z.string().min(1),
+      baseBranch: z.string().min(1),
+    })
+    .optional(),
+  execution: z.object({ conversationId: z.string().min(1) }),
+  interactiveGrant: z.string().min(1),
+  generationCommit: nullableNonEmpty.optional(),
+});
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;

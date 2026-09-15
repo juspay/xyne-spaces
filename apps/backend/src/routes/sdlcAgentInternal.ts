@@ -1,8 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z } from 'zod';
 import { resolveSdlcAgentRepositorySchema } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { SdlcHubService } from '@/sdlc';
+import { readHubKnowledge } from '@/sdlc/hubKnowledge';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
@@ -39,6 +41,21 @@ router.post(
       input.channelId
     );
     res.status(200).json({ success: true, context });
+  }),
+);
+
+const hubKnowledgeSchema = z.object({
+  channelId: z.string().min(1),
+  actorUserId: z.string().min(1),
+});
+
+/** Claw-auth prepends these to SDLC agent chats and channel pings. */
+router.post(
+  '/hub-knowledge',
+  route(async (req, res) => {
+    const input = hubKnowledgeSchema.parse(req.body);
+    const documents = await readHubKnowledge(input.channelId, input.actorUserId);
+    res.status(200).json({ success: true, documents });
   }),
 );
 

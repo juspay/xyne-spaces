@@ -118,16 +118,30 @@ export class ClawAgentProvider
   async collect(
     payload: ResumePayload,
     record: AgentDispatchRecord,
-    _stepConfig: ClawAgentConfig,
+    stepConfig: ClawAgentConfig,
     ctx: StepExecutionContext,
   ): Promise<AgentRunResult> {
-    return collectClawResult(payload, record, ctx);
+    return collectClawResult(payload, record, stepConfig, ctx);
   }
+}
+
+/** Claw joins the agent's last text messages, so a mid-run note can precede the JSON. */
+function jsonAtEnd(text: string): string | null {
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    try {
+      JSON.parse(text.slice(start));
+      return text.slice(start);
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export async function collectClawResult(
   payload: ResumePayload,
   record: AgentDispatchRecord,
+  stepConfig: object,
   ctx: StepExecutionContext,
 ): Promise<AgentRunResult> {
   const envelope = isRecord(payload.data) ? (payload.data as ClawCallbackEnvelope) : null;
@@ -144,9 +158,12 @@ export async function collectClawResult(
     );
   }
 
-  const text = typeof envelope.result === 'string'
+  const raw = typeof envelope.result === 'string'
     ? envelope.result
     : JSON.stringify(envelope.result ?? '');
+  // The SDK passes the whole step config, outputType included.
+  const expectJson = 'outputType' in stepConfig && stepConfig.outputType === 'json';
+  const text = expectJson ? (jsonAtEnd(raw) ?? raw) : raw;
 
   return {
     text,

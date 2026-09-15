@@ -488,6 +488,7 @@ model WorkflowExecution {
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  /// @deprecated -> back-relation of the legacy repos.sdlcSetupExecutionId
   sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
@@ -629,7 +630,8 @@ model WorkflowCredential {
   workspaceId String // denormalized tenant key (stamped on insert)
   id          String @id @default(cuid())
   name        String
-  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  credType    String // the connector's credential type, e.g. BUILTIN_BEARER
+  authType    String // stored value shape: bearer | basic | custom_header | oauth2_client_credentials | secret
   data        String // ENCRYPTED JSON — auth values
   status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
   createdAt   DateTime
@@ -2281,6 +2283,7 @@ model EmailChannelPreference {
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
+  metricsGuestVisibility String?  // JSON DeskMetricsResponse.guestVisibility: what guests see on the metrics dashboard
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
   deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
   deskReportAgentSlug    String?
@@ -3308,12 +3311,14 @@ model Repo {
   projectId            String?
   /// @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links; never written since multi-repo
   channelId            String?
+  /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  /// @deprecated -> navigation for the legacy sdlcSetupExecutionId
   setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
   /// @deprecated -> back-relation of the legacy sdlc_entity_links.repoId
   sdlcEntityLinks SdlcEntityLink[]

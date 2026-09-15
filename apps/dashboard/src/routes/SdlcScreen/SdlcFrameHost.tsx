@@ -124,11 +124,12 @@ const SdlcFrameHost = (): ReactElement | null => {
     if (!isSdlcPath(location.pathname)) return;
     if (path === frameLocationRef.current) return;
 
-    // The bare hub link means "back to SDLC", so it returns to wherever the frame already is.
+    // The bare hub link means "back to SDLC", so it returns to wherever the frame
+    // already is — when that is an SDLC page, not the Workflows screen it also shows.
     const frameLocation = frameLocationRef.current;
     if (
       frameLocation &&
-      isSdlcPath(frameLocation) &&
+      /^\/[^/]+\/sdlc(\/|$)/.test(frameLocation) &&
       /^\/[^/]+\/sdlc\/?$/.test(location.pathname)
     ) {
       void navigate(frameLocation, { replace: true });

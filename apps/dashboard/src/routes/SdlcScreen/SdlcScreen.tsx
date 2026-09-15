@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -11,10 +12,10 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  ChannelRole,
   SDLC_ENTITY_TYPES,
   SDLC_RELATION_TYPES,
-  SDLC_REPO_KNOWLEDGE_FOLDER,
+  SDLC_HUB_KNOWLEDGE_FOLDER,
+  SDLC_WIKI_FOLDER,
   type SdlcEntityType,
   type SdlcRelationType,
   type SdlcCallLink,
@@ -22,7 +23,6 @@ import {
   TicketStatusV2,
   TicketPriority,
 } from '@xyne/shared';
-import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -46,7 +46,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Rocket,
   Search,
   ShieldCheck,
   Sparkles,
@@ -61,6 +60,8 @@ import { SdlcHubDialog } from './SdlcHubDialog';
 import {
   SdlcHubPicker,
   persistSdlcSectionHeights,
+  sdlcFoldedGroupHeight,
+  SdlcSidebarFitSection,
   SdlcSidebarSection,
   SdlcSidebarSectionSeparator,
 } from './SdlcHubSidebar';
@@ -98,7 +99,6 @@ import {
   ContextPickerPanel,
   type ContextSelections,
 } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
-import { useExternalDebuggerStore } from '../../store/useExternalDebuggerStore';
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import {
   isElectronApp,
@@ -108,15 +108,8 @@ import {
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { buildSdlcArtifactCreationPrompt } from './artifactCreationPrompt';
-import { shouldLoadSdlcWikiPages, shouldLoadSdlcWikiRun } from './sdlcWikiQueryPolicy';
-import {
-  SdlcWikiSection,
-  SdlcWikiSidebarTree,
-  type SdlcWikiPage,
-  type SdlcWikiRun,
-  type SdlcWikiStartInput,
-} from './SdlcWikiSection';
-import { SdlcDebuggerPanel } from './SdlcDebuggerPanel';
+import { SdlcWikiSection, SdlcWikiSidebarTree } from './SdlcWikiSection';
+import { type SdlcWikiPage, type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
@@ -131,7 +124,6 @@ import {
   sdlcChatLayout,
   sdlcChatNavigationSearch,
   sdlcRightPanelIds,
-  sdlcRightPanelMode,
   shouldCloseInvalidSdlcConversationDeepLink,
   shouldStartFreshSdlcAssistant,
 } from './sdlcChatPolicy';
@@ -141,6 +133,7 @@ import { UserHoverWrapper } from '../../components/ui/UserMentionPopover/UserMen
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Popover } from '../../components/ui/Popover';
+import { Tooltip } from '../../components/ui/Tooltip';
 import {
   SdlcFinderColumn,
   SdlcFinderPreview,
@@ -149,15 +142,9 @@ import {
 } from './SdlcFinder';
 import { type SdlcTicket } from './ticketPolicy';
 import { linkedTicketIds } from './artifactTicketPolicy';
-import {
-  CANCEL_REPO_KNOWLEDGE,
-  type RepoKnowledgePhase,
-  RUN_REPO_KNOWLEDGE,
-  repoKnowledgeAction,
-  repoKnowledgeState,
-} from './repoKnowledgePolicy';
+import { type HubWorkflow, type HubWorkflowPhase, useHubWorkflow } from './hubWorkflowRunPolicy';
 
-type Section = 'overview' | 'wiki' | 'baseline' | 'tracks' | 'tickets' | 'artifacts' | 'workflows';
+type Section = 'overview' | 'wiki' | 'knowledge' | 'tracks' | 'tickets' | 'artifacts' | 'workflows';
 
 const StableCanvasScreen = memo(CanvasScreen);
 
@@ -171,7 +158,7 @@ const isSdlcRelationType = (value: string): value is SdlcRelationType =>
 const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: typeof Boxes }> = [
   { id: 'overview', label: 'Overview', icon: Boxes },
   { id: 'wiki', label: 'Wiki', icon: BookOpen },
-  { id: 'baseline', label: 'Repo Knowledge', icon: ShieldCheck },
+  { id: 'knowledge', label: 'Hub Knowledge', icon: ShieldCheck },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
 ];
@@ -293,8 +280,7 @@ export default function SdlcScreen(): ReactElement {
       })),
     [channels],
   );
-  // Repositories in a hub coexist; there is no selection. Repo Knowledge and Wiki
-  // still address one repository and read the first until they cover all of them.
+  // Repositories in a hub coexist; there is no selection.
   const selectedRepo = channelRepos[0];
   const repo = useMemo(
     () =>
@@ -325,6 +311,9 @@ export default function SdlcScreen(): ReactElement {
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
   const showClosedTracks = useUserPreference('sdlcShowClosedTracks');
+  const foldedSidebarHeight = sdlcFoldedGroupHeight(
+    useUserPreference('sdlcSidebarSectionsCollapsed'),
+  );
   const setShowClosedTracks = (next: boolean): void =>
     setUserPreference('sdlcShowClosedTracks', next);
   const finderGroupBy = useUserPreference('sdlcFinderGroupBy');
@@ -494,10 +483,6 @@ export default function SdlcScreen(): ReactElement {
   const [linkTargetType, setLinkTargetType] = useState('MESSAGE');
   const [linkTargetId, setLinkTargetId] = useState('');
   const automaticAccessChecksRef = useRef(new Set<string>());
-  const externalDebuggerTarget = useExternalDebuggerStore(state => state.target);
-  const openExternalDebugger = useExternalDebuggerStore(state => state.open);
-  const updateExternalDebugger = useExternalDebuggerStore(state => state.update);
-  const closeExternalDebugger = useExternalDebuggerStore(state => state.close);
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   useEffect(() => {
@@ -512,7 +497,7 @@ export default function SdlcScreen(): ReactElement {
   }, [channel]);
   const knowledgeFolderId = useMemo(
     () =>
-      (channel?.canvasFolders ?? []).find(folder => folder.name === SDLC_REPO_KNOWLEDGE_FOLDER)
+      (channel?.canvasFolders ?? []).find(folder => folder.name === SDLC_HUB_KNOWLEDGE_FOLDER)
         ?.id ?? null,
     [channel],
   );
@@ -566,45 +551,86 @@ export default function SdlcScreen(): ReactElement {
     () => tracks.filter(track => track.status === 'COMPLETED' || track.status === 'ARCHIVED'),
     [tracks],
   );
-  const wikiQuery = useQuery({
-    queryKey: ['sdlc-wiki-pages', repoId],
-    queryFn: async () => {
-      const response = await apiInstance.get<{ success: boolean; pages: SdlcWikiPage[] }>(
-        `/sdlc/repositories/${encodeURIComponent(repoId!)}/wiki`,
-      );
-      return response.data.pages;
-    },
-    enabled: Boolean(repoId && shouldLoadSdlcWikiPages(section)),
+  const [hubItemRows] = useCachedQuery(queries.getSdlcHubItems({ channelId: channelId || '' }), {
+    enabled: Boolean(channelId),
   });
-  const wikiRunQuery = useQuery({
-    queryKey: ['sdlc-wiki-run', repoId],
-    queryFn: async () => {
-      const response = await apiInstance.get<{ success: boolean; run: SdlcWikiRun | null }>(
-        `/sdlc/repositories/${encodeURIComponent(repoId!)}/wiki/run`,
-      );
-      return response.data.run;
-    },
-    enabled: Boolean(repoId && shouldLoadSdlcWikiRun(section)),
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchInterval: query => {
-      const phase = query.state.data?.phase;
-      return phase &&
-        ['QUEUED', 'PREPARING', 'BOOTSTRAPPING', 'PROCESSING', 'VALIDATING', 'CORRECTING'].includes(
-          phase,
-        )
-        ? 2_000
-        : false;
-    },
-  });
-  const wikiPages = wikiQuery.data ?? [];
-  const refetchWikiPages = wikiQuery.refetch;
-  const wikiRunUpdatedAt = wikiRunQuery.data?.updatedAt;
-  useEffect(() => {
-    if (!wikiRunUpdatedAt || section !== 'wiki') return;
-    void refetchWikiPages();
-  }, [refetchWikiPages, section, wikiRunUpdatedAt]);
-  const selectedWikiPage = wikiPages.find(page => page.canvasId === selectedCanvasId);
+  const [wikiFolderRows] = useCachedQuery(
+    queries.getSdlcHubFolders({ channelId: channelId || '' }),
+    { enabled: Boolean(channelId) },
+  );
+  const hubItems = useMemo(() => (Array.isArray(hubItemRows) ? hubItemRows : []), [hubItemRows]);
+  const hubFolderNames = useMemo(
+    () =>
+      new Map(
+        (Array.isArray(wikiFolderRows) ? wikiFolderRows : []).map(folder => [
+          folder.id,
+          folder.name,
+        ]),
+      ),
+    [wikiFolderRows],
+  );
+  const wikiScopeList = useMemo(
+    () =>
+      channelId
+        ? wikiScopes({
+            channelId,
+            edges: hubItems,
+            folderNames: hubFolderNames,
+            memberRepoIds: new Set(channelRepos.map(item => item.id)),
+          })
+        : [],
+    [channelId, hubItems, hubFolderNames, channelRepos],
+  );
+  const wikiPagesByScope = useMemo(() => {
+    const wikiCanvases = new Map<string, WikiCanvas>(
+      canvases.map(canvas => [
+        canvas.id,
+        {
+          id: canvas.id,
+          title: canvas.title,
+          updatedAt: canvas.lastEditedAt ?? canvas.updatedAt,
+          archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED',
+        },
+      ]),
+    );
+    return new Map(
+      wikiScopeList.map(scope => [
+        scope.folderId,
+        wikiScopePages({
+          scopeFolderId: scope.folderId,
+          edges: hubItems,
+          folderNames: hubFolderNames,
+          canvases: wikiCanvases,
+        }),
+      ]),
+    );
+  }, [wikiScopeList, hubItems, hubFolderNames, canvases]);
+  const wikiPageCounts = useMemo(
+    () =>
+      new Map(
+        [...wikiPagesByScope].map(
+          ([folderId, pages]) => [folderId, pages.filter(page => !page.archived).length] as const,
+        ),
+      ),
+    [wikiPagesByScope],
+  );
+  // A page link without ?wiki= falls back to the page's own folder.
+  const wikiScope =
+    wikiScopeList.find(scope => scope.folderId === routeSearchParams.get('wiki')) ??
+    wikiScopeList.find(scope =>
+      wikiPagesByScope.get(scope.folderId)?.some(page => page.canvasId === selectedCanvasId),
+    ) ??
+    null;
+  const [showArchivedWiki, setShowArchivedWiki] = useState(false);
+  const wikiScopeAllPages = useMemo(
+    () => (wikiScope ? (wikiPagesByScope.get(wikiScope.folderId) ?? []) : []),
+    [wikiScope, wikiPagesByScope],
+  );
+  const wikiPages = useMemo(
+    () => (showArchivedWiki ? wikiScopeAllPages : wikiScopeAllPages.filter(page => !page.archived)),
+    [showArchivedWiki, wikiScopeAllPages],
+  );
+  const selectedWikiPage = wikiScopeAllPages.find(page => page.canvasId === selectedCanvasId);
   const assistantCanvas = useMemo(
     () =>
       selectedCanvas
@@ -614,31 +640,32 @@ export default function SdlcScreen(): ReactElement {
           : null,
     [selectedCanvas, selectedWikiPage],
   );
-  const baseline = useMemo(
+  const knowledgeDocs = useMemo(
     () =>
       knowledgeFolderId ? canvases.filter(canvas => canvas.folderId === knowledgeFolderId) : [],
     [canvases, knowledgeFolderId],
   );
-  const baselineSidebarPages = useMemo<SdlcWikiPage[]>(
+  const knowledgeSidebarPages = useMemo<SdlcWikiPage[]>(
     () =>
-      baseline.map(canvas => {
+      knowledgeDocs.map(canvas => {
         const title = canvas.title;
         return {
           canvasId: canvas.id,
           title,
-          path: title,
           folderPath: '',
-          syncedAt: new Date(canvas.updatedAt).toISOString(),
           updatedAt: new Date(canvas.lastEditedAt ?? canvas.updatedAt).toISOString(),
+          archived: false,
         };
       }),
-    [baseline],
+    [knowledgeDocs],
   );
   const folders = useMemo(() => (repo ? (repo.channel?.canvasFolders ?? []) : []), [repo]);
   const typeFolders = useMemo(
     () =>
       folders
-        .filter(folder => folder.name !== 'Baseline')
+        .filter(
+          folder => folder.name !== SDLC_HUB_KNOWLEDGE_FOLDER && folder.name !== SDLC_WIKI_FOLDER,
+        )
         .slice()
         .sort((left, right) => left.createdAt - right.createdAt)
         .map(folder => ({
@@ -910,11 +937,7 @@ export default function SdlcScreen(): ReactElement {
   const sdlcChatTab = chatLayout.activeTab;
   const discussionOpen =
     routeSearchParams.get('discussion') === '1' && sdlcChatTab === 'conversations';
-  const rightPanelMode = sdlcRightPanelMode({
-    chatOpen: chatLayout.panelOpen,
-    debuggerOpen: externalDebuggerTarget?.repoId === repoId,
-  });
-  const rightPanelOpen = rightPanelMode !== 'closed';
+  const rightPanelOpen = chatLayout.panelOpen;
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
   useEffect(() => {
     if (selectedDiscussionConversationId) {
@@ -971,8 +994,7 @@ export default function SdlcScreen(): ReactElement {
   const discussionSurface = discussionContext?.surface ?? null;
   const chatPanelAvailable =
     Boolean(discussionOwner && discussionSurface) || Boolean(section === 'tracks' && selectedTrack);
-  const showRightPanel = rightPanelMode === 'debugger' || (rightPanelOpen && chatPanelAvailable);
-  const chatPanelShowing = rightPanelMode === 'chat' && rightPanelOpen && chatPanelAvailable;
+  const showRightPanel = rightPanelOpen && chatPanelAvailable;
   const discussionConversationIds = useMemo(
     () => discussionIdsForOwner(discussionOwner?.canvasId ?? null, links),
     [discussionOwner, links],
@@ -1000,51 +1022,17 @@ export default function SdlcScreen(): ReactElement {
     { enabled: Boolean(channelId) },
   );
   const hubWorkflowId = hubWorkflowLink?.workflow?.id ?? null;
-  const knowledgeRunsQuery = useQuery({
-    queryKey: ['sdlc-knowledge-runs', hubWorkflowId],
-    queryFn: async () => {
-      const response = await apiInstance.get<{
-        items: { id: string; status: string; updatedAt?: string }[];
-      }>('/workflows-v2/executions', { params: { workflowId: hubWorkflowId, limit: 5 } });
-      return response.data.items.map(run => ({
-        id: run.id,
-        status: run.status,
-        updatedAt: run.updatedAt ? Date.parse(run.updatedAt) : null,
-      }));
-    },
-    enabled: Boolean(hubWorkflowId),
-    refetchInterval: 5 * 60_000,
-  });
-  const state = repoKnowledgeState({
-    workflowId: hubWorkflowId,
-    runs: knowledgeRunsQuery.data ?? null,
-  });
+  const state = useHubWorkflow(hubWorkflowId);
   const knowledgeRunning = state.phase === 'RUNNING';
+  const [wikiWorkflowLink] = useCachedQuery(
+    queries.getSdlcWikiWorkflow({ channelId: channelId || '' }),
+    { enabled: Boolean(channelId) },
+  );
+  const wikiState = useHubWorkflow(wikiWorkflowLink?.workflow?.id ?? null);
 
-  useEffect(() => {
-    if (!repoId || externalDebuggerTarget?.repoId !== repoId) return;
-    if (wikiRunQuery.data && externalDebuggerTarget.executionId === wikiRunQuery.data.executionId) {
-      updateExternalDebugger(repoId, {
-        conversationId: wikiRunQuery.data.conversationId || externalDebuggerTarget.conversationId,
-        sessionId: wikiRunQuery.data.sessionId,
-        running: [
-          'QUEUED',
-          'PREPARING',
-          'BOOTSTRAPPING',
-          'PROCESSING',
-          'VALIDATING',
-          'CORRECTING',
-        ].includes(wikiRunQuery.data.phase),
-      });
-      return;
-    }
-  }, [externalDebuggerTarget, repoId, updateExternalDebugger, wikiRunQuery.data]);
-
-  const readyCount = new Set(
-    baseline
-      .filter(canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE')
-      .map(canvas => canvas.sdlcArtifact?.artifactType),
-  ).size;
+  const readyCount = knowledgeDocs.filter(
+    canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE',
+  ).length;
   const accessRepoId = repo ? repo.id : '';
   const accessCapabilities =
     repo && Array.isArray(repo.accessCapabilities)
@@ -1081,13 +1069,6 @@ export default function SdlcScreen(): ReactElement {
       .post(`/sdlc/repositories/${accessRepoId}/access-check`, { force: false })
       .catch(() => undefined);
   }, [readReady, accessRepoId]);
-  const isAdmin = Boolean(
-    repo &&
-    repo.channel?.participants?.some(
-      participant => participant.userId === auth.userID && participant.role === ChannelRole.ADMIN,
-    ),
-  );
-
   const call = async (
     key: string,
     request: () => Promise<unknown>,
@@ -1103,67 +1084,6 @@ export default function SdlcScreen(): ReactElement {
       setBusy(null);
     }
   };
-
-  const callWikiAction = async (
-    key: string,
-    path: 'generate' | 'refresh' | 'retry' | 'cancel',
-    body: unknown,
-    success: string,
-  ): Promise<void> => {
-    await call(
-      key,
-      async () => {
-        await apiInstance.post(`/sdlc/repositories/${repoId!}/wiki/${path}`, body);
-        await Promise.all([
-          wikiRunQuery.refetch(),
-          ...(section === 'wiki' ? [wikiQuery.refetch()] : []),
-        ]);
-      },
-      success,
-    );
-  };
-
-  const generateWiki = (input: SdlcWikiStartInput): Promise<void> =>
-    callWikiAction('wiki-generate', 'generate', input, 'Wiki generation started');
-  const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
-    callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
-  const runKnowledge = (): Promise<void> =>
-    call(
-      RUN_REPO_KNOWLEDGE.key,
-      async () => {
-        await apiInstance.post(`/workflows-v2/workflows/${state.workflowId!}/trigger`, {});
-        await knowledgeRunsQuery.refetch();
-      },
-      RUN_REPO_KNOWLEDGE.success,
-    );
-  const cancelKnowledge = (): Promise<void> =>
-    call(
-      CANCEL_REPO_KNOWLEDGE.key,
-      async () => {
-        await apiInstance.post(`/workflows-v2/executions/${state.runId!}/cancel`, {});
-        await knowledgeRunsQuery.refetch();
-      },
-      CANCEL_REPO_KNOWLEDGE.success,
-    );
-  const callWikiExecutionAction = (action: 'retry' | 'cancel', success: string): Promise<void> => {
-    const executionId = wikiRunQuery.data?.executionId;
-    if (!executionId) return Promise.resolve();
-    return call(
-      `wiki-${action}`,
-      async () => {
-        await apiInstance.post(
-          `/sdlc/repositories/${repoId!}/wiki/runs/${encodeURIComponent(executionId)}/${action}`,
-        );
-        await Promise.all([
-          wikiRunQuery.refetch(),
-          ...(section === 'wiki' ? [wikiQuery.refetch()] : []),
-        ]);
-      },
-      success,
-    );
-  };
-  const retryWiki = (): Promise<void> => callWikiExecutionAction('retry', 'Wiki run resumed');
-  const cancelWiki = (): Promise<void> => callWikiExecutionAction('cancel', 'Wiki run cancelled');
 
   const navigateWithinSdlc = useCallback(
     (pathname: string, destinationSearch = ''): void => {
@@ -1221,7 +1141,9 @@ export default function SdlcScreen(): ReactElement {
   const openWikiPage = (page: SdlcWikiPage): void => {
     if (!repoId) return;
     setRelatedSourceId(null);
-    navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?canvas=${encodeURIComponent(page.canvasId)}`);
+    const search = new URLSearchParams({ canvas: page.canvasId });
+    if (wikiScope) search.set('wiki', wikiScope.folderId);
+    navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?${search.toString()}`);
   };
 
   const closeCanvas = (): void => {
@@ -1235,7 +1157,10 @@ export default function SdlcScreen(): ReactElement {
       );
       return;
     }
-    navigateWithinSdlc(`/sdlc/${channelId}/${section}`);
+    navigateWithinSdlc(
+      `/sdlc/${channelId}/${section}`,
+      section === 'wiki' && wikiScope ? `?wiki=${encodeURIComponent(wikiScope.folderId)}` : '',
+    );
   };
 
   const setDiscussionUrl = useCallback(
@@ -1263,18 +1188,16 @@ export default function SdlcScreen(): ReactElement {
   );
 
   const openConversations = useCallback((): void => {
-    closeExternalDebugger();
     setFolderDiscussion(null);
     setDiscussionUrl({ open: true, conversationId: null });
-  }, [closeExternalDebugger, setDiscussionUrl]);
+  }, [setDiscussionUrl]);
 
   const openFolderConversations = useCallback(
     (folder: { id: string; name: string }): void => {
-      closeExternalDebugger();
       setFolderDiscussion(folder);
       setDiscussionUrl({ open: true, conversationId: null });
     },
-    [closeExternalDebugger, setDiscussionUrl],
+    [setDiscussionUrl],
   );
 
   const renderFolderConversationBadge = useCallback(
@@ -1314,7 +1237,6 @@ export default function SdlcScreen(): ReactElement {
   const openSdlcAssistant = useCallback(
     (threadInfo?: ThreadInfo): void => {
       if (!repo) return;
-      closeExternalDebugger();
       // Ask AI renders inside the SDLC lane itself (the framed bundle's own
       // XyneAISidebar), so Ask AI changes ship with this lane and never need a
       // parent redeploy.
@@ -1341,13 +1263,12 @@ export default function SdlcScreen(): ReactElement {
         researchContext: { type: 'repository', id: repo.id, name: repo.name },
       });
     },
-    [assistantCanvas, closeExternalDebugger, repo, selectedAgentSlug, setSelectedAgentSlug],
+    [assistantCanvas, repo, selectedAgentSlug, setSelectedAgentSlug],
   );
 
   const askSdlcAssistant = useCallback(
     (query: string, canvas?: { canvasId: string; title: string }, forceFreshChat = false): void => {
       if (!repo) return;
-      closeExternalDebugger();
       const assistantState = xyneAIActor.getSnapshot();
       const pinnedContext = assistantState.context.researchContext;
       const needsFreshChat =
@@ -1369,39 +1290,58 @@ export default function SdlcScreen(): ReactElement {
         initialQuery: query,
       });
     },
-    [closeExternalDebugger, repo, selectedAgentSlug, setSelectedAgentSlug],
+    [repo, selectedAgentSlug, setSelectedAgentSlug],
   );
 
-  const openSdlcDebugger = useCallback(
-    (target: Parameters<typeof openExternalDebugger>[0]): void => {
-      if (xyneAIActor.getSnapshot().matches('open')) xyneAIActor.send({ type: 'CLOSE' });
-      closeConversations();
-      openExternalDebugger(target);
-    },
-    [closeConversations, openExternalDebugger],
-  );
-
-  const renderRepoKnowledgeControls = (compact = false): ReactElement | undefined => {
-    if (!isAdmin || !repo) return undefined;
-    if (state.phase === 'NOT_CONFIGURED') return undefined;
-
-    const action = repoKnowledgeAction(state.phase);
-    const Icon = knowledgeRunning ? X : state.phase === 'NOT_STARTED' ? Rocket : RefreshCw;
-
+  const renderWorkflowControls = (label: string, workflow: HubWorkflow): ReactElement => {
+    const running = workflow.phase === 'RUNNING';
+    const busyKey = `hub-workflow:${label}`;
     return (
-      <div className='flex items-center gap-2'>
-        <Button
-          size={compact ? 'sm' : 'default'}
-          variant={knowledgeRunning ? 'destructive' : 'default'}
-          loading={busy === action.key}
-          disabled={busy !== null}
-          onClick={() => void (knowledgeRunning ? cancelKnowledge() : runKnowledge())}
-          data-track-category='SdlcHub'
-          data-track-name={`RepoKnowledge${knowledgeRunning ? 'Cancel' : 'Run'}Clicked`}
-        >
-          <Icon size={compact ? 14 : 16} />
-          {action.label}
-        </Button>
+      <div className='flex shrink-0 items-center gap-1.5'>
+        <WorkflowStatusIcon workflow={workflow} />
+        {workflow.workflowId ? (
+          <Button
+            size='sm'
+            variant={running ? 'outline' : 'default'}
+            loading={busy === busyKey}
+            disabled={busy === busyKey}
+            onClick={() =>
+              void call(
+                busyKey,
+                running ? workflow.cancel : workflow.start,
+                running ? `${label} run cancelled` : `${label} run started`,
+              )
+            }
+            data-track-category='SdlcHub'
+            data-track-name={running ? 'HubWorkflowRunCancelled' : 'HubWorkflowRunStarted'}
+            data-track-metadata={JSON.stringify({ label })}
+          >
+            {running ? 'Cancel' : 'Start'}
+          </Button>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderWorkflowHeader = (input: {
+    icon: typeof Boxes;
+    title: string;
+    description: string;
+    workflow: HubWorkflow;
+  }): ReactElement => {
+    const Icon = input.icon;
+    return (
+      <div className='mb-6 flex items-center justify-between gap-6 border-b pb-5'>
+        <div className='flex min-w-0 flex-1 items-center gap-3'>
+          <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-sm'>
+            <Icon size={19} />
+          </div>
+          <div className='min-w-0'>
+            <h2 className='text-xl font-semibold tracking-tight'>{input.title}</h2>
+            <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
+          </div>
+        </div>
+        {renderWorkflowControls(input.title, input.workflow)}
       </div>
     );
   };
@@ -2237,7 +2177,7 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 folderById={folderById}
                 discussingFolderId={
-                  chatPanelShowing && activeFolderDiscussion ? activeFolderDiscussion.id : null
+                  showRightPanel && activeFolderDiscussion ? activeFolderDiscussion.id : null
                 }
                 onRenameFolder={(folderId, name) =>
                   void call(
@@ -2399,11 +2339,9 @@ export default function SdlcScreen(): ReactElement {
           <span className='flex-1 truncate text-left'>{item.label}</span>
           <span className='text-xs tabular-nums text-sidebar-foreground/50'>
             {item.id === 'wiki'
-              ? section === 'wiki'
-                ? wikiPages.length
-                : ''
-              : item.id === 'baseline'
-                ? baseline.length
+              ? [...wikiPageCounts.values()].reduce((total, count) => total + count, 0)
+              : item.id === 'knowledge'
+                ? knowledgeDocs.length
                 : item.id === 'tickets'
                   ? channelTicketCount
                   : ''}
@@ -2521,21 +2459,21 @@ export default function SdlcScreen(): ReactElement {
               />
             </div>
           </div>
-          {/* Every list in the sidebar folds to its header and drags against its
-            neighbours — the hub's own pages included, since a reader who lives
-            in one section should be able to put the rest away. Heights are
-            remembered per reader in the preferences machine rather than by the
-            group, so there is one place a sidebar setting lives. */}
+          {railOpen ? (
+            <SdlcSidebarFitSection id='sdlc-sidebar-hub' title='Hub'>
+              {sectionNavRows}
+            </SdlcSidebarFitSection>
+          ) : null}
           {railOpen ? (
             <ResizableGroup
               orientation='vertical'
               onLayoutChanged={(_layout, meta) => persistSdlcSectionHeights(meta)}
-              className='min-h-0 flex-1'
+              className={cn(
+                'border-t border-sidebar-border-muted',
+                foldedSidebarHeight === null ? 'min-h-0 flex-1' : 'mt-auto box-content shrink-0',
+              )}
+              {...(foldedSidebarHeight !== null && { style: { height: foldedSidebarHeight } })}
             >
-              <SdlcSidebarSection id='sdlc-sidebar-hub' title='Hub'>
-                {sectionNavRows}
-              </SdlcSidebarSection>
-              <SdlcSidebarSectionSeparator />
               <SdlcSidebarSection
                 id='sdlc-sidebar-tracks'
                 title='Tracks'
@@ -2709,38 +2647,6 @@ export default function SdlcScreen(): ReactElement {
                   );
                 })}
               </SdlcSidebarSection>
-              <SdlcSidebarSectionSeparator />
-              <SdlcSidebarSection
-                id='sdlc-sidebar-repositories'
-                title='Repositories'
-                count={channelRepos.length}
-                action={{
-                  label: 'Add a repository',
-                  trackName: 'HubRepositoriesOpened',
-                  onClick: () => setHubDialog('manage'),
-                }}
-              >
-                {channelRepos.map(repository => (
-                  <a
-                    key={repository.id}
-                    href={repository.canonicalUrl || repository.url}
-                    target='_blank'
-                    rel='noreferrer'
-                    className='mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[7px] px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-foreground/[0.06]'
-                    data-track-category='SdlcHub'
-                    data-track-name='HubRepositoryOpened'
-                  >
-                    <GitBranch size={15} className='shrink-0 text-sidebar-foreground/70' />
-                    <span className='min-w-0 flex-1 truncate text-left'>{repository.name}</span>
-                    <ExternalLink size={12} className='shrink-0 text-sidebar-foreground/45' />
-                  </a>
-                ))}
-                {channelRepos.length === 0 && (
-                  <p className='px-2 py-3 text-[12.5px] text-sidebar-foreground/50'>
-                    No repositories yet.
-                  </p>
-                )}
-              </SdlcSidebarSection>
               {/* Slack. Panels have to fill the group, so without something here to
                 take the leftover height the group refuses to collapse the last
                 open section — every section closed is a perfectly reasonable
@@ -2753,27 +2659,12 @@ export default function SdlcScreen(): ReactElement {
               <Panel id='sdlc-sidebar-slack' minSize='0px' defaultSize='100%' />
             </ResizableGroup>
           ) : null}
-          {section === 'wiki' && selectedWikiPage && (
+          {section === 'knowledge' && selectedCanvas && (
             <div className='min-h-0 flex-1 border-t border-sidebar-border-muted'>
               <SdlcWikiSidebarTree
-                pages={wikiPages}
-                loading={wikiQuery.isLoading}
-                error={wikiQuery.isError}
+                pages={knowledgeSidebarPages}
                 selectedCanvasId={selectedCanvasId}
-                onRetry={() => void wikiQuery.refetch()}
-                onOpen={openWikiPage}
-              />
-            </div>
-          )}
-          {section === 'baseline' && selectedCanvas && (
-            <div className='min-h-0 flex-1 border-t border-sidebar-border-muted'>
-              <SdlcWikiSidebarTree
-                pages={baselineSidebarPages}
-                loading={false}
-                error={false}
-                selectedCanvasId={selectedCanvasId}
-                variant='repo-knowledge'
-                onRetry={() => undefined}
+                variant='hub-knowledge'
                 onOpen={page => openCanvas(page.canvasId)}
               />
             </div>
@@ -2805,6 +2696,20 @@ export default function SdlcScreen(): ReactElement {
             title sits on the line the sidebar headers already establish. */}
         <header className='z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5 backdrop-blur'>
           <div className='flex min-w-0 items-center gap-2'>
+            {section === 'wiki' && wikiScope ? (
+              <>
+                <button
+                  type='button'
+                  onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/wiki`)}
+                  className='shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground'
+                  data-track-category='SdlcHub'
+                  data-track-name='WikiRepositoriesOpened'
+                >
+                  Wiki
+                </button>
+                <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+              </>
+            ) : null}
             {selectedCanvasId ? (
               <>
                 <button
@@ -2815,18 +2720,33 @@ export default function SdlcScreen(): ReactElement {
                   data-track-name='CanvasClosedInline'
                   data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
                 >
-                  {selectedCanvasTypeFolder?.name ??
-                    (section === 'artifacts'
-                      ? (activeTypeFolder?.name ?? 'Artifacts')
-                      : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview'))}
+                  {section === 'wiki' && wikiScope
+                    ? wikiScope.name
+                    : (selectedCanvasTypeFolder?.name ??
+                      (section === 'artifacts'
+                        ? (activeTypeFolder?.name ?? 'Artifacts')
+                        : (SECTIONS.find(item => item.id === section)?.label ?? 'Overview')))}
                 </button>
                 <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+                {section === 'wiki'
+                  ? selectedWikiPage?.folderPath
+                      .split('/')
+                      .filter(Boolean)
+                      .map((folder, index) => (
+                        <Fragment key={index}>
+                          <span className='truncate text-sm text-muted-foreground'>{folder}</span>
+                          <ChevronRight size={15} className='shrink-0 text-muted-foreground' />
+                        </Fragment>
+                      ))
+                  : null}
                 <h1 className='truncate font-semibold'>
                   {selectedCanvas?.title ?? selectedWikiPage?.title ?? 'Canvas'}
                 </h1>
               </>
             ) : section === 'tracks' && selectedTrack ? (
               <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
+            ) : section === 'wiki' && wikiScope ? (
+              <h1 className='truncate font-semibold'>{wikiScope.name}</h1>
             ) : (
               <h1 className='font-semibold'>
                 {section === 'artifacts'
@@ -2850,7 +2770,7 @@ export default function SdlcScreen(): ReactElement {
                 <SquareArrowOutUpRight className='size-4' />
               </Button>
             ) : null}
-            {chatPanelAvailable && !chatPanelShowing ? (
+            {chatPanelAvailable && !showRightPanel ? (
               <Button
                 size='icon'
                 variant='ghost'
@@ -2943,7 +2863,7 @@ export default function SdlcScreen(): ReactElement {
             <div
               className={cn(
                 'grid transition-[grid-template-columns] duration-300 ease-out',
-                chatPanelShowing ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]',
+                showRightPanel ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]',
               )}
             >
               <div className='flex min-w-0 items-center overflow-hidden'>
@@ -2953,7 +2873,7 @@ export default function SdlcScreen(): ReactElement {
                   aria-label='Close chat'
                   title='Close chat'
                   className='ml-1.5 size-7 rounded-lg'
-                  tabIndex={chatPanelShowing ? 0 : -1}
+                  tabIndex={showRightPanel ? 0 : -1}
                   onClick={closeConversations}
                 >
                   <X className='size-4' />
@@ -2966,7 +2886,7 @@ export default function SdlcScreen(): ReactElement {
           orientation='horizontal'
           className='min-h-0 flex-1 overflow-hidden'
           autoSaveId='sdlc-chat-shell'
-          panelIds={sdlcRightPanelIds(rightPanelMode)}
+          panelIds={sdlcRightPanelIds(rightPanelOpen)}
         >
           <Panel
             id={SDLC_MAIN_PANEL_ID}
@@ -2980,6 +2900,7 @@ export default function SdlcScreen(): ReactElement {
                     key={selectedCanvasId}
                     canvasId={selectedCanvasId}
                     showAskAiAction={false}
+                    showPageTitle={false}
                   />
                 </div>
               ) : section === 'workflows' ? (
@@ -3005,40 +2926,20 @@ export default function SdlcScreen(): ReactElement {
                       <div className='rounded-xl border bg-background p-5'>
                         <div className='flex items-center justify-between gap-6'>
                           <div className='min-w-0'>
-                            <h2 className='text-base font-semibold'>Repo Knowledge</h2>
+                            <h2 className='text-base font-semibold'>Hub Knowledge</h2>
                             <p className='mt-1 text-sm text-muted-foreground'>
                               Create and approve repository guides used by SDLC Assistant.
                             </p>
                             <p className='mt-2 text-xs text-muted-foreground'>
-                              {state.phase === 'NOT_CONFIGURED'
-                                ? 'No workflow configured for this hub yet'
-                                : state.phase === 'RUNNING'
-                                  ? 'Generation in progress'
-                                  : `${readyCount} document${readyCount === 1 ? '' : 's'} ready`}
-                              {' · '}
-                              Updated {updatedAtLabel(state.updatedAt)}
+                              {readyCount} document{readyCount === 1 ? '' : 's'} ready
                             </p>
-                            {state.phase === 'FAILED' && (
-                              <p className='mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive'>
-                                The last run did not finish. Open the Workflows tab for the failing
-                                step, or run it again.
-                              </p>
-                            )}
                           </div>
-                          <div className='flex shrink-0 items-center gap-2'>
-                            <StatusPill phase={state.phase} />
-                            {renderRepoKnowledgeControls()}
-                            {!isAdmin && state.phase === 'NOT_STARTED' ? (
-                              <span className='max-w-40 text-right text-xs text-muted-foreground'>
-                                A hub admin must generate Repo Knowledge.
-                              </span>
-                            ) : null}
-                          </div>
+                          {renderWorkflowControls('Hub Knowledge', state)}
                         </div>
                       </div>
                       <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
                         <Metric
-                          label='Repo Knowledge ready'
+                          label='Hub Knowledge ready'
                           value={String(readyCount)}
                           icon={ShieldCheck}
                         />
@@ -3056,15 +2957,17 @@ export default function SdlcScreen(): ReactElement {
 
                   {section === 'tracks' && renderTrack()}
 
-                  {section === 'baseline' && (
-                    <section>
-                      <SectionHeader
-                        title='Repo Knowledge'
-                        description='Generate or refresh from repository history. Admins edit; members read.'
-                        action={renderRepoKnowledgeControls(true)}
-                      />
+                  {section === 'knowledge' && (
+                    <section className='mx-auto max-w-5xl'>
+                      {renderWorkflowHeader({
+                        icon: ShieldCheck,
+                        title: 'Hub Knowledge',
+                        description:
+                          'Given to SDLC Assistant in every chat. Admins edit; members read.',
+                        workflow: state,
+                      })}
                       <div className='grid grid-cols-2 gap-4'>
-                        {baseline.map(canvas => {
+                        {knowledgeDocs.map(canvas => {
                           const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
                           return (
                             <div
@@ -3073,7 +2976,7 @@ export default function SdlcScreen(): ReactElement {
                               tabIndex={0}
                               onClick={() => openCanvas(canvas.id)}
                               data-track-category='SdlcHub'
-                              data-track-name='BaselineCanvasOpened'
+                              data-track-name='HubKnowledgeCanvasOpened'
                               data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                               onKeyDown={event => {
                                 if (event.key === 'Enter' || event.key === ' ') {
@@ -3114,12 +3017,12 @@ export default function SdlcScreen(): ReactElement {
                             </div>
                           );
                         })}
-                        {baseline.length === 0 && (
+                        {knowledgeDocs.length === 0 && (
                           <EmptyCard
                             text={
                               knowledgeRunning
-                                ? 'Repo Knowledge generation is in progress.'
-                                : 'Generate Repo Knowledge directly from the repository.'
+                                ? 'Hub Knowledge generation is in progress.'
+                                : 'Start the Hub Knowledge workflow to generate these documents.'
                             }
                           />
                         )}
@@ -3129,39 +3032,28 @@ export default function SdlcScreen(): ReactElement {
 
                   {section === 'wiki' && (
                     <SdlcWikiSection
+                      key={wikiScope?.folderId ?? 'repositories'}
+                      header={renderWorkflowHeader({
+                        icon: BookOpen,
+                        title: 'Wiki',
+                        description:
+                          'A Wiki for each repository, plus Relationships for how they connect.',
+                        workflow: wikiState,
+                      })}
+                      scopes={wikiScopeList}
+                      scope={wikiScope}
+                      pageCounts={wikiPageCounts}
                       pages={wikiPages}
-                      loading={wikiQuery.isLoading}
-                      error={wikiQuery.isError}
-                      onRetry={() => void wikiQuery.refetch()}
-                      onOpen={openWikiPage}
-                      run={wikiRunQuery.data ?? null}
-                      isAdmin={isAdmin}
-                      actionPending={
-                        (busy?.startsWith('wiki-') || busy?.startsWith('knowledge-')) ?? false
+                      showArchived={showArchivedWiki}
+                      onSelectScope={folderId =>
+                        navigateWithinSdlc(
+                          `/sdlc/${channelId}/wiki`,
+                          `?wiki=${encodeURIComponent(folderId)}`,
+                        )
                       }
-                      onGenerate={generateWiki}
-                      onRefresh={refreshWiki}
-                      onRetryRun={retryWiki}
-                      onCancelRun={cancelWiki}
-                      onDebugRun={() => {
-                        const run = wikiRunQuery.data;
-                        if (!run?.conversationId) return;
-                        openSdlcDebugger({
-                          source: 'sdlc',
-                          repoId: repo.id,
-                          executionId: run.executionId,
-                          conversationId: run.conversationId,
-                          sessionId: run.sessionId,
-                          running: [
-                            'QUEUED',
-                            'PREPARING',
-                            'BOOTSTRAPPING',
-                            'PROCESSING',
-                            'VALIDATING',
-                            'CORRECTING',
-                          ].includes(run.phase),
-                        });
-                      }}
+                      onAddRepository={() => setHubDialog('manage')}
+                      onShowArchivedChange={setShowArchivedWiki}
+                      onOpen={openWikiPage}
                     />
                   )}
 
@@ -3188,9 +3080,7 @@ export default function SdlcScreen(): ReactElement {
               </Separator>
               <Panel id={SDLC_CHAT_PANEL_ID} defaultSize='38%' minSize='360px' maxSize='55%'>
                 <EntityLinkContext.Provider value={entityLinkScope}>
-                  {rightPanelMode === 'debugger' ? (
-                    <SdlcDebuggerPanel />
-                  ) : discussionOwner && discussionSurface && repo.channelId ? (
+                  {discussionOwner && discussionSurface && repo.channelId ? (
                     <SdlcChatPanel
                       key={`discussion-${discussionOwner.canvasId}`}
                       channelId={repo.channelId}
@@ -3925,6 +3815,7 @@ export default function SdlcScreen(): ReactElement {
                 key={readerCanvasId}
                 canvasId={readerCanvasId}
                 showAskAiAction={false}
+                showPageTitle={false}
               />
             </div>
           </div>
@@ -4135,20 +4026,52 @@ function Metric({
   );
 }
 
-function StatusPill({ phase }: { phase: RepoKnowledgePhase }): ReactElement {
-  const running = phase === 'RUNNING';
+const WORKFLOW_PHASE_LABEL: Record<HubWorkflowPhase, string> = {
+  NOT_CONFIGURED: 'Not set up',
+  NOT_STARTED: 'Not run yet',
+  RUNNING: 'Running',
+  READY: 'Completed',
+  FAILED: 'Failed',
+  CANCELLED: 'Cancelled',
+};
+
+function WorkflowStatusIcon({
+  workflow,
+}: {
+  workflow: Pick<HubWorkflow, 'phase' | 'updatedAt'>;
+}): ReactElement {
+  const { phase, updatedAt } = workflow;
+  const Icon =
+    phase === 'RUNNING'
+      ? Loader2
+      : phase === 'READY'
+        ? Check
+        : phase === 'FAILED'
+          ? CircleAlert
+          : CircleDot;
+  const label =
+    typeof updatedAt === 'number'
+      ? `${WORKFLOW_PHASE_LABEL[phase]} · ${formatRelativeTime(updatedAt)}`
+      : WORKFLOW_PHASE_LABEL[phase];
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium',
-        phase === 'FAILED'
-          ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'bg-background',
-      )}
-    >
-      {running ? <Loader2 size={12} className='animate-spin' /> : <CircleDot size={12} />}
-      {phase.replaceAll('_', ' ')}
-    </span>
+    <Tooltip content={label}>
+      <span
+        role='img'
+        aria-label={label}
+        className={cn(
+          'grid size-8 place-items-center rounded-full',
+          phase === 'RUNNING'
+            ? 'text-amber-600'
+            : phase === 'READY'
+              ? 'text-emerald-600'
+              : phase === 'FAILED'
+                ? 'text-destructive'
+                : 'text-muted-foreground',
+        )}
+      >
+        <Icon size={16} className={cn(phase === 'RUNNING' && 'animate-spin')} />
+      </span>
+    </Tooltip>
   );
 }
 

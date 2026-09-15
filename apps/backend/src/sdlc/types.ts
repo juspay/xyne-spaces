@@ -40,7 +40,6 @@ export interface SdlcRepositoryRunContext {
 
 export interface SdlcArtifact {
   canvasId?: string;
-  kind?: 'BASELINE';
   viewAccessId?: string;
   url?: string;
 }

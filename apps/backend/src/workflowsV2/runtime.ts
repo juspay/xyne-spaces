@@ -1,23 +1,13 @@
-/**
- * The `@xyne/workflow-sdk` runtime, assembled.
- *
- * Everything the engine needs, wired once: the six adapters, the three registries, the
- * executor and the event bus. Nothing here is xyne-specific logic — the decisions all live
- * in the adapters. This file is the composition root, and the only place that knows they
- * belong together.
- *
- * Deliberately does NOT auto-initialize its queues. The API process and the worker both
- * import this module, but only one of them should own a Bull processor, so
- * `initWorkflows()` is called explicitly from each entry point.
- */
 import {
+  BaseConnector,
+  ConnectorRegistry,
   ServiceRegistry,
-  StepRegistry,
-  TriggerRegistry,
   WorkflowExecutor,
   WorkflowRuntime,
+  type AnyStep,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
+import { GitHubConnector } from '@xyne/connector-sdk/github';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -25,6 +15,8 @@ import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
 import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
+import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
+import { SdlcWikiPlanStep } from '@/sdlc/wiki/wikiPlanStep';
 import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
@@ -48,8 +40,9 @@ export const eventBus = new RedisEventBus();
 
 const storage = new WorkflowStorageAdapter();
 const services = new ServiceRegistry();
-const steps = new StepRegistry();
-const triggers = new TriggerRegistry();
+
+const connectors = new ConnectorRegistry();
+connectors.register(new GitHubConnector());
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
@@ -64,36 +57,61 @@ const triggers = new TriggerRegistry();
  * This replaced an interim step that drove the SDK's bundled pi-mono runtime against LiteLLM. That
  * removal is what lets the backend drop the pi peer dependencies: `@xyne/workflow-sdk/agents/host`
  * is pi-free, and nothing else here imports the pi-ful `/agents` barrel.
- *
- * Capability-gated: no claw config means no agent step in the picker, rather than one that is
- * present and fails mid-run — the same rule DEDUP and the WEBHOOK trigger break, being
- * auto-registered by the SDK with no way to opt out.
  */
-if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
-  steps.register(
+class ClawConnector extends BaseConnector {
+  readonly id = 'claw';
+  readonly version = '1.0.0';
+  readonly name = 'Xyne Claw';
+  readonly description = 'Agents configured on xyne-claw';
+  readonly icon = 'bot';
+  readonly credentials = [];
+  readonly triggers = [];
+  readonly steps: readonly AnyStep[] = [
     new HostAgentStep(new ClawAgentProvider(), {
       type: 'RUN_AGENT',
       name: 'Run Agent',
       description: "Run one of your workspace's agents and use its response",
       category: 'ai',
     }),
-  );
-  logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
+  ];
+}
 
-  steps.register(
+/** SDLC hub steps. The agent steps dispatch to claw's sdlc-agent, so they share its gate. */
+class SdlcConnector extends BaseConnector {
+  readonly id = 'sdlc';
+  readonly version = '1.0.0';
+  readonly name = 'SDLC';
+  readonly description = 'Steps that work on an SDLC hub';
+  readonly icon = 'git-branch';
+  readonly credentials = [];
+  readonly triggers = [];
+  readonly steps: readonly AnyStep[] = [
     new HostAgentStep(new SdlcArtifactAgentProvider(), {
       type: 'CREATE_SDLC_ARTIFACT',
       name: 'Create SDLC artifact',
       description: "Generate or refresh one document in an SDLC hub's artifact type",
       category: 'ai',
     }),
-  );
-  logger.info('[workflows] CREATE_SDLC_ARTIFACT registered (sdlc-agent, S2S dispatch)');
+    new HostAgentStep(new SdlcAgentProvider(), {
+      type: SDLC_AGENT_STEP_TYPE,
+      name: 'SDLC Agent',
+      description: 'Run the SDLC agent in a hub, optionally pinned to one repository',
+      category: 'ai',
+    }),
+    new SdlcWikiPlanStep(),
+  ];
+}
+
+if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
+  connectors.register(new ClawConnector());
+  logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
+  connectors.register(new SdlcConnector());
+  logger.info('[workflows] CREATE_SDLC_ARTIFACT, SDLC_AGENT and SDLC_WIKI_PLAN registered');
 } else {
   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }
 
-const executor = new WorkflowExecutor(persistence, steps, triggers, services, {
+const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
   storage,
@@ -105,8 +123,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   queue: new BullQueueAdapter(),
   scheduler: new BullSchedulerAdapter(),
   services,
-  steps,
-  triggers,
+  connectors,
   executor,
   storage,
   eventBus,

@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsClawRouter, workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -140,8 +140,8 @@ import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
-import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
@@ -183,7 +183,6 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
-import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -203,7 +202,6 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
-import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { encryptedFieldsConfig } from '@xyne/shared';
@@ -352,6 +350,7 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
+    this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
@@ -374,8 +373,6 @@ export class App {
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
-
-    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
 
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
@@ -612,11 +609,6 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
-    this.app.post(
-      '/api/internal/sdlc/claw-callback/:executionId/:step',
-      validateS2SKey,
-      handleSdlcClawCallback,
-    );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
     // resolves the gate from it.
@@ -640,7 +632,6 @@ export class App {
       res.json({ encryptedFields });
     });
 
-    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -963,9 +954,6 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    logger.info('Initializing SDLC queue (producer)...');
-    await sdlcQueue.initialize();
-
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -1189,9 +1177,6 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
-
-      // Close SDLC producer queue
-      await sdlcQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
