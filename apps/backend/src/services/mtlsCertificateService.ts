@@ -38,7 +38,7 @@ class MtlsCertificateService {
    */
   async revokeUserCertificates(userEmail: string): Promise<boolean> {
     if (!this.isConfigured()) {
-      logger.warn('[MTLS] Certificate service not configured; skipping certificate revocation', { userEmail });
+      logger.warn('[MTLS] Certificate service not configured; skipping certificate revocation');
       return false;
     }
 
@@ -46,7 +46,7 @@ class MtlsCertificateService {
 
     try {
       const listResponse = await fetch(
-        `${this.baseUrl}/api/internal/users/${email}/devices?status=active&limit=100`,
+        `${this.baseUrl}/internal/users/${email}/devices?status=active&limit=100`,
         {
           method: 'GET',
           headers: this.headers(),
@@ -57,10 +57,10 @@ class MtlsCertificateService {
       if (!listResponse.ok) {
         // 404 = user has never enrolled a device; nothing to revoke.
         if (listResponse.status === 404) {
-          logger.info('[MTLS] No mTLS user/devices for deactivated user; nothing to revoke', { userEmail });
+          logger.info('[MTLS] No mTLS user/devices for deactivated user; nothing to revoke');
           return true;
         }
-        logger.error('[MTLS] Failed to list device certificates', { userEmail, status: listResponse.status });
+        logger.error('[MTLS] Failed to list device certificates', { status: listResponse.status });
         return false;
       }
 
@@ -70,14 +70,14 @@ class MtlsCertificateService {
       const devices = (listBody.data ?? []).filter((d) => d.certificate && !d.certificate.is_revoked);
 
       if (devices.length === 0) {
-        logger.info('[MTLS] No active certificates for deactivated user', { userEmail });
+        logger.info('[MTLS] No active certificates for deactivated user');
         return true;
       }
 
       let allRevoked = true;
       for (const device of devices) {
         const revokeResponse = await fetch(
-          `${this.baseUrl}/api/internal/users/${email}/devices/${encodeURIComponent(device.device_id)}/revoke`,
+          `${this.baseUrl}/internal/users/${email}/devices/${encodeURIComponent(device.device_id)}/revoke`,
           {
             method: 'POST',
             headers: this.headers(),
@@ -89,7 +89,6 @@ class MtlsCertificateService {
         if (!revokeResponse.ok) {
           allRevoked = false;
           logger.error('[MTLS] Failed to revoke device certificate', {
-            userEmail,
             deviceId: device.device_id,
             status: revokeResponse.status,
           });
@@ -97,14 +96,12 @@ class MtlsCertificateService {
       }
 
       logger.info('[MTLS] Certificate revocation completed for deactivated user', {
-        userEmail,
         deviceCount: devices.length,
         allRevoked,
       });
       return allRevoked;
     } catch (error) {
       logger.error('[MTLS] Certificate revocation request errored', {
-        userEmail,
         error: error instanceof Error ? error.message : String(error),
       });
       return false;

@@ -1,9 +1,15 @@
 import { OAuth2Client, gaxios } from 'google-auth-library';
 import axios from 'axios';
 import { AuthProvider } from '@xyne/shared';
+import { config } from '../config/env';
 import { logger as baseLogger } from '../utils/logger';
 import { UserSessionService } from '../services/userSessionService';
 import { accountDeactivationService } from '../services/accountDeactivationService';
+import {
+  GOOGLE_CLIENTS,
+  googleClientKeyFromDeviceInfo,
+  orderedGoogleClientKeys,
+} from '../services/googleOAuthClients';
 
 const logger = baseLogger.child({ module: 'SessionRefreshValidator' });
 const userSessionService = new UserSessionService();
@@ -16,64 +22,61 @@ export type RefreshVerdict =
   | { allowed: true }
   | { allowed: false; reason: string; deactivate: boolean };
 
-// Errors that mean the token/account is permanently invalid — matches the
-// PERMANENT_AUTH_ERROR convention used across the Gmail/Calendar workers.
-const PERMANENT_GOOGLE_ERRORS = ['invalid_grant', 'unauthorized_client', 'invalid_token'];
+// A refresh token is bound to its minting client. Only the OWNING client can
+// tell us the account is revoked (permanent errors, GOOGLE_AUTH_PERMANENT_ERRORS,
+// default invalid_grant / invalid_token). Any other client just reports it
+// doesn't own the token (unauthorized_client / invalid_client) — that is NOT a
+// revocation, so we try the next client.
+const OWNING_CLIENT_REVOKED = config.googleAuthPermanentErrors;
+const WRONG_CLIENT = ['unauthorized_client', 'invalid_client'];
 
 /**
- * Verify a Google refresh token against Google.
+ * Verify a Google refresh token against the client that minted it.
  *
- * A fresh OAuth2Client is used per attempt; a shared client whose credentials
- * are mutated per request can surface a spurious `unauthorized_client` under
- * concurrency, so on that error we recreate the client and retry once — a real
- * revocation then surfaces as `invalid_grant`. Returns true only when Google
- * definitively rejects the token (account revoked/deactivated). Transient/system
- * errors return false so the local session is allowed to continue.
+ * Returns true only when the OWNING client reports the token is bad
+ * (invalid_grant / invalid_token) — a genuine revocation/deactivation. A
+ * `unauthorized_client` means we tried the wrong client, so we move on. If no
+ * client claims the token or everything is transient, we allow the session (we
+ * never deactivate on an inconclusive result).
  */
 async function isGoogleRefreshTokenRevoked(
-  refreshToken: string,
-  user: { id: string; email: string },
+  session: LoadedSession,
+  user: { id: string },
 ): Promise<boolean> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = session.refreshToken!;
+  const preferred = googleClientKeyFromDeviceInfo(session.deviceInfo);
+  let sawTransient = false;
 
-  const attempt = async (): Promise<{ ok: boolean; error?: string }> => {
+  for (const key of orderedGoogleClientKeys(preferred)) {
+    const creds = GOOGLE_CLIENTS[key]();
+    if (!creds.id) continue; // client not configured — skip
+
     try {
-      const client = new OAuth2Client(clientId, clientSecret);
+      const client = new OAuth2Client(creds.id, creds.secret);
       client.setCredentials({ refresh_token: refreshToken });
-      // If the user has been deleted or suspended in Google, this throws.
       await client.getAccessToken();
-      return { ok: true };
-    } catch (err) {
-      const googleError = err as gaxios.GaxiosError;
-      return { ok: false, error: googleError.response?.data?.error ?? googleError.message };
-    }
-  };
-
-  let result = await attempt();
-  if (result.ok) {
-    logger.info(`[Refresh-Validate] Google verification successful for ${user.email}`, { userId: user.id });
-    return false;
-  }
-
-  if (result.error === 'unauthorized_client') {
-    logger.info(`[Refresh-Validate] Google returned unauthorized_client for ${user.email}; recreating client and retrying`, { userId: user.id });
-    result = await attempt();
-    if (result.ok) {
-      logger.info(`[Refresh-Validate] Google verification successful on retry for ${user.email}`, { userId: user.id });
+      logger.info(`[Refresh-Validate] Google verification successful via ${creds.label} client`, { userId: user.id });
       return false;
+    } catch (err) {
+      const code = (err as gaxios.GaxiosError).response?.data?.error ?? (err as Error).message;
+
+      if (OWNING_CLIENT_REVOKED.includes(code)) {
+        logger.warn(`[Refresh-Validate] Google rejected token (${code}) via ${creds.label} client — account revoked/deactivated`, {
+          userId: user.id,
+          googleError: code,
+        });
+        return true;
+      }
+      if (WRONG_CLIENT.includes(code)) continue; // not this client's token — try next
+      logger.error(`[Refresh-Validate] Unexpected Google error (${code}) via ${creds.label} client`, {
+        userId: user.id,
+        googleError: code,
+      });
+      sawTransient = true; // network / 5xx — inconclusive
     }
   }
 
-  if (result.error && PERMANENT_GOOGLE_ERRORS.includes(result.error)) {
-    logger.warn(`[Refresh-Validate] Google rejected token (${result.error}) for ${user.email} — account revoked/deactivated`, {
-      userId: user.id,
-      googleError: result.error,
-    });
-    return true;
-  }
-
-  logger.warn(`[Refresh-Validate] Google verification transient error for ${user.email}; allowing session. Error: ${result.error}`, { userId: user.id });
+  logger.warn(`[Refresh-Validate] Google verification inconclusive (transient=${sawTransient}); allowing session`, { userId: user.id });
   return false;
 }
 
@@ -83,10 +86,8 @@ async function isGoogleRefreshTokenRevoked(
  * user (disabled/deleted). Transient/network errors return false.
  */
 async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> {
-  const user = session.user;
-
   if (!session.accessToken) {
-    logger.info(`[Refresh-Validate] No access token for Microsoft user ${user.email}; skipping Graph check`);
+    logger.info('[Refresh-Validate] No access token for Microsoft user; skipping Graph check');
     return false;
   }
 
@@ -97,7 +98,7 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
     });
 
     if (graphResponse.status === 200) {
-      logger.info(`[Refresh-Validate] Microsoft Graph verification successful for ${user.email}`);
+      logger.info('[Refresh-Validate] Microsoft Graph verification successful');
       return false;
     }
 
@@ -122,19 +123,19 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
       if (tokenResponse.status === 200) {
         const tokenData = tokenResponse.data as { access_token: string };
         await userSessionService.updateSession(session.id, { accessToken: tokenData.access_token });
-        logger.info(`[Refresh-Validate] Microsoft token refreshed for ${user.email}`);
+        logger.info('[Refresh-Validate] Microsoft token refreshed');
         return false;
       }
 
-      logger.warn(`[Refresh-Validate] Microsoft token refresh failed for ${user.email}; user may be disabled in Azure AD`);
+      logger.warn('[Refresh-Validate] Microsoft token refresh failed; user may be disabled in Azure AD');
       return true;
     }
 
     // 403 or other — user likely disabled/deleted in Azure AD.
-    logger.warn(`[Refresh-Validate] Microsoft Graph returned ${graphResponse.status} for ${user.email}; user may be disabled in Azure AD`);
+    logger.warn(`[Refresh-Validate] Microsoft Graph returned ${graphResponse.status}; user may be disabled in Azure AD`);
     return true;
   } catch (err) {
-    logger.warn(`[Refresh-Validate] Microsoft Graph verification transient error for ${user.email}: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(`[Refresh-Validate] Microsoft Graph verification transient error: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
 }
@@ -148,10 +149,7 @@ async function isProviderRevoked(session: LoadedSession): Promise<boolean> {
   const provider = session.user.authProvider;
 
   if (provider === AuthProvider.GOOGLE && session.refreshToken) {
-    return isGoogleRefreshTokenRevoked(session.refreshToken, {
-      id: session.user.id,
-      email: session.user.email,
-    });
+    return isGoogleRefreshTokenRevoked(session, { id: session.user.id });
   }
 
   if (provider === AuthProvider.MICROSOFT) {
@@ -199,7 +197,6 @@ export async function isRefreshAllowed(session: LoadedSession | null): Promise<b
 
   logger.warn(`[Refresh-Validate] Refresh denied: ${verdict.reason}`, {
     userId: session?.user?.id,
-    email: session?.user?.email,
   });
 
   if (verdict.deactivate && session?.user) {

@@ -22,7 +22,7 @@ class AccountDeactivationService {
   private userSessionService = new UserSessionService();
 
   async handleDeactivatedUser({ userId, email }: DeactivatedUser): Promise<void> {
-    logger.warn('[Deactivation] Cleaning up deactivated user', { userId, email });
+    logger.warn('[Deactivation] Cleaning up deactivated user', { userId });
 
     const steps: Array<{ name: string; run: () => Promise<unknown> }> = [
       // Revoke any mTLS certificates issued to the user (s2s call).
@@ -39,13 +39,12 @@ class AccountDeactivationService {
       if (result.status === 'rejected') {
         logger.error(`[Deactivation] Step failed: ${steps[index].name}`, {
           userId,
-          email,
           error: result.reason instanceof Error ? result.reason.message : String(result.reason),
         });
       }
     });
 
-    logger.info('[Deactivation] Cleanup complete', { userId, email });
+    logger.info('[Deactivation] Cleanup complete', { userId });
   }
 }
 
