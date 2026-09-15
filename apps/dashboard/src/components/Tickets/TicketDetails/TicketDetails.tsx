@@ -3260,6 +3260,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         const workspaceId = location.pathname.split('/')[1];
         void navigate(
           `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+          { state: { trackSource: 'ticket_details' } },
         );
         return;
       }
@@ -3306,6 +3307,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             const workspaceId = pathParts[1];
             void navigate(
               `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+              { state: { trackSource: 'ticket_details' } },
             );
           } else {
             const workspaceId = location.pathname.split('/')[1];
@@ -5098,6 +5100,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     const workspaceId = pathParts[1];
                     void navigate(
                       `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+                      { state: { trackSource: 'ticket_details' } },
                     );
                   } else {
                     const workspaceId = location.pathname.split('/')[1];

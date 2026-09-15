@@ -52,6 +52,19 @@ import {
   type AttachmentRef,
 } from '../../../machines/attachmentViewerMachine';
 import { threadCitationStore } from '../ThreadCitationModal/ThreadCitationModal';
+import {
+  deskTicketTrackingMetadata,
+  msSinceDeskTicketViewed,
+  newComposerSessionId,
+  resolveAiDraftState,
+  trackDeskOutcome,
+} from '../../../services/Analytics/deskTracking';
+import { lengthBucket } from '../../../services/Analytics/trackSource';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import {
+  getDeskDraftTrackingSnapshot,
+  setDeskDraftTrackingSession,
+} from '../../../hooks/useDeskAIDraft';
 
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { markdownToHtml } from '../../../utils/clipboardUtils';
@@ -212,7 +225,22 @@ interface EmailComposerProps {
   initialTo?: string[];
   channelPreference: EmailChannelPreference | undefined;
   channelPreferenceLoaded: boolean;
+  /**
+   * Analytics only. Which surface opened this composer — reply_pill ·
+   * thread_item · header · mailto · reopen_draft · keyboard. Defaults to
+   * reply_pill for replies and header for compose.
+   */
+  trackSource?: string;
+  /**
+   * Analytics only. The ticket row, so COMPOSER_OPENED / SEND_EMAIL_* carry
+   * the ticket dimensions and `isFirstResponse`. Optional: the compose modal
+   * has no ticket yet.
+   */
+  ticket?: Parameters<typeof deskTicketTrackingMetadata>[0];
 }
+
+/** AUTO_DRAFT_SHOWN fires once per conversation per page load, not per mount. */
+const autoDraftShownFor = new Set<string>();
 
 export const EmailComposer = ({
   conversationId,
@@ -242,14 +270,21 @@ export const EmailComposer = ({
   initialTo,
   channelPreference,
   channelPreferenceLoaded,
+  trackSource,
+  ticket: trackTicket,
 }: EmailComposerProps): ReactElement => {
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
   // Current user — used to scope localStorage compose drafts so two users
   // sharing the same browser don't see each other's in-flight drafts.
   const { userID } = useAuthContextValues();
+  // One id per composer mount. Every row of the reply funnel (COMPOSER_OPENED,
+  // AUTO_DRAFT_SHOWN, the AIDraft run events, SEND_EMAIL_*, COMPOSER_ABANDONED)
+  // carries it, so a ticket replied to three times, or a compose modal open
+  // beside a reply, still joins exactly.
+  const composerSessionIdRef = useRef<string>(newComposerSessionId());
   // One-shot AI helper for the wand button next to the Subject field.
-  const subjectAI = useComposeSubjectAI(channelId ?? null);
+  const subjectAI = useComposeSubjectAI(channelId ?? null, composerSessionIdRef.current);
   const emails = propEmails;
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const clawAgents = useChannelClawAgents(channelId || null);
@@ -445,6 +480,113 @@ export const EmailComposer = ({
     [emailContent],
   );
 
+  // ── Reply-funnel analytics ──────────────────────────────────────────────
+  // Refs, not state: they are read at send time and in the unmount cleanup,
+  // never rendered. `mountedAtRef` is the funnel's clock; `sentRef` keeps
+  // COMPOSER_ABANDONED quiet after a successful send; `bodyLengthRef` is what
+  // the cleanup sees since state is stale inside a [] effect.
+  const mountedAtRef = useRef<number>(Date.now());
+  const sentRef = useRef(false);
+  const discardRef = useRef(false);
+  const savedAsDraftRef = useRef(false);
+  const bodyLengthRef = useRef(0);
+  useEffect(() => {
+    bodyLengthRef.current = stripHtml(emailContent).trim().length;
+  }, [emailContent]);
+  // 'ai' when the wand wrote the subject, 'ai_edited' once the agent touches it after.
+  const subjectSourceRef = useRef<'manual' | 'ai' | 'ai_edited'>('manual');
+  // Plain-text length of the server auto-draft as it was loaded, for
+  // aiDraftState = auto_unedited / auto_edited at send time.
+  const autoDraftLengthRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!hasAutoDraft || autoDraftLengthRef.current !== null) return;
+    if (draft?.draftContent)
+      autoDraftLengthRef.current = stripHtml(draft.draftContent).trim().length;
+  }, [hasAutoDraft, draft?.draftContent]);
+  // Two-step send review: when it opened, so the confirm / cancel clicks can
+  // carry it. A timestamp, not a delta — attributes bake at render.
+  const reviewOpenedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    reviewOpenedAtRef.current = showSendConfirm ? Date.now() : null;
+  }, [showSendConfirm]);
+  const resolvedTrackSource = trackSource ?? (isComposeMode ? 'header' : 'reply_pill');
+  const trackMode: 'compose' | 'reply' | 'reply_all' = isComposeMode
+    ? 'compose'
+    : replyMode === 'replyAll'
+      ? 'reply_all'
+      : 'reply';
+  const isFirstResponse =
+    trackTicket && 'firstRespondedAt' in trackTicket ? !trackTicket.firstRespondedAt : undefined;
+  const trackCtx = useMemo(
+    () => ({
+      deskType: channelPreference?.deskType ?? null,
+      draft: draft ? { autoDraftStatus: draft.autoDraftStatus ?? null } : null,
+    }),
+    [channelPreference?.deskType, draft],
+  );
+  const trackCtxRef = useRef(trackCtx);
+  trackCtxRef.current = trackCtx;
+  const trackTicketRef = useRef(trackTicket);
+  trackTicketRef.current = trackTicket;
+
+  // COMPOSER_OPENED / AUTO_DRAFT_SHOWN on mount, COMPOSER_ABANDONED on unmount.
+  // The composer is mounted only while it is open (the host toggles it), so
+  // mount and unmount are the open and the close. The send path sets sentRef
+  // so a successful send never also counts as an abandon.
+  useEffect(() => {
+    const composerSessionId = composerSessionIdRef.current;
+    setDeskDraftTrackingSession(composerSessionId, ticketId ?? null);
+    const hadServerDraft = !!draft?.draftContent && stripHtml(draft.draftContent).trim().length > 0;
+    trackDeskOutcome('COMPOSER_OPENED', trackTicketRef.current, trackCtxRef.current, {
+      composerSessionId,
+      mode: trackMode,
+      source: resolvedTrackSource,
+      hadAutoDraft: hasAutoDraft,
+      hadServerDraft,
+      replyToSpecificEmail: !!replyToEmailId,
+      ...(isFirstResponse !== undefined && { isFirstResponse }),
+    });
+    if (hasAutoDraft && conversationId && !autoDraftShownFor.has(conversationId)) {
+      autoDraftShownFor.add(conversationId);
+      globalClickTracker.trackManualEvent('AIDraft', 'AUTO_DRAFT_SHOWN', undefined, {
+        ...(ticketId && { ticketId }),
+        conversationId,
+        composerSessionId,
+        ...(draft?.draftContent && {
+          draftLengthBucket: lengthBucket(stripHtml(draft.draftContent).trim().length),
+        }),
+        ...(draft?.updatedAt && {
+          hoursSinceGenerated: Math.max(0, Math.round((Date.now() - draft.updatedAt) / 3_600_000)),
+        }),
+        ...(channelPreference?.autoDraftAgentSlug && {
+          agentSlug: channelPreference.autoDraftAgentSlug,
+        }),
+      });
+    }
+    return () => {
+      if (sentRef.current || bodyLengthRef.current === 0) return;
+      const snapshot = getDeskDraftTrackingSnapshot();
+      trackDeskOutcome('COMPOSER_ABANDONED', trackTicketRef.current, trackCtxRef.current, {
+        composerSessionId,
+        mode: trackMode,
+        reason: discardRef.current ? 'discard' : 'close',
+        bodyLengthBucket: lengthBucket(bodyLengthRef.current),
+        hadAiDraft: hasAutoDraft || snapshot.acceptedLength !== null || snapshot.rejected,
+        aiDraftState: resolveAiDraftState({
+          acceptedLength: snapshot.acceptedLength,
+          rejected: snapshot.rejected,
+          hadAutoDraft: hasAutoDraft,
+          autoDraftLength: autoDraftLengthRef.current,
+          sentLength: bodyLengthRef.current,
+        }),
+        msInComposer: Date.now() - mountedAtRef.current,
+        savedAsDraft: savedAsDraftRef.current,
+      });
+    };
+    // Mount/unmount only — the open is a single moment, not a render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const ccInputRef = React.useRef<HTMLInputElement>(null);
   const bccInputRef = React.useRef<HTMLInputElement>(null);
@@ -488,12 +630,15 @@ export const EmailComposer = ({
   );
 
   const saveReplyDraft = useCallback(
-    (content: string, attachmentIds?: string[]): string | null =>
-      saveDraft(content, attachmentIds, {
+    (content: string, attachmentIds?: string[]): string | null => {
+      const id = saveDraft(content, attachmentIds, {
         to: toEmails,
         cc: ccEmails,
         bcc: bccEmails,
-      }),
+      });
+      if (id) savedAsDraftRef.current = true;
+      return id;
+    },
     [saveDraft, toEmails, ccEmails, bccEmails],
   );
 
@@ -1020,6 +1165,7 @@ export const EmailComposer = ({
       }
       return;
     }
+    savedAsDraftRef.current = true;
     saveComposeDraft(composeDraftServerId, {
       subject: composeSubject,
       draftContent: emailContent,
@@ -1398,8 +1544,49 @@ export const EmailComposer = ({
       setShowSendConfirm(true);
       return;
     }
+    const usedTwoStepSend = twoStepSendEnabled && showSendConfirm;
     setShowSendConfirm(false);
     setIsSending(true);
+    // Which step failed, for SEND_EMAIL_FAILED: an attachment upload rejecting
+    // is a different problem from the send itself rejecting.
+    let sendStage: 'upload' | 'send' = 'upload';
+    // Dimensions the server's EMAIL_SENT activity cannot see: what the AI draft
+    // contributed, how long the agent spent, how the subject was written.
+    // Counts, flags and buckets only — never the body, subject or addresses.
+    const sendTrackMetadata = (emailType: 'COMPOSE' | 'REPLY_ALL'): Record<string, unknown> => {
+      const snapshot = getDeskDraftTrackingSnapshot();
+      const sentLength = stripHtml(emailContent).trim().length;
+      const inlineImagesCount = (emailContent.match(/<img\b[^>]*data-att-id=/gi) ?? []).length;
+      return {
+        composerSessionId: composerSessionIdRef.current,
+        mode: trackMode,
+        emailType,
+        toCount: toEmails.length,
+        ccCount: ccEmails.length,
+        bccCount: bccEmails.length,
+        attachmentsCount: attachments.length,
+        inlineImagesCount,
+        bodyLengthBucket: lengthBucket(sentLength),
+        hasSignature: !!selectedSignatureId,
+        usedTwoStepSend,
+        aiDraftState: resolveAiDraftState({
+          acceptedLength: snapshot.acceptedLength,
+          rejected: snapshot.rejected,
+          hadAutoDraft: hasAutoDraft,
+          autoDraftLength: autoDraftLengthRef.current,
+          sentLength,
+        }),
+        aiRefineCount: snapshot.refineCount,
+        ...(isComposeMode && { subjectSource: subjectSourceRef.current }),
+        ...(isFirstResponse !== undefined && { isFirstResponse }),
+        replyToSpecificEmail: !!replyToEmailId,
+        msInComposer: Date.now() - mountedAtRef.current,
+        ...((): Record<string, unknown> => {
+          const since = msSinceDeskTicketViewed(ticketId);
+          return since === null ? {} : { msSinceTicketViewed: since };
+        })(),
+      };
+    };
     try {
       // Separate attachments: those with IDs already uploaded vs those needing upload
       const attachmentsWithIds = attachments.filter(att => att.attachmentId);
@@ -1413,6 +1600,7 @@ export const EmailComposer = ({
         );
         regularAttachmentIds = [...regularAttachmentIds, ...newlyUploadedIds];
       }
+      sendStage = 'send';
 
       const inlineIdsFromBody = new Set<string>();
       const imgRe = /<img\b[^>]*>/gi;
@@ -1460,6 +1648,20 @@ export const EmailComposer = ({
           ...(attachmentIds.length > 0 && { attachmentIds }),
         });
 
+        sentRef.current = true;
+        trackDeskOutcome(
+          'SEND_EMAIL_SUCCEEDED',
+          response.data.conversationId
+            ? { id: response.data.ticketXyneId ?? response.data.conversationId }
+            : null,
+          trackCtxRef.current,
+          {
+            ...sendTrackMetadata('COMPOSE'),
+            ...(response.data.conversationId && { conversationId: response.data.conversationId }),
+            ...(response.data.warning && { recordedWithWarning: true }),
+          },
+        );
+
         setEmailContent('');
         setComposeSubject('');
         setAttachments([]);
@@ -1506,6 +1708,12 @@ export const EmailComposer = ({
         ...(ticketSubject?.trim() && { subject: ticketSubject.trim() }),
       });
 
+      sentRef.current = true;
+      trackDeskOutcome('SEND_EMAIL_SUCCEEDED', trackTicketRef.current, trackCtxRef.current, {
+        ...sendTrackMetadata('REPLY_ALL'),
+        conversationId,
+      });
+
       setEmailContent('');
       if (draftId) {
         deleteDraft();
@@ -1536,6 +1744,15 @@ export const EmailComposer = ({
         backendMessage ||
         (error instanceof Error ? error.message : null) ||
         (isComposeMode ? 'Failed to send email' : 'Failed to send reply');
+      const httpStatus = (error as { response?: { status?: number } })?.response?.status;
+      trackDeskOutcome('SEND_EMAIL_FAILED', trackTicketRef.current, trackCtxRef.current, {
+        composerSessionId: composerSessionIdRef.current,
+        mode: trackMode,
+        stage: sendStage,
+        errorKind: httpStatus ? 'http' : error instanceof Error ? error.name : 'unknown',
+        ...(httpStatus !== undefined && { httpStatus }),
+        msInComposer: Date.now() - mountedAtRef.current,
+      });
       toast.error(message);
       logger.warn(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_warn',
@@ -2071,6 +2288,10 @@ export const EmailComposer = ({
                   aria-label='Close review dialog'
                   data-track-category='Support'
                   data-track-name='CloseTwoStepSendReview'
+                  data-track-metadata={JSON.stringify({
+                    composerSessionId: composerSessionIdRef.current,
+                    reviewOpenedAt: reviewOpenedAtRef.current,
+                  })}
                 >
                   <X size={16} />
                 </button>
@@ -2175,6 +2396,10 @@ export const EmailComposer = ({
                     className='rounded-lg px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted'
                     data-track-category='Support'
                     data-track-name='CancelTwoStepSend'
+                    data-track-metadata={JSON.stringify({
+                      composerSessionId: composerSessionIdRef.current,
+                      reviewOpenedAt: reviewOpenedAtRef.current,
+                    })}
                   >
                     Back to edit
                   </button>
@@ -2186,6 +2411,10 @@ export const EmailComposer = ({
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
                     data-ph-capture-attribute-track-id='send_email_confirm'
+                    data-track-metadata={JSON.stringify({
+                      composerSessionId: composerSessionIdRef.current,
+                      reviewOpenedAt: reviewOpenedAtRef.current,
+                    })}
                   >
                     {isSending ? (
                       <Loader2 size={14} className='animate-spin' />
@@ -2485,6 +2714,9 @@ export const EmailComposer = ({
                             setToEmails([]);
                             setCcEmails([]);
                             setBccEmails([]);
+                            // The unmount cleanup reports COMPOSER_ABANDONED;
+                            // this tells it the close was a discard, not an X.
+                            discardRef.current = true;
                             if (isComposeMode) {
                               onDiscard?.();
                             } else {
@@ -2612,7 +2844,10 @@ export const EmailComposer = ({
             <input
               type='text'
               value={composeSubject}
-              onChange={e => setComposeSubject(e.target.value)}
+              onChange={e => {
+                if (subjectSourceRef.current === 'ai') subjectSourceRef.current = 'ai_edited';
+                setComposeSubject(e.target.value);
+              }}
               placeholder='Subject'
               className='flex-1 text-sm py-1 outline-none bg-transparent'
               disabled={isSending}
@@ -2635,7 +2870,10 @@ export const EmailComposer = ({
                   onClick={() => {
                     void (async (): Promise<void> => {
                       const suggested = await subjectAI.generate(stripHtml(emailContent));
-                      if (suggested) setComposeSubject(suggested);
+                      if (suggested) {
+                        subjectSourceRef.current = 'ai';
+                        setComposeSubject(suggested);
+                      }
                     })();
                   }}
                   disabled={isSending || !hasEmailBody || subjectAI.isGenerating}

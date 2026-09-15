@@ -24,15 +24,50 @@ export type DeskDraftRunKind = 'manual' | 'refine' | 'quick_rewrite' | 'custom_r
  * module-level record is enough; `generatedAt` is a timestamp rather than a
  * delta because the attribute is baked at render, not at the click.
  */
-let deskDraftTracking: { generatedAt: number | null; refineCount: number; kind: DeskDraftRunKind } =
-  { generatedAt: null, refineCount: 0, kind: 'manual' };
-
-export function getDeskDraftTrackingSnapshot(): {
+interface DeskDraftTracking {
   generatedAt: number | null;
   refineCount: number;
   kind: DeskDraftRunKind;
-} {
+  /** The composer mount this draft belongs to (see newComposerSessionId). */
+  composerSessionId: string | null;
+  ticketId: string | null;
+  /** Length of the draft the agent inserted, for the edit-before-send check at send time. */
+  acceptedLength: number | null;
+  /** The agent discarded the last AI draft instead of inserting it. */
+  rejected: boolean;
+}
+
+let deskDraftTracking: DeskDraftTracking = {
+  generatedAt: null,
+  refineCount: 0,
+  kind: 'manual',
+  composerSessionId: null,
+  ticketId: null,
+  acceptedLength: null,
+  rejected: false,
+};
+
+export function getDeskDraftTrackingSnapshot(): Readonly<DeskDraftTracking> {
   return deskDraftTracking;
+}
+
+/**
+ * Called by the composer on mount so every AIDraft event for this session
+ * joins back to its COMPOSER_OPENED / SEND_EMAIL_* rows.
+ */
+export function setDeskDraftTrackingSession(
+  composerSessionId: string | null,
+  ticketId: string | null,
+): void {
+  deskDraftTracking = {
+    generatedAt: null,
+    refineCount: 0,
+    kind: 'manual',
+    composerSessionId,
+    ticketId,
+    acceptedLength: null,
+    rejected: false,
+  };
 }
 
 function trackDeskDraftOutcome(
@@ -57,6 +92,10 @@ function trackDeskDraftOutcome(
       latencyMs: startedAt === null ? null : Date.now() - startedAt,
       ...(contentLength !== undefined && { draftLengthBucket: lengthBucket(contentLength) }),
       refineCount: deskDraftTracking.refineCount,
+      ...(deskDraftTracking.composerSessionId && {
+        composerSessionId: deskDraftTracking.composerSessionId,
+      }),
+      ...(deskDraftTracking.ticketId && { ticketId: deskDraftTracking.ticketId }),
     },
   );
 }
@@ -193,7 +232,14 @@ export function useDeskAIDraft({
     runKindRef.current = kind;
     runStartedAtRef.current = Date.now();
     if (kind !== 'manual') deskDraftTracking.refineCount += 1;
-    else deskDraftTracking = { generatedAt: null, refineCount: 0, kind };
+    else
+      deskDraftTracking = {
+        ...deskDraftTracking,
+        generatedAt: null,
+        refineCount: 0,
+        acceptedLength: null,
+        rejected: false,
+      };
     deskDraftTracking.kind = kind;
   }, []);
   const rewriteTracked = useCallback(
@@ -678,6 +724,10 @@ export function useDeskAIDraft({
     }
     ourStreamIdRef.current = null;
     clearStorage();
+    // Remembered for SEND_EMAIL_SUCCEEDED's aiDraftState: the send compares
+    // the body it ships against this length to say whether the draft was edited.
+    deskDraftTracking.acceptedLength = draftContent.length;
+    deskDraftTracking.rejected = false;
     return draftContent;
   }, [draftContent, clearStorage, threadId]);
 
@@ -686,6 +736,8 @@ export function useDeskAIDraft({
       xyneAIStreamManager.abortStreamByThread(threadId);
     }
     ourStreamIdRef.current = null;
+    deskDraftTracking.rejected = true;
+    deskDraftTracking.acceptedLength = null;
     setIsDraftActive(false);
     setDraftContent('');
     setDraftSources([]);

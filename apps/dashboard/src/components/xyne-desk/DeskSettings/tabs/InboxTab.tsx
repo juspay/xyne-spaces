@@ -382,6 +382,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           {signatureModalOpen && (
             <div ref={signatureModalRef}>
               <InlineSignatureEditor
+                signatureCount={signatures?.length ?? 0}
                 initial={editingSignature}
                 onSave={data => {
                   const now = Date.now();
@@ -494,6 +495,10 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                           className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
+                          data-track-metadata={JSON.stringify({
+                            signatureCount: signatures?.length ?? 0,
+                            isDefault: true,
+                          })}
                         >
                           Set as default
                         </button>

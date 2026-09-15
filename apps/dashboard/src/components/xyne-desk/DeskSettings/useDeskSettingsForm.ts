@@ -21,6 +21,14 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { DEFAULT_PRIORITY_PROMPT } from './constants';
 import type { SaveMappingPayload, ClassificationMapping } from '../../../types/classification';
+import {
+  DESK_FEATURE_FIELDS,
+  changedKeys,
+  errorKindOf,
+  trackDeskFeatureToggled,
+  trackDeskSettingsSaveFailed,
+  trackDeskSettingsSaved,
+} from './deskSettingsTracking';
 
 export const parseDefaultCc = (val: string | undefined | null): string[] =>
   val
@@ -330,7 +338,7 @@ export function useDeskSettingsForm(
       ? 'Add a category and a prompt before enabling auto-classification.'
       : null;
 
-  const save = async () => {
+  const save = async (tab?: string) => {
     if (!channelId || !isDirty) return;
     if (sendAsAliasError) {
       toast.error('Invalid send-as alias', { description: sendAsAliasError });
@@ -341,6 +349,40 @@ export function useDeskSettingsForm(
       return;
     }
     setSaving(true);
+    // SETTINGS_SAVED / FEATURE_TOGGLED read the diff, not the values: the form
+    // is one Save for thirty fields and "which ones" is the only question worth
+    // answering. Snapshot before the awaits — the server slices re-sync as the
+    // preference row replicates back, which would empty the diff.
+    const changedFields = [
+      ...changedKeys(pref.draft, pref.server),
+      ...changedKeys(cls.draft, cls.server).map(k => `classification.${k}`),
+      ...changedKeys(pri.draft, pri.server).map(k => `priority.${k}`),
+      ...(mappingsDirty ? ['classificationMappings'] : []),
+    ];
+    const deskType = emailChannelPreference?.deskType ?? null;
+    const saveStartedAt = Date.now();
+    const featureFlips: Parameters<typeof trackDeskFeatureToggled>[0][] = [];
+    (Object.keys(DESK_FEATURE_FIELDS) as (keyof typeof DESK_FEATURE_FIELDS)[]).forEach(key => {
+      if (pref.draft[key] === pref.server[key]) return;
+      featureFlips.push({
+        feature: DESK_FEATURE_FIELDS[key],
+        to: pref.draft[key] === true,
+        deskType,
+        channelId,
+        ...(key === 'autoAIDraft' && { agentSlug: pref.draft.autoDraftAgentSlug }),
+      });
+    });
+    if (cls.draft.enabled !== cls.server.enabled) {
+      featureFlips.push({ feature: 'classification', to: cls.draft.enabled, deskType, channelId });
+    }
+    if (pri.draft.enabled !== pri.server.enabled) {
+      featureFlips.push({
+        feature: 'priority_classification',
+        to: pri.draft.enabled,
+        deskType,
+        channelId,
+      });
+    }
     try {
       const d = pref.draft;
       const s = pref.server;
@@ -436,7 +478,23 @@ export function useDeskSettingsForm(
       }
 
       if (Object.keys(patch).length > 0) await savePreference(patch);
-    } catch {
+      trackDeskSettingsSaved({
+        deskType,
+        channelId,
+        tab,
+        changedFields,
+        latencyMs: Date.now() - saveStartedAt,
+      });
+      featureFlips.forEach(trackDeskFeatureToggled);
+    } catch (err) {
+      trackDeskSettingsSaveFailed({
+        deskType,
+        channelId,
+        tab,
+        changedFields,
+        latencyMs: Date.now() - saveStartedAt,
+        errorKind: errorKindOf(err),
+      });
       toast.error('Failed to save desk settings', { description: 'Please try again.' });
     } finally {
       setSaving(false);

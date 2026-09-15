@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
+import { trackDeskOutcome } from '../services/Analytics/deskTracking';
 
 /**
  * Marks a Desk ticket's latest email as read when its detail thread opens.
@@ -23,13 +24,28 @@ export function useMarkEmailRead(
     if (!latestEmailId) return;
     if (markedRef.current === latestEmailId) return;
     markedRef.current = latestEmailId;
-    void zero.mutate(
-      mutators.emailRead.markAsRead({
-        id: uuidv4(),
-        ticketId,
-        lastReadEmailId: latestEmailId,
-        updatedAt: Date.now(),
-      }),
-    );
+    void zero
+      .mutate(
+        mutators.emailRead.markAsRead({
+          id: uuidv4(),
+          ticketId,
+          lastReadEmailId: latestEmailId,
+          updatedAt: Date.now(),
+        }),
+      )
+      .client.then(() => {
+        // Opening the thread is the implicit "mark read"; the manual and bulk
+        // variants report the same outcome with their own trigger.
+        trackDeskOutcome(
+          'READ_STATE_CHANGED',
+          { id: ticketId },
+          {},
+          {
+            to: 'read',
+            trigger: 'open',
+            bulkCount: 1,
+          },
+        );
+      });
   }, [shouldMark, ticketId, latestEmailId, zero]);
 }
