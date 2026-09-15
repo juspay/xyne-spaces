@@ -51,30 +51,6 @@ async function assertChannelParticipant(channelId: string, userId: string): Prom
   throw err;
 }
 
-async function assertChannelParticipant(channelId: string, userId: string): Promise<void> {
-  const channel = await db.channel.findUnique({
-    where: { id: channelId },
-    select: { id: true },
-  });
-  if (!channel) {
-    const err = new Error('Channel not found') as Error & { status?: number };
-    err.status = 404;
-    throw err;
-  }
-
-  const participant = await db.channelParticipant.findFirst({
-    where: { channelId, userId },
-    select: { id: true },
-  });
-  if (participant) return;
-
-  const err = new Error('Forbidden: only channel participants can fetch from this desk') as Error & {
-    status?: number;
-  };
-  err.status = 403;
-  throw err;
-}
-
 router.use(
   express.json({
     limit: '5mb',
