@@ -125,6 +125,30 @@ export const GROUP_KEY_TO_DOC_TYPE = Object.fromEntries(
   ).flatMap(([docType, { groupKeys }]) => groupKeys.map(groupKey => [groupKey, docType])),
 ) as Record<string, SearchResultsDocType>;
 
+/** Render order of backend-result groups in the palette's search-active branch. */
+export const BACKEND_GROUP_KEYS = [
+  'conversation',
+  'ticket',
+  'attachment',
+  'canvas',
+  'transcript',
+  'recording',
+  'desk',
+] as const;
+
+/**
+ * Backend-result group key -> palette TabType, for the groups that show a loading skeleton
+ * on the ALL tab while a search is pending (Messages and Tickets) — derived from the registry.
+ */
+export const ALL_TAB_SKELETON_GROUPS = Object.fromEntries(
+  (['messages', 'tickets'] as const).flatMap(docType =>
+    DOC_TYPE_REGISTRY[docType].groupKeys.map(groupKey => [
+      groupKey,
+      DOC_TYPE_REGISTRY[docType].tab,
+    ]),
+  ),
+) as Partial<Record<string, TabType>>;
+
 export const VespaApps = {
   CHAT: 'chat',
   TICKET: 'ticket',
