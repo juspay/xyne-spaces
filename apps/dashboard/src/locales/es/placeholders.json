@@ -1010,6 +1010,16 @@
         "linkPlaceholder": "Enlace",
         "searchByIdOrTitlePlaceholder": "Buscar por ID o título"
       }
+    },
+    "recordingsScreen": {
+      "findInTranscriptPlaceholder": "Buscar en la transcripción",
+      "typeSlashForCommandsPlaceholder": "Escribe '/' para comandos",
+      "recordingTitlePlaceholder": "Título de la grabación"
+    },
+    "recordingsV2Screen": {
+      "peoplePlaceholder": "Personas",
+      "searchPeoplePlaceholder": "Buscar personas...",
+      "searchRecordingsPeopleLabelsPlaceholder": "Buscar grabaciones, personas o etiquetas..."
     }
   }
 }

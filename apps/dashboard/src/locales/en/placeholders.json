@@ -1010,6 +1010,16 @@
         "linkPlaceholder": "Link",
         "searchByIdOrTitlePlaceholder": "Search by ID or title"
       }
+    },
+    "recordingsScreen": {
+      "findInTranscriptPlaceholder": "Find in transcript",
+      "typeSlashForCommandsPlaceholder": "Type '/' for commands",
+      "recordingTitlePlaceholder": "Recording title"
+    },
+    "recordingsV2Screen": {
+      "peoplePlaceholder": "People",
+      "searchPeoplePlaceholder": "Search people...",
+      "searchRecordingsPeopleLabelsPlaceholder": "Search recordings, people or labels..."
     }
   }
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, MultipleCrossCancelDefault } from '@xyne/icons';
 import type { User } from '@xyne/shared/machines';
 import Avatar from '../../../components/ui/Avatar/Avatar';
@@ -42,6 +43,7 @@ export function RecordingPeopleFilter({
   selectedUserId,
   onUserChange,
 }: RecordingPeopleFilterProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [searchValue, setSearchValue] = useState('');
 
   const rankedPeople = useRankedActivePeople(searchValue.trim(), PEOPLE_LIMIT);
@@ -94,8 +96,8 @@ export function RecordingPeopleFilter({
         options={options}
         selectedValue={selectedUserId}
         onSelect={onUserChange}
-        placeholder='People'
-        searchPlaceholder='Search people...'
+        placeholder={t('routes.recordingsV2Screen.peoplePlaceholder')}
+        searchPlaceholder={t('routes.recordingsV2Screen.searchPeoplePlaceholder')}
         inputClassName={cn(
           'h-9 max-w-[9rem] rounded-xl pl-3 pr-7 text-sm font-medium shadow-sm',
           '[&>span]:min-w-0 [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:!whitespace-nowrap',

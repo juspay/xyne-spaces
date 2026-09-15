@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { User } from '@xyne/shared/machines';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AlertTriangle, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
@@ -59,6 +60,7 @@ const RecordingAskAIModal = ({
   onOpenChange,
   onConfirm,
 }: RecordingAskAIModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -223,7 +225,7 @@ const RecordingAskAIModal = ({
             type='text'
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder='Search recordings, people or labels...'
+            placeholder={t('routes.recordingsV2Screen.searchRecordingsPeopleLabelsPlaceholder')}
             aria-label='Search recordings, people or labels'
             className='w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='RecordingsV2'

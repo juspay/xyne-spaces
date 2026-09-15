@@ -4,6 +4,7 @@
  */
 
 import { ReactElement, useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, AlertTriangle } from 'lucide-react';
 
 interface SaveTitleModalProps {
@@ -26,6 +27,7 @@ export function SaveTitleModal({
   isSaving,
   endedByAgentDrop = false,
 }: SaveTitleModalProps): ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const [title, setTitle] = useState(defaultTitle);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +85,7 @@ export function SaveTitleModal({
           value={title}
           onChange={e => setTitle(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder='Recording title'
+          placeholder={t('routes.recordingsScreen.recordingTitlePlaceholder')}
           disabled={isSaving}
           className='w-full px-4 py-3 text-base bg-muted dark:bg-gray-900 border border-input dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground dark:text-gray-100 placeholder-gray-400 disabled:opacity-50'
           data-track-category='SaveTitleModal'
