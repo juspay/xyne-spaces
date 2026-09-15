@@ -14,6 +14,7 @@ import { requestLogger } from '@/middleware/requestLogger';
 import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
+import { anyS2sKeyMatches } from '@/middleware/validateS2SKey';
 import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
@@ -534,11 +535,13 @@ export class App {
     // App routes
     this.app.use('/api/apps', appRoutes);
 
-    // Internal S2S endpoints (trusted service-to-service calls)
+    // Internal S2S endpoints (trusted service-to-service calls).
+    // Key comparison is constant-time (see anyS2sKeyMatches) — plain
+    // `includes` short-circuits and leaks a prefix-match timing side channel.
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
       const supplied = req.headers['x-s2s-key'];
-      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
-      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
+      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey];
+      if (typeof supplied !== 'string' || !anyS2sKeyMatches(supplied, accepted)) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
       }
