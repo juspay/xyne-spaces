@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
 import { X, Plus, Trash2 } from 'lucide-react';
@@ -51,6 +52,7 @@ const OwnerCombobox = ({
   errorMessage,
   inputRef,
 }: OwnerComboboxProps) => {
+  const { t } = useTranslation('placeholders');
   const selectedOwner = ownerItems.find(o => o.value === value) ?? null;
   const displayValue = selectedOwner ? selectedOwner.label : searchQuery;
 
@@ -64,7 +66,7 @@ const OwnerCombobox = ({
       <Combobox
         ref={inputRef}
         label='Owner *'
-        placeholder='Search and select owner...'
+        placeholder={t('routes.rcaScreen.searchSelectOwnerPlaceholder')}
         queryString={displayValue}
         onInputValueChange={val => {
           if (val === '' && selectedOwner) return;
@@ -105,6 +107,7 @@ export const COEForm = ({
     throw new Error('Invalid RCA');
   }
 
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { isMobile } = usePlatform();
   const isLocked = selectedRecord.status === RCAStatus.CLOSED && !isCoeEnabled;
@@ -622,7 +625,7 @@ export const COEForm = ({
                 }
                 updatePendingRow(index, row => ({ ...row, action: e.target.value }));
               }}
-              placeholder='Describe the action to address the RCA...'
+              placeholder={t('routes.rcaScreen.coeForm.describeActionPlaceholder')}
               rows={4}
               aria-invalid={showErrors && !data.action.trim()}
               className={cn(
@@ -720,7 +723,7 @@ export const COEForm = ({
               <div className='p-1 space-y-2'>
                 <p className='text-sm font-semibold text-foreground'>Quick Fixes Done</p>
                 <MultiSelect
-                  placeholder='Select quick fixes'
+                  placeholder={t('routes.rcaScreen.coeForm.selectQuickFixesPlaceholder')}
                   options={quickFixOptions}
                   selectedValues={quickFixes}
                   onChange={values => setValue('quickFixes', values, { shouldDirty: true })}

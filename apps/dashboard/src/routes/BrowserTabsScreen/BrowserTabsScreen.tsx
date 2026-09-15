@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSelector } from '@xstate/react';
 import {
   ArrowLeft,
@@ -244,6 +245,7 @@ export function BrowserTabsScreen({
   variant = 'fullscreen',
   pendingUrls: externalPendingUrls,
 }: BrowserTabsScreenProps = {}): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const tabs = useSelector(browserPanelActor, state => state.context.tabs);
   const activeTabId = useSelector(browserPanelActor, state => state.context.activeTabId);
   const statePendingUrls = useSelector(browserPanelActor, state => state.context.pendingUrls);
@@ -823,7 +825,7 @@ export function BrowserTabsScreen({
               type='text'
               value={urlInput}
               onChange={e => setUrlInput(e.target.value)}
-              placeholder='Enter a URL or search...'
+              placeholder={t('routes.browserTabsScreen.urlBarPlaceholder')}
               className={`w-full bg-background border border-input rounded-md focus:outline-none focus:border-transparent ${
                 isPanel
                   ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
@@ -884,7 +886,7 @@ export function BrowserTabsScreen({
               value={findQuery}
               onChange={e => setFindQuery(e.target.value)}
               onKeyDown={handleFindKeyDown}
-              placeholder='Find in page...'
+              placeholder={t('routes.browserTabsScreen.findInPagePlaceholder')}
               className='flex-1 bg-muted px-3 py-1.5 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
               data-track-category='BROWSER'
               data-track-name='FIND_IN_PAGE_INPUT'

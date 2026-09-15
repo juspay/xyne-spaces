@@ -1,4 +1,5 @@
 import { FormEvent, ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import { CheckTickSingle, CopyDefault } from '@xyne/icons';
 import { WorkspaceRole } from '@xyne/shared';
@@ -53,6 +54,7 @@ export const WorkspaceInviteDialog = ({
   onOpenChange,
   workspaceId,
 }: WorkspaceInviteDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [emailsInput, setEmailsInput] = useState('');
   const [isInviting, setIsInviting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -200,7 +202,7 @@ export const WorkspaceInviteDialog = ({
               type='text'
               value={emailsInput}
               onChange={event => setEmailsInput(event.target.value)}
-              placeholder='jane@acme.com, jhon@acme.com'
+              placeholder={t('appSidebar.workspaceInvite.emailsPlaceholder')}
               disabled={isInviting}
               className='h-10 min-w-0 flex-1 rounded-[13px] border border-border bg-background px-3.5 text-[15px] font-medium text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60 focus:ring-2 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-60'
               data-track-category='WorkspaceInviteDialog'

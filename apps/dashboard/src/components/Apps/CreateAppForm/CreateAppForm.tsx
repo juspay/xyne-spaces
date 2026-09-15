@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '../../ui/Button/Button';
@@ -18,6 +19,7 @@ export interface CreateAppFormProps {
 }
 
 export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const {
     control,
     handleSubmit,
@@ -86,7 +88,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
             render={({ field }) => (
               <Input
                 id='name'
-                placeholder='Enter app name'
+                placeholder={t('apps.createApp.namePlaceholder')}
                 disabled={createAppMutation.isPending}
                 {...field}
               />
@@ -106,7 +108,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
               <Textarea
                 id='description'
                 className='text-foreground'
-                placeholder='Enter app description (optional)'
+                placeholder={t('apps.common.descriptionPlaceholder')}
                 rows={3}
                 disabled={createAppMutation.isPending}
                 {...field}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ANDROID_PACKAGE_NAME_PATTERN, normalizeChannelName } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
@@ -162,6 +163,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   hideVisibility = false,
   requireConnector = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [debouncedChannelName, setDebouncedChannelName] = useState('');
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
@@ -534,7 +536,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           </label>
           <Select value={deskType} onValueChange={value => handleSourceChange(value as DeskType)}>
             <SelectTrigger id='desk-source' className='w-full'>
-              <SelectValue placeholder='Select a source' />
+              <SelectValue placeholder={t('chat.addChannelForm.selectSource')} />
             </SelectTrigger>
             <SelectContent>
               {DESK_SOURCES.map(source => {
@@ -613,7 +615,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           </label>
           <Select value={selectedCallSource} disabled>
             <SelectTrigger id='call-source-select' className='w-full'>
-              <SelectValue placeholder='Select a source' />
+              <SelectValue placeholder={t('chat.addChannelForm.selectSource')} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value='OZONETEL'>Ozonetel</SelectItem>
@@ -672,7 +674,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <>
               <Select value={selectedSlackChannelId} onValueChange={setSelectedSlackChannelId}>
                 <SelectTrigger id='slack-channel-select' className='w-full'>
-                  <SelectValue placeholder='Select a Slack channel' />
+                  <SelectValue placeholder={t('chat.addChannelForm.selectSlackChannel')} />
                 </SelectTrigger>
                 <SelectContent>
                   {slackChannelsData
@@ -732,7 +734,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <>
               <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
                 <SelectTrigger id='app-desk-select' className='w-full'>
-                  <SelectValue placeholder='Select a Xyne App' />
+                  <SelectValue placeholder={t('chat.addChannelForm.selectXyneApp')} />
                 </SelectTrigger>
                 <SelectContent>
                   {eligibleAppsData.map(app => (
@@ -855,7 +857,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                           ),
                         )
                       }
-                      placeholder='Xyne'
+                      placeholder={t('chat.addChannelForm.xynePlaceholder')}
                       autoComplete='off'
                     />
                   </div>
@@ -878,7 +880,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                           ),
                         )
                       }
-                      placeholder='com.example.app'
+                      placeholder={t('chat.addChannelForm.appIdExample')}
                       autoComplete='off'
                       aria-invalid={invalidPackage || duplicatePackage}
                     />
@@ -983,7 +985,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 id='channel-name'
                 value={field.state.value}
                 onChange={handleNameChange}
-                placeholder='e.g. general, development, support'
+                placeholder={t('chat.addChannelForm.channelNameExamples')}
                 className='pl-8 pr-12 text-foreground'
                 aria-invalid={field.state.meta.errors.length > 0}
                 data-testid='channel-name-input'
@@ -1022,7 +1024,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               selectedValue={field.state.value || null}
               onSelect={val => field.handleChange(val ?? '')}
               placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              searchPlaceholder='Search projects...'
+              searchPlaceholder={t('chat.addChannelForm.searchProjects')}
               width='100%'
             />
             {field.state.meta.errors.length > 0 && (
@@ -1137,7 +1139,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               value={field.state.value}
               className='text-foreground'
               onChange={e => field.handleChange(e.target.value)}
-              placeholder='What is this channel about?'
+              placeholder={t('chat.addChannelForm.whatIsChannelAbout')}
               rows={4}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='Edit_Channel_Description'
@@ -1201,7 +1203,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               value={tagString}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagString(e.target.value)}
               onKeyDown={handleTagInputKeyDown}
-              placeholder='Type a tag and press Enter or add comma'
+              placeholder={t('chat.addChannelForm.typeTagEnter')}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='Edit_Topic_Tag'
             />

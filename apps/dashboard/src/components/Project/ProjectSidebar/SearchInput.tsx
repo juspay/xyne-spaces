@@ -1,4 +1,5 @@
 import { ReactElement, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, MultipleCrossCancelDefault as X } from '@xyne/icons';
 
 interface SearchInputProps {
@@ -8,12 +9,9 @@ interface SearchInputProps {
   placeholder?: string;
 }
 
-const SearchInput = ({
-  value,
-  onChange,
-  onClose,
-  placeholder = 'Search...',
-}: SearchInputProps): ReactElement => {
+const SearchInput = ({ value, onChange, onClose, placeholder }: SearchInputProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.common.searchEllipsis');
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus when component mounts
@@ -27,7 +25,7 @@ const SearchInput = ({
       <input
         ref={inputRef}
         type='text'
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         value={value}
         onChange={e => onChange(e.target.value)}
         className='flex-1 bg-transparent text-[13px] text-foreground placeholder-gray-400 outline-none min-w-0'

@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart3 } from 'lucide-react';
 import { Switch } from '@/components/ui/Switch';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -29,6 +30,7 @@ const DAY_OPTIONS: Array<{ label: string; value: ClawMetricsDays }> = [
 ];
 
 const ClawMetricsScreen = (): ReactElement => {
+  const { t } = useTranslation('common');
   const [days, setDays] = useState<ClawMetricsDays>(7);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [allOrgs, setAllOrgs] = useState(false);
@@ -54,12 +56,14 @@ const ClawMetricsScreen = (): ReactElement => {
           </div>
           <div>
             <h1 className='text-xl font-semibold text-foreground'>
-              {selectedAgent ? `Agent · ${selectedAgent}` : 'Workspace metrics'}
+              {selectedAgent
+                ? t('clawMetricsScreen.agentHeading', { agent: selectedAgent })
+                : t('clawMetricsScreen.workspaceMetricsHeading')}
             </h1>
             <p className='mt-1 text-sm text-muted-foreground'>
               {selectedAgent
-                ? `Latency, throughput, sentiment, and tool performance for ${selectedAgent}.`
-                : 'Latency, throughput, errors, and provider performance across your accessible runs.'}
+                ? t('clawMetricsScreen.agentDescription', { agent: selectedAgent })
+                : t('clawMetricsScreen.workspaceDescription')}
             </p>
           </div>
         </div>
@@ -70,13 +74,13 @@ const ClawMetricsScreen = (): ReactElement => {
               <Switch
                 checked={allOrgs}
                 onCheckedChange={setAllOrgs}
-                aria-label='Show metrics across all organizations'
+                aria-label={t('clawMetricsScreen.showAllOrgsAriaLabel')}
               />
-              <span>All organizations</span>
+              <span>{t('clawMetricsScreen.allOrganizationsLabel')}</span>
             </div>
           )}
           <label htmlFor='claw-metrics-agent' className='text-xs text-muted-foreground'>
-            View
+            {t('clawMetricsScreen.viewLabel')}
           </label>
           <select
             id='claw-metrics-agent'
@@ -86,7 +90,7 @@ const ClawMetricsScreen = (): ReactElement => {
             data-track-name='Select metrics scope'
             className='h-9 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring'
           >
-            <option value=''>All workspace</option>
+            <option value=''>{t('clawMetricsScreen.allWorkspaceOption')}</option>
             {agentSlugs.map(slug => (
               <option key={slug} value={slug}>
                 {slug}
@@ -120,7 +124,7 @@ const ClawMetricsScreen = (): ReactElement => {
 
       {error && (
         <div className='mb-5 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive'>
-          Failed to load metrics: {error.message}
+          {t('clawMetricsScreen.failedToLoadMetrics', { message: error.message })}
         </div>
       )}
 
@@ -138,14 +142,14 @@ const ClawMetricsScreen = (): ReactElement => {
           {!selectedAgent && global.data && (
             <>
               <MetricsCard
-                title='LLM latency by provider and model'
-                description='Compare model pairs by median latency, slow tail, time to first token, throughput, and errors.'
+                title={t('clawMetricsScreen.llmLatencyTitle')}
+                description={t('clawMetricsScreen.llmLatencyDescription')}
               >
                 <ProviderLatencyTable rows={global.data.byProvider} />
               </MetricsCard>
               <MetricsCard
-                title='Agents leaderboard'
-                description='Agents ranked by run count. Select a row to drill into its metrics.'
+                title={t('clawMetricsScreen.agentsLeaderboardTitle')}
+                description={t('clawMetricsScreen.agentsLeaderboardDescription')}
               >
                 <AgentLeaderboard rows={global.data.topAgents} onAgentClick={setSelectedAgent} />
               </MetricsCard>
@@ -156,8 +160,8 @@ const ClawMetricsScreen = (): ReactElement => {
             <>
               {agent.data.sentiment.totalRuns > 0 && (
                 <MetricsCard
-                  title='User sentiment and feedback'
-                  description='Explicit ratings and behavioral signals for the selected window.'
+                  title={t('clawMetricsScreen.userSentimentTitle')}
+                  description={t('clawMetricsScreen.userSentimentDescription')}
                 >
                   <SentimentPanel sentiment={agent.data.sentiment} />
                 </MetricsCard>
@@ -165,8 +169,8 @@ const ClawMetricsScreen = (): ReactElement => {
               <ImprovementsCard agentSlug={selectedAgent} />
               {agent.data.toolLatency.length > 0 && (
                 <MetricsCard
-                  title='Tool latency'
-                  description='Tools ranked by cumulative time to identify the largest bottlenecks.'
+                  title={t('clawMetricsScreen.toolLatencyTitle')}
+                  description={t('clawMetricsScreen.toolLatencyDescription')}
                 >
                   <ToolLatencyTable rows={agent.data.toolLatency} />
                 </MetricsCard>
@@ -176,8 +180,8 @@ const ClawMetricsScreen = (): ReactElement => {
 
           {data.slowSessions.length > 0 && (
             <MetricsCard
-              title='Slowest sessions'
-              description='Slow runs ranked by total wall-clock time. Expand a row for its tool breakdown.'
+              title={t('clawMetricsScreen.slowestSessionsTitle')}
+              description={t('clawMetricsScreen.slowestSessionsDescription')}
             >
               <SlowSessionsTable rows={data.slowSessions} showAgent={!selectedAgent} />
             </MetricsCard>

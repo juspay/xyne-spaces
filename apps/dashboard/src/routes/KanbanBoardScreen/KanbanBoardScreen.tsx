@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
@@ -436,6 +437,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialViewVersion,
   hasSharedSeed,
 }) => {
+  const { t } = useTranslation('placeholders');
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
     boardId?: string;
@@ -4105,7 +4107,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         onKeyDown={e => {
                           if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
                         }}
-                        placeholder='e.g. My open PRs'
+                        placeholder={t('routes.kanbanBoardScreen.savedViewNameExamplePlaceholder')}
                         data-track-category='Projects'
                         data-track-name='SaveViewNameInput'
                         className={cn(
@@ -4702,7 +4704,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     onKeyDown={event => {
                       if (event.key === 'Escape') setFlowRunSearchQuery('');
                     }}
-                    placeholder='Search ticket ID or title'
+                    placeholder={t('routes.kanbanBoardScreen.searchTicketsPlaceholder')}
                     data-track-category='flow_board'
                     data-track-name='search_flow_run'
                     className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'

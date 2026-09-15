@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
@@ -97,6 +98,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
   value,
   onChange,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [h, setH] = useState(() => value.split(':')[0] ?? '00');
   const [m, setM] = useState(() => value.split(':')[1] ?? '00');
   const minRef = useRef<HTMLInputElement>(null);
@@ -149,7 +151,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         type='text'
         inputMode='numeric'
         value={h}
-        placeholder='HH'
+        placeholder={t('desk.metrics.hourPlaceholder')}
         maxLength={2}
         data-track-category='DeskMetrics'
         data-track-name='TimeInputHour'
@@ -165,7 +167,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         type='text'
         inputMode='numeric'
         value={m}
-        placeholder='MM'
+        placeholder={t('desk.metrics.minutePlaceholder')}
         maxLength={2}
         data-track-category='DeskMetrics'
         data-track-name='TimeInputMinute'

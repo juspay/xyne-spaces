@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PencilEditLine } from '@xyne/icons';
@@ -32,6 +33,7 @@ interface ClawSubagentCreateV2Props {
 }
 
 const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isEdit = subagent !== undefined;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -99,7 +101,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 <AutoWidthInput
                   value={state.name}
                   onChange={next => update({ name: normalizeSubagentName(next) })}
-                  placeholder='Name your subagent'
+                  placeholder={t('aiScreen.library.subagents.nameYourSubagent')}
                   aria-label='Subagent name'
                   aria-invalid={Boolean(nameError)}
                   autoFocus
@@ -135,7 +137,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 id='subagent-v2-description'
                 value={state.description}
                 onChange={e => update({ description: e.target.value })}
-                placeholder='What this specialist does and when agents should call it.'
+                placeholder={t('aiScreen.library.subagents.whatSpecialistDoes')}
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent v2: description'
                 className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
@@ -160,7 +162,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 <input
                   value={state.paramDescription}
                   onChange={e => update({ paramDescription: e.target.value })}
-                  placeholder='What the parent agent passes in'
+                  placeholder={t('aiScreen.library.subagents.parentPasses')}
                   aria-label='Parameter description'
                   data-track-category='Claw Agents'
                   data-track-name='Create subagent v2: parameter description'
@@ -176,7 +178,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 id='subagent-v2-prompt'
                 value={state.systemPrompt}
                 onChange={e => update({ systemPrompt: e.target.value })}
-                placeholder='You are a focused specialist that…'
+                placeholder={t('aiScreen.library.subagents.focusedSpecialist')}
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent v2: prompt'
                 className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'

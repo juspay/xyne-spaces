@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/Badge';
@@ -37,6 +38,7 @@ const strategyLabel = (strategy: ApprovalStrategy): string => {
 };
 
 const MemoryTab = ({ agent, permissions }: MemoryTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const { data, isLoading, remove } = useClawAgentMemories(agent.slug, search);
   const memoryEnabled = readBool(agent.config['memoryEnabled']);
@@ -93,7 +95,7 @@ const MemoryTab = ({ agent, permissions }: MemoryTabProps): ReactElement => {
           <Input
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder='Search memories…'
+            placeholder={t('clawAgents.digitalTwin.searchMemories')}
             className='pl-9'
           />
         </div>

@@ -1,4 +1,5 @@
 import { type ReactElement, useMemo, useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
@@ -124,6 +125,7 @@ const CommandFormInline = ({
   onSaved,
   onCancel,
 }: CommandFormInlineProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
@@ -181,7 +183,7 @@ const CommandFormInline = ({
             <Input
               id='command-name'
               className='pl-5 text-sm h-8'
-              placeholder='e.g. sell'
+              placeholder={t('apps.editApp.commandNamePlaceholder')}
               value={name}
               onChange={e => {
                 setName(e.target.value);
@@ -200,7 +202,7 @@ const CommandFormInline = ({
         <Input
           id='command-description'
           className='text-sm h-8'
-          placeholder='What does this command do?'
+          placeholder={t('apps.editApp.commandDescriptionPlaceholder')}
           value={desc}
           onChange={e => setDesc(e.target.value)}
           disabled={saving}
@@ -356,6 +358,7 @@ const ShortcutFormInline = ({
   onSaved,
   onCancel,
 }: ShortcutFormInlineProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [saving, setSaving] = useState(false);
   const [commandName, setCommandName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
@@ -407,7 +410,7 @@ const ShortcutFormInline = ({
         <Input
           id='shortcut-command-name'
           className='text-sm h-8 font-mono'
-          placeholder='e.g. create_task'
+          placeholder={t('apps.editApp.shortcutIdPlaceholder')}
           value={commandName}
           onChange={e => {
             setCommandName(e.target.value);
@@ -424,7 +427,7 @@ const ShortcutFormInline = ({
         <Input
           id='shortcut-description'
           className='text-sm h-8'
-          placeholder='What does this shortcut do?'
+          placeholder={t('apps.editApp.shortcutDescriptionPlaceholder')}
           value={desc}
           onChange={e => setDesc(e.target.value)}
           disabled={saving}
@@ -893,6 +896,7 @@ export const EditAppForm = ({
   isLoading = false,
   onCancel,
 }: EditAppFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // Install mode = editing this workspace's install (admin). Template mode = editing the app
   // (creator). In install mode commands and name/description are read-only (template-owned).
   const isInstallMode = editMode === 'install';
@@ -1362,7 +1366,7 @@ export const EditAppForm = ({
                   render={({ field }) => (
                     <Textarea
                       id='description'
-                      placeholder='Enter app description (optional)'
+                      placeholder={t('apps.common.descriptionPlaceholder')}
                       rows={3}
                       disabled={isLoading || isInstallMode}
                       className='text-foreground'
@@ -1402,7 +1406,7 @@ export const EditAppForm = ({
                     <Input
                       id='webhookUrl'
                       type='url'
-                      placeholder='https://your-app.com/webhook'
+                      placeholder={t('apps.editApp.webhookUrlPlaceholder')}
                       disabled={isLoading || !canEditInstallSettings}
                       className='text-foreground'
                       {...field}
@@ -1495,7 +1499,7 @@ export const EditAppForm = ({
                       onValueChange={value => setSelectedWebhookType(value as IncomingWebhookType)}
                     >
                       <SelectTrigger id='webhook-type-select' className='w-full'>
-                        <SelectValue placeholder='Select a webhook type' />
+                        <SelectValue placeholder={t('apps.editApp.selectWebhookType')} />
                       </SelectTrigger>
                       <SelectContent>
                         {WEBHOOK_TYPE_OPTIONS.map(option => (
@@ -1521,7 +1525,7 @@ export const EditAppForm = ({
                         }
                       >
                         <SelectTrigger id='webhook-action-select' className='w-full'>
-                          <SelectValue placeholder='Select a webhook action' />
+                          <SelectValue placeholder={t('apps.editApp.selectWebhookAction')} />
                         </SelectTrigger>
                         <SelectContent>
                           {WEBHOOK_ACTION_OPTIONS.map(option => (
@@ -1550,7 +1554,7 @@ export const EditAppForm = ({
                       }}
                     >
                       <SelectTrigger id='webhook-channel-select' className='w-full'>
-                        <SelectValue placeholder='Select a channel' />
+                        <SelectValue placeholder={t('apps.editApp.selectChannel')} />
                       </SelectTrigger>
                       <SelectContent>
                         {botChannels.map(channel => (
@@ -1584,10 +1588,10 @@ export const EditAppForm = ({
                             <SelectValue
                               placeholder={
                                 !selectedChannelId
-                                  ? 'Select a channel first'
+                                  ? t('apps.editApp.selectChannelFirst')
                                   : projectBoards.length === 0
-                                    ? 'No boards available'
-                                    : 'Select a board'
+                                    ? t('apps.editApp.noBoardsAvailable')
+                                    : t('apps.editApp.selectBoard')
                               }
                             />
                           </SelectTrigger>
@@ -1622,7 +1626,7 @@ export const EditAppForm = ({
                       id='webhook-name-input'
                       value={webhookName}
                       onChange={setWebhookName}
-                      placeholder='e.g., GitHub CI, Monitoring'
+                      placeholder={t('apps.editApp.webhookNamePlaceholder')}
                       className='text-sm'
                     />
                   </div>

@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../utils/classNames';
 import { AISidebar } from './AISidebar';
 import {
@@ -113,6 +114,7 @@ export function AIShell({
   sidebarToggleRef,
   children,
 }: AIShellProps): ReactElement {
+  const { t } = useTranslation('common');
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
   const appPanelRef = useRef<PanelImperativeHandle>(null);
   const splitMode = rightPanel !== undefined && rightPanel !== null;
@@ -240,7 +242,11 @@ export function AIShell({
         collapsedSize={0}
         onResize={(size: PanelSize) => onSidebarCollapsedChange?.(size.inPixels === 0)}
       >
-        <aside id='ai-sidebar' aria-label='AI Sidebar' className='h-full w-full'>
+        <aside
+          id='ai-sidebar'
+          aria-label={t('aiScreen.aiShell.aiSidebarAriaLabel')}
+          className='h-full w-full'
+        >
           <AISidebar
             activeSessionId={activeSessionId}
             onCreateChat={onCreateChat}

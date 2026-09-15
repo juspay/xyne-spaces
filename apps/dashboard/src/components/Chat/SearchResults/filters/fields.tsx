@@ -4,6 +4,7 @@
  * and these stay independently readable.
  */
 import { ReactElement, useState, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Hash, X } from 'lucide-react';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { cn } from '../../../../utils/classNames';
@@ -286,6 +287,7 @@ export function BoardTokenField({
   onChange: (next: string[]) => void;
   track: string;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [allBoards] = useCachedQuery(queries.getAllBoardsList());
   const boards = useMemo(
@@ -306,7 +308,7 @@ export function BoardTokenField({
       query={query}
       onQueryChange={setQuery}
       onChange={onChange}
-      placeholder='e.g. Platform'
+      placeholder={t('chat.search.fieldExample')}
       track={track}
     />
   );

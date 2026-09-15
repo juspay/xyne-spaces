@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
@@ -14,6 +15,7 @@ import { useCachedQuery } from '../../../src/hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
 
 export const DashboardCreation: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -71,7 +73,7 @@ export const DashboardCreation: React.FC = () => {
                 type='text'
                 value={formData.name}
                 onChange={handleInputChange}
-                placeholder='Enter dashboard name'
+                placeholder={t('routes.dashboardCreation.namePlaceholder')}
                 autoFocus={!isMobile}
               />
             </div>
@@ -87,7 +89,7 @@ export const DashboardCreation: React.FC = () => {
                 name='description'
                 value={formData.description}
                 onChange={handleInputChange}
-                placeholder='Enter description (optional)'
+                placeholder={t('routes.dashboardCreation.descriptionPlaceholder')}
                 rows={3}
               />
             </div>

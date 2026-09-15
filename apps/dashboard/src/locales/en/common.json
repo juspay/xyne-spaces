@@ -1,0 +1,319 @@
+{
+  "clawMetricsScreen": {
+    "workspaceMetricsHeading": "Workspace metrics",
+    "agentHeading": "Agent · {{agent}}",
+    "workspaceDescription": "Latency, throughput, errors, and provider performance across your accessible runs.",
+    "agentDescription": "Latency, throughput, sentiment, and tool performance for {{agent}}.",
+    "showAllOrgsAriaLabel": "Show metrics across all organizations",
+    "allOrganizationsLabel": "All organizations",
+    "viewLabel": "View",
+    "allWorkspaceOption": "All workspace",
+    "failedToLoadMetrics": "Failed to load metrics: {{message}}",
+    "llmLatencyTitle": "LLM latency by provider and model",
+    "llmLatencyDescription": "Compare model pairs by median latency, slow tail, time to first token, throughput, and errors.",
+    "agentsLeaderboardTitle": "Agents leaderboard",
+    "agentsLeaderboardDescription": "Agents ranked by run count. Select a row to drill into its metrics.",
+    "userSentimentTitle": "User sentiment and feedback",
+    "userSentimentDescription": "Explicit ratings and behavioral signals for the selected window.",
+    "toolLatencyTitle": "Tool latency",
+    "toolLatencyDescription": "Tools ranked by cumulative time to identify the largest bottlenecks.",
+    "slowestSessionsTitle": "Slowest sessions",
+    "slowestSessionsDescription": "Slow runs ranked by total wall-clock time. Expand a row for its tool breakdown."
+  },
+  "metricsOverview": {
+    "concernErrorRate": "error rate is {{pct}}",
+    "concernP95": "p95 is {{ms}}",
+    "concernErrorsTrendingUp": "errors are trending upward",
+    "concernTailLatencyTrendingUp": "tail latency is trending upward",
+    "healthyBanner_one": "Metrics look healthy across {{count}} run.",
+    "healthyBanner_other": "Metrics look healthy across {{count}} runs.",
+    "concernsBanner_one": "{{count}} concern: {{list}}",
+    "concernsBanner_other": "{{count}} concerns: {{list}}",
+    "typicalRunTimeLabel": "Typical run time",
+    "typicalRunTimeHelp": "Half of runs completed faster than this.",
+    "slowTailRunTimeLabel": "Slow-tail run time",
+    "slowTailRunTimeHelp": "The slowest 5% completed at or above this time.",
+    "totalRunsLabel": "Total runs",
+    "totalRunsDetail": "{{sign}}{{count}} vs previous",
+    "whereTimeGoesLabel": "Where time goes",
+    "whereTimeGoesValue": "{{ms}} LLM",
+    "whereTimeGoesDetail": "{{ms}} in tools",
+    "errorRateLabel": "Error rate",
+    "outcomesLabel": "Outcomes",
+    "outcomesValue": "{{count}} complete",
+    "outcomesDetail": "{{failed}} failed · {{cancelled}} cancelled"
+  },
+  "metricsFormatters": {
+    "slower": "slower",
+    "faster": "faster"
+  },
+  "metricsCharts": {
+    "runsByDayTitle": "Runs by day",
+    "runsByDayDescription": "Daily runs stacked by outcome.",
+    "completedLabel": "Completed",
+    "failedLabel": "Failed",
+    "cancelledLabel": "Cancelled",
+    "typicalRunTimeOverTimeTitle": "Typical run time over time",
+    "typicalRunTimeOverTimeDescription": "p50 — half of runs completed faster than this each day.",
+    "typicalRunP50Label": "Typical run (p50)",
+    "slowTailOverTimeTitle": "Slow tail over time",
+    "slowTailOverTimeDescription": "p95 — the slowest 5% each day.",
+    "slowTailP95Label": "Slow tail (p95)",
+    "llmTimeVsToolTimeTitle": "LLM time vs tool time",
+    "llmTimeVsToolTimeDescription": "A growing tool segment indicates connector or tool latency; a growing LLM segment indicates model latency.",
+    "avgLlmTimeLabel": "Avg LLM time",
+    "avgToolTimeLabel": "Avg Tool time"
+  },
+  "sentimentPanel": {
+    "concernRatingsNegative": "ratings are mostly negative",
+    "concernApologeticElevated": "apologetic replies are elevated",
+    "concernFailedElevated": "failed runs are elevated",
+    "concernCancelledElevated": "cancelled runs are elevated",
+    "concernRetriesElevated": "LLM retries are elevated",
+    "healthyBanner": "Sentiment looks healthy across {{count}} runs.",
+    "concernsBanner_one": "{{count}} concern: {{list}}",
+    "concernsBanner_other": "{{count}} concerns: {{list}}",
+    "ratingsUpLabel": "Ratings 👍",
+    "ratingsDownLabel": "Ratings 👎",
+    "percentOfRated": "{{pct}}% of rated",
+    "noRatings": "No ratings",
+    "apologeticLabel": "Apologetic",
+    "ofCompletedRuns": "of completed runs",
+    "cancelledLabel": "Cancelled",
+    "ofAllRuns": "of all runs",
+    "retriedLabel": "Retried",
+    "llmRetries": "LLM retries",
+    "recentCommentsLabel": "Recent comments",
+    "thumbsUpAriaLabel": "Thumbs up",
+    "thumbsDownAriaLabel": "Thumbs down"
+  },
+  "improvementsCard": {
+    "bucketAgentUnable": "Agent unable to do work",
+    "bucketFailures": "Failures",
+    "bucketUserFrustrated": "User frustrated",
+    "evidenceSessionCount_one": "{{count}} evidence session",
+    "evidenceSessionCount_other": "{{count}} evidence sessions",
+    "moreCount": "+{{count}} more",
+    "manualChangeNotice": "Marking handled records a manual change; it does not edit the agent.",
+    "dismissButton": "Dismiss",
+    "markHandledButton": "Mark as handled",
+    "title": "Improvement suggestions",
+    "description": "Generated hourly from negative-signal sessions. Review the proposed fix, make the change manually, then mark it handled.",
+    "failedToLoad": "Failed to load suggestions: {{message}}",
+    "noPendingSuggestions": "No pending suggestions.",
+    "findingCount_one": "{{count}} finding",
+    "findingCount_other": "{{count}} findings",
+    "nothingPendingInBucket": "Nothing pending in this bucket.",
+    "toastImprovementHandled": "Improvement marked as handled",
+    "toastFailedToUpdate": "Failed to update improvement",
+    "toastImprovementDismissed": "Improvement dismissed",
+    "toastFailedToDismiss": "Failed to dismiss improvement"
+  },
+  "metricsTables": {
+    "agentLeaderboard": {
+      "agentHeader": "Agent",
+      "runsHeader": "Runs",
+      "p50Header": "p50",
+      "p95Header": "p95",
+      "avgLlmHeader": "Avg LLM",
+      "avgToolHeader": "Avg tool",
+      "errorsHeader": "Errors",
+      "noRuns": "No runs in this window.",
+      "unknownOrg": "Unknown org"
+    },
+    "providerLatencyTable": {
+      "providerModelHeader": "Provider · model",
+      "runsHeader": "Runs",
+      "p50LlmHeader": "p50 LLM",
+      "p95LlmHeader": "p95 LLM",
+      "p50TtftHeader": "p50 TTFT",
+      "tpsHeader": "TPS",
+      "errorPctHeader": "Error %",
+      "noProviderRuns": "No provider-tagged runs in this window.",
+      "unknownModel": "unknown"
+    },
+    "toolLatencyTable": {
+      "toolHeader": "Tool",
+      "callsHeader": "Calls",
+      "avgHeader": "Avg",
+      "p50Header": "p50",
+      "p95Header": "p95",
+      "cumulativeHeader": "Cumulative",
+      "shareHeader": "Share",
+      "errorsHeader": "Errors"
+    },
+    "slowSessionsTable": {
+      "sessionHeader": "Session",
+      "agentHeader": "Agent",
+      "totalHeader": "Total",
+      "llmHeader": "LLM",
+      "toolHeader": "Tool",
+      "whenHeader": "When",
+      "taskLabel": "Task: ",
+      "noToolCalls": "No tool calls recorded.",
+      "callCount_one": "{{count}} call",
+      "callCount_other": "{{count}} calls",
+      "errorSuffix": " · error"
+    }
+  },
+  "aiScreen": {
+    "comingSoon": {
+      "description": "This section is coming soon. It will show up here once it's ready."
+    },
+    "emptyState": {
+      "workingLate": "Working late",
+      "goodMorning": "Good morning",
+      "goodAfternoon": "Good afternoon",
+      "goodEvening": "Good evening"
+    },
+    "readonlyContextPills": {
+      "attachedContextAriaLabel_one": "{{count}} attached context item",
+      "attachedContextAriaLabel_other": "{{count}} attached context items"
+    },
+    "askAiRatingButtons": {
+      "ratingUnavailableTitle": "Rating available once the response is saved",
+      "helpfulTitle": "Helpful",
+      "notHelpfulTitle": "Not helpful",
+      "saveButton": "Save"
+    },
+    "promptMarkerRail": {
+      "yourPromptsAriaLabel": "Your prompts"
+    },
+    "aiAgentSelector": {
+      "askAiLabel": "Ask AI",
+      "clearButton": "Clear",
+      "loadingAgents": "Loading agents…",
+      "noAgentsMatch": "No agents match “{{query}}”",
+      "agentCount_one": "{{count}} agent",
+      "agentCount_other": "{{count}} agents"
+    },
+    "composerVoiceButton": {
+      "transcriptionFailedTitle": "Voice transcription failed",
+      "unknownError": "Unknown error",
+      "notSupported": "Voice recording is not supported in this browser",
+      "micPermissionDenied": "Microphone permission denied",
+      "failedToStart": "Failed to start voice recording",
+      "recordingFailedUnexpectedly": "Voice recording failed unexpectedly",
+      "stopVoiceInput": "Stop voice input",
+      "startVoiceInput": "Start voice input",
+      "transcribing": "Transcribing…",
+      "voiceInput": "Voice input"
+    },
+    "modelThinkingSelector": {
+      "defaultLabel": "Default",
+      "offLabel": "Off",
+      "minimalLabel": "Minimal",
+      "lowLabel": "Low",
+      "mediumLabel": "Medium",
+      "highLabel": "High",
+      "recommendedParenthetical": "Recommended ({{model}})",
+      "recommendedModelTitle": "Recommended model",
+      "modelAndThinkingAriaLabel": "Model and thinking",
+      "recommendedLabel": "Recommended",
+      "recommendedTag": "(Recommended)",
+      "noModelsMatch": "No models match",
+      "thinkingLabel": "Thinking"
+    },
+    "composerCollectionPicker": {
+      "selectCollectionsLabel": "Select collections",
+      "backLabel": "Back",
+      "searchThisFolderPlaceholder": "Search this folder…",
+      "searchCollectionsPlaceholder": "Search collections…",
+      "noMatches": "No matches",
+      "folderEmpty": "This folder is empty",
+      "clickToSelectDoubleClickToOpen": "Click to select · double-click to open",
+      "selectedLabel": "Selected",
+      "noCollections": "No collections",
+      "noCollectionsFound": "No collections found"
+    },
+    "sidebar": {
+      "navKnowledge": "Knowledge",
+      "navAgentHub": "Agent Hub",
+      "navDigitalTwin": "Digital twin",
+      "navOrganization": "Organization",
+      "navMetrics": "Metrics",
+      "navSettings": "Settings",
+      "navAdmin": "Admin",
+      "navMorningBrief": "Morning Brief",
+      "newChatLabel": "New Chat",
+      "noChatsYet": "No chats yet",
+      "startNewChatHint": "Start a new chat above to see it here.",
+      "chatOptionsAriaLabel": "Chat options",
+      "deleteButton": "Delete",
+      "deleteChatTitle": "Delete chat?",
+      "deleteChatDescription": "Delete the chat \"{{title}}\"? This can't be undone.",
+      "untitledLabel": "Untitled",
+      "closeAriaLabel": "Close",
+      "deleteChatBody": "{{title}} will be deleted for good. This can't be undone.",
+      "cancelButton": "Cancel",
+      "recentsLabel": "Recents",
+      "newChatTooltip": "New chat"
+    },
+    "aiShell": {
+      "aiSidebarAriaLabel": "AI Sidebar"
+    }
+  },
+  "citationDocsPanel": {
+    "failedToLoadFile": "Failed to load file.",
+    "failedToReadFile": "Failed to read file.",
+    "rawTab": "Raw",
+    "previewTab": "Preview",
+    "previewNotAvailable": "Preview not available for this file type",
+    "expandPanelLabel": "Expand documents panel",
+    "expandLabel": "Expand",
+    "listOpenDocumentsLabel": "List open documents",
+    "chunkLabel": "ch {{index}}",
+    "closeDocLabel": "Close {{title}}",
+    "jumpToSourceLabel": "Jump to Source",
+    "collapsePanelLabel": "Collapse panel",
+    "collapseLabel": "Collapse",
+    "closeAllDocumentsLabel": "Close all documents",
+    "closeAllLabel": "Close all",
+    "ticketTabTitle": "Ticket {{id}}"
+  },
+  "reactArtifact": {
+    "restoreNotice": {
+      "restoredToPrefix": "Restored to",
+      "versionLabel": "Version {{number}}",
+      "fromVersion": "from Version {{number}}"
+    },
+    "bootOverlay": {
+      "loadingAppAriaLabel": "Loading app"
+    },
+    "savedIndicator": {
+      "movedOnTitle": "This app has moved on to version {{number}}. Open the current version.",
+      "newerVersionExistsTitle": "A newer version of this app exists. Open the current version.",
+      "newerVersionWithNumber": "Newer version (v{{number}})",
+      "newerVersion": "Newer version",
+      "savedTitle": "Saved to your apps. Open it in the Library.",
+      "savedLabel": "Saved"
+    }
+  },
+  "artifactPaneReference": {
+    "viewingTitle": "This version is open in the pane",
+    "showTitle": "Show this version in the pane",
+    "versionLabel": "Version {{number}}",
+    "appLabel": "App",
+    "currentLabel": "· Current",
+    "showingLabel": "· Showing",
+    "restoreCurrentWithNumber": "Make version {{number}} current — the agent's next update builds on it",
+    "restoreCurrent": "Make this version current",
+    "restoreButton": "Restore"
+  },
+  "artifactErrorOverlay": {
+    "unknownError": "Unknown error",
+    "hitErrorTitle": "This app hit an error",
+    "dismissAriaLabel": "Dismiss",
+    "dismissTitle": "Dismiss and show the app anyway",
+    "fixRequested": "Fix requested",
+    "fixWithAi": "Fix with AI",
+    "copied": "Copied",
+    "copyError": "Copy error",
+    "waitForReply": "Wait for the current reply to finish, then try again."
+  },
+  "messageReactArtifacts": {
+    "couldNotSave": "Could not save this app.",
+    "openInAppPanel": "Open in the app panel",
+    "openFullScreen": "Open full screen"
+  }
+}

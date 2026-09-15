@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
 import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
@@ -23,6 +24,7 @@ const MAX_INSTRUCTIONS_LENGTH = 10000;
 const MAX_CUSTOM_INSTRUCTION_LENGTH = 1000;
 
 export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const [activeTab, setActiveTab] = useState<'custom' | 'skills'>('custom');
   const instructionRef = useRef<HTMLTextAreaElement>(null);
   const instructionSelectionRef = useRef<{ start: number; end: number } | null>(null);
@@ -491,7 +493,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   value={skillName}
                   autoFocus={!isMobile}
                   onChange={e => handleNameChange(e.target.value.slice(0, MAX_NAME_LENGTH))}
-                  placeholder='Enter skill name'
+                  placeholder={t('chat.xyneAiSidebar.enterSkillName')}
                   className={`w-full bg-background px-3 py-2 border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:bg-muted disabled:text-muted-foreground ${
                     nameError
                       ? 'border-destructive focus:ring-destructive/20'
@@ -531,7 +533,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   onChange={e =>
                     setSkillDescription(e.target.value.slice(0, MAX_DESCRIPTION_LENGTH))
                   }
-                  placeholder='Brief description of what this skill does'
+                  placeholder={t('chat.xyneAiSidebar.skillDescription')}
                   rows={3}
                   className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}
@@ -561,7 +563,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   onChange={e =>
                     setSkillInstructions(e.target.value.slice(0, MAX_INSTRUCTIONS_LENGTH))
                   }
-                  placeholder='Detailed instructions for how the AI should behave when using this skill'
+                  placeholder={t('chat.xyneAiSidebar.skillInstructions')}
                   rows={6}
                   className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}

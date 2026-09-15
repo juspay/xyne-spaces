@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Network, Plus, Search } from 'lucide-react';
 import { cn } from '@/utils/classNames';
@@ -118,6 +119,7 @@ const FilterButton = ({
 type SourceFilter = 'all' | SubagentSource;
 
 const SubagentsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { data, isLoading, isError, refetch } = useClawSubagents();
   const subagents = useMemo(() => data ?? [], [data]);
@@ -216,7 +218,7 @@ const SubagentsTab = (): ReactElement => {
                   type='text'
                   value={query}
                   onChange={e => setQuery(e.target.value)}
-                  placeholder='Search subagents'
+                  placeholder={t('clawAgents.subagentsTab.searchSubagents')}
                   data-track-category='Claw Agents'
                   data-track-name='Search subagents'
                   className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'

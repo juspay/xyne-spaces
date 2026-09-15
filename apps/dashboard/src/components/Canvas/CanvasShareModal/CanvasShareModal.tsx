@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { CanvasVisibility, CanvasRole, ChannelScopeType } from '@xyne/shared';
 import type { Canvas, CanvasParticipant } from '../Canvas.types';
@@ -73,6 +74,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   participants: preloadedParticipants,
   onClose,
 }) => {
+  const { t } = useTranslation('placeholders');
   const { user: currentUser } = useAuth();
   const z = useZero();
   const shareableOrigin = useShareableOrigin();
@@ -611,7 +613,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             <div className='flex gap-2'>
               <Input
                 type='email'
-                placeholder='Enter email address...'
+                placeholder={t('canvas.enterEmailAddress')}
                 value={guestInvite.email}
                 onChange={e => guestInvite.setEmail(e.target.value)}
                 onKeyDown={e => {

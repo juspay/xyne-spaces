@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
 import { EntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
@@ -27,6 +28,7 @@ export function ReplyOnMessageStepForm({
   pathPrefix,
   variableSources,
 }: ReplyOnMessageStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as ReplyOnMessageConfigShape;
 
   const issuesAt = useMemo(() => {
@@ -53,7 +55,7 @@ export function ReplyOnMessageStepForm({
           onChange={next => setField('conversationId', next)}
           variableSources={variableSources}
           targetEntityKind={EntityKind.CONVERSATION}
-          placeholder='Pick a conversation'
+          placeholder={t('automation.pickConversation')}
         />
       </FieldRow>
 
@@ -67,7 +69,7 @@ export function ReplyOnMessageStepForm({
           onChange={next => setField('senderId', next)}
           variableSources={variableSources}
           entityKind={EntityKind.SENDER}
-          placeholder='Pick a bot (defaults to the automations bot)'
+          placeholder={t('automation.pickBot')}
         />
       </FieldRow>
 
@@ -84,7 +86,7 @@ export function ReplyOnMessageStepForm({
           onChange={next => setField('content', next)}
           variableSources={variableSources}
           channelId={null}
-          placeholder='Type your reply… use @ to mention someone'
+          placeholder={t('automation.reply.typeReplyMention')}
         />
       </FieldRow>
     </div>

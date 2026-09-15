@@ -15,6 +15,7 @@
  * internally so a host just wires availableTools + selection.
  */
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, ChevronRight, Loader2, Check, X, Info } from 'lucide-react';
 import { suggestTools } from '@/services/claw/clawToolsService';
 
@@ -121,6 +122,7 @@ export function ToolboxPicker({
   showCaption = true,
   hideSubagents = false,
 }: Props) {
+  const { t } = useTranslation('placeholders');
   // When subagents are hidden, drop them from the catalog so every downstream
   // consumer (rail, center list, suggestions, selection tray) omits them.
   const availableTools = useMemo(() => {
@@ -922,7 +924,7 @@ export function ToolboxPicker({
                 submitRefine();
               }
             }}
-            placeholder='e.g. I also need Slack notifications and Jira ticket creation'
+            placeholder={t('clawAgents.toolbox.refinePlaceholder')}
             aria-label='Describe tools to add'
             rows={3}
             autoFocus
@@ -1193,7 +1195,7 @@ export function ToolboxPicker({
                     data-track-name='Search tools'
                     value={toolSearch}
                     onChange={e => setToolSearch(e.target.value)}
-                    placeholder='Search tools…'
+                    placeholder={t('clawAgents.toolbox.searchTools')}
                     aria-label='Search tools'
                     className='w-full rounded-lg bg-muted px-3 py-1.5 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 transition-[box-shadow] [&::-webkit-search-cancel-button]:hidden'
                   />
@@ -1664,7 +1666,7 @@ export function ToolboxPicker({
               data-track-name='Search tools'
               value={toolSearch}
               onChange={e => setToolSearch(e.target.value)}
-              placeholder='Search tools…'
+              placeholder={t('clawAgents.toolbox.searchTools')}
               aria-label='Search tools'
               className='w-full rounded-lg border border-border bg-card px-3 py-2 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition-[border-color,box-shadow] [&::-webkit-search-cancel-button]:hidden'
             />

@@ -1,4 +1,5 @@
 import { ReactElement, RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Pencil, UserPlus, X } from 'lucide-react';
 import { ShieldCheck } from '@xyne/icons';
 import { Button } from '../ui/Button/Button';
@@ -54,6 +55,7 @@ const RoleDetailHeader = ({
   onSaveEdit,
   onAddUsers,
 }: RoleDetailHeaderProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   if (editing) {
     return (
       <div className='shrink-0 flex h-[52px] items-center gap-2.5 border-b border-border px-4'>
@@ -66,7 +68,7 @@ const RoleDetailHeader = ({
             if (e.key === 'Escape') onCancelEdit();
           }}
           maxLength={40}
-          placeholder='e.g. XYNE_PM'
+          placeholder={t('roles.detailHeader.namePlaceholder')}
           aria-label='Role name'
           className='h-8 w-52 shrink-0 text-sm font-medium'
         />
@@ -78,7 +80,7 @@ const RoleDetailHeader = ({
             if (e.key === 'Escape') onCancelEdit();
           }}
           maxLength={80}
-          placeholder='What is this role for?'
+          placeholder={t('roles.detailHeader.descriptionPlaceholder')}
           aria-label='Role description'
           className='h-8 min-w-0 flex-1 text-sm'
         />

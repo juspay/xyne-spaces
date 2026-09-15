@@ -1,0 +1,319 @@
+{
+  "clawMetricsScreen": {
+    "workspaceMetricsHeading": "Métricas del espacio de trabajo",
+    "agentHeading": "Agente · {{agent}}",
+    "workspaceDescription": "Latencia, rendimiento, errores y desempeño del proveedor en todas tus ejecuciones accesibles.",
+    "agentDescription": "Latencia, rendimiento, sentimiento y desempeño de herramientas para {{agent}}.",
+    "showAllOrgsAriaLabel": "Mostrar métricas de todas las organizaciones",
+    "allOrganizationsLabel": "Todas las organizaciones",
+    "viewLabel": "Vista",
+    "allWorkspaceOption": "Todo el espacio de trabajo",
+    "failedToLoadMetrics": "Error al cargar las métricas: {{message}}",
+    "llmLatencyTitle": "Latencia de LLM por proveedor y modelo",
+    "llmLatencyDescription": "Compara pares de modelos por latencia media, cola lenta, tiempo al primer token, rendimiento y errores.",
+    "agentsLeaderboardTitle": "Clasificación de agentes",
+    "agentsLeaderboardDescription": "Agentes clasificados por número de ejecuciones. Selecciona una fila para ver sus métricas en detalle.",
+    "userSentimentTitle": "Sentimiento y comentarios del usuario",
+    "userSentimentDescription": "Calificaciones explícitas y señales de comportamiento para el período seleccionado.",
+    "toolLatencyTitle": "Latencia de herramientas",
+    "toolLatencyDescription": "Herramientas clasificadas por tiempo acumulado para identificar los mayores cuellos de botella.",
+    "slowestSessionsTitle": "Sesiones más lentas",
+    "slowestSessionsDescription": "Ejecuciones lentas clasificadas por tiempo total transcurrido. Expande una fila para ver su desglose por herramienta."
+  },
+  "metricsOverview": {
+    "concernErrorRate": "la tasa de error es {{pct}}",
+    "concernP95": "p95 es {{ms}}",
+    "concernErrorsTrendingUp": "los errores están en aumento",
+    "concernTailLatencyTrendingUp": "la latencia de cola está en aumento",
+    "healthyBanner_one": "Las métricas se ven saludables en {{count}} ejecución.",
+    "healthyBanner_other": "Las métricas se ven saludables en {{count}} ejecuciones.",
+    "concernsBanner_one": "{{count}} problema: {{list}}",
+    "concernsBanner_other": "{{count}} problemas: {{list}}",
+    "typicalRunTimeLabel": "Tiempo de ejecución típico",
+    "typicalRunTimeHelp": "La mitad de las ejecuciones se completaron más rápido que esto.",
+    "slowTailRunTimeLabel": "Tiempo de ejecución de cola lenta",
+    "slowTailRunTimeHelp": "El 5% más lento se completó en este tiempo o por encima de él.",
+    "totalRunsLabel": "Ejecuciones totales",
+    "totalRunsDetail": "{{sign}}{{count}} vs. anterior",
+    "whereTimeGoesLabel": "En qué se va el tiempo",
+    "whereTimeGoesValue": "{{ms}} LLM",
+    "whereTimeGoesDetail": "{{ms}} en herramientas",
+    "errorRateLabel": "Tasa de error",
+    "outcomesLabel": "Resultados",
+    "outcomesValue": "{{count}} completadas",
+    "outcomesDetail": "{{failed}} fallidas · {{cancelled}} canceladas"
+  },
+  "metricsFormatters": {
+    "slower": "más lento",
+    "faster": "más rápido"
+  },
+  "metricsCharts": {
+    "runsByDayTitle": "Ejecuciones por día",
+    "runsByDayDescription": "Ejecuciones diarias apiladas por resultado.",
+    "completedLabel": "Completadas",
+    "failedLabel": "Fallidas",
+    "cancelledLabel": "Canceladas",
+    "typicalRunTimeOverTimeTitle": "Tiempo de ejecución típico a lo largo del tiempo",
+    "typicalRunTimeOverTimeDescription": "p50 — la mitad de las ejecuciones se completaron más rápido que esto cada día.",
+    "typicalRunP50Label": "Ejecución típica (p50)",
+    "slowTailOverTimeTitle": "Cola lenta a lo largo del tiempo",
+    "slowTailOverTimeDescription": "p95 — el 5% más lento cada día.",
+    "slowTailP95Label": "Cola lenta (p95)",
+    "llmTimeVsToolTimeTitle": "Tiempo de LLM vs tiempo de herramienta",
+    "llmTimeVsToolTimeDescription": "Un segmento de herramienta creciente indica latencia del conector o de la herramienta; un segmento de LLM creciente indica latencia del modelo.",
+    "avgLlmTimeLabel": "Tiempo promedio de LLM",
+    "avgToolTimeLabel": "Tiempo promedio de herramienta"
+  },
+  "sentimentPanel": {
+    "concernRatingsNegative": "las calificaciones son mayormente negativas",
+    "concernApologeticElevated": "las respuestas de disculpa están elevadas",
+    "concernFailedElevated": "las ejecuciones fallidas están elevadas",
+    "concernCancelledElevated": "las ejecuciones canceladas están elevadas",
+    "concernRetriesElevated": "los reintentos de LLM están elevados",
+    "healthyBanner": "El sentimiento se ve saludable en {{count}} ejecuciones.",
+    "concernsBanner_one": "{{count}} problema: {{list}}",
+    "concernsBanner_other": "{{count}} problemas: {{list}}",
+    "ratingsUpLabel": "Calificaciones 👍",
+    "ratingsDownLabel": "Calificaciones 👎",
+    "percentOfRated": "{{pct}}% de las calificadas",
+    "noRatings": "Sin calificaciones",
+    "apologeticLabel": "Disculpas",
+    "ofCompletedRuns": "de las ejecuciones completadas",
+    "cancelledLabel": "Canceladas",
+    "ofAllRuns": "de todas las ejecuciones",
+    "retriedLabel": "Reintentadas",
+    "llmRetries": "reintentos de LLM",
+    "recentCommentsLabel": "Comentarios recientes",
+    "thumbsUpAriaLabel": "Pulgar arriba",
+    "thumbsDownAriaLabel": "Pulgar abajo"
+  },
+  "improvementsCard": {
+    "bucketAgentUnable": "Agente no puede realizar el trabajo",
+    "bucketFailures": "Fallas",
+    "bucketUserFrustrated": "Usuario frustrado",
+    "evidenceSessionCount_one": "{{count}} sesión de evidencia",
+    "evidenceSessionCount_other": "{{count}} sesiones de evidencia",
+    "moreCount": "+{{count}} más",
+    "manualChangeNotice": "Marcar como manejado registra un cambio manual; no modifica al agente.",
+    "dismissButton": "Descartar",
+    "markHandledButton": "Marcar como manejado",
+    "title": "Sugerencias de mejora",
+    "description": "Generadas cada hora a partir de sesiones con señales negativas. Revisa la corrección propuesta, realiza el cambio manualmente y luego márcalo como manejado.",
+    "failedToLoad": "Error al cargar las sugerencias: {{message}}",
+    "noPendingSuggestions": "No hay sugerencias pendientes.",
+    "findingCount_one": "{{count}} hallazgo",
+    "findingCount_other": "{{count}} hallazgos",
+    "nothingPendingInBucket": "No hay nada pendiente en este grupo.",
+    "toastImprovementHandled": "Mejora marcada como manejada",
+    "toastFailedToUpdate": "Error al actualizar la mejora",
+    "toastImprovementDismissed": "Mejora descartada",
+    "toastFailedToDismiss": "Error al descartar la mejora"
+  },
+  "metricsTables": {
+    "agentLeaderboard": {
+      "agentHeader": "Agente",
+      "runsHeader": "Ejecuciones",
+      "p50Header": "p50",
+      "p95Header": "p95",
+      "avgLlmHeader": "LLM prom.",
+      "avgToolHeader": "Herramienta prom.",
+      "errorsHeader": "Errores",
+      "noRuns": "No hay ejecuciones en esta ventana.",
+      "unknownOrg": "Organización desconocida"
+    },
+    "providerLatencyTable": {
+      "providerModelHeader": "Proveedor · modelo",
+      "runsHeader": "Ejecuciones",
+      "p50LlmHeader": "p50 LLM",
+      "p95LlmHeader": "p95 LLM",
+      "p50TtftHeader": "p50 TTFT",
+      "tpsHeader": "TPS",
+      "errorPctHeader": "% Error",
+      "noProviderRuns": "No hay ejecuciones con proveedor etiquetado en esta ventana.",
+      "unknownModel": "desconocido"
+    },
+    "toolLatencyTable": {
+      "toolHeader": "Herramienta",
+      "callsHeader": "Llamadas",
+      "avgHeader": "Prom.",
+      "p50Header": "p50",
+      "p95Header": "p95",
+      "cumulativeHeader": "Acumulado",
+      "shareHeader": "Proporción",
+      "errorsHeader": "Errores"
+    },
+    "slowSessionsTable": {
+      "sessionHeader": "Sesión",
+      "agentHeader": "Agente",
+      "totalHeader": "Total",
+      "llmHeader": "LLM",
+      "toolHeader": "Herramienta",
+      "whenHeader": "Cuándo",
+      "taskLabel": "Tarea: ",
+      "noToolCalls": "No se registraron llamadas a herramientas.",
+      "callCount_one": "{{count}} llamada",
+      "callCount_other": "{{count}} llamadas",
+      "errorSuffix": " · error"
+    }
+  },
+  "aiScreen": {
+    "comingSoon": {
+      "description": "Esta sección estará disponible próximamente. Aparecerá aquí en cuanto esté lista."
+    },
+    "emptyState": {
+      "workingLate": "Trabajando hasta tarde",
+      "goodMorning": "Buenos días",
+      "goodAfternoon": "Buenas tardes",
+      "goodEvening": "Buenas noches"
+    },
+    "readonlyContextPills": {
+      "attachedContextAriaLabel_one": "{{count}} elemento de contexto adjunto",
+      "attachedContextAriaLabel_other": "{{count}} elementos de contexto adjuntos"
+    },
+    "askAiRatingButtons": {
+      "ratingUnavailableTitle": "La calificación estará disponible una vez que se guarde la respuesta",
+      "helpfulTitle": "Útil",
+      "notHelpfulTitle": "No útil",
+      "saveButton": "Guardar"
+    },
+    "promptMarkerRail": {
+      "yourPromptsAriaLabel": "Tus mensajes"
+    },
+    "aiAgentSelector": {
+      "askAiLabel": "Preguntar a la IA",
+      "clearButton": "Limpiar",
+      "loadingAgents": "Cargando agentes…",
+      "noAgentsMatch": "Ningún agente coincide con “{{query}}”",
+      "agentCount_one": "{{count}} agente",
+      "agentCount_other": "{{count}} agentes"
+    },
+    "composerVoiceButton": {
+      "transcriptionFailedTitle": "Error en la transcripción de voz",
+      "unknownError": "Error desconocido",
+      "notSupported": "La grabación de voz no es compatible con este navegador",
+      "micPermissionDenied": "Permiso de micrófono denegado",
+      "failedToStart": "Error al iniciar la grabación de voz",
+      "recordingFailedUnexpectedly": "La grabación de voz falló inesperadamente",
+      "stopVoiceInput": "Detener entrada de voz",
+      "startVoiceInput": "Iniciar entrada de voz",
+      "transcribing": "Transcribiendo…",
+      "voiceInput": "Entrada de voz"
+    },
+    "modelThinkingSelector": {
+      "defaultLabel": "Predeterminado",
+      "offLabel": "Desactivado",
+      "minimalLabel": "Mínimo",
+      "lowLabel": "Bajo",
+      "mediumLabel": "Medio",
+      "highLabel": "Alto",
+      "recommendedParenthetical": "Recomendado ({{model}})",
+      "recommendedModelTitle": "Modelo recomendado",
+      "modelAndThinkingAriaLabel": "Modelo y razonamiento",
+      "recommendedLabel": "Recomendado",
+      "recommendedTag": "(Recomendado)",
+      "noModelsMatch": "Ningún modelo coincide",
+      "thinkingLabel": "Razonamiento"
+    },
+    "composerCollectionPicker": {
+      "selectCollectionsLabel": "Seleccionar colecciones",
+      "backLabel": "Atrás",
+      "searchThisFolderPlaceholder": "Buscar en esta carpeta…",
+      "searchCollectionsPlaceholder": "Buscar colecciones…",
+      "noMatches": "Sin coincidencias",
+      "folderEmpty": "Esta carpeta está vacía",
+      "clickToSelectDoubleClickToOpen": "Clic para seleccionar · doble clic para abrir",
+      "selectedLabel": "Seleccionado",
+      "noCollections": "Sin colecciones",
+      "noCollectionsFound": "No se encontraron colecciones"
+    },
+    "sidebar": {
+      "navKnowledge": "Conocimiento",
+      "navAgentHub": "Centro de agentes",
+      "navDigitalTwin": "Gemelo digital",
+      "navOrganization": "Organización",
+      "navMetrics": "Métricas",
+      "navSettings": "Configuración",
+      "navAdmin": "Administración",
+      "navMorningBrief": "Resumen matutino",
+      "newChatLabel": "Nuevo chat",
+      "noChatsYet": "Aún no hay chats",
+      "startNewChatHint": "Inicia un nuevo chat arriba para verlo aquí.",
+      "chatOptionsAriaLabel": "Opciones del chat",
+      "deleteButton": "Eliminar",
+      "deleteChatTitle": "¿Eliminar chat?",
+      "deleteChatDescription": "¿Eliminar el chat \"{{title}}\"? Esto no se puede deshacer.",
+      "untitledLabel": "Sin título",
+      "closeAriaLabel": "Cerrar",
+      "deleteChatBody": "{{title}} se eliminará de forma permanente. Esto no se puede deshacer.",
+      "cancelButton": "Cancelar",
+      "recentsLabel": "Recientes",
+      "newChatTooltip": "Nuevo chat"
+    },
+    "aiShell": {
+      "aiSidebarAriaLabel": "Barra lateral de IA"
+    }
+  },
+  "citationDocsPanel": {
+    "failedToLoadFile": "Error al cargar el archivo.",
+    "failedToReadFile": "Error al leer el archivo.",
+    "rawTab": "Sin formato",
+    "previewTab": "Vista previa",
+    "previewNotAvailable": "Vista previa no disponible para este tipo de archivo",
+    "expandPanelLabel": "Expandir panel de documentos",
+    "expandLabel": "Expandir",
+    "listOpenDocumentsLabel": "Listar documentos abiertos",
+    "chunkLabel": "frag. {{index}}",
+    "closeDocLabel": "Cerrar {{title}}",
+    "jumpToSourceLabel": "Ir a la fuente",
+    "collapsePanelLabel": "Contraer panel",
+    "collapseLabel": "Contraer",
+    "closeAllDocumentsLabel": "Cerrar todos los documentos",
+    "closeAllLabel": "Cerrar todo",
+    "ticketTabTitle": "Ticket {{id}}"
+  },
+  "reactArtifact": {
+    "restoreNotice": {
+      "restoredToPrefix": "Restaurado a",
+      "versionLabel": "Versión {{number}}",
+      "fromVersion": "desde la versión {{number}}"
+    },
+    "bootOverlay": {
+      "loadingAppAriaLabel": "Cargando app"
+    },
+    "savedIndicator": {
+      "movedOnTitle": "Esta app ha avanzado a la versión {{number}}. Abre la versión actual.",
+      "newerVersionExistsTitle": "Existe una versión más reciente de esta app. Abre la versión actual.",
+      "newerVersionWithNumber": "Versión más reciente (v{{number}})",
+      "newerVersion": "Versión más reciente",
+      "savedTitle": "Guardada en tus apps. Ábrela en la Biblioteca.",
+      "savedLabel": "Guardada"
+    }
+  },
+  "artifactPaneReference": {
+    "viewingTitle": "Esta versión está abierta en el panel",
+    "showTitle": "Mostrar esta versión en el panel",
+    "versionLabel": "Versión {{number}}",
+    "appLabel": "App",
+    "currentLabel": "· Actual",
+    "showingLabel": "· Mostrando",
+    "restoreCurrentWithNumber": "Hacer que la versión {{number}} sea la actual: la próxima actualización del agente se construirá sobre ella",
+    "restoreCurrent": "Hacer que esta versión sea la actual",
+    "restoreButton": "Restaurar"
+  },
+  "artifactErrorOverlay": {
+    "unknownError": "Error desconocido",
+    "hitErrorTitle": "Esta app tuvo un error",
+    "dismissAriaLabel": "Descartar",
+    "dismissTitle": "Descartar y mostrar la app de todos modos",
+    "fixRequested": "Corrección solicitada",
+    "fixWithAi": "Corregir con IA",
+    "copied": "Copiado",
+    "copyError": "Copiar error",
+    "waitForReply": "Espera a que termine la respuesta actual y vuelve a intentarlo."
+  },
+  "messageReactArtifacts": {
+    "couldNotSave": "No se pudo guardar esta app.",
+    "openInAppPanel": "Abrir en el panel de apps",
+    "openFullScreen": "Abrir en pantalla completa"
+  }
+}

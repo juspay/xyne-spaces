@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../../hooks/useZero';
 import { toast } from 'sonner';
 import { Button } from '../../../ui/Button/Button';
@@ -42,6 +43,7 @@ export const UserList = ({
   onAddUser,
   onRemoveUser,
 }: UserListProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [searchTerm, setSearchTerm] = useState('');
   const [, forceUpdate] = useState(0);
@@ -198,7 +200,7 @@ export const UserList = ({
           <Input
             ref={inputRef}
             type='text'
-            placeholder='Search members or add people'
+            placeholder={t('userGroups.userList.searchPlaceholder')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             className='w-full pl-10 pr-4 h-9 text-sm'
@@ -373,6 +375,7 @@ interface RoleSelectorProps {
 }
 
 const RoleSelector = ({ roles, selectedRoleId, onSelect }: RoleSelectorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const options: SelectorOption[] = useMemo(
     () =>
       roles.map(r => ({
@@ -389,8 +392,8 @@ const RoleSelector = ({ roles, selectedRoleId, onSelect }: RoleSelectorProps): R
       options={options}
       selectedValue={selectedRoleId ?? null}
       onSelect={onSelect}
-      placeholder='Select role'
-      searchPlaceholder='Search roles...'
+      placeholder={t('userGroups.userList.selectRole')}
+      searchPlaceholder={t('userGroups.userList.searchRoles')}
       showSearch={true}
       width='160px'
       testId='member-role-selector'

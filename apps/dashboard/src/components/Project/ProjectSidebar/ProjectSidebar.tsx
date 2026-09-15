@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, ChevronDown } from '@xyne/icons';
 import { ProjectSidebarProps } from './ProjectSidebar.types';
 import DirectorySectionHeader from '../../Chat/DirectorySectionHeader';
@@ -20,6 +21,7 @@ const ProjectSidebar = ({
   userGroups = [],
   persons = [],
 }: ProjectSidebarProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
 
@@ -134,7 +136,7 @@ const ProjectSidebar = ({
                   value={projectsSearch.searchQuery}
                   onChange={projectsSearch.setSearchQuery}
                   onClose={projectsSearch.closeSearch}
-                  placeholder='Search projects/Boards...'
+                  placeholder={t('project.sidebar.searchProjectsBoards')}
                 />
               ) : (
                 <>
@@ -202,7 +204,7 @@ const ProjectSidebar = ({
                   value={groupsSearch.searchQuery}
                   onChange={groupsSearch.setSearchQuery}
                   onClose={groupsSearch.closeSearch}
-                  placeholder='Search groups...'
+                  placeholder={t('project.sidebar.searchGroups')}
                 />
               ) : (
                 <>
@@ -261,7 +263,7 @@ const ProjectSidebar = ({
                   value={personsSearch.searchQuery}
                   onChange={personsSearch.setSearchQuery}
                   onClose={personsSearch.closeSearch}
-                  placeholder='Search persons...'
+                  placeholder={t('project.sidebar.searchPersons')}
                 />
               ) : (
                 <>

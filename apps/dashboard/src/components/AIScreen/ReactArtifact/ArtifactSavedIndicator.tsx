@@ -18,6 +18,7 @@
  */
 
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Check, History } from 'lucide-react';
@@ -33,6 +34,7 @@ export const ArtifactSavedIndicator = ({
   appId,
   versionId,
 }: ArtifactSavedIndicatorProps): ReactElement | null => {
+  const { t } = useTranslation('common');
   const { workspaceId, appId: routeAppId } = useParams<{
     workspaceId?: string;
     appId?: string;
@@ -72,14 +74,16 @@ export const ArtifactSavedIndicator = ({
         className='flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-600 transition-colors hover:bg-sky-500/20 dark:text-sky-400'
         title={
           headNumber
-            ? `This app has moved on to version ${headNumber}. Open the current version.`
-            : 'A newer version of this app exists. Open the current version.'
+            ? t('reactArtifact.savedIndicator.movedOnTitle', { number: headNumber })
+            : t('reactArtifact.savedIndicator.newerVersionExistsTitle')
         }
         data-track-category='AskAI'
         data-track-name='ReactArtifactOpenNewerVersion'
       >
         <History className='h-3 w-3' aria-hidden='true' />
-        {headNumber ? `Newer version (v${headNumber})` : 'Newer version'}
+        {headNumber
+          ? t('reactArtifact.savedIndicator.newerVersionWithNumber', { number: headNumber })
+          : t('reactArtifact.savedIndicator.newerVersion')}
       </Link>
     );
   }
@@ -88,12 +92,12 @@ export const ArtifactSavedIndicator = ({
     <Link
       to={href}
       className='flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400'
-      title='Saved to your apps. Open it in the Library.'
+      title={t('reactArtifact.savedIndicator.savedTitle')}
       data-track-category='AskAI'
       data-track-name='ReactArtifactOpenSavedApp'
     >
       <Check className='h-3 w-3' aria-hidden='true' />
-      Saved
+      {t('reactArtifact.savedIndicator.savedLabel')}
     </Link>
   );
 };

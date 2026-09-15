@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   FileText,
@@ -95,6 +96,7 @@ interface GuestUsersTabProps {
 }
 
 export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const [guests, setGuests] = useState<GuestUserAccess[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,7 +201,7 @@ export const GuestUsersTab = ({ isActive = false }: GuestUsersTabProps): ReactEl
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
           <Input
             type='text'
-            placeholder='Search by guest, email, entity, or grant type...'
+            placeholder={t('routes.workspaceManagementScreen.guestUsersTab.searchPlaceholder')}
             value={searchQuery}
             onChange={event => setSearchQuery(event.target.value)}
             className='pl-10'

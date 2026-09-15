@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import Input from '../../../ui/Input/Input';
 import {
@@ -40,6 +41,7 @@ interface TagValueInputProps {
 }
 
 export function TagValueInput({ value, onChange }: TagValueInputProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const parsed = parseValue(value);
   const [tagInput, setTagInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +87,7 @@ export function TagValueInput({ value, onChange }: TagValueInputProps): React.Re
         <div className='w-[160px]'>
           <Select value={parsed.category} onValueChange={cat => update({ category: cat })}>
             <SelectTrigger className='w-full'>
-              <SelectValue placeholder='Category…' />
+              <SelectValue placeholder={t('automation.condition.category')} />
             </SelectTrigger>
             <SelectContent>
               {catalog.map(c => (

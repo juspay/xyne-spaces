@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { TextInput, SingleSelect } from '@juspay/blend-design-system';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -67,6 +68,7 @@ export const BoardForm = ({
   loading = false,
   projectId: providedProjectId,
 }: BoardFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isEdit = !!board;
   const [name, setName] = useState(board?.name || '');
   const [projectId, setProjectId] = useState(board?.projectId || providedProjectId || '');
@@ -560,7 +562,7 @@ export const BoardForm = ({
           label='Board Name'
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder='Enter board name'
+          placeholder={t('board.form.enterBoardName')}
           required
           disabled={isLoading}
         />
@@ -569,7 +571,7 @@ export const BoardForm = ({
       <div>
         <SingleSelect
           label='Board Type'
-          placeholder='Select board type'
+          placeholder={t('board.form.selectBoardType')}
           items={[
             {
               // FLOW boards have a dedicated creation path and cannot be
@@ -599,7 +601,7 @@ export const BoardForm = ({
           id='board-description'
           value={description}
           onChange={e => setDescription(e.target.value)}
-          placeholder='Enter board description (optional)'
+          placeholder={t('board.form.enterBoardDescription')}
           disabled={isLoading}
           rows={3}
           className='w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
@@ -686,7 +688,7 @@ export const BoardForm = ({
                       label=''
                       value={stage.name}
                       onChange={e => updateStage(index, 'name', e.target.value)}
-                      placeholder='Stage name'
+                      placeholder={t('board.form.stageName')}
                       disabled={isLoading}
                     />
                     <div className='grid grid-cols-12 gap-2'>
@@ -695,7 +697,7 @@ export const BoardForm = ({
                           label=''
                           value={stage.eta || ''}
                           onChange={e => updateStage(index, 'eta', e.target.value)}
-                          placeholder='ETA (hrs)'
+                          placeholder={t('board.form.etaHours')}
                           type='number'
                           disabled={isLoading || !stage.etaEnabled}
                         />
@@ -735,7 +737,7 @@ export const BoardForm = ({
                           label=''
                           value={stage.sequenceNumber}
                           onChange={e => updateStage(index, 'sequenceNumber', e.target.value)}
-                          placeholder='Seq #'
+                          placeholder={t('board.form.seqNumber')}
                           type='number'
                           disabled={isLoading}
                         />
@@ -780,7 +782,7 @@ export const BoardForm = ({
                     <div className='mt-2'>
                       <MultiSelect
                         label='PR Status Triggers'
-                        placeholder='Select PR statuses...'
+                        placeholder={t('board.form.selectPrStatuses')}
                         options={PR_STATUS_OPTIONS}
                         selectedValues={stage.prStatuses || []}
                         onChange={values =>

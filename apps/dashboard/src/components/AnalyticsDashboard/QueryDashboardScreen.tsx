@@ -1,5 +1,6 @@
 import { ArrowLeft, BarChart3, ChevronLeft, Plus, Save, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../../hooks/useAuth';
@@ -61,6 +62,7 @@ interface AvailableFields {
 }
 
 export const QueryDashboardScreen: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const { dashboardId } = useParams<{ dashboardId: string }>();
   const zero = useZero();
   const navigate = useNavigate();
@@ -595,7 +597,7 @@ export const QueryDashboardScreen: React.FC = () => {
                     id='query-name'
                     value={queryName}
                     onChange={e => setQueryName(e.target.value)}
-                    placeholder='Enter query name'
+                    placeholder={t('analyticsDashboard.queryNamePlaceholder')}
                     className='border-border/50 bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all rounded-lg shadow-sm'
                   />
                 </div>
@@ -644,8 +646,8 @@ export const QueryDashboardScreen: React.FC = () => {
                           options={fields.map(f => ({ value: f.name, label: f.label, icon: null }))}
                           selectedValues={selectedFields}
                           onMultiSelect={setSelectedFields}
-                          placeholder='Search fields...'
-                          searchPlaceholder='Search fields...'
+                          placeholder={t('analyticsDashboard.searchFields')}
+                          searchPlaceholder={t('analyticsDashboard.searchFields')}
                           showSearch={true}
                           width='100%'
                           disableClientFiltering={false}
@@ -723,8 +725,8 @@ export const QueryDashboardScreen: React.FC = () => {
                                   });
                                 }
                               }}
-                              placeholder='Select function...'
-                              searchPlaceholder='Search functions...'
+                              placeholder={t('analyticsDashboard.selectFunction')}
+                              searchPlaceholder={t('analyticsDashboard.searchFunctions')}
                               showSearch={false}
                               width='auto'
                             />
@@ -746,13 +748,13 @@ export const QueryDashboardScreen: React.FC = () => {
                                   });
                                 }
                               }}
-                              placeholder='Select field...'
-                              searchPlaceholder='Search fields...'
+                              placeholder={t('analyticsDashboard.selectField')}
+                              searchPlaceholder={t('analyticsDashboard.searchFields')}
                               showSearch={true}
                               width='100%'
                             />
                             <Input
-                              placeholder='alias'
+                              placeholder={t('analyticsDashboard.alias')}
                               value={agg.alias || ''}
                               onChange={e =>
                                 setAggregations(prev => {
@@ -848,8 +850,8 @@ export const QueryDashboardScreen: React.FC = () => {
                                     });
                                   }
                                 }}
-                                placeholder='Select field...'
-                                searchPlaceholder='Search fields...'
+                                placeholder={t('analyticsDashboard.selectField')}
+                                searchPlaceholder={t('analyticsDashboard.searchFields')}
                                 showSearch={true}
                                 width='100%'
                               />
@@ -939,8 +941,8 @@ export const QueryDashboardScreen: React.FC = () => {
                                 });
                               }
                             }}
-                            placeholder='Select field...'
-                            searchPlaceholder='Search fields...'
+                            placeholder={t('analyticsDashboard.selectField')}
+                            searchPlaceholder={t('analyticsDashboard.searchFields')}
                             showSearch={true}
                             width='100%'
                           />
@@ -959,8 +961,8 @@ export const QueryDashboardScreen: React.FC = () => {
                                 });
                               }
                             }}
-                            placeholder='Select direction...'
-                            searchPlaceholder='Search directions...'
+                            placeholder={t('analyticsDashboard.selectDirection')}
+                            searchPlaceholder={t('analyticsDashboard.searchDirections')}
                             showSearch={false}
                             width='auto'
                           />

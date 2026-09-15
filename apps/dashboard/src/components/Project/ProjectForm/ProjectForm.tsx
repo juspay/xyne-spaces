@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { Textarea } from '../../ui/Textarea';
@@ -24,6 +25,7 @@ export const ProjectForm = ({
   onCancel,
   loading = false,
 }: ProjectFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isEdit = !!project;
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
@@ -119,7 +121,7 @@ export const ProjectForm = ({
           className='[[data-theme=midnight]_&]:bg-input/30'
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder='Enter project name'
+          placeholder={t('project.form.namePlaceholder')}
           required
           disabled={isLoading}
           autoFocus={!isMobile}
@@ -136,7 +138,7 @@ export const ProjectForm = ({
             className='[[data-theme=midnight]_&]:bg-input/30'
             value={code}
             onChange={e => setCode(sanitizeProjectCode(e.target.value))}
-            placeholder='e.g., EUL, PROJ, PRO1, XY2'
+            placeholder={t('project.form.codePlaceholder')}
             required
             disabled={isLoading}
             data-testid='project-code-input'
@@ -156,7 +158,7 @@ export const ProjectForm = ({
           className='[[data-theme=midnight]_&]:bg-input/30'
           value={description}
           onChange={e => setDescription(e.target.value)}
-          placeholder='Enter project description (optional)'
+          placeholder={t('project.form.descriptionPlaceholder')}
           rows={4}
           disabled={isLoading}
         />

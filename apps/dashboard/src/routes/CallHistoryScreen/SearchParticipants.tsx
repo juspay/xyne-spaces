@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import Input from '../../components/ui/Input';
 import { Check, Search, X, ChevronUp, ChevronRight } from 'lucide-react';
@@ -68,6 +69,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   disableClientFiltering = false,
   prefilledOptions,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [selectedOptionsMap, setSelectedOptionsMap] = useState<Map<string, ParticipantOptions>>(
     new Map(),
   );
@@ -487,7 +489,9 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
               role='combobox'
               ref={inputRef}
               placeholder={
-                hasUserSelected ? 'Search by user name' : 'Search by user, channel, or group name'
+                hasUserSelected
+                  ? t('routes.callHistoryScreen.searchByUserName')
+                  : t('routes.callHistoryScreen.searchByUserChannelGroup')
               }
               value={searchQuery}
               onKeyDown={handleKeyDown}
@@ -523,7 +527,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                   <Search className='w-4 h-4 text-muted-foreground mr-2 shrink-0' />
                   <input
                     type='text'
-                    placeholder='Search participants...'
+                    placeholder={t('routes.callHistoryScreen.searchParticipantsPlaceholder')}
                     value={participantSearchQuery}
                     onChange={e => setParticipantSearchQuery(e.target.value)}
                     onClick={e => e.stopPropagation()}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 import { ChevronBigDown, ChevronBigRight, FileText, FolderDefault, SearchBig } from '@xyne/icons';
 import { CollectionTreeNode } from '../../knowledgeBase/tree/treeTypes';
@@ -338,6 +339,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
   rootCollections,
   onNavigateCollection,
 }) => {
+  const { t } = useTranslation('placeholders');
   const outline = useMemo(() => buildOutline(rootChildrenIds, nodes), [rootChildrenIds, nodes]);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -485,7 +487,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search by name'
+            placeholder={t('knowledgeBaseV2.kbContents.searchByName')}
             className='h-9 pl-9'
             aria-label='Search files and folders by name'
             data-track-category='knowledge-base'

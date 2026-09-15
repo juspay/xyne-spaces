@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Popover } from '@juspay/blend-design-system';
 import Tooltip from '../Tooltip/Tooltip';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
@@ -34,6 +35,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
   isLoading = false,
   error,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
   const [fileError, setFileError] = useState<string | undefined>();
@@ -126,7 +128,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
             <input
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder=':party_parrot:'
+              placeholder={t('ui.emojiPicker.customEmojiName')}
               className='w-full bg-background rounded border px-3 py-2 outline-none focus:border-ring'
             />
             <p className='text-xs text-muted-foreground'>Letters, numbers, and underscores only</p>

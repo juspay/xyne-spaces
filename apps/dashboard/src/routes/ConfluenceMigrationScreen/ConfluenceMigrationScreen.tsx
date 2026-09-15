@@ -1,4 +1,5 @@
 import { type ChangeEvent, ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FolderKanban, FileText, FolderOpen, AlertTriangle, UserRound, Hash } from 'lucide-react';
 import { ChannelScopeType } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -89,6 +90,7 @@ const formatDateTime = (value: string | null | undefined): string => {
 };
 
 const ConfluenceMigrationScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [projects] = useCachedQuery(queries.getAllProjects());
   const allChannels = useAllChannels();
   const [spaceKey, setSpaceKey] = useState('');
@@ -378,7 +380,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     setMigrationProgress(null);
                     setMigrationPhase('setup');
                   }}
-                  placeholder='JR'
+                  placeholder={t('routes.confluenceMigrationScreen.spaceKeyPlaceholder')}
                 />
                 <p className='mt-2 text-xs text-muted-foreground'>
                   Example: `JR` for the Hyperswitch Confluence space.
@@ -414,8 +416,10 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     setMigrationProgress(null);
                     setMigrationPhase('setup');
                   }}
-                  placeholder='Auto resolve by space name'
-                  searchPlaceholder='Search projects...'
+                  placeholder={t('routes.confluenceMigrationScreen.autoResolveProjectPlaceholder')}
+                  searchPlaceholder={t(
+                    'routes.confluenceMigrationScreen.searchProjectsPlaceholder',
+                  )}
                   width='100%'
                   showClearButton
                   testId='confluence-target-project'
@@ -453,8 +457,10 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                     setMigrationProgress(null);
                     setMigrationPhase('setup');
                   }}
-                  placeholder='Select channel'
-                  searchPlaceholder='Search channels...'
+                  placeholder={t('routes.confluenceMigrationScreen.selectChannelPlaceholder')}
+                  searchPlaceholder={t(
+                    'routes.confluenceMigrationScreen.searchChannelsPlaceholder',
+                  )}
                   width='100%'
                   showClearButton
                   testId='confluence-target-channel'

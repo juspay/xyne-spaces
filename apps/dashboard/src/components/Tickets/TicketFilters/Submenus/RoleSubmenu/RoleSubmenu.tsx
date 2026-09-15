@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check, ChevronDown } from '@xyne/icons';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
@@ -31,6 +32,7 @@ export const RoleSubmenu = ({
   availableUsers: availableUserIds,
   className = '',
 }: RoleSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [openRoleId, setOpenRoleId] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export const RoleSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search roles...'
+            placeholder={t('tickets.filters.searchRoles')}
             className='pl-9 h-9'
           />
         </div>
@@ -184,7 +186,7 @@ export const RoleSubmenu = ({
                           onChange={e =>
                             setUserSearchByRole(prev => ({ ...prev, [role.id]: e.target.value }))
                           }
-                          placeholder='Search users...'
+                          placeholder={t('tickets.filters.searchUsers')}
                           className='pl-8 h-8 text-xs'
                         />
                       </div>

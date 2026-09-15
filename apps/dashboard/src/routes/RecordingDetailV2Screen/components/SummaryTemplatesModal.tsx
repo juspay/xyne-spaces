@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   DndContext,
   KeyboardSensor,
@@ -276,6 +277,7 @@ const SortableTemplateSection = ({
   onUpdate,
   onRemove,
 }: SortableTemplateSectionProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const hasReservedTitle = isReservedSectionTitle(section.title);
   const {
     attributes,
@@ -320,7 +322,9 @@ const SortableTemplateSection = ({
           value={section.title}
           onChange={event => onUpdate(section.id, { title: event.target.value })}
           readOnly={!isEditable}
-          placeholder='Section title'
+          placeholder={t(
+            'routes.recordingDetailV2Screen.summaryTemplatesModal.sectionTitlePlaceholder',
+          )}
           aria-label='Section title'
           aria-invalid={hasReservedTitle}
           className={cn(
@@ -342,7 +346,9 @@ const SortableTemplateSection = ({
           onChange={event => onUpdate(section.id, { description: event.target.value })}
           readOnly={!isEditable}
           rows={1}
-          placeholder='Instructions for this section…'
+          placeholder={t(
+            'routes.recordingDetailV2Screen.summaryTemplatesModal.sectionInstructionsPlaceholder',
+          )}
           aria-label='Section description'
           className='thin-scrollbar w-full min-h-[1lh] max-h-[3lh] resize-none overflow-y-auto bg-transparent text-sm leading-normal text-muted-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground/60'
           data-track-category='SummaryTemplates'
@@ -377,6 +383,7 @@ export function SummaryTemplatesModal({
   onClose,
   onApply,
 }: SummaryTemplatesModalProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const isScribeAdmin = useHasResourceAccess('SCRIBE');
   const [search, setSearch] = useState('');
   const [draft, setDraft] = useState<TemplateDraft | null>(null);
@@ -933,7 +940,9 @@ export function SummaryTemplatesModal({
               <input
                 value={search}
                 onChange={event => setSearch(event.target.value)}
-                placeholder='Search templates...'
+                placeholder={t(
+                  'routes.recordingDetailV2Screen.summaryTemplatesModal.searchTemplatesPlaceholder',
+                )}
                 className='min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground'
                 data-track-category='SummaryTemplates'
                 data-track-name='Search'
@@ -1054,7 +1063,9 @@ export function SummaryTemplatesModal({
                 <div className='min-w-0 flex-1 pt-px'>
                   <input
                     ref={nameInputRef}
-                    placeholder='Untitled template'
+                    placeholder={t(
+                      'routes.recordingDetailV2Screen.summaryTemplatesModal.untitledTemplatePlaceholder',
+                    )}
                     value={draft.name}
                     onChange={event => updateTemplateName(event.target.value)}
                     readOnly={!isEditable}
@@ -1199,7 +1210,9 @@ export function SummaryTemplatesModal({
                   onChange={event => updateMeetingContext(event.target.value)}
                   readOnly={!isEditable}
                   rows={3}
-                  placeholder='Describe the meeting and the summary you want…'
+                  placeholder={t(
+                    'routes.recordingDetailV2Screen.summaryTemplatesModal.meetingDescriptionPlaceholder',
+                  )}
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditContext'
@@ -1396,7 +1409,9 @@ export function SummaryTemplatesModal({
                   onChange={event => updateSystemPrompt(event.target.value)}
                   readOnly={!isEditable}
                   rows={4}
-                  placeholder='Generate or write the instructions used to create summaries with this template…'
+                  placeholder={t(
+                    'routes.recordingDetailV2Screen.summaryTemplatesModal.templateInstructionsPlaceholder',
+                  )}
                   className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditSystemPrompt'

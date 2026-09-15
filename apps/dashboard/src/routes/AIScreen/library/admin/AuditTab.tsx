@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -49,6 +50,7 @@ export function AuditTab({
   orgNamesById: Record<string, string>;
   showOrgLabels: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [offset, setOffset] = useState(0);
   const [eventType, setEventType] = useState('');
   const [query, setQuery] = useState('');
@@ -95,8 +97,8 @@ export function AuditTab({
       <AdminSearchField
         value={query}
         onChange={setQuery}
-        placeholder='Search audit log'
-        ariaLabel='Search audit log'
+        placeholder={t('aiScreen.library.admin.searchAuditLog')}
+        ariaLabel={t('aiScreen.library.admin.searchAuditLog')}
         trackName='Admin: search audit log'
         className='w-full'
       />

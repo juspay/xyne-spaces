@@ -6,6 +6,7 @@
  * Recommended row.
  */
 import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Brain, Check, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
@@ -20,17 +21,22 @@ export const formatModelLabel = (id: string): string => id.replace(/-\d{8}$/, ''
 
 /** Per-run thinking level for the composer. null = the agent's configured
  *  default. Applies to whichever provider serves the run (same precedence as
- *  the agent's modelSettings.thinkingLevel). */
+ *  the agent's modelSettings.thinkingLevel).
+ *
+ *  `id` is a stable, untranslated identifier used for data-id/tracking
+ *  metadata; `labelKey` resolves the translated display text — kept separate
+ *  so switching the UI locale never changes tracking payloads or test ids. */
 const THINKING_LEVEL_OPTIONS: Array<{
   value: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
-  label: string;
+  id: string;
+  labelKey: string;
 }> = [
-  { value: null, label: 'Default' },
-  { value: 'off', label: 'Off' },
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
+  { value: null, id: 'default', labelKey: 'modelThinkingSelector.defaultLabel' },
+  { value: 'off', id: 'off', labelKey: 'modelThinkingSelector.offLabel' },
+  { value: 'minimal', id: 'minimal', labelKey: 'modelThinkingSelector.minimalLabel' },
+  { value: 'low', id: 'low', labelKey: 'modelThinkingSelector.lowLabel' },
+  { value: 'medium', id: 'medium', labelKey: 'modelThinkingSelector.mediumLabel' },
+  { value: 'high', id: 'high', labelKey: 'modelThinkingSelector.highLabel' },
 ];
 
 /**
@@ -66,6 +72,8 @@ export function ModelThinkingSelector({
   /** Render only the popover, anchored to a zero-size element in the toolbar. */
   hideTrigger?: boolean;
 }) {
+  const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
@@ -92,8 +100,10 @@ export function ModelThinkingSelector({
     if (!q) return models;
     return models.filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
   }, [models, query]);
-  const thinkingLabel =
-    THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
+  const thinkingLevelOption = THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel);
+  const thinkingLabel = thinkingLevelOption
+    ? tc(thinkingLevelOption.labelKey)
+    : tc('modelThinkingSelector.defaultLabel');
 
   const rowClass = (active: boolean) =>
     cn(
@@ -126,10 +136,10 @@ export function ModelThinkingSelector({
               selected
                 ? selected.id
                 : defaultModel
-                  ? `Recommended (${defaultModel})`
-                  : 'Recommended model'
+                  ? tc('modelThinkingSelector.recommendedParenthetical', { model: defaultModel })
+                  : tc('modelThinkingSelector.recommendedModelTitle')
             }
-            aria-label='Model and thinking'
+            aria-label={tc('modelThinkingSelector.modelAndThinkingAriaLabel')}
             data-track-category='XyneAI'
             data-track-name='OPEN_MODEL_SELECTOR'
             className={cn(
@@ -147,7 +157,7 @@ export function ModelThinkingSelector({
                 ? formatModelLabel(selected.name)
                 : defaultModel
                   ? formatModelLabel(defaultModel)
-                  : 'Recommended'}
+                  : tc('modelThinkingSelector.recommendedLabel')}
             </span>
             {thinkingLevel && <span className='text-muted-foreground'>{thinkingLabel}</span>}
             <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground' aria-hidden />
@@ -171,11 +181,13 @@ export function ModelThinkingSelector({
         >
           <span className='flex flex-col items-start gap-0.5'>
             <span className='font-medium'>
-              {defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}
+              {defaultModel
+                ? formatModelLabel(defaultModel)
+                : tc('modelThinkingSelector.recommendedLabel')}
             </span>
             {defaultModel && (
               <span className='text-[11px] text-muted-foreground truncate max-w-full'>
-                (Recommended)
+                {tc('modelThinkingSelector.recommendedTag')}
               </span>
             )}
           </span>
@@ -191,7 +203,7 @@ export function ModelThinkingSelector({
               <input
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder='Search models…'
+                placeholder={t('aiScreen.chat.searchModels')}
                 data-id='model-search'
                 data-track-category='XyneAI'
                 data-track-name='SEARCH_MODELS'
@@ -200,7 +212,9 @@ export function ModelThinkingSelector({
             </div>
             <div className='flex max-h-80 flex-col overflow-auto'>
               {filtered.length === 0 ? (
-                <div className='px-2.5 py-2 text-sm text-muted-foreground'>No models match</div>
+                <div className='px-2.5 py-2 text-sm text-muted-foreground'>
+                  {tc('modelThinkingSelector.noModelsMatch')}
+                </div>
               ) : (
                 filtered.map(m => (
                   <button
@@ -251,7 +265,7 @@ export function ModelThinkingSelector({
                 aria-hidden
                 strokeWidth={1.75}
               />
-              Thinking
+              {tc('modelThinkingSelector.thinkingLabel')}
             </span>
             <span className='flex items-center gap-1 text-muted-foreground'>
               {thinkingLabel}
@@ -269,19 +283,19 @@ export function ModelThinkingSelector({
             >
               {THINKING_LEVEL_OPTIONS.map(o => (
                 <button
-                  key={o.label}
+                  key={o.id}
                   type='button'
                   onClick={() => {
                     onSelectThinking(o.value);
                     setOpen(false);
                   }}
-                  data-id={`thinking-option-${o.label.toLowerCase()}`}
+                  data-id={`thinking-option-${o.id}`}
                   data-track-category='XyneAI'
                   data-track-name='SELECT_THINKING_LEVEL'
-                  data-track-metadata={JSON.stringify({ level: o.label })}
+                  data-track-metadata={JSON.stringify({ level: o.id })}
                   className={rowClass(o.value === thinkingLevel)}
                 >
-                  <span>{o.label}</span>
+                  <span>{tc(o.labelKey)}</span>
                   {o.value === thinkingLevel && (
                     <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
                   )}

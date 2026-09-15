@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { CheckTickCircle, FilterFunnel } from '@xyne/icons';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
@@ -15,6 +16,7 @@ import { SUBSYSTEM_ICONS, SUBSYSTEM_LABELS, subsystemLabel } from '../components
 import type { DigitalTwinCandidate } from '@/services/claw/digitalTwinTypes';
 
 const DigitalTwinProposalsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data: groups, isLoading, isError } = useClawDigitalTwinProposals();
   const approveCluster = useApproveDigitalTwinCluster();
 
@@ -101,8 +103,8 @@ const DigitalTwinProposalsTab = (): ReactElement => {
         <AdminSearchField
           value={search}
           onChange={setSearch}
-          placeholder='Search proposals'
-          ariaLabel='Search proposals'
+          placeholder={t('aiScreen.digitalTwin.searchProposals')}
+          ariaLabel={t('aiScreen.digitalTwin.searchProposals')}
           trackCategory='Claw Agents'
           trackName='Digital Twin: search proposals'
           className='w-full'

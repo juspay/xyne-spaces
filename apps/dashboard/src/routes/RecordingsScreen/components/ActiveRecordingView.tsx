@@ -4,6 +4,7 @@
 
 import type { ReactElement, RefObject } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Skeleton } from '../../../components/ui/Skeleton';
@@ -61,6 +62,7 @@ function TranscriptSearchBar({
   onOpen,
   onKeyDown,
 }: TranscriptSearchBarProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -87,7 +89,7 @@ function TranscriptSearchBar({
             value={query}
             onChange={e => onQueryChange(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder='Find in transcript'
+            placeholder={t('routes.recordingsScreen.findInTranscriptPlaceholder')}
             autoFocus
             className='flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/70 outline-none'
             data-track-category='RecordingsScreen'

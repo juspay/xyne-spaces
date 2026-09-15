@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
@@ -1408,6 +1409,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   },
   ref,
 ): ReactElement {
+  const { t } = useTranslation('placeholders');
   const composerRef = useRef<AIComposerHandle | null>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
@@ -2444,7 +2446,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming}
               onStop={handleStop}
-              placeholder='Write a message...'
+              placeholder={t('aiScreen.chat.writeMessage')}
             />
           </div>
         </div>

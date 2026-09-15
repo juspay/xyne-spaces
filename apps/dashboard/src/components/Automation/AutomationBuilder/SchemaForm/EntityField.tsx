@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChannelType, UserType } from '@xyne/shared';
 import {
   Bot,
@@ -150,6 +151,7 @@ function prependSelectedOption<T extends { id: string }>(
 }
 
 function UserField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const users = useActiveUserSearch(search, 15);
   const selectedUser = useUser(value ?? '');
@@ -186,7 +188,7 @@ function UserField({ value, onChange, placeholder }: FieldProps): React.ReactEle
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search users…'
+      searchPlaceholder={t('automation.entity.searchUsers')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -195,6 +197,7 @@ function UserField({ value, onChange, placeholder }: FieldProps): React.ReactEle
 }
 
 function UserGroupField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const groups = useUserGroups();
 
@@ -227,7 +230,7 @@ function UserGroupField({ value, onChange, placeholder }: FieldProps): React.Rea
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search groups…'
+      searchPlaceholder={t('automation.entity.searchGroups')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -244,6 +247,7 @@ function channelIcon(type: string | null | undefined): React.ReactElement {
 }
 
 function ChannelField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
   const selectedChannel = useChannel(value ?? '');
@@ -279,7 +283,7 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search channels…'
+      searchPlaceholder={t('automation.entity.searchChannels')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -288,6 +292,7 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
 }
 
 function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
 
@@ -319,7 +324,7 @@ function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactEl
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search boards…'
+      searchPlaceholder={t('automation.entity.searchBoards')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -328,6 +333,7 @@ function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactEl
 }
 
 function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const users = useUsers();
   const selectedUser = useUser(value ?? '');
@@ -384,7 +390,7 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search bots…'
+      searchPlaceholder={t('automation.entity.searchBots')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -393,6 +399,7 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
 }
 
 function StageField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   const boardIds = useMemo(() => (boards ?? []).map(b => b.id), [boards]);
@@ -437,7 +444,7 @@ function StageField({ value, onChange, placeholder }: FieldProps): React.ReactEl
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search stages…'
+      searchPlaceholder={t('automation.entity.searchStages')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -446,6 +453,7 @@ function StageField({ value, onChange, placeholder }: FieldProps): React.ReactEl
 }
 
 function ProjectField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const [projects] = useCachedQuery(queries.getAllProjects());
 
@@ -477,7 +485,7 @@ function ProjectField({ value, onChange, placeholder }: FieldProps): React.React
       selectedValue={value}
       onSelect={next => onChange(next ?? undefined)}
       placeholder={placeholder}
-      searchPlaceholder='Search projects…'
+      searchPlaceholder={t('automation.entity.searchProjects')}
       onSearchChange={setSearch}
       disableClientFiltering
       showClearButton
@@ -540,6 +548,7 @@ interface MultiFieldProps {
 }
 
 function MultiUsers({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const users = useActiveUserSearch(search, 30);
   const options: SelectorOption[] = useMemo(() => {
@@ -557,7 +566,7 @@ function MultiUsers({ value, onChange, placeholder }: MultiFieldProps): React.Re
       selectedValues={value}
       onMultiSelect={onChange}
       placeholder={placeholder}
-      searchPlaceholder='Search users…'
+      searchPlaceholder={t('automation.entity.searchUsers')}
       onSearchChange={setSearch}
       disableClientFiltering
     />
@@ -565,6 +574,7 @@ function MultiUsers({ value, onChange, placeholder }: MultiFieldProps): React.Re
 }
 
 function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const groups = useUserGroups();
   const options: SelectorOption[] = useMemo(() => {
@@ -585,7 +595,7 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
       selectedValues={value}
       onMultiSelect={onChange}
       placeholder={placeholder}
-      searchPlaceholder='Search groups…'
+      searchPlaceholder={t('automation.entity.searchGroups')}
       onSearchChange={setSearch}
       disableClientFiltering
     />
@@ -593,6 +603,7 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
 }
 
 function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
@@ -628,7 +639,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
       selectedValues={value}
       onMultiSelect={onChange}
       placeholder={placeholder}
-      searchPlaceholder='Search channels…'
+      searchPlaceholder={t('automation.entity.searchChannels')}
       onSearchChange={setSearch}
       disableClientFiltering
     />
@@ -636,6 +647,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
 }
 
 function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   const options: SelectorOption[] = useMemo(() => {
@@ -655,7 +667,7 @@ function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.R
       selectedValues={value}
       onMultiSelect={onChange}
       placeholder={placeholder}
-      searchPlaceholder='Search boards…'
+      searchPlaceholder={t('automation.entity.searchBoards')}
       onSearchChange={setSearch}
       disableClientFiltering
     />
@@ -663,6 +675,7 @@ function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.R
 }
 
 function MultiProjects({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [search, setSearch] = useState('');
   const [projects] = useCachedQuery(queries.getAllProjects());
   const options: SelectorOption[] = useMemo(() => {
@@ -682,7 +695,7 @@ function MultiProjects({ value, onChange, placeholder }: MultiFieldProps): React
       selectedValues={value}
       onMultiSelect={onChange}
       placeholder={placeholder}
-      searchPlaceholder='Search projects…'
+      searchPlaceholder={t('automation.entity.searchProjects')}
       onSearchChange={setSearch}
       disableClientFiltering
     />

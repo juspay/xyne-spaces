@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as Popover from '@radix-ui/react-popover';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../../utils/classNames';
 import type { MultiSelectProps, MultiSelectOption } from './MultiSelect.types';
 
@@ -16,7 +17,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
   options,
   selectedValues,
   onChange,
-  placeholder = 'Select options',
+  placeholder,
   label,
   className,
   disabled = false,
@@ -24,6 +25,8 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
   error,
   helperText,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.multiSelect.selectOptions');
   const [isOpen, setIsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -184,7 +187,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   </span>
                 ))
               ) : (
-                <span className='text-muted-foreground'>{placeholder}</span>
+                <span className='text-muted-foreground'>{resolvedPlaceholder}</span>
               )}
             </div>
             <svg
@@ -230,7 +233,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   setSearchValue(e.target.value);
                   setFocusedIndex(-1);
                 }}
-                placeholder='Search options...'
+                placeholder={t('ui.multiSelect.searchOptions')}
                 className='w-full px-2 py-1.5 text-sm border border-input rounded bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-ring'
               />
             </div>

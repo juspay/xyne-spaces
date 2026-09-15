@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, PencilLine } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useFlow } from '../FlowContext';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -44,6 +45,7 @@ const OptionCheck: React.FC<{ checked: boolean }> = ({ checked }) => (
  * paging never loses input.
  */
 export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
+  const { t } = useTranslation('placeholders');
   const props = node.props as
     | {
         title: string;
@@ -249,7 +251,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                   data-track-category='USER_QUESTION_ARTIFACT'
                   data-track-name='EDIT_OPEN_ENDED_ANSWER'
                   onChange={event => updateAnswer(activeQuestion.id, event.target.value)}
-                  placeholder={activeQuestion.placeholder ?? 'Type your answer…'}
+                  placeholder={activeQuestion.placeholder ?? t('flowUI.userQuestion.typeAnswer')}
                   disabled={disabled}
                   rows={3}
                   className='w-full resize-y rounded-lg border border-foreground/10 bg-transparent px-1.5 py-1.5 text-sm font-medium leading-5 text-foreground outline-none placeholder:text-foreground/40 focus:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-60'
@@ -309,7 +311,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                           setCustomOpen({ ...customOpen, [activeQuestion.id]: false });
                         }
                       }}
-                      placeholder='Type your own answer…'
+                      placeholder={t('flowUI.userQuestion.typeCustomAnswer')}
                       disabled={disabled}
                       rows={1}
                       className='min-w-0 flex-1 resize-none self-center bg-transparent text-sm font-semibold leading-5 text-foreground outline-none placeholder:font-semibold placeholder:text-foreground/60 disabled:cursor-not-allowed'

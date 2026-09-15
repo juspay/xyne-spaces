@@ -7,6 +7,7 @@ import {
   useRef,
   useEffect,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { GripVertical, Plus, Trash2, Check, ChevronDown, ChevronLeft, Copy } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
@@ -196,6 +197,7 @@ const BoardEditScreen = ({
   initialBoardName,
   sourceBoardId,
 }: BoardEditScreenProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
@@ -1543,7 +1545,7 @@ const BoardEditScreen = ({
                   className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
                     boardName ? 'text-foreground' : 'text-xyne-gray-300'
                   } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
-                  placeholder='Enter Board Name'
+                  placeholder={t('board.editScreen.enterBoardName')}
                   data-track-category='form'
                   data-track-name='board-name-input'
                 />

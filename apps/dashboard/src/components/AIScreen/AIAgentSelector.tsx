@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Bot, Search } from 'lucide-react';
 import { Popover } from '../ui/Popover';
@@ -37,6 +38,8 @@ export function AIAgentSelector({
   onOpenChange,
   hideTrigger = false,
 }: AIAgentSelectorProps): ReactElement {
+  const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : uncontrolledOpen;
@@ -69,7 +72,7 @@ export function AIAgentSelector({
     [agents, selectedAgentSlug],
   );
 
-  const displayText = selectedAgent?.name ?? 'Ask AI';
+  const displayText = selectedAgent?.name ?? tc('aiScreen.aiAgentSelector.askAiLabel');
 
   // Zero-size anchor when the pill is hidden — Radix positions the popover
   // against the trigger, so it still needs an element in the toolbar.
@@ -133,7 +136,7 @@ export function AIAgentSelector({
               type='text'
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Search agents…'
+              placeholder={t('aiScreen.chat.searchAgentsInline')}
               className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
               autoFocus
               data-track-category='XyneAI'
@@ -147,7 +150,7 @@ export function AIAgentSelector({
                 data-track-category='XyneAI'
                 data-track-name='CLEAR_AGENT_SEARCH'
               >
-                Clear
+                {tc('aiScreen.aiAgentSelector.clearButton')}
               </button>
             )}
           </div>
@@ -155,7 +158,9 @@ export function AIAgentSelector({
 
         {/* Loading state */}
         {isLoading && (
-          <div className='px-3 py-4 text-sm text-muted-foreground text-center'>Loading agents…</div>
+          <div className='px-3 py-4 text-sm text-muted-foreground text-center'>
+            {tc('aiScreen.aiAgentSelector.loadingAgents')}
+          </div>
         )}
 
         {/* Scrollable list */}
@@ -181,7 +186,7 @@ export function AIAgentSelector({
               data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
             >
               <Bot className='w-4 h-4 shrink-0' />
-              <span className='font-normal'>Ask AI</span>
+              <span className='font-normal'>{tc('aiScreen.aiAgentSelector.askAiLabel')}</span>
             </button>
 
             {/* Divider if there are agents */}
@@ -190,7 +195,7 @@ export function AIAgentSelector({
             {/* Agent list */}
             {filteredAgents.length === 0 && agents.length > 0 ? (
               <div className='px-3 py-4 text-sm text-muted-foreground text-center'>
-                No agents match &ldquo;{query}&rdquo;
+                {tc('aiScreen.aiAgentSelector.noAgentsMatch', { query })}
               </div>
             ) : (
               filteredAgents.map((agent: AccessibleClawAgent) => (
@@ -223,7 +228,7 @@ export function AIAgentSelector({
         {/* Footer count */}
         {filteredAgents.length > MAX_VISIBLE_AGENTS && (
           <div className='sticky bottom-0 ai-agent-selector border-t border-border px-3 py-1.5 text-[11px] font-normal text-muted-foreground/60 text-center'>
-            {filteredAgents.length} agents
+            {tc('aiScreen.aiAgentSelector.agentCount', { count: filteredAgents.length })}
           </div>
         )}
       </div>

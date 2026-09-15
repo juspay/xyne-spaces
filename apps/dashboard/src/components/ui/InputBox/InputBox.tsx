@@ -6,6 +6,7 @@ import React, {
   useImperativeHandle,
   useEffect,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
@@ -239,7 +240,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       showTypingIndicator = true,
       agentSlot,
       hasAgentActivity = false,
-      placeholder = 'Type a message...',
+      placeholder,
       value,
       disabled = false,
       className = '',
@@ -279,6 +280,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     ref,
   ) => {
+    const { t } = useTranslation('placeholders');
+    const resolvedPlaceholder = placeholder ?? t('ui.inputBox.typeMessage');
     const {
       addDroppedFiles: providerAddDroppedFiles,
       removeDroppedFile: providerRemoveDroppedFile,
@@ -721,7 +724,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }),
         LinkSyncPlugin,
         Placeholder.configure({
-          placeholder: typeof placeholder === 'string' ? placeholder : '',
+          placeholder: typeof resolvedPlaceholder === 'string' ? resolvedPlaceholder : '',
         }),
         MentionExtension.configure({
           userActions: [],
@@ -1724,7 +1727,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 emojiSizeClass={emojiSizeClass}
                 onAttachClick={handleAttachClick}
                 onSend={() => void handleSend()}
-                placeholder={placeholder}
+                placeholder={resolvedPlaceholder}
                 showMentions={features.mentions}
                 showFormattingToolbar={showMobileFormattingToolbar}
                 onMentionClick={() => {
@@ -1813,7 +1816,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
                       }`}
                     >
-                      {placeholder}
+                      {resolvedPlaceholder}
                     </div>
                   ))}
               </div>

@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { Calendar as CalendarIcon, Loader2 } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
@@ -104,6 +105,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
   onOpenChange,
   channelId,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [step, setStep] = useState<'range' | 'provider'>('range');
   const [mode, setMode] = useState<Mode>('last-3mo');
   const [customStart, setCustomStart] = useState<Date | null>(null);
@@ -225,7 +227,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     value={customStart}
                     rangeForVisual={{ start: customStart, end: customEnd }}
                     onPick={d => setCustomStart(d)}
-                    placeholder='Start date'
+                    placeholder={t('chat.emailRefetch.startDate')}
                     maxDate={customEnd ?? new Date()}
                   />
                   <DateField
@@ -233,7 +235,7 @@ export const DlMemberSyncDialog: React.FC<DlMemberSyncDialogProps> = ({
                     value={customEnd}
                     rangeForVisual={{ start: customStart, end: customEnd }}
                     onPick={d => setCustomEnd(d)}
-                    placeholder='End date'
+                    placeholder={t('chat.emailRefetch.endDate')}
                     {...(customStart && { minDate: customStart })}
                     maxDate={new Date()}
                   />

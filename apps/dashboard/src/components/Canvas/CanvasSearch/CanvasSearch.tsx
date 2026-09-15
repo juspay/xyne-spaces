@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type {
   BlockNoteEditor,
   BlockSchema,
@@ -21,6 +22,7 @@ interface CanvasSearchProps {
 }
 
 export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSearchProps) => {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -114,7 +116,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder='Search in canvas...'
+          placeholder={t('canvas.searchInCanvas')}
           className='w-full px-3 py-1.5 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
           data-track-event='blur'
           data-track-category='CANVAS'

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   AccessType,
@@ -85,6 +86,7 @@ const getNextClonedBoardName = (
 };
 
 const ProjectDetailScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { workspaceId, projectId } = useParams<{ workspaceId: string; projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1146,7 +1148,7 @@ const ProjectDetailScreen = (): ReactElement => {
             value={repositoryUrl}
             onChange={event => handleRepositoryUrlChange(event.target.value)}
             className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
-            placeholder='https://github.com/org/repository.git'
+            placeholder={t('routes.projectDetailScreen.repositoryUrlPlaceholder')}
             data-track-category='ProjectDetail'
             data-track-name='RepositoryUrlChanged'
           />

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowRight,
   Check,
@@ -348,6 +349,7 @@ function CanvasCommentThreadSection({
   onDeleteComment,
   onUpdateComment,
 }: CanvasCommentThreadSectionProps): React.JSX.Element {
+  const { t } = useTranslation('placeholders');
   const [loadedComments = []] = useCachedQuery(
     queries.canvasThreadComments({ threadId: thread.id }),
     {
@@ -478,7 +480,7 @@ function CanvasCommentThreadSection({
                 id={`canvas-comment-edit-${comment.id}`}
                 channelId={channelId}
                 currentUserId={currentUserId}
-                placeholder='Edit comment'
+                placeholder={t('canvas.editComment')}
                 value={comment.body}
                 fallbackMentionedUserIds={parseMentionedUserIds(comment.mentionedUserIds)}
                 minHeightClassName='min-h-[38px]'
@@ -575,6 +577,7 @@ export function CanvasCommentsPanel({
   onCreateThreadCreated,
   onCreateThreadFailed,
 }: CanvasCommentsPanelProps): React.JSX.Element {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
@@ -841,7 +844,7 @@ export function CanvasCommentsPanel({
               id={`canvas-comment-new-${canvasId}`}
               channelId={channelId}
               currentUserId={user?.id}
-              placeholder='Add a comment'
+              placeholder={t('canvas.addComment')}
               minHeightClassName='min-h-[38px]'
               onSubmit={createThread}
             />

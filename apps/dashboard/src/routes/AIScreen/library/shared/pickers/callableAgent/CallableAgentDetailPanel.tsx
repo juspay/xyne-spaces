@@ -1,4 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Staroflife, Tools, UserBot } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Textarea } from '@/components/ui/Textarea';
@@ -109,6 +110,7 @@ export function CallableAgentDetailPanel({
   onAdd: (requestReason: string) => void;
   onRemove: () => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [reason, setReason] = useState('');
   // The catalog row comes from the agent LIST, which carries no config, skills
   // or prompt — fetch the real detail so these sections aren't all empty.
@@ -217,7 +219,7 @@ export function CallableAgentDetailPanel({
                   value={reason}
                   maxLength={REASON_MAX}
                   onChange={event => setReason(event.target.value)}
-                  placeholder='Why does this agent need to be called?'
+                  placeholder={t('aiScreen.library.shared.whyCallAgent')}
                   rows={3}
                 />
                 <span className='text-xs leading-4 text-muted-foreground'>

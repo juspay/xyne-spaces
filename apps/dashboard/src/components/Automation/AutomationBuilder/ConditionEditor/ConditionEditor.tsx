@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, Variable, X } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Button } from '../../../ui/Button/Button';
@@ -135,6 +136,7 @@ function LeafRow({
   onChange,
   canWrap,
 }: LeafRowProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const operator = operators.find(o => o.value === leaf.operator);
   const showValue = operator && operator.valueType !== 'none';
 
@@ -169,7 +171,7 @@ function LeafRow({
         <div className='w-[200px]'>
           <Select value={leaf.operator} onValueChange={v => update({ operator: v })}>
             <SelectTrigger className='w-full'>
-              <SelectValue placeholder='Operator' />
+              <SelectValue placeholder={t('automation.condition.operator')} />
             </SelectTrigger>
             <SelectContent>
               {operators.map(o => (
@@ -275,6 +277,7 @@ function ValueInput({
   enumValues: string[] | null;
   entityKind: ReturnType<typeof detectEntityKind>;
 }): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   if (operator?.valueType === 'tag') {
     return <TagValueInput value={typeof value === 'string' ? value : ''} onChange={onChange} />;
   }
@@ -291,7 +294,7 @@ function ValueInput({
     return (
       <Input
         type='number'
-        placeholder='Value'
+        placeholder={t('automation.value')}
         value={typeof value === 'number' ? String(value) : ''}
         onChange={e => {
           const n = Number(e.target.value);
@@ -305,7 +308,7 @@ function ValueInput({
     return (
       <Select value={selected} onValueChange={v => onChange(v)}>
         <SelectTrigger className='w-full'>
-          <SelectValue placeholder='Select…' />
+          <SelectValue placeholder={t('automation.condition.select')} />
         </SelectTrigger>
         <SelectContent>
           {enumValues.map(v => (
@@ -328,7 +331,7 @@ function ValueInput({
   }
   return (
     <Input
-      placeholder='Value'
+      placeholder={t('automation.value')}
       value={typeof value === 'string' ? value : ''}
       onChange={e => onChange(e.target.value)}
     />

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckTickSingle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { TagMethod } from '@xyne/shared';
 import { toast } from 'sonner';
@@ -122,6 +123,7 @@ export function LabelPicker({
   trackCategory,
   onChange,
 }: LabelPickerProps): ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const [isOpen, setIsOpen] = useState(false);
   const resolvable = useMemo(() => [...labels, ...suggestions], [labels, suggestions]);
   const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(resolvable);
@@ -240,7 +242,7 @@ export function LabelPicker({
         className={LIST_INHERITS_POPOVER_CLASS_NAME}
         isOpen={isOpen}
         onOpenChange={setIsOpen}
-        searchPlaceholder='Search or create...'
+        searchPlaceholder={t('labels.searchOrCreate')}
         searchMaxLength={LABEL_MAX_LENGTH}
         searchAriaLabel='Search or create a label'
         listAriaLabel='Labels'

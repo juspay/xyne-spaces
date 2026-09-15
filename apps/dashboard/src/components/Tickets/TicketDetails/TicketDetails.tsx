@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -570,6 +571,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   stageReadOnly = false,
   subTicketsOnly = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -3296,8 +3298,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         options={subTicketPickerOptions}
         selectedValue={null}
         onSelect={value => handleLinkSubTicket(value)}
-        placeholder='+ Add existing sub-ticket'
-        searchPlaceholder='Search by ticket ID or name'
+        placeholder={t('tickets.details.addExistingSubTicket')}
+        searchPlaceholder={t('tickets.details.searchByTicketIdOrName')}
         isOpen={isAddSubTicketMenuOpen}
         onOpenChange={handleAddSubTicketMenuOpenChange}
         onSearchChange={subTicketSearch.handleSearchChange}
@@ -3671,8 +3673,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   }))}
                   selectedValue={ticket.boardId ?? null}
                   onSelect={handleBoardChange}
-                  placeholder='Select board'
-                  searchPlaceholder='Search boards...'
+                  placeholder={t('tickets.selectBoard')}
+                  searchPlaceholder={t('tickets.details.searchBoards')}
                   isLoading={hasBoardDropdownOpened && !boards}
                   width='auto'
                   noBorder={true}
@@ -3787,7 +3789,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           value={tagSearchQuery}
                           onChange={e => setTagSearchQuery(e.target.value)}
                           onKeyDown={handleTagKeyDown}
-                          placeholder='Search or create label...'
+                          placeholder={t('tickets.details.searchOrCreateLabel')}
                           className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
                           data-track-category='Tickets'
                           data-track-name='SearchTags'
@@ -3882,7 +3884,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       items={selectorStages}
                       selectedValue={ticket.stageName}
                       onValueChange={handleStageChange}
-                      placeholder='Set Status'
+                      placeholder={t('tickets.details.setStatus')}
                       icon={
                         <StageIndicator
                           stages={stages}
@@ -3955,7 +3957,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     items={priorityItems}
                     selectedValue={ticket.priority}
                     onValueChange={handlePriorityChange}
-                    placeholder='Set Priority'
+                    placeholder={t('tickets.details.setPriority')}
                     icon={<TicketPriorityIcon size={14} />}
                     noBorder={true}
                   />
@@ -3980,7 +3982,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     items={ticketTypeOptions}
                     selectedValue={ticket.ticketType}
                     onValueChange={handleTicketTypeChange}
-                    placeholder='Set Type'
+                    placeholder={t('tickets.details.setType')}
                     noBorder={true}
                     isLoading={isTicketTypeLoading}
                     onOpenChange={open => {
@@ -4134,7 +4136,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         type='text'
                         value={acknowledgeReason}
                         onChange={e => setAcknowledgeReason(e.target.value)}
-                        placeholder='Reason for keeping the current dates...'
+                        placeholder={t('tickets.details.reasonKeepDates')}
                         className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
                         data-testid='acknowledge-eta-risk-reason'
                         data-track-category='TicketDetails'
@@ -5101,8 +5103,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   options={referenceTicketOptions}
                   selectedValue={null}
                   onSelect={value => handleAddReference(value)}
-                  placeholder='+ Add ticket'
-                  searchPlaceholder='Search by ID or name'
+                  placeholder={t('tickets.details.addTicket')}
+                  searchPlaceholder={t('tickets.details.searchByIdOrName')}
                   isOpen={isAddTicketMenuOpen}
                   onOpenChange={handleAddTicketMenuOpenChange}
                   onSearchChange={handleAddTicketMenuSearchChange}
@@ -5232,7 +5234,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               id='non-form-reviewer-comment'
               value={nonFormReviewComment}
               onChange={e => setNonFormReviewComment(e.target.value)}
-              placeholder='Explain your decision…'
+              placeholder={t('tickets.stageForm.explainDecision')}
               rows={3}
               className='w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y'
               data-track-category='Tickets'

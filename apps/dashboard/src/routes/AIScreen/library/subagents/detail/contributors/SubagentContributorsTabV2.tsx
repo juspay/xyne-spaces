@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { MultipleCrossCancelDefault, PlusDefault, SearchDefault } from '@xyne/icons';
@@ -34,6 +35,7 @@ export function SubagentContributorsTabV2({
   canShare: boolean;
   isBuiltIn: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const shares = useClawSubagentShares(subagent.name);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -168,7 +170,7 @@ export function SubagentContributorsTabV2({
                 ref={searchRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder='Filter contributors'
+                placeholder={t('aiScreen.library.subagents.filterContributors')}
                 aria-label='Filter contributors'
                 data-track-category='Claw Agents'
                 data-track-name='Subagent detail v2: filter contributors'

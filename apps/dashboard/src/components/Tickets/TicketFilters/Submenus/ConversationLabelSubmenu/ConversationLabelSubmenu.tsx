@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check, Tag } from '@xyne/icons';
 import { queries } from '../../../../../zero/queries';
 import { useCachedQuery } from '../../../../../hooks/useCachedQuery';
@@ -43,6 +44,7 @@ export const ConversationLabelSubmenu = ({
   onChange,
   channelId,
 }: ConversationLabelSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -96,7 +98,7 @@ export const ConversationLabelSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search labels...'
+            placeholder={t('tickets.searchLabels')}
             className='pl-9 h-9'
           />
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button/index';
 import {
   Select,
@@ -34,6 +35,7 @@ export function StructuredOutputDialog({
   saving,
   onSave,
 }: StructuredOutputDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [draft, setDraft] = useState<BehaviourDraft>(behaviour);
   const [error, setError] = useState<string | null>(null);
 
@@ -144,7 +146,7 @@ export function StructuredOutputDialog({
           id='behaviour-output-template'
           value={draft.outputTemplate}
           onChange={e => patch({ outputTemplate: e.target.value })}
-          placeholder='Optional outline the answer should follow'
+          placeholder={t('aiScreen.library.agents.structuredOutline')}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: output template'
           className={`${FIELD} h-[86px] resize-y`}
@@ -159,7 +161,7 @@ export function StructuredOutputDialog({
           id='behaviour-output-require-tools'
           value={draft.outputRequireTools}
           onChange={e => patch({ outputRequireTools: e.target.value })}
-          placeholder='search, read-file'
+          placeholder={t('aiScreen.library.agents.toolsExample')}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: output required tools'
           className={`${FIELD} h-11 py-0`}

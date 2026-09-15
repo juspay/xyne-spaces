@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { ArrowRight } from '@xyne/icons';
@@ -58,6 +59,7 @@ const getInitialStepIndex = (): number => {
 };
 
 const QuestionnaireScreen = (): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { user } = useAuth();
   const z = useZero();
@@ -386,7 +388,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
               type='text'
               value={displayName}
               onChange={e => setDisplayName(e.target.value)}
-              placeholder='Enter your full name'
+              placeholder={t('routes.questionnaireScreen.fullNamePlaceholder')}
               autoComplete='off'
               className='mt-[24px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
               data-track-category='Questionnaire'
@@ -403,7 +405,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 type='text'
                 value={role}
                 onChange={e => setRole(e.target.value)}
-                placeholder='Ex: Product Manager'
+                placeholder={t('routes.questionnaireScreen.rolePlaceholder')}
                 autoComplete='off'
                 className='mt-[10px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
                 data-track-category='Questionnaire'
@@ -478,7 +480,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 type='text'
                 value={companyName}
                 onChange={e => setCompanyName(e.target.value)}
-                placeholder='Ex: Nike'
+                placeholder={t('routes.questionnaireScreen.companyNamePlaceholder')}
                 autoComplete='organization'
                 className='mt-[12px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
                 data-track-category='Questionnaire'

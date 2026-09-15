@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useTranslation } from 'react-i18next';
 import React, {
   ReactElement,
   useCallback,
@@ -243,6 +244,7 @@ export const EmailComposer = ({
   channelPreference,
   channelPreferenceLoaded,
 }: EmailComposerProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isComposeMode = mode === 'compose';
   const features = resolveFeatures(mode, featureOverrides);
   // Current user — used to scope localStorage compose drafts so two users
@@ -2613,7 +2615,7 @@ export const EmailComposer = ({
               type='text'
               value={composeSubject}
               onChange={e => setComposeSubject(e.target.value)}
-              placeholder='Subject'
+              placeholder={t('desk.email.subject')}
               className='flex-1 text-sm py-1 outline-none bg-transparent'
               disabled={isSending}
               aria-label='Subject'

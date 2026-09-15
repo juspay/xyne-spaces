@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { UserListView } from '../../components/ResourceAccess';
 import { ResourceAccessModal } from '../../components/ResourceAccess';
 import { useUsers, searchUsers } from '../../hooks/useUsers';
@@ -19,6 +20,7 @@ import { usePlatform } from '../../hooks/usePlatform';
  * - Only admins of a resource can grant admin access to others
  */
 export const ResourceAccessScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const users = useUsers();
   const [searchQuery, setSearchQuery] = useState('');
   const { isMobile } = usePlatform();
@@ -65,7 +67,7 @@ export const ResourceAccessScreen = (): ReactElement => {
             <Input
               ref={searchInputRef}
               type='text'
-              placeholder='Search users by name or email...'
+              placeholder={t('routes.resourceAccessScreen.searchUsersPlaceholder')}
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
               className='pl-10 w-full'

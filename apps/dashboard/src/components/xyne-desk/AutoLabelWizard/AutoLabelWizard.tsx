@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ListChecks, Loader2, Plus, Tag } from 'lucide-react';
 import { toast } from 'sonner';
@@ -73,6 +74,7 @@ export function AutoLabelWizard({
   showKeepInInbox = true,
   onCreated,
 }: AutoLabelWizardProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const { userID } = useAuthContextValues();
   const usersById = useUsersById();
@@ -385,7 +387,7 @@ export function AutoLabelWizard({
                 setLabelId(undefined);
                 setLabelColor(colorForName(e.target.value));
               }}
-              placeholder='Search or create a label…'
+              placeholder={t('desk.label.searchOrCreateArticle')}
               className='h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground'
               data-track-category='xyne-desk'
               data-track-name='auto-label-label-search'

@@ -27,6 +27,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { PlusDefault } from '@xyne/icons';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
@@ -215,7 +216,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   {
     autoFocus,
     onSubmit,
-    placeholder = 'Ask anything',
+    placeholder,
     pending = false,
     onStop,
     hideDisclaimer,
@@ -226,6 +227,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   },
   ref,
 ): ReactElement {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('aiComposer.askAnything');
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
@@ -828,7 +831,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               onChange={e => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={placeholder}
+              placeholder={resolvedPlaceholder}
               rows={1}
               className={cn(
                 'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground/80 focus:outline-none',

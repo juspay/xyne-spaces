@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { DeleteDustbin01 } from '@xyne/icons';
 import { AdminSearchField } from '@/routes/AIScreen/library/admin/components/AdminSearchField';
 import { TabMessage } from '@/routes/AIScreen/library/admin/components/TabMessage';
@@ -20,6 +21,7 @@ const DELETE_COPY =
   'This removes it from Hindsight and marks related review rows as rejected. Recall-hit history is retained.';
 
 const DigitalTwinHotTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [range, setRange] = useState<MemoryRange>('7d');
   const { data: stats, isLoading } = useClawDigitalTwinStats(range);
   const deleteMutation = useDeleteDigitalTwinMemory();
@@ -39,8 +41,8 @@ const DigitalTwinHotTab = (): ReactElement => {
         <AdminSearchField
           value={search}
           onChange={setSearch}
-          placeholder='Search hot memories'
-          ariaLabel='Search hot memories'
+          placeholder={t('aiScreen.digitalTwin.searchHotMemories')}
+          ariaLabel={t('aiScreen.digitalTwin.searchHotMemories')}
           trackCategory='Claw Agents'
           trackName='Digital Twin: search hot memories'
           className='w-full'

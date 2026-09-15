@@ -8,6 +8,7 @@ import {
   type ReactElement,
   type TouchEvent as ReactTouchEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Flag, PauseBig, PlayBig, Spinner, StopBig, CloudDisabled } from '@xyne/icons';
 import { Maximize2, Monitor, MonitorOff, Video, VideoOff, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -657,6 +658,7 @@ const RecordingMiniPill = ({
 };
 
 const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const handleFileUpload = useCallback(
     (file: File): Promise<string> => canvasService.uploadCanvasFile(notesCanvasId!, file),
     [notesCanvasId],
@@ -669,7 +671,7 @@ const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => 
         channelId={channelId ?? undefined}
         editable
         autoFocus
-        placeholder='Add your notes here, you can view the transcript live in the transcript tab'
+        placeholder={t('routes.recordingDetailV2Screen.notesPlaceholder')}
         onFileUpload={handleFileUpload}
         className='floating-recording-notes h-full w-full
           [&_.bn-side-menu]:!hidden

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useEffect, useMemo, type ComponentProps } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '../../components/ui/Button/Button';
 import { AppsTable } from '../../components/Apps/AppsTable/AppsTable';
@@ -32,6 +33,7 @@ const isAppsView = (v: string | null): v is AppsView =>
   v === 'installed' || v === 'org' || v === 'marketplace';
 
 const AppsScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const permissions = usePermissions();
   const { user } = useAuth();
   const zero = useZero();
@@ -428,7 +430,7 @@ const AppsScreen = (): ReactElement => {
               <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
               <Input
                 type='text'
-                placeholder='Search apps by name, description or created by...'
+                placeholder={t('routes.appsScreen.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setSearchQuery(e.target.value)

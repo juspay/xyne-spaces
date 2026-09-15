@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -149,6 +150,7 @@ export const TicketFiltersDropdown = ({
   leadingControl?: ReactElement;
   trailingControl?: ReactElement | undefined;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
@@ -1003,7 +1005,7 @@ export const TicketFiltersDropdown = ({
                 >
                   <input
                     type='text'
-                    placeholder='Name this view'
+                    placeholder={t('tickets.filters.nameThisView')}
                     value={viewName}
                     data-track-category='saved-views'
                     data-track-name='view-name-input'
@@ -1056,7 +1058,7 @@ export const TicketFiltersDropdown = ({
             <input
               ref={inputRef}
               type='text'
-              placeholder='Search Tickets'
+              placeholder={t('tickets.filters.searchTickets')}
               autoFocus={!isMobile}
               value={searchValue ?? ''}
               onChange={e => onSearchChange?.(e.target.value)}

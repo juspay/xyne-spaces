@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { XyneAIQuickMenu } from './XyneAIQuickMenu';
@@ -73,78 +74,100 @@ import {
   useRailActiveCalls,
 } from '../Call/CallsRailHoverCard/CallsRailHoverCard';
 
+// `label` stays the English fallback (passed as t()'s defaultValue below);
+// `translationKey` is the stable lookup key, independent of copy so it can't
+// drift from the desktop rail's wording for the same concept.
 const mobileNavigationItems = [
   {
     path: '/chat/dir',
     label: 'Home',
+    translationKey: 'nav.mobile.home',
     icon: HomeDefault,
   },
   {
     path: '/chat/dm',
     label: 'DMs',
+    translationKey: 'nav.dms',
     icon: ChatDefault,
   },
   {
     path: '/calls',
     label: 'Calls',
+    translationKey: 'nav.calls',
     icon: PhoneDefault,
   },
   {
     path: '/chat/activity',
     label: 'Activity',
+    translationKey: 'nav.activity',
     icon: NotificationBellOn,
   },
   {
     path: '/analytics',
     label: 'Analytics',
+    translationKey: 'nav.analytics',
     icon: GraphTrendLine,
   },
   {
     path: '/chat/canvas',
     label: 'Canvas',
+    translationKey: 'nav.mobile.canvas',
     icon: FileText,
   },
   {
     path: '/dashboards',
     label: 'Dashboards',
+    translationKey: 'nav.dashboards',
     icon: GridDashboard01,
   },
   {
     path: '/recorder',
     label: 'Record',
+    translationKey: 'nav.mobile.record',
     icon: MicMicrophone,
   },
   {
     path: '/chat/bookmarks',
     label: 'Bookmarks',
+    translationKey: 'nav.mobile.bookmarks',
     icon: BookmarkDefault,
   },
   {
     path: '/rca',
     label: 'RCA',
+    translationKey: 'nav.mobile.rca',
     icon: ClipboardCheck,
   },
   {
     path: '/chat/threads',
     label: 'Threads',
+    translationKey: 'nav.mobile.threads',
     icon: ChatDefault,
   },
   {
     path: '/chat/recap',
     label: 'Recap',
+    translationKey: 'nav.mobile.recap',
     icon: SparkleAi01,
   },
   {
     path: '/error-report',
     label: 'Report Issue',
+    translationKey: 'support.reportIssue',
     icon: AlertCircle,
   },
   {
     path: '/guide',
     label: 'Guide',
+    translationKey: 'nav.mobile.guide',
     icon: QuestionMarkCircle,
   },
 ];
+
+// Paths shown as the four primary (always-visible) mobile tabs — kept
+// path-based rather than label-based so it stays correct once labels
+// are translated per-locale.
+const MOBILE_PRIMARY_PATHS = new Set(['/chat/dir', '/chat/dm', '/calls', '/chat/activity']);
 
 type QuickMenuProps = {
   prefixWs: (path: string) => string;
@@ -169,6 +192,7 @@ const SUPPORT_REUSED_ROUTES = [
 ];
 
 const AppSidebar = (): ReactElement => {
+  const { t } = useTranslation('sidebar');
   const location = useLocation();
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -358,7 +382,7 @@ const AppSidebar = (): ReactElement => {
 
   useEffect(() => {
     const unsubscribe = window.electronAPI?.onAppWindowLimitReached?.(limit => {
-      toast.info(`You can have up to ${limit} extra windows open. Close one to open another.`);
+      toast.info(t('windowLimitToast', { limit }));
     });
     return (): void => unsubscribe?.();
   }, []);
@@ -417,15 +441,16 @@ const AppSidebar = (): ReactElement => {
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;
 
-                  const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
+                  const testId = `nav-${item.testKey}`;
+                  const label = t(`nav.${item.testKey}`, item.label);
 
                   const tooltipContent = shortcutIndex ? (
                     <span className='flex items-center gap-2'>
-                      {item.label}
+                      {label}
                       <ShortcutHint keys={`mod+${shortcutIndex}`} />
                     </span>
                   ) : (
-                    item.label
+                    label
                   );
 
                   const QuickMenu = quickMenuFor(item.path);
@@ -441,7 +466,7 @@ const AppSidebar = (): ReactElement => {
                           event.preventDefault();
                         }
                       }}
-                      aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-label={showPendingDmDot ? t('dmsUnread') : label}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -557,7 +582,7 @@ const AppSidebar = (): ReactElement => {
                     trigger={
                       <button
                         type='button'
-                        aria-label='More'
+                        aria-label={t('more.ariaLabel')}
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'
@@ -592,11 +617,11 @@ const AppSidebar = (): ReactElement => {
           <ZeroConnectionStatus className='mb-2' />
 
           {isCommunityWorkspace && (
-            <Tooltip content='Invite people' side='right' delayDuration={0}>
+            <Tooltip content={t('invite.tooltip')} side='right' delayDuration={0}>
               <button
                 type='button'
-                aria-label='Invite people to workspace'
-                title='Invite people'
+                aria-label={t('invite.ariaLabel')}
+                title={t('invite.tooltip')}
                 onClick={() => setIsInviteDialogOpen(true)}
                 data-testid='nav-invite-people'
                 data-track-category='App_Sidebar'
@@ -625,8 +650,8 @@ const AppSidebar = (): ReactElement => {
             trigger={
               <button
                 type='button'
-                aria-label='Support'
-                title='Support'
+                aria-label={t('support.ariaLabel')}
+                title={t('support.title')}
                 data-testid='nav-support'
                 data-track-category='App_Sidebar'
                 data-track-name='Sidebar_Support_Toggle'
@@ -775,14 +800,18 @@ const SidebarMoreMenu = ({
   onNavigate: (label: string, openedInNewWindow?: boolean) => void;
   onCustomize: () => void;
 }): ReactElement => {
+  const { t } = useTranslation('sidebar');
   return (
     <div className='flex flex-col'>
-      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>More</p>
+      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>
+        {t('more.heading')}
+      </p>
       {items.length > 0 ? (
         <ul className='flex flex-col'>
           {items.map(item => {
             const Icon = item.icon;
             const isActive = activeRoute === item.path;
+            const label = t(`nav.${item.testKey}`, item.label);
             return (
               <li key={item.path}>
                 <Link
@@ -795,7 +824,7 @@ const SidebarMoreMenu = ({
                       event.preventDefault();
                     }
                   }}
-                  data-testid={`more-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+                  data-testid={`more-${item.testKey}`}
                   data-track-category='App_Sidebar'
                   data-track-name='Sidebar_More_Item'
                   data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
@@ -809,14 +838,14 @@ const SidebarMoreMenu = ({
                   <span className='flex size-5 shrink-0 items-center justify-center'>
                     <Icon size={16} variant={isActive ? 'Solid' : 'Stroke'} />
                   </span>
-                  <span className='truncate'>{item.label}</span>
+                  <span className='truncate'>{label}</span>
                 </Link>
               </li>
             );
           })}
         </ul>
       ) : (
-        <p className='px-2.5 py-2 text-sm text-muted-foreground'>All items are in your toolbar.</p>
+        <p className='px-2.5 py-2 text-sm text-muted-foreground'>{t('more.empty')}</p>
       )}
 
       <div className='my-1 border-t border-border' />
@@ -829,7 +858,7 @@ const SidebarMoreMenu = ({
         data-track-name='Sidebar_Customize_Toolbar'
         className='block w-full rounded-md px-2.5 py-2 text-left text-sm font-medium text-[color:var(--mention-color)] transition-colors hover:bg-accent'
       >
-        Customize toolbar
+        {t('more.customizeToolbar')}
       </button>
     </div>
   );
@@ -842,9 +871,12 @@ const SidebarSupportMenu = ({
   onReportIssue: () => void;
   onViewMyTickets: () => void;
 }): ReactElement => {
+  const { t } = useTranslation('sidebar');
   return (
     <div className='flex flex-col'>
-      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>Support</p>
+      <p className='px-2.5 pt-1 pb-1.5 text-sm font-semibold text-popover-foreground'>
+        {t('support.heading')}
+      </p>
       <ul className='flex flex-col'>
         <li>
           <button
@@ -858,7 +890,7 @@ const SidebarSupportMenu = ({
             <span className='flex size-5 shrink-0 items-center justify-center'>
               <AlertCircle size={16} />
             </span>
-            <span className='flex-1 truncate text-left'>Report issue</span>
+            <span className='flex-1 truncate text-left'>{t('support.reportIssue')}</span>
           </button>
         </li>
         <li>
@@ -873,7 +905,7 @@ const SidebarSupportMenu = ({
             <span className='flex size-5 shrink-0 items-center justify-center'>
               <TicketToken size={16} />
             </span>
-            <span className='flex-1 truncate text-left'>View my tickets</span>
+            <span className='flex-1 truncate text-left'>{t('support.viewMyTickets')}</span>
           </button>
         </li>
       </ul>
@@ -893,6 +925,7 @@ const MobileNavbar = ({
   filteredNavigationItems: {
     path: string;
     label: string;
+    translationKey: string;
     icon: React.ElementType;
   }[];
   activeRoute: string;
@@ -902,6 +935,7 @@ const MobileNavbar = ({
   unreadActivityCount: number;
   recapUnreadCount: number;
 }): ReactElement => {
+  const { t } = useTranslation('sidebar');
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
@@ -958,12 +992,8 @@ const MobileNavbar = ({
   // Early return AFTER all hooks have been called
   if (isOnChat) return <></>;
 
-  const primaryItems = mobileNavItems.filter(item =>
-    ['Home', 'DMs', 'Calls', 'Activity'].includes(item.label),
-  );
-  const menuItems = mobileNavItems.filter(
-    item => !['Home', 'DMs', 'Calls', 'Activity'].includes(item.label),
-  );
+  const primaryItems = mobileNavItems.filter(item => MOBILE_PRIMARY_PATHS.has(item.path));
+  const menuItems = mobileNavItems.filter(item => !MOBILE_PRIMARY_PATHS.has(item.path));
   const isMoreActive = isMenuOpen || menuItems.some(item => activeRoute === item.path);
 
   return (
@@ -979,6 +1009,7 @@ const MobileNavbar = ({
               const Icon = item.icon;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
               const showActivityBadge = item.path === '/chat/activity' && unreadActivityCount > 0;
+              const label = t(item.translationKey, item.label);
 
               return (
                 <Link
@@ -1012,7 +1043,7 @@ const MobileNavbar = ({
                       isActive ? 'text-foreground' : 'text-muted-foreground'
                     }`}
                   >
-                    {item.label}
+                    {label}
                   </span>
                 </Link>
               );
@@ -1029,7 +1060,7 @@ const MobileNavbar = ({
               }}
               role='button'
               tabIndex={0}
-              aria-label='More options'
+              aria-label={t('more.moreOptions')}
               data-track-category='Mobile_Sidebar'
               data-track-name='Toggle_Mobile_Menu'
               data-track-metadata={JSON.stringify({ isOpen: !isMenuOpen })}
@@ -1046,7 +1077,7 @@ const MobileNavbar = ({
                   isMoreActive ? 'text-foreground' : 'text-muted-foreground'
                 }`}
               >
-                More
+                {t('more.heading')}
               </span>
 
               {isMenuOpen && (
@@ -1059,6 +1090,7 @@ const MobileNavbar = ({
                     const isActive = activeRoute === item.path;
                     const isRecorder = item.path === '/recorder';
                     const isButtonItem = isRecorder || item.path === '/error-report';
+                    const label = t(item.translationKey, item.label);
 
                     // For Record, don't use Link - just handle click
                     if (isButtonItem) {
@@ -1084,7 +1116,7 @@ const MobileNavbar = ({
                           }}
                           role='button'
                           tabIndex={0}
-                          aria-label={item.label}
+                          aria-label={label}
                           data-track-category='Mobile_Sidebar'
                           data-track-name='Mobile_Menu_Item'
                           data-track-metadata={JSON.stringify({
@@ -1102,7 +1134,7 @@ const MobileNavbar = ({
                               isActive ? 'text-foreground' : 'text-muted-foreground'
                             }`}
                           >
-                            {item.label}
+                            {label}
                           </span>
                         </div>
                       );
@@ -1142,7 +1174,7 @@ const MobileNavbar = ({
                             isActive ? 'text-foreground' : 'text-muted-foreground'
                           }`}
                         >
-                          {item.label}
+                          {label}
                         </span>
                       </Link>
                     );

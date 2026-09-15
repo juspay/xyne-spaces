@@ -9838,6 +9838,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,
@@ -9872,7 +9873,46 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder,
+            enterSendsMessage: true,
+            allowThreadBroadcastMentions: false,
+            globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            globalMobileNotificationLevel: NotificationLevel.MENTIONS_ONLY,
+            threadReplyNotificationsEnabled: true,
+            channelWideMentionsEnabled: true,
+            notificationKeywords: '[]',
+            showThreadTags: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    // App UI locale — distinct from any message-translation target language preference.
+    setDisplayLanguage: defineMutator(
+      z.object({
+        id: z.string(),
+        displayLanguage: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, displayLanguage, timestamp } }) => {
+        const existing = await tx.run(
+          zql.user_preferences.where('userId', ctx.userID).one(),
+        );
+        if (existing) {
+          await tx.mutate.user_preferences.update({
+            id: existing.id,
+            displayLanguage,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.user_preferences.insert({
+            workspaceId: ctx.workspaceId,
+            id,
+            userId: ctx.userID,
+            displayLanguage,
+            channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,
             globalDesktopNotificationLevel: NotificationLevel.MENTIONS_ONLY,
@@ -9908,6 +9948,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage,
             allowThreadBroadcastMentions: false,
@@ -9944,6 +9985,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,
@@ -9980,6 +10022,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions,
@@ -10033,6 +10076,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,
@@ -10070,6 +10114,7 @@ export const mutators = defineMutators({
             workspaceId: ctx.workspaceId,
             id,
             userId: ctx.userID,
+            displayLanguage: 'en',
             channelSortOrder: ChannelSortOrder.RECENCY,
             enterSendsMessage: true,
             allowThreadBroadcastMentions: false,

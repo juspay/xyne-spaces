@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, X, Tag, Check, Pencil, Trash2 } from 'lucide-react';
 import { Popover } from '../ui/Popover/Popover';
 import { Button } from '../ui/Button';
@@ -290,6 +291,7 @@ const VariableEditor = ({
   onCancel,
   onSave,
 }: VariableEditorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [name, setName] = useState(initial?.name ?? '');
   const [label, setLabel] = useState(initial?.label ?? '');
   const [optionsText, setOptionsText] = useState(initial?.options.join(', ') ?? '');
@@ -341,7 +343,7 @@ const VariableEditor = ({
           id='var-name'
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder='e.g. status'
+          placeholder={t('dashboard.variables.statusKeyExample')}
           disabled={!!initial}
         />
       </div>
@@ -356,7 +358,7 @@ const VariableEditor = ({
           id='var-label'
           value={label}
           onChange={e => setLabel(e.target.value)}
-          placeholder='e.g. Status'
+          placeholder={t('dashboard.variables.statusLabelExample')}
         />
       </div>
       <div className='space-y-1'>
@@ -370,7 +372,7 @@ const VariableEditor = ({
           id='var-options'
           value={optionsText}
           onChange={e => setOptionsText(e.target.value)}
-          placeholder='open, closed, pending'
+          placeholder={t('dashboard.variables.openClosedPendingExample')}
         />
       </div>
       <label className='flex items-center gap-2 text-sm text-foreground'>

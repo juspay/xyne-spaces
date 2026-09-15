@@ -1,5 +1,6 @@
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
+import './locales';
 import './global.css';
 import '@xyne/workflow-ui/styles.css';
 import './styles/workflow-ui-theme.css';

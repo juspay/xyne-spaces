@@ -2,6 +2,7 @@ import { QueryVisualizationType } from '@xyne/shared';
 import { X } from 'lucide-react';
 import type { Dispatch, ReactElement, SetStateAction } from 'react';
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 import type { DataSourceColumn } from '../../../services/DynamicDashboard/dataSourceSchemaService';
 import Input from '../../ui/Input';
@@ -117,6 +118,7 @@ export const VisualBuilder = ({
   wantsSelect,
   wantsTimeBucket,
 }: VisualBuilderProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const removeJoin = useCallback(
     (joinId: string, joinModel: string, joinAlias?: string) => {
       const prefix = (joinAlias ?? joinModel) + '.';
@@ -138,7 +140,7 @@ export const VisualBuilder = ({
             onChange={e => setTitle(e.target.value)}
             data-track-category='COMPONENT_EDITOR'
             data-track-name='Title_Input'
-            placeholder='e.g: Revenue by Status'
+            placeholder={t('dashboard.visualBuilder.revenueExample')}
           />
         </Field>
 
@@ -150,7 +152,7 @@ export const VisualBuilder = ({
             options={dataSources
               .filter(d => d.ingestionStatus === 'complete')
               .map(d => ({ value: d.id, label: d.name }))}
-            placeholder='Choose your data source'
+            placeholder={t('dashboard.visualBuilder.chooseDataSource')}
           />
         </Field>
 
@@ -161,7 +163,7 @@ export const VisualBuilder = ({
               value=''
               onChange={() => undefined}
               options={[]}
-              placeholder='Choose your data source'
+              placeholder={t('dashboard.visualBuilder.chooseDataSource')}
               disabled
             />
           ) : schemaLoading ? (
@@ -175,7 +177,7 @@ export const VisualBuilder = ({
                 value: t.tableName,
                 label: `${t.schemaName}.${t.tableName}`,
               }))}
-              placeholder='Select a table…'
+              placeholder={t('dashboard.visualBuilder.selectTable')}
             />
           )}
         </Field>
@@ -365,7 +367,7 @@ export const VisualBuilder = ({
                         value: c.value,
                         label: `${c.value} · ${c.dataTypeCanonical}`,
                       }))}
-                    placeholder='Column…'
+                    placeholder={t('dashboard.visualBuilder.column')}
                     className='flex-1'
                   />
                   {wantsTimeBucket &&
@@ -379,7 +381,7 @@ export const VisualBuilder = ({
                           patchById(setGroupBy, g.id, x => ({ ...x, bucket: v as TimeBucket }))
                         }
                         options={TIME_BUCKETS.map(b => ({ value: b, label: b }))}
-                        placeholder='bucket'
+                        placeholder={t('dashboard.visualBuilder.bucket')}
                         className='w-24'
                       />
                     )}
@@ -509,7 +511,7 @@ export const VisualBuilder = ({
                       value: c.value,
                       label: `${c.value} · ${c.dataTypeCanonical}`,
                     }))}
-                    placeholder='Column…'
+                    placeholder={t('dashboard.visualBuilder.column')}
                     className='flex-1 min-w-0'
                   />
                   <Select
@@ -527,7 +529,11 @@ export const VisualBuilder = ({
                       }
                       data-track-category='COMPONENT_EDITOR'
                       data-track-name='Filter_Value_Input'
-                      placeholder={f.op === 'in' || f.op === 'notIn' ? 'a, b, c' : 'value'}
+                      placeholder={
+                        f.op === 'in' || f.op === 'notIn'
+                          ? t('dashboard.visualBuilder.listExample')
+                          : t('dashboard.visualBuilder.value')
+                      }
                       className='w-28 text-xs'
                     />
                   )}
@@ -625,7 +631,7 @@ export const VisualBuilder = ({
               }}
               data-track-category='COMPONENT_EDITOR'
               data-track-name='Take_Limit_Input'
-              placeholder='no limit'
+              placeholder={t('dashboard.visualBuilder.noLimit')}
               min={1}
               max={10000}
               className='w-32 text-sm'
@@ -652,7 +658,7 @@ export const VisualBuilder = ({
                       { value: '', label: '(none — ignore dashboard time range)' },
                       ...temporalCols.map(c => ({ value: c.value, label: c.value })),
                     ]}
-                    placeholder='(none)'
+                    placeholder={t('dashboard.visualBuilder.none')}
                   />
                   <p className='text-[10px] text-muted-foreground'>
                     When set, the dashboard&apos;s time-range picker filters this tile on this

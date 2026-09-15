@@ -1,4 +1,5 @@
 import { useState, type ComponentType, type SVGProps, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   BuildingApartmentTwo,
@@ -55,7 +56,7 @@ type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
 export interface AINavItem {
   key: string;
-  label: string;
+  labelKey: string;
   icon: NavIcon;
   to: string;
   /** Prefix for active matching when `to` points at one sub-route of a section. */
@@ -69,22 +70,53 @@ export interface AINavItem {
 }
 
 export const NAV_ITEMS: AINavItem[] = [
-  { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
-  { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
+  {
+    key: 'knowledge',
+    labelKey: 'aiScreen.sidebar.navKnowledge',
+    icon: Notebook as NavIcon,
+    to: '/ai/knowledge',
+  },
+  {
+    key: 'agent-hub',
+    labelKey: 'aiScreen.sidebar.navAgentHub',
+    icon: LayoutGridStackDown as NavIcon,
+    to: '/ai/library',
+  },
+  {
+    key: 'digital-twin',
+    labelKey: 'aiScreen.sidebar.navDigitalTwin',
+    icon: UserTwo as NavIcon,
+    to: '/ai/digital-twin',
+  },
   {
     key: 'organization',
-    label: 'Organization',
+    labelKey: 'aiScreen.sidebar.navOrganization',
     icon: BuildingApartmentTwo as NavIcon,
     to: '/ai/organization',
     orgManagerOnly: true,
   },
-  { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
-  { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },
-  { key: 'admin', label: 'Admin', icon: UserShield as NavIcon, to: '/ai/admin', adminOnly: true },
+  {
+    key: 'metrics',
+    labelKey: 'aiScreen.sidebar.navMetrics',
+    icon: Piechart01 as NavIcon,
+    to: '/ai/metrics',
+  },
+  {
+    key: 'settings',
+    labelKey: 'aiScreen.sidebar.navSettings',
+    icon: Settings01 as NavIcon,
+    to: '/ai/settings',
+  },
+  {
+    key: 'admin',
+    labelKey: 'aiScreen.sidebar.navAdmin',
+    icon: UserShield as NavIcon,
+    to: '/ai/admin',
+    adminOnly: true,
+  },
   {
     key: 'daily-brief',
-    label: 'Morning Brief',
+    labelKey: 'aiScreen.sidebar.navMorningBrief',
     icon: File02Ai as NavIcon,
     to: '/ai/daily-brief/today',
     matchPath: '/ai/daily-brief',
@@ -114,11 +146,16 @@ interface AISidebarProps {
 function SidebarNavItem({
   icon: Icon,
   label,
+  trackKey,
   active = false,
   onClick,
 }: {
   icon: NavIcon;
   label: string;
+  /** Stable, untranslated identifier for analytics — kept separate from the
+   *  (translated) display label so switching the UI locale never changes the
+   *  tracking payload. */
+  trackKey: string;
   active?: boolean;
   onClick?: () => void;
 }): ReactElement {
@@ -129,7 +166,7 @@ function SidebarNavItem({
       className={cn(NAV_ITEM_CLASS, active ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS)}
       data-track-category='XyneAI'
       data-track-name='SIDEBAR_NAV'
-      data-track-metadata={JSON.stringify({ label })}
+      data-track-metadata={JSON.stringify({ label: trackKey })}
     >
       <span className='flex size-4 shrink-0 items-center justify-center'>
         <Icon className='size-4' aria-hidden />
@@ -156,6 +193,7 @@ function SessionHistory({
   onSelect,
   onDelete,
 }: SessionHistoryProps): ReactElement {
+  const { t } = useTranslation('common');
   // Rename + star intentionally omitted: claw-auth (the v2 backing store) has
   // no title override or starred field, so those actions can't be implemented
   // here without a schema change. Delete is the only v2 mutation backed by an
@@ -189,9 +227,9 @@ function SessionHistory({
         <div className='mx-auto mb-3 flex size-10 items-center justify-center rounded-full bg-sidebar-accent'>
           <ChatPlus className='size-4 text-sidebar-foreground' aria-hidden />
         </div>
-        <p className='text-sm text-sidebar-accent-foreground'>No chats yet</p>
+        <p className='text-sm text-sidebar-accent-foreground'>{t('aiScreen.sidebar.noChatsYet')}</p>
         <p className='mt-1 text-xs text-sidebar-foreground'>
-          Start a new chat above to see it here.
+          {t('aiScreen.sidebar.startNewChatHint')}
         </p>
       </div>
     );
@@ -237,7 +275,7 @@ function SessionHistory({
                         'shrink-0 items-center justify-center rounded-md p-1 hover:bg-sidebar-accent',
                         openDropdownId === session.sessionId ? 'flex' : 'hidden group-hover:flex',
                       )}
-                      aria-label='Chat options'
+                      aria-label={t('aiScreen.sidebar.chatOptionsAriaLabel')}
                       data-track-category='XyneAI'
                       data-track-name='OPEN_SESSION_MENU'
                     >
@@ -258,7 +296,7 @@ function SessionHistory({
                     data-track-name='DELETE_SESSION'
                   >
                     <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
-                    <span>Delete</span>
+                    <span>{t('aiScreen.sidebar.deleteButton')}</span>
                   </button>
                 </Popover>
               </div>
@@ -273,21 +311,23 @@ function SessionHistory({
           onOpenChange={open => {
             if (!open) closeDeleteDialog();
           }}
-          title='Delete chat?'
-          description={`Delete the chat "${pendingSession.title || 'Untitled'}"? This can't be undone.`}
+          title={t('aiScreen.sidebar.deleteChatTitle')}
+          description={t('aiScreen.sidebar.deleteChatDescription', {
+            title: pendingSession.title || t('aiScreen.sidebar.untitledLabel'),
+          })}
           className='max-w-[420px] p-0'
           testId='delete-session-dialog'
         >
           <div>
             <div className='flex items-start justify-between gap-3 px-5 py-4'>
               <h2 className='pr-2 text-base font-semibold leading-tight text-foreground'>
-                Delete chat?
+                {t('aiScreen.sidebar.deleteChatTitle')}
               </h2>
               <button
                 type='button'
                 onClick={closeDeleteDialog}
                 className='shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                aria-label='Close'
+                aria-label={t('aiScreen.sidebar.closeAriaLabel')}
                 data-track-category='XyneAI'
                 data-track-name='CLOSE_DELETE_SESSION_DIALOG'
               >
@@ -295,8 +335,9 @@ function SessionHistory({
               </button>
             </div>
             <p className='px-5 pb-5 text-sm leading-relaxed text-foreground'>
-              <span className='font-semibold'>{pendingSession.title || 'Untitled'}</span> will be
-              deleted for good. This can&apos;t be undone.
+              {t('aiScreen.sidebar.deleteChatBody', {
+                title: pendingSession.title || t('aiScreen.sidebar.untitledLabel'),
+              })}
             </p>
             <div className='flex justify-end gap-2 px-5 pb-4'>
               <Button
@@ -306,7 +347,7 @@ function SessionHistory({
                 data-track-category='XyneAI'
                 data-track-name='CANCEL_DELETE_SESSION'
               >
-                Cancel
+                {t('aiScreen.sidebar.cancelButton')}
               </Button>
               <Button
                 variant='destructive'
@@ -316,7 +357,7 @@ function SessionHistory({
                 data-track-category='XyneAI'
                 data-track-name='CONFIRM_DELETE_SESSION'
               >
-                Delete
+                {t('aiScreen.sidebar.deleteButton')}
               </Button>
             </div>
           </div>
@@ -335,6 +376,7 @@ export function AISidebar({
   onCreateChat,
   onSelectSession,
 }: AISidebarProps): ReactElement {
+  const { t } = useTranslation('common');
   const { isMobile } = usePlatform();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const { pathname } = useLocation();
@@ -392,11 +434,12 @@ export function AISidebar({
           <nav className='flex shrink-0 flex-col gap-1'>
             <SidebarNavItem
               icon={ChatPlus as NavIcon}
-              label='New Chat'
+              label={t('aiScreen.sidebar.newChatLabel')}
+              trackKey='New Chat'
               active={isNewChatActive}
               onClick={onCreateChat}
             />
-            {visibleNavItems.map(({ key, label, icon: Icon, to, trackName }) => {
+            {visibleNavItems.map(({ key, labelKey, icon: Icon, to, trackName }) => {
               const isActive = routedActiveItem?.key === key;
               return (
                 <Link
@@ -414,7 +457,7 @@ export function AISidebar({
                   <span className='flex size-4 shrink-0 items-center justify-center'>
                     <Icon className='size-4' aria-hidden />
                   </span>
-                  <span className='block min-w-0 flex-1 truncate text-left'>{label}</span>
+                  <span className='block min-w-0 flex-1 truncate text-left'>{t(labelKey)}</span>
                 </Link>
               );
             })}
@@ -430,7 +473,9 @@ export function AISidebar({
                 data-track-category='XyneAI'
                 data-track-name='TOGGLE_RECENTS'
               >
-                <span className='block truncate text-left'>Recents</span>
+                <span className='block truncate text-left'>
+                  {t('aiScreen.sidebar.recentsLabel')}
+                </span>
                 <ChevronBigDown
                   size={12}
                   className={cn(
@@ -440,11 +485,16 @@ export function AISidebar({
                   aria-hidden
                 />
               </button>
-              <Tooltip content='New chat' side='top' sideOffset={0} delayDuration={500}>
+              <Tooltip
+                content={t('aiScreen.sidebar.newChatTooltip')}
+                side='top'
+                sideOffset={0}
+                delayDuration={500}
+              >
                 <button
                   type='button'
                   onClick={onCreateChat}
-                  aria-label='New chat'
+                  aria-label={t('aiScreen.sidebar.newChatTooltip')}
                   className='group/child mr-0.5 rounded-md p-1 text-sidebar-foreground opacity-100 transition-opacity duration-300 ease-in-out hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100 md:opacity-0'
                   data-track-category='XyneAI'
                   data-track-name='NEW_CHAT_FROM_RECENTS'

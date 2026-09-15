@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   ChevronDown,
@@ -158,6 +159,7 @@ function ViewRow({
 }
 
 const ViewsSidebarSection = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const location = useLocation();
   const zero = useZero();
@@ -403,7 +405,7 @@ const ViewsSidebarSection = (): ReactElement => {
             onKeyDown={e => {
               if (e.key === 'Enter') void submitRename();
             }}
-            placeholder='View name'
+            placeholder={t('project.viewsSection.viewNamePlaceholder')}
             aria-label='View name'
             data-track-category='Projects'
             data-track-name='RenameViewInput'

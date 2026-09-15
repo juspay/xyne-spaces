@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ListDefault, SearchDefault } from '@xyne/icons';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/classNames';
@@ -10,6 +11,7 @@ import { scoreToneClass } from '../components/format';
 import type { RecallResult } from '@/services/claw/digitalTwinTypes';
 
 const DigitalTwinRecallTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<RecallResult[] | null>(null);
   const recall = useRecallDigitalTwin();
@@ -35,7 +37,7 @@ const DigitalTwinRecallTab = (): ReactElement => {
             onChange={e => setQuery(e.target.value)}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin recall query'
-            placeholder='Ask a question your Twin might answer…'
+            placeholder={t('aiScreen.digitalTwin.askQuestion')}
             rows={3}
             className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none'
           />

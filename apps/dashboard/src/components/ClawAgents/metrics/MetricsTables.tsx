@@ -1,4 +1,5 @@
 import { Fragment, ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   GlobalMetricsAgentRow,
@@ -19,26 +20,39 @@ export const AgentLeaderboard = ({
   rows: GlobalMetricsAgentRow[];
   onAgentClick: (slug: string) => void;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const showOrg = rows.some(row => row.orgName || row.orgId);
   return (
     <div className='overflow-x-auto'>
       <table className='w-full min-w-[680px]'>
         <thead>
           <tr className='text-left'>
-            <th className={th}>Agent</th>
-            <th className={cn(th, 'text-right')}>Runs</th>
-            <th className={cn(th, 'text-right')}>p50</th>
-            <th className={cn(th, 'text-right')}>p95</th>
-            <th className={cn(th, 'text-right')}>Avg LLM</th>
-            <th className={cn(th, 'text-right')}>Avg tool</th>
-            <th className={cn(th, 'text-right')}>Errors</th>
+            <th className={th}>{t('metricsTables.agentLeaderboard.agentHeader')}</th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.runsHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.p50Header')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.p95Header')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.avgLlmHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.avgToolHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.agentLeaderboard.errorsHeader')}
+            </th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
               <td colSpan={7} className='py-8 text-center text-sm text-muted-foreground'>
-                No runs in this window.
+                {t('metricsTables.agentLeaderboard.noRuns')}
               </td>
             </tr>
           )}
@@ -54,7 +68,7 @@ export const AgentLeaderboard = ({
                 <p className='font-medium'>{row.agentSlug}</p>
                 {showOrg && (
                   <p className='text-xs text-muted-foreground'>
-                    {row.orgName ?? row.orgId ?? 'Unknown org'}
+                    {row.orgName ?? row.orgId ?? t('metricsTables.agentLeaderboard.unknownOrg')}
                   </p>
                 )}
               </td>
@@ -86,6 +100,7 @@ export const ProviderLatencyTable = ({
 }: {
   rows: GlobalMetricsProviderRow[];
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const [sort, setSort] = useState<ProviderSort>('runs');
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const sorted = useMemo(
@@ -132,25 +147,43 @@ export const ProviderLatencyTable = ({
         <thead>
           <tr className='text-left'>
             <th className={th}>
-              <Header label='Provider · model' value='provider' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.providerModelHeader')}
+                value='provider'
+              />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='Runs' value='runs' />
+              <Header label={t('metricsTables.providerLatencyTable.runsHeader')} value='runs' />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='p50 LLM' value='p50LlmMs' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.p50LlmHeader')}
+                value='p50LlmMs'
+              />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='p95 LLM' value='p95LlmMs' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.p95LlmHeader')}
+                value='p95LlmMs'
+              />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='p50 TTFT' value='p50TtftMs' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.p50TtftHeader')}
+                value='p50TtftMs'
+              />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='TPS' value='avgTokensPerSec' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.tpsHeader')}
+                value='avgTokensPerSec'
+              />
             </th>
             <th className={cn(th, 'text-right')}>
-              <Header label='Error %' value='errorRate' />
+              <Header
+                label={t('metricsTables.providerLatencyTable.errorPctHeader')}
+                value='errorRate'
+              />
             </th>
           </tr>
         </thead>
@@ -158,7 +191,7 @@ export const ProviderLatencyTable = ({
           {sorted.length === 0 && (
             <tr>
               <td colSpan={7} className='py-8 text-center text-sm text-muted-foreground'>
-                No provider-tagged runs in this window.
+                {t('metricsTables.providerLatencyTable.noProviderRuns')}
               </td>
             </tr>
           )}
@@ -169,7 +202,9 @@ export const ProviderLatencyTable = ({
             >
               <td className={td}>
                 <p className='font-medium'>{row.provider}</p>
-                <p className='font-mono text-xs text-muted-foreground'>{row.model ?? 'unknown'}</p>
+                <p className='font-mono text-xs text-muted-foreground'>
+                  {row.model ?? t('metricsTables.providerLatencyTable.unknownModel')}
+                </p>
               </td>
               <td className={cn(td, 'text-right tabular-nums')}>{row.runs}</td>
               <td className={cn(td, 'text-right tabular-nums')}>{formatMs(row.p50LlmMs)}</td>
@@ -188,20 +223,33 @@ export const ProviderLatencyTable = ({
 };
 
 export const ToolLatencyTable = ({ rows }: { rows: ToolLatencyRow[] }): ReactElement => {
+  const { t } = useTranslation('common');
   const total = rows.reduce((sum, row) => sum + row.totalMs, 0) || 1;
   return (
     <div className='overflow-x-auto'>
       <table className='w-full min-w-[760px]'>
         <thead>
           <tr className='text-left'>
-            <th className={th}>Tool</th>
-            <th className={cn(th, 'text-right')}>Calls</th>
-            <th className={cn(th, 'text-right')}>Avg</th>
-            <th className={cn(th, 'text-right')}>p50</th>
-            <th className={cn(th, 'text-right')}>p95</th>
-            <th className={cn(th, 'text-right')}>Cumulative</th>
-            <th className={th}>Share</th>
-            <th className={cn(th, 'text-right')}>Errors</th>
+            <th className={th}>{t('metricsTables.toolLatencyTable.toolHeader')}</th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.callsHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.avgHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.p50Header')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.p95Header')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.cumulativeHeader')}
+            </th>
+            <th className={th}>{t('metricsTables.toolLatencyTable.shareHeader')}</th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.toolLatencyTable.errorsHeader')}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -258,6 +306,7 @@ export const SlowSessionsTable = ({
   rows: SlowSession[];
   showAgent: boolean;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <div className='overflow-x-auto'>
@@ -265,12 +314,22 @@ export const SlowSessionsTable = ({
         <thead>
           <tr className='text-left'>
             <th className={cn(th, 'w-8')} />
-            <th className={th}>Session</th>
-            {showAgent && <th className={th}>Agent</th>}
-            <th className={cn(th, 'text-right')}>Total</th>
-            <th className={cn(th, 'text-right')}>LLM</th>
-            <th className={cn(th, 'text-right')}>Tool</th>
-            <th className={cn(th, 'text-right')}>When</th>
+            <th className={th}>{t('metricsTables.slowSessionsTable.sessionHeader')}</th>
+            {showAgent && (
+              <th className={th}>{t('metricsTables.slowSessionsTable.agentHeader')}</th>
+            )}
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.slowSessionsTable.totalHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.slowSessionsTable.llmHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.slowSessionsTable.toolHeader')}
+            </th>
+            <th className={cn(th, 'text-right')}>
+              {t('metricsTables.slowSessionsTable.whenHeader')}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -308,12 +367,16 @@ export const SlowSessionsTable = ({
                     <td colSpan={showAgent ? 6 : 5} className='py-3 pr-3'>
                       {row.task && (
                         <p className='mb-3 text-xs text-muted-foreground'>
-                          <span className='font-medium text-foreground'>Task: </span>
+                          <span className='font-medium text-foreground'>
+                            {t('metricsTables.slowSessionsTable.taskLabel')}
+                          </span>
                           {row.task}
                         </p>
                       )}
                       {row.topTools.length === 0 ? (
-                        <p className='text-xs text-muted-foreground'>No tool calls recorded.</p>
+                        <p className='text-xs text-muted-foreground'>
+                          {t('metricsTables.slowSessionsTable.noToolCalls')}
+                        </p>
                       ) : (
                         <div className='grid gap-1'>
                           {row.topTools.map(tool => (
@@ -324,8 +387,12 @@ export const SlowSessionsTable = ({
                               <span className='font-mono'>{tool.tool}</span>
                               <span>{formatMs(tool.ms)}</span>
                               <span>
-                                {tool.calls} call{tool.calls === 1 ? '' : 's'}
-                                {tool.isError ? ' · error' : ''}
+                                {t('metricsTables.slowSessionsTable.callCount', {
+                                  count: tool.calls,
+                                })}
+                                {tool.isError
+                                  ? t('metricsTables.slowSessionsTable.errorSuffix')
+                                  : ''}
                               </span>
                             </div>
                           ))}

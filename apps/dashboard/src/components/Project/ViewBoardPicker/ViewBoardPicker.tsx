@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight, LayerTwo as Layers, SearchDefault as Search } from '@xyne/icons';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -108,6 +109,7 @@ export function ViewBoardPicker({
   onChange,
   className,
 }: ViewBoardPickerProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(new Set());
@@ -190,7 +192,7 @@ export function ViewBoardPicker({
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder='Search projects...'
+            placeholder={t('chat.addChannelForm.searchProjects')}
             className='flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
             data-track-category='Projects'
             data-track-name='SearchBoardPicker'

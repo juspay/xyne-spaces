@@ -924,6 +924,7 @@ model UserPreference {
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
+  displayLanguage          String   @default("en") // App UI locale (ISO 639-1) — distinct from any message-translation target language
   channelSortOrder         String           @default("RECENCY") // Sidebar channel sort
   channelFilterMode        String?          // Channels group filter (null = app default)
   starredFilterMode        String?          // Starred group filter (null = app default)

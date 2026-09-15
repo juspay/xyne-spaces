@@ -11,6 +11,7 @@ import {
   WorkspaceRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
@@ -4180,6 +4181,7 @@ export const SupportTicketDetail = ({
   navTickets,
   showAdjacentNav = true,
 }: SupportTicketDetailProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const {
     workspaceId: routeWorkspaceId,
     channelId: channelIdParam,
@@ -5462,7 +5464,7 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
+                    placeholder={t('routes.supportScreen.replyToReviewPlaceholder')}
                     maxLength={350}
                     trackingCategory='social-media-composer'
                   />

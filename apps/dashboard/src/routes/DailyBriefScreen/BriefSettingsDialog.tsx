@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { Button } from '../../components/ui/Button';
@@ -27,6 +28,7 @@ export function BriefSettingsDialog({
   onRegenerate,
   busy = false,
 }: BriefSettingsDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [enabled, setEnabled] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [loading, setLoading] = useState(false);
@@ -131,7 +133,7 @@ export function BriefSettingsDialog({
               rows={7}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-instructions'
-              placeholder='e.g. Keep it under six lines. Lead with anything touching payments, and always name who I am waiting on.'
+              placeholder={t('routes.dailyBriefScreen.instructionsPlaceholder')}
               className={cn(
                 'w-full resize-none rounded-lg border bg-background px-3 py-2',
                 'text-sm text-foreground placeholder:text-muted-foreground',

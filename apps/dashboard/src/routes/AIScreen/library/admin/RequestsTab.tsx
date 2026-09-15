@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -158,6 +159,7 @@ export function RequestsTab({
   showOrgLabels: boolean;
   registration: AgentRegistration;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
@@ -410,8 +412,8 @@ export function RequestsTab({
       <AdminSearchField
         value={query}
         onChange={setQuery}
-        placeholder='Search requests'
-        ariaLabel='Search requests'
+        placeholder={t('aiScreen.library.admin.searchRequests')}
+        ariaLabel={t('aiScreen.library.admin.searchRequests')}
         trackName='Admin: search requests'
         className='w-full'
       />

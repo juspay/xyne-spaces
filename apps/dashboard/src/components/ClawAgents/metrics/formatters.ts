@@ -1,3 +1,5 @@
+import i18next from '@/locales';
+
 export const formatMs = (ms: number | null | undefined): string => {
   if (ms === null || ms === undefined) return '—';
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -19,7 +21,9 @@ export const formatSignedMs = (ms: number | null | undefined): MetricDelta => {
   if (ms === null || ms === undefined) return { label: '—', tone: 'flat' };
   if (Math.abs(ms) < 50) return { label: '≈0', tone: 'flat' };
   return {
-    label: `${ms > 0 ? '+' : ''}${formatMs(Math.abs(ms))} ${ms > 0 ? 'slower' : 'faster'}`,
+    label: `${ms > 0 ? '+' : ''}${formatMs(Math.abs(ms))} ${
+      ms > 0 ? i18next.t('metricsFormatters.slower') : i18next.t('metricsFormatters.faster')
+    }`,
     tone: ms > 0 ? 'bad' : 'good',
   };
 };

@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link2 } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -31,6 +32,7 @@ export const AddDriveLinkModal = ({
   collectionName,
   parentId,
 }: AddDriveLinkModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [url, setUrl] = useState('');
   const valid = isDriveUrl(url);
 
@@ -83,7 +85,7 @@ export const AddDriveLinkModal = ({
               type='text'
               value={url}
               onChange={event => setUrl(event.target.value)}
-              placeholder='https://drive.google.com/file/d/…'
+              placeholder={t('knowledgeBaseV2.driveLink.placeholder')}
               data-track-category='knowledge-base'
               data-track-name='drive-link-input'
             />

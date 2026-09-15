@@ -6,6 +6,7 @@
  * supplied; the pane exists because that does not fit in a row.
  */
 import { JSX, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, RotateCcw, Trash2, X } from 'lucide-react';
 import { normalizeThreadTypeName, type ThreadTypeEntry } from '@xyne/shared';
 import type { VocabularyEntry } from '../../../api/threadTypeVocabularyApi';
@@ -81,6 +82,7 @@ export const TagDecisionPane = ({
   onRemove,
   isDeciding,
 }: TagDecisionPaneProps): JSX.Element => {
+  const { t } = useTranslation('placeholders');
   const status = entry.status ?? 'APPROVED';
   const isProposal = status === 'UNDER_REVIEW';
   const isRejected = status === 'REJECTED';
@@ -232,7 +234,7 @@ export const TagDecisionPane = ({
                 value={label}
                 maxLength={60}
                 onChange={event => setLabel(event.target.value)}
-                placeholder='Feature request'
+                placeholder={t('tags.decisionPane.labelPlaceholder')}
               />
             </Field>
 
@@ -242,7 +244,7 @@ export const TagDecisionPane = ({
                 value={summary}
                 maxLength={160}
                 onChange={event => setSummary(event.target.value)}
-                placeholder='Something is broken. Done when it is fixed and verified.'
+                placeholder={t('tags.decisionPane.summaryPlaceholder')}
               />
             </Field>
 
@@ -289,7 +291,7 @@ export const TagDecisionPane = ({
                 data-track-category='TagReview'
                 data-track-name='EditDefinition'
                 rows={5}
-                placeholder='Describe when this type applies, as if instructing someone who has never seen the thread.'
+                placeholder={t('tags.decisionPane.descriptionPlaceholder')}
                 className={cn(
                   'w-full resize-y rounded-[10px] border border-border bg-background px-3 py-2',
                   'text-sm text-foreground outline-none placeholder:text-muted-foreground',

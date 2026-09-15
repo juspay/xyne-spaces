@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -23,6 +24,7 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
   onSave,
   onCancel,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [name, setName] = useState(initial?.name ?? '');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -102,7 +104,7 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
             type='text'
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder='Signature Name'
+            placeholder={t('desk.settings.signatureName')}
             autoComplete='off'
             data-1p-ignore
             data-lpignore='true'

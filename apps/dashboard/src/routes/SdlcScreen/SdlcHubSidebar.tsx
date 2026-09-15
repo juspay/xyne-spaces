@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   ChevronRight,
@@ -54,6 +55,7 @@ export function SdlcHubPicker(props: {
   selectedHubId: string;
   onSelect: (hubId: string) => void;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const options = useMemo<SelectorOption[]>(
     () =>
       props.hubs.map(hub => ({
@@ -79,8 +81,8 @@ export function SdlcHubPicker(props: {
       onSelect={value => {
         if (value) props.onSelect(value);
       }}
-      placeholder='Select hub'
-      searchPlaceholder='Search hubs and repositories...'
+      placeholder={t('routes.sdlcHubSidebar.selectHubPlaceholder')}
+      searchPlaceholder={t('routes.sdlcHubSidebar.searchHubsAndRepositoriesPlaceholder')}
       width='100%'
       dropdownMinWidth='22rem'
     />

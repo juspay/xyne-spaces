@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ConfigChannelField } from '../SchemaForm/ConfigChannelField';
 import { EntityVariableField, MultiEntityVariableField } from '../SchemaForm/EntityVariableField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
@@ -35,6 +36,7 @@ export function SendMessageStepForm({
   stepId,
   readOnly = false,
 }: SendMessageStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const cfg = value as SendMessageConfigShape;
 
   const issuesAt = useMemo(() => {
@@ -78,7 +80,7 @@ export function SendMessageStepForm({
           value={Array.isArray(cfg.userIds) ? cfg.userIds : []}
           onChange={next => setField('userIds', next)}
           variableSources={variableSources}
-          placeholder='Pick users to DM'
+          placeholder={t('automation.sendMessage.pickUsersToDm')}
         />
       </FieldRow>
 
@@ -92,7 +94,7 @@ export function SendMessageStepForm({
           onChange={next => setField('senderId', next)}
           variableSources={variableSources}
           entityKind={EntityKind.SENDER}
-          placeholder='Pick a bot (defaults to the automations bot)'
+          placeholder={t('automation.pickBot')}
         />
       </FieldRow>
 
@@ -106,7 +108,7 @@ export function SendMessageStepForm({
           onChange={next => setField('content', next)}
           variableSources={variableSources}
           channelId={cfg.channelId ?? null}
-          placeholder='Type your message… use @ to mention someone'
+          placeholder={t('automation.sendMessage.typeMessageMention')}
         />
       </FieldRow>
 

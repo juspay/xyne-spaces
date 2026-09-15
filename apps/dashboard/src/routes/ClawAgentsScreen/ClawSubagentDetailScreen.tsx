@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, Lock, Plus, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -120,35 +121,40 @@ const PersonaTab = ({
   draft: Draft;
   setDraft: React.Dispatch<React.SetStateAction<Draft>>;
   canEdit: boolean;
-}): ReactElement => (
-  <div className='flex flex-col gap-5'>
-    <label htmlFor='subagent-description' className='flex flex-col gap-1.5'>
-      <FieldLabel>Description</FieldLabel>
-      <Input
-        id='subagent-description'
-        value={draft.description}
-        onChange={event => setDraft(current => ({ ...current, description: event.target.value }))}
-        readOnly={!canEdit}
-        placeholder='What this subagent does and when it should be called'
-      />
-    </label>
-    <label htmlFor='subagent-system-prompt' className='flex flex-col gap-1.5'>
-      <div className='flex items-center justify-between'>
-        <FieldLabel>System prompt</FieldLabel>
-        <span className='text-xs text-muted-foreground'>
-          {draft.systemPrompt.length} characters
-        </span>
-      </div>
-      <Textarea
-        id='subagent-system-prompt'
-        value={draft.systemPrompt}
-        onChange={event => setDraft(current => ({ ...current, systemPrompt: event.target.value }))}
-        readOnly={!canEdit}
-        className='min-h-80 font-mono text-xs leading-relaxed'
-      />
-    </label>
-  </div>
-);
+}): ReactElement => {
+  const { t } = useTranslation('placeholders');
+  return (
+    <div className='flex flex-col gap-5'>
+      <label htmlFor='subagent-description' className='flex flex-col gap-1.5'>
+        <FieldLabel>Description</FieldLabel>
+        <Input
+          id='subagent-description'
+          value={draft.description}
+          onChange={event => setDraft(current => ({ ...current, description: event.target.value }))}
+          readOnly={!canEdit}
+          placeholder={t('clawAgents.subagent.whatSubagentDoesDetail')}
+        />
+      </label>
+      <label htmlFor='subagent-system-prompt' className='flex flex-col gap-1.5'>
+        <div className='flex items-center justify-between'>
+          <FieldLabel>System prompt</FieldLabel>
+          <span className='text-xs text-muted-foreground'>
+            {draft.systemPrompt.length} characters
+          </span>
+        </div>
+        <Textarea
+          id='subagent-system-prompt'
+          value={draft.systemPrompt}
+          onChange={event =>
+            setDraft(current => ({ ...current, systemPrompt: event.target.value }))
+          }
+          readOnly={!canEdit}
+          className='min-h-80 font-mono text-xs leading-relaxed'
+        />
+      </label>
+    </div>
+  );
+};
 
 const KnowledgeTab = ({
   draft,
@@ -163,6 +169,7 @@ const KnowledgeTab = ({
   skills: Skill[];
   skillsLoading: boolean;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const toggleSkill = (id: string): void => {
     if (!canEdit) return;
     setDraft(current => ({
@@ -243,7 +250,7 @@ const KnowledgeTab = ({
                   }))
                 }
                 readOnly={!canEdit}
-                placeholder='Working…'
+                placeholder={t('clawAgents.subagent.working')}
               />
               {canEdit && (
                 <Button
@@ -362,6 +369,7 @@ const ContributorsTab = ({
   subagent: SubagentDef;
   canShare: boolean;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { add, remove } = useClawSubagentShares(subagent.name);
   const [input, setInput] = useState('');
   const shares: SubagentShareEntry[] = subagent.shares ?? [];
@@ -406,7 +414,7 @@ const ContributorsTab = ({
           <Input
             value={input}
             onChange={event => setInput(event.target.value)}
-            placeholder='Email or user ID'
+            placeholder={t('clawAgents.subagent.emailOrUserId')}
             onKeyDown={event => {
               if (event.key === 'Enter') {
                 event.preventDefault();

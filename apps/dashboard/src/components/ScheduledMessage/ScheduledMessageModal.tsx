@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm, Controller } from 'react-hook-form';
 import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
@@ -71,6 +72,7 @@ const ScheduledMessageModal = ({
   scheduledMessage,
   onSaved,
 }: ScheduledMessageModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const channels = useBrowsableChannels();
   const isEditMode = !!scheduledMessage;
   const inputBoxRef = useRef<InputBoxHandle>(null);
@@ -357,7 +359,7 @@ const ScheduledMessageModal = ({
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger id='channel-select' className='w-full'>
-                      <SelectValue placeholder='Select a channel' />
+                      <SelectValue placeholder={t('scheduledMessage.modal.selectChannel')} />
                     </SelectTrigger>
                     <SelectContent>
                       {adminChannels?.map(ch => (
@@ -395,7 +397,7 @@ const ScheduledMessageModal = ({
                 <Input
                   id='title-input'
                   {...field}
-                  placeholder='e.g., Daily Standup Message'
+                  placeholder={t('scheduledMessage.modal.titlePlaceholder')}
                   disabled={!canEdit && isEditMode}
                 />
               )}
@@ -431,7 +433,7 @@ const ScheduledMessageModal = ({
                 <InputBox
                   ref={inputBoxRef}
                   id='message-inputbox'
-                  placeholder='The message that will be posted to the channel'
+                  placeholder={t('scheduledMessage.modal.messagePlaceholder')}
                   onSendMessage={() => {
                     void handleFormSubmit(onSubmit)();
                   }}

@@ -1,4 +1,5 @@
 import type { Dispatch, ReactElement, SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileText, Settings2, UserCheck, X } from 'lucide-react';
 import { FormFieldType, type FlowPlanNode, type FlowStepGate } from '@xyne/shared';
 import Textarea from '../../ui/Textarea';
@@ -85,6 +86,7 @@ export function FlowStepConfigPanel({
   canSavePanel,
   handleSavePanel,
 }: FlowStepConfigPanelProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   return (
     <aside className='w-[360px] flex-shrink-0 h-full border-l border-border bg-muted/40 flex flex-col overflow-y-auto'>
       <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/60'>
@@ -160,7 +162,7 @@ export function FlowStepConfigPanel({
             onChange={e =>
               setDraftConfirmationGate({ type: 'confirmation', prompt: e.target.value })
             }
-            placeholder='e.g. KYC documents verified against the registry'
+            placeholder={t('board.flow.kycExample')}
             rows={3}
             data-track-category='flow_plan_editor'
             data-track-name='input_confirmation_prompt'

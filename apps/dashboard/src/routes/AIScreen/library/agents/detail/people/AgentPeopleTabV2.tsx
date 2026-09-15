@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -47,6 +48,7 @@ export function AgentPeopleTabV2({
   agent: Agent;
   actions: AgentDetailActions;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -245,7 +247,7 @@ export function AgentPeopleTabV2({
                 ref={searchRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
-                placeholder='Filter members'
+                placeholder={t('aiScreen.library.agents.filterMembers')}
                 aria-label='Filter members'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: filter members'

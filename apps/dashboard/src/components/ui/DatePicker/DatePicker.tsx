@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Calendar, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import Button from '../Button';
@@ -155,7 +156,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   id,
   selectedDate,
   onSelect,
-  placeholder = 'Select date',
+  placeholder,
   minDate,
   maxDate,
   disabledDates,
@@ -164,6 +165,8 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   isInitialOpen = false,
   contentClassName,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.datePicker.selectDate');
   const [isOpen, setIsOpen] = useState(isInitialOpen);
   const [months, setMonths] = useState<Array<{ year: number; month: number }>>([]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -378,7 +381,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               selectedDate ? 'text-foreground' : 'text-muted-foreground',
             )}
           >
-            {selectedDate ? formatDate(selectedDate) : placeholder}
+            {selectedDate ? formatDate(selectedDate) : resolvedPlaceholder}
           </span>
           {showClearButton && selectedDate && (
             <button

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Panel, ResizableGroup, Separator, usePanelRef } from '../ui/Resizable/Resizable';
 import {
@@ -61,6 +62,7 @@ function useCitationFile(
   doc: Pick<CitationKbFileDoc, 'fileId' | 'title' | 'mimeType'>,
   fallbackMimeType: string,
 ): { file: File | null; loading: boolean; error: string | null } {
+  const { t } = useTranslation('common');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ function useCitationFile(
         if (!cancelled) setFile(f);
       })
       .catch(() => {
-        if (!cancelled) setError('Failed to load file.');
+        if (!cancelled) setError(t('citationDocsPanel.failedToLoadFile'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -87,6 +89,7 @@ function useCitationFile(
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.fileId, doc.title, doc.mimeType, fallbackMimeType]);
 
   return { file, loading, error };
@@ -154,6 +157,7 @@ function CitationPdfView({ doc }: { doc: CitationKbFileDoc }): ReactElement {
  *  the KB file viewer) or the raw source text. No chunk-highlight support —
  *  ReadmeViewer doesn't have a find-and-scroll path like pdf.js does. */
 function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement {
+  const { t } = useTranslation('common');
   const { file, loading, error } = useCitationFile(doc, 'text/markdown');
   const [mode, setMode] = useState<'raw' | 'preview'>('preview');
   const [rawText, setRawText] = useState<string | null>(null);
@@ -168,11 +172,12 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
         if (!cancelled) setRawText(text);
       })
       .catch(() => {
-        if (!cancelled) setRawText('Failed to read file.');
+        if (!cancelled) setRawText(t('citationDocsPanel.failedToReadFile'));
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
   return (
@@ -195,7 +200,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             data-track-category='AskAI'
             data-track-name='citation-doc-raw'
           >
-            Raw
+            {t('citationDocsPanel.rawTab')}
           </button>
           <button
             type='button'
@@ -210,7 +215,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             data-track-category='AskAI'
             data-track-name='citation-doc-preview'
           >
-            Preview
+            {t('citationDocsPanel.previewTab')}
           </button>
         </div>
       </div>
@@ -244,6 +249,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
  *  viewers already render "the preview"). No chunk-highlight: only pdf.js
  *  (via PdfViewer) actually consumes `highlightQuery`. */
 function CitationGenericView({ doc }: { doc: CitationKbFileDoc }): ReactElement {
+  const { t } = useTranslation('common');
   const fileType = detectFileType(doc.mimeType ?? '', doc.title);
   const { file, loading, error } = useCitationFile(doc, doc.mimeType ?? 'application/octet-stream');
   const ViewerComponent = fileType?.component;
@@ -274,7 +280,7 @@ function CitationGenericView({ doc }: { doc: CitationKbFileDoc }): ReactElement 
           </div>
         ) : (
           <div className='flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground'>
-            Preview not available for this file type
+            {t('citationDocsPanel.previewNotAvailable')}
           </div>
         )}
       </div>
@@ -306,6 +312,7 @@ function CitationThreadView({ doc }: { doc: CitationThreadDoc }): ReactElement {
  *  uses. `onNavigateToTicket` re-opens a linked ticket in a new panel tab so a
  *  ticket-to-ticket jump stays inside the /ai panel. */
 function CitationTicketView({ doc }: { doc: CitationTicketDoc }): ReactElement {
+  const { t } = useTranslation('common');
   const ctx = useCitationDocs();
   return (
     <div className='flex h-full w-full flex-col overflow-auto bg-background'>
@@ -316,7 +323,7 @@ function CitationTicketView({ doc }: { doc: CitationTicketDoc }): ReactElement {
           ctx?.openDoc({
             source: 'ticket',
             id: `ticket:${ticketId}`,
-            title: `Ticket ${ticketId}`,
+            title: t('citationDocsPanel.ticketTabTitle', { id: ticketId }),
             ticketId,
           })
         }
@@ -356,6 +363,7 @@ function CitationDocView({ doc }: { doc: CitationDoc }): ReactElement {
  * xyne-search's CitationPanel. Renders nothing when no doc is open.
  */
 export function CitationDocsPanel(): ReactElement | null {
+  const { t } = useTranslation('common');
   const ctx = useCitationDocs();
   const navigate = useNavigate();
   // Ref on the active tab so it auto-scrolls into view in the horizontally
@@ -391,8 +399,8 @@ export function CitationDocsPanel(): ReactElement | null {
         <button
           type='button'
           onClick={() => setCollapsed(false)}
-          aria-label='Expand documents panel'
-          title='Expand'
+          aria-label={t('citationDocsPanel.expandPanelLabel')}
+          title={t('citationDocsPanel.expandLabel')}
           className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           data-track-category='AskAI'
           data-track-name='citation-docs-expand'
@@ -413,7 +421,7 @@ export function CitationDocsPanel(): ReactElement | null {
             <button
               type='button'
               className='flex h-7 flex-shrink-0 items-center gap-0.5 rounded px-1.5 text-[12px] font-medium text-foreground hover:bg-secondary/60'
-              aria-label='List open documents'
+              aria-label={t('citationDocsPanel.listOpenDocumentsLabel')}
               data-track-category='AskAI'
               data-track-name='citation-docs-list-open'
             >
@@ -434,7 +442,7 @@ export function CitationDocsPanel(): ReactElement | null {
                 </span>
                 {doc.source === 'kb-file' && typeof doc.chunkIndex === 'number' && (
                   <span className='flex-shrink-0 text-xs text-muted-foreground'>
-                    ch {doc.chunkIndex}
+                    {t('citationDocsPanel.chunkLabel', { index: doc.chunkIndex })}
                   </span>
                 )}
               </DropdownMenuItem>
@@ -471,7 +479,7 @@ export function CitationDocsPanel(): ReactElement | null {
                 </button>
                 <button
                   type='button'
-                  aria-label={`Close ${doc.title}`}
+                  aria-label={t('citationDocsPanel.closeDocLabel', { title: doc.title })}
                   onClick={() => closeDoc(doc.id)}
                   className='grid h-4 w-4 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10'
                   data-track-category='AskAI'
@@ -489,8 +497,8 @@ export function CitationDocsPanel(): ReactElement | null {
             <button
               type='button'
               onClick={openActiveSource}
-              aria-label='Jump to Source'
-              title='Jump to Source'
+              aria-label={t('citationDocsPanel.jumpToSourceLabel')}
+              title={t('citationDocsPanel.jumpToSourceLabel')}
               className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='citation-docs-open-source'
@@ -501,8 +509,8 @@ export function CitationDocsPanel(): ReactElement | null {
           <button
             type='button'
             onClick={() => setCollapsed(true)}
-            aria-label='Collapse panel'
-            title='Collapse'
+            aria-label={t('citationDocsPanel.collapsePanelLabel')}
+            title={t('citationDocsPanel.collapseLabel')}
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='citation-docs-collapse'
@@ -512,8 +520,8 @@ export function CitationDocsPanel(): ReactElement | null {
           <button
             type='button'
             onClick={closeAll}
-            aria-label='Close all documents'
-            title='Close all'
+            aria-label={t('citationDocsPanel.closeAllDocumentsLabel')}
+            title={t('citationDocsPanel.closeAllLabel')}
             className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='citation-docs-close-all'

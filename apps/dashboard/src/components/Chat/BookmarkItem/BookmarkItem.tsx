@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useZero } from '../../../hooks/useZero';
@@ -72,6 +73,7 @@ export const BookmarkItem = ({
   nofocus = false,
   onMarkedDone,
 }: BookmarkItemProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const zero = useZero();
@@ -372,7 +374,7 @@ export const BookmarkItem = ({
               id={reminderDatePickerId}
               selectedDate={customReminderDate}
               onSelect={setCustomReminderDate}
-              placeholder='Select date'
+              placeholder={t('chat.bookmark.selectDate')}
               minDate={new Date(new Date().setHours(0, 0, 0, 0))}
               inputClassName='w-full !h-9'
               showClearButton={false}
@@ -388,7 +390,7 @@ export const BookmarkItem = ({
               onValueChange={value => setCustomReminderTime(value)}
             >
               <SelectTrigger id={reminderTimeSelectId} className='w-full'>
-                <SelectValue placeholder='Select time' />
+                <SelectValue placeholder={t('chat.bookmark.selectTime')} />
               </SelectTrigger>
               <SelectContent showScrollButtons={false}>
                 {REMINDER_TIME_OPTIONS.map(option => (

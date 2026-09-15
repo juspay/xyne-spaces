@@ -1,0 +1,70 @@
+{
+  "nav": {
+    "xyne-ai": "Xyne AI",
+    "chat": "Chat",
+    "dms": "Mensajes",
+    "activity": "Actividad",
+    "calls": "Llamadas",
+    "recordings": "Grabaciones",
+    "tickets": "Tickets",
+    "sdlc": "SDLC",
+    "support": "Soporte",
+    "my-canvas": "Mi Canvas",
+    "automations": "Automatizaciones",
+    "workflows": "Flujos de trabajo",
+    "scheduled-messages": "Mensajes programados",
+    "user-groups": "Grupos de usuarios",
+    "user-management": "Gestión de usuarios",
+    "roles": "Roles",
+    "workspace-management": "Gestión del espacio de trabajo",
+    "tag-review": "Revisión de etiquetas",
+    "organisations": "Organizaciones",
+    "analytics": "Analítica",
+    "forms": "Formularios",
+    "browser": "Navegador",
+    "apps": "Aplicaciones",
+    "user-guide": "Guía del usuario",
+    "insights": "Perspectivas",
+    "knowledge-base": "Base de conocimientos",
+    "context": "Contexto",
+    "dashboards": "Paneles",
+    "list-projects": "Lista de proyectos",
+    "release-manager": "Gestor de versiones",
+    "jira-migration": "Migración de Jira",
+    "confluence-migration": "Migración de Confluence",
+    "whatsapp-migration": "Migración de WhatsApp",
+    "slack-migration": "Migración de Slack",
+    "team-intelligence": "Inteligencia de equipo",
+    "claw-agents": "Agentes Claw",
+    "mobile": {
+      "home": "Inicio",
+      "canvas": "Canvas",
+      "record": "Grabar",
+      "bookmarks": "Marcadores",
+      "rca": "RCA",
+      "threads": "Hilos",
+      "recap": "Resumen",
+      "guide": "Guía"
+    }
+  },
+  "more": {
+    "ariaLabel": "Más",
+    "heading": "Más",
+    "empty": "Todos los elementos están en tu barra de herramientas.",
+    "customizeToolbar": "Personalizar barra de herramientas",
+    "moreOptions": "Más opciones"
+  },
+  "support": {
+    "ariaLabel": "Soporte",
+    "title": "Soporte",
+    "heading": "Soporte",
+    "reportIssue": "Reportar un problema",
+    "viewMyTickets": "Ver mis tickets"
+  },
+  "invite": {
+    "ariaLabel": "Invitar personas al espacio de trabajo",
+    "tooltip": "Invitar personas"
+  },
+  "dmsUnread": "Mensajes sin leer",
+  "windowLimitToast": "Puedes tener hasta {{limit}} ventanas adicionales abiertas. Cierra una para abrir otra."
+}

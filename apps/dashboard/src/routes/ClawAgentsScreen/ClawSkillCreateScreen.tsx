@@ -1,4 +1,5 @@
 import { ReactElement, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Check, FolderOpen, Upload } from 'lucide-react';
 import { cn } from '@/utils/classNames';
@@ -13,6 +14,7 @@ const codeField =
   'w-full resize-none overflow-auto rounded-xl border border-border bg-muted/30 p-4 font-mono text-xs leading-relaxed text-foreground transition-colors focus:border-ring focus:bg-background focus:outline-none focus:ring-1 focus:ring-ring';
 
 const ClawSkillCreateScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const createMutation = useCreateClawSkill();
 
@@ -85,7 +87,7 @@ const ClawSkillCreateScreen = (): ReactElement => {
                 id='claw-skill-name'
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder='e.g. PR Review Guidelines'
+                placeholder={t('clawAgents.skill.nameExample')}
                 autoFocus
                 data-track-category='Claw Agents'
                 data-track-name='Skill name input'
@@ -134,7 +136,7 @@ const ClawSkillCreateScreen = (): ReactElement => {
               id='claw-skill-description'
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder='What this skill does and when agents should use it'
+              placeholder={t('clawAgents.skill.whatCoversNoEllipsis')}
               data-track-category='Claw Agents'
               data-track-name='Skill description input'
               className='w-full rounded-lg border border-border bg-card px-3 py-2 text-[14px] text-foreground placeholder:text-muted-foreground transition focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30'
@@ -155,7 +157,7 @@ const ClawSkillCreateScreen = (): ReactElement => {
               id='claw-skill-content'
               value={content}
               onChange={e => setContent(e.target.value)}
-              placeholder='Markdown playbook the agent consults while working…'
+              placeholder={t('clawAgents.skill.playbook')}
               rows={14}
               data-track-category='Claw Agents'
               data-track-name='Skill content input'

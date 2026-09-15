@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Building2,
   Plus,
@@ -148,6 +149,7 @@ const OrgMembersSection = ({
   selfId,
   z,
 }: OrgMembersSectionProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [members] = useCachedQuery(queries.getOrgMembers({ orgId }), { enabled: true });
   logger.info(LogEvent.INFO, {
     type: 'migrated_console_log',
@@ -303,7 +305,7 @@ const OrgMembersSection = ({
             <Input
               ref={emailInputRef}
               type='email'
-              placeholder='Enter email address...'
+              placeholder={t('routes.organisationsScreen.memberEmailPlaceholder')}
               value={emailInput}
               onChange={e => setEmailInput(e.target.value)}
               onKeyDown={e => {
@@ -446,6 +448,7 @@ const OrgMembersSection = ({
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
 export const OrganisationsScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const z = useZero();
   const workspaceId = self?.workspaceId ?? '';
@@ -695,7 +698,9 @@ export const OrganisationsScreen = (): ReactElement => {
                         id='community-workspace-name'
                         value={communityWorkspaceName}
                         onChange={event => setCommunityWorkspaceName(event.target.value)}
-                        placeholder='Enter community workspace name...'
+                        placeholder={t(
+                          'routes.organisationsScreen.communityWorkspaceNamePlaceholder',
+                        )}
                         disabled={isCreatingCommunityWorkspace}
                       />
                     </div>
@@ -890,7 +895,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   ref={orgNameInputRef}
                   id='org-name'
                   type='text'
-                  placeholder='Enter organisation name...'
+                  placeholder={t('routes.organisationsScreen.orgNamePlaceholder')}
                   value={newOrgName}
                   onChange={e => setNewOrgName(e.target.value)}
                   disabled={isCreatingOrg}
@@ -905,7 +910,7 @@ export const OrganisationsScreen = (): ReactElement => {
                 <Input
                   id='workspace-name'
                   type='text'
-                  placeholder='Enter workspace name...'
+                  placeholder={t('routes.organisationsScreen.workspaceNamePlaceholder')}
                   value={newWorkspaceName}
                   onChange={e => setNewWorkspaceName(e.target.value)}
                   disabled={isCreatingOrg}
@@ -920,7 +925,7 @@ export const OrganisationsScreen = (): ReactElement => {
                 <Input
                   id='owner-email'
                   type='email'
-                  placeholder='owner@example.com'
+                  placeholder={t('routes.organisationsScreen.ownerEmailPlaceholder')}
                   value={newOwnerEmail}
                   onChange={e => setNewOwnerEmail(e.target.value)}
                   disabled={isCreatingOrg}

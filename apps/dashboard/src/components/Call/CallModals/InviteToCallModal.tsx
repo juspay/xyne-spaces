@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import { User } from '@xyne/shared';
@@ -20,6 +21,7 @@ export function InviteToCallModal({
   onClose,
   callId,
 }: InviteToCallModalProps): React.ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const zero = useZero();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -78,9 +80,9 @@ export function InviteToCallModal({
             excludeUserIds={[user?.id || '']}
             selectedUsers={selectedUsers}
             onUsersChange={setSelectedUsers}
-            placeholder='Search users to invite...'
-            label='Select Users'
-            hintText='Search by name or email to find users to invite'
+            placeholder={t('call.inviteToCall.searchPlaceholder')}
+            label={t('call.inviteToCall.label')}
+            hintText={t('call.inviteToCall.hint')}
             data-testid='search-user-invite'
             autoFocus={!isMobile}
           />

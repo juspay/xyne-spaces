@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
@@ -219,6 +220,7 @@ const OwnerTeamPicker = ({
   value: string;
   onChange: (next: string) => void;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const groups = useUserGroups();
 
   const options: SelectorOption[] = useMemo(() => {
@@ -251,8 +253,8 @@ const OwnerTeamPicker = ({
       options={options}
       selectedValue={value.trim() || null}
       onSelect={next => onChange(next ?? '')}
-      placeholder='Select owner team'
-      searchPlaceholder='Search user groups…'
+      placeholder={t('release.wizard.selectOwnerTeam')}
+      searchPlaceholder={t('release.wizard.searchUserGroups')}
       showUnassignOption
       unassignLabel='No owner team'
       width='100%'
@@ -276,89 +278,92 @@ const ApplicationRow = ({
   canRemove,
   onRemove,
   onUpdate,
-}: ApplicationRowProps): ReactElement => (
-  <div className='px-3 py-2 bg-muted rounded-md space-y-2'>
-    <div className='flex items-center justify-between'>
-      <h4 className='font-medium text-sm'>Service {index + 1}</h4>
-      {canRemove && (
-        <button
-          type='button'
-          onClick={() => onRemove(app.id)}
-          data-track-category='Release'
-          data-track-name='REMOVE_WIZARD_APP'
-          className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
-          aria-label={isLocked ? 'Delete on save' : 'Remove'}
-          title={isLocked ? 'This service will be deleted on Save' : 'Remove'}
-        >
-          <Trash2 size={14} />
-        </button>
-      )}
+}: ApplicationRowProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
+  return (
+    <div className='px-3 py-2 bg-muted rounded-md space-y-2'>
+      <div className='flex items-center justify-between'>
+        <h4 className='font-medium text-sm'>Service {index + 1}</h4>
+        {canRemove && (
+          <button
+            type='button'
+            onClick={() => onRemove(app.id)}
+            data-track-category='Release'
+            data-track-name='REMOVE_WIZARD_APP'
+            className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
+            aria-label={isLocked ? 'Delete on save' : 'Remove'}
+            title={isLocked ? 'This service will be deleted on Save' : 'Remove'}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-2'>
+        <div>
+          <label className={LABEL_CLASS} htmlFor={`application-name-${app.id}`}>
+            Service Name *
+          </label>
+          <input
+            id={`application-name-${app.id}`}
+            type='text'
+            value={app.name}
+            disabled={isLocked}
+            onChange={e => onUpdate(app.id, 'name', e.target.value)}
+            data-track-category='Release'
+            data-track-name='APPLICATION_NAME_INPUT'
+            placeholder={t('release.wizard.appNamePlaceholder')}
+            className={INPUT_CLASS}
+          />
+        </div>
+
+        <div>
+          <label className={LABEL_CLASS} htmlFor={`application-regex-${app.id}`}>
+            Service Regex *
+          </label>
+          <input
+            id={`application-regex-${app.id}`}
+            type='text'
+            value={app.regex}
+            onChange={e => onUpdate(app.id, 'regex', e.target.value)}
+            data-track-category='Release'
+            data-track-name='APPLICATION_REGEX_INPUT'
+            placeholder={t('release.wizard.appRegexPlaceholder')}
+            className={INPUT_CLASS}
+          />
+          <p className={HELP_CLASS}>Matches commit file paths to identify this service</p>
+        </div>
+
+        <div>
+          <div className={LABEL_CLASS}>Owner Team</div>
+          <OwnerTeamPicker value={app.ownerTeam} onChange={v => onUpdate(app.id, 'ownerTeam', v)} />
+        </div>
+
+        <div className='md:col-span-2'>
+          <div className={LABEL_CLASS}>Environment File Paths</div>
+          <PathChipsInput
+            value={app.envPaths}
+            onChange={v => onUpdate(app.id, 'envPaths', v)}
+            placeholder={t('release.wizard.envPathsPlaceholder')}
+            ariaLabel={`Environment file paths for service ${index + 1}`}
+          />
+          <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
+        </div>
+
+        <div className='md:col-span-2'>
+          <div className={LABEL_CLASS}>Migration File Paths</div>
+          <PathChipsInput
+            value={app.migrationPaths}
+            onChange={v => onUpdate(app.id, 'migrationPaths', v)}
+            placeholder={t('release.wizard.migrationPathsPlaceholder')}
+            ariaLabel={`Migration file paths for service ${index + 1}`}
+          />
+          <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
+        </div>
+      </div>
     </div>
-
-    <div className='grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-2'>
-      <div>
-        <label className={LABEL_CLASS} htmlFor={`application-name-${app.id}`}>
-          Service Name *
-        </label>
-        <input
-          id={`application-name-${app.id}`}
-          type='text'
-          value={app.name}
-          disabled={isLocked}
-          onChange={e => onUpdate(app.id, 'name', e.target.value)}
-          data-track-category='Release'
-          data-track-name='APPLICATION_NAME_INPUT'
-          placeholder='e.g., backend'
-          className={INPUT_CLASS}
-        />
-      </div>
-
-      <div>
-        <label className={LABEL_CLASS} htmlFor={`application-regex-${app.id}`}>
-          Service Regex *
-        </label>
-        <input
-          id={`application-regex-${app.id}`}
-          type='text'
-          value={app.regex}
-          onChange={e => onUpdate(app.id, 'regex', e.target.value)}
-          data-track-category='Release'
-          data-track-name='APPLICATION_REGEX_INPUT'
-          placeholder='e.g., ^backend/'
-          className={INPUT_CLASS}
-        />
-        <p className={HELP_CLASS}>Matches commit file paths to identify this service</p>
-      </div>
-
-      <div>
-        <div className={LABEL_CLASS}>Owner Team</div>
-        <OwnerTeamPicker value={app.ownerTeam} onChange={v => onUpdate(app.id, 'ownerTeam', v)} />
-      </div>
-
-      <div className='md:col-span-2'>
-        <div className={LABEL_CLASS}>Environment File Paths</div>
-        <PathChipsInput
-          value={app.envPaths}
-          onChange={v => onUpdate(app.id, 'envPaths', v)}
-          placeholder='config/env.yml, .env.prod'
-          ariaLabel={`Environment file paths for service ${index + 1}`}
-        />
-        <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
-      </div>
-
-      <div className='md:col-span-2'>
-        <div className={LABEL_CLASS}>Migration File Paths</div>
-        <PathChipsInput
-          value={app.migrationPaths}
-          onChange={v => onUpdate(app.id, 'migrationPaths', v)}
-          placeholder='migrations/, db/migrate/'
-          ariaLabel={`Migration file paths for service ${index + 1}`}
-        />
-        <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
-      </div>
-    </div>
-  </div>
-);
+  );
+};
 
 interface Step3Props {
   applications: ApplicationConfig[];
@@ -402,6 +407,7 @@ const Step3Applications = ({
   connectionTest,
   lockTrackingMode,
 }: Step3Props): ReactElement => {
+  const { t } = useTranslation('placeholders');
   return (
     <div className='space-y-3'>
       <div>
@@ -427,7 +433,7 @@ const Step3Applications = ({
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
                   data-track-category='Release'
                   data-track-name='REPOSITORY_URL_INPUT'
-                  placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
+                  placeholder={t('release.wizard.repoUrlPlaceholder')}
                   className={INPUT_CLASS}
                 />
                 <Button
@@ -508,7 +514,7 @@ const Step3Applications = ({
                 const next = items[items.length - 1];
                 onChannelSelect(next ? { id: next.id, name: next.name } : null);
               }}
-              placeholder='Search and select a channel...'
+              placeholder={t('release.wizard.searchSelectChannel')}
             />
           </div>
         </>

@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm, Controller } from 'react-hook-form';
 import { Users } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
@@ -35,6 +36,7 @@ export const UserGroupForm = ({
   onCancel,
   loading = false,
 }: UserGroupFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isEdit = !!userGroup;
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -243,7 +245,7 @@ export const UserGroupForm = ({
                     id='name'
                     value={value}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-                    placeholder='Enter user group name'
+                    placeholder={t('userGroups.form.namePlaceholder')}
                     required
                     disabled={isLoading}
                     data-testid='user-group-name-input'
@@ -265,7 +267,7 @@ export const UserGroupForm = ({
                     id='alias'
                     value={value}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-                    placeholder='e.g., frontend-team, backend-devs (optional)'
+                    placeholder={t('userGroups.form.aliasPlaceholder')}
                     disabled={isLoading}
                   />
                 )}
@@ -293,7 +295,7 @@ export const UserGroupForm = ({
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                       onChange(e.target.value)
                     }
-                    placeholder='Enter user group description (optional)'
+                    placeholder={t('userGroups.form.descriptionPlaceholder')}
                     rows={4}
                     disabled={isLoading}
                   />

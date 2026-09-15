@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ChangeEvent } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
@@ -147,6 +148,7 @@ export const ImpactForm = ({
     throw new Error('Invalid RCA');
   }
 
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const isLocked =
     selectedRecord.status !== RCAStatus.DRAFT && selectedRecord.status !== RCAStatus.CLOSED;
@@ -595,7 +597,7 @@ export const ImpactForm = ({
                 }
                 updatePendingRow(index, row => ({ ...row, impact: e.target.value }));
               }}
-              placeholder='Describe the impact...'
+              placeholder={t('routes.rcaScreen.impactForm.describeImpactPlaceholder')}
               rows={4}
               aria-invalid={showErrors && !data.impact.trim()}
               className={cn(

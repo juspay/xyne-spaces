@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileText, Folder } from 'lucide-react';
 import type { CanvasChannel, CanvasFolder, CanvasProject } from '../Canvas.types';
 import { useZero } from '../../../hooks/useZero';
@@ -33,6 +34,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   onToggleStar,
   searchQuery = '',
 }) => {
+  const { t } = useTranslation('placeholders');
   const z = useZero();
   const navigate = useNavigate();
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
@@ -644,7 +646,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                     handleCreateChannelFolder();
                   }
                 }}
-                placeholder='Folder name'
+                placeholder={t('canvas.folderName')}
                 className='h-9 flex-1'
               />
               <button

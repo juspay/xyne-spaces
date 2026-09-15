@@ -1,0 +1,70 @@
+{
+  "nav": {
+    "xyne-ai": "Xyne AI",
+    "chat": "Chat",
+    "dms": "DMs",
+    "activity": "Activity",
+    "calls": "Calls",
+    "recordings": "Recordings",
+    "tickets": "Tickets",
+    "sdlc": "SDLC",
+    "support": "Support",
+    "my-canvas": "My Canvas",
+    "automations": "Automations",
+    "workflows": "Workflows",
+    "scheduled-messages": "Scheduled Messages",
+    "user-groups": "User Groups",
+    "user-management": "User Management",
+    "roles": "Roles",
+    "workspace-management": "Workspace Management",
+    "tag-review": "Tag Review",
+    "organisations": "Organisations",
+    "analytics": "Analytics",
+    "forms": "Forms",
+    "browser": "Browser",
+    "apps": "Apps",
+    "user-guide": "User Guide",
+    "insights": "Insights",
+    "knowledge-base": "Knowledge Base",
+    "context": "Context",
+    "dashboards": "Dashboards",
+    "list-projects": "List Projects",
+    "release-manager": "Release Manager",
+    "jira-migration": "Jira Migration",
+    "confluence-migration": "Confluence Migration",
+    "whatsapp-migration": "WhatsApp Migration",
+    "slack-migration": "Slack Migration",
+    "team-intelligence": "Team Intelligence",
+    "claw-agents": "Claw Agents",
+    "mobile": {
+      "home": "Home",
+      "canvas": "Canvas",
+      "record": "Record",
+      "bookmarks": "Bookmarks",
+      "rca": "RCA",
+      "threads": "Threads",
+      "recap": "Recap",
+      "guide": "Guide"
+    }
+  },
+  "more": {
+    "ariaLabel": "More",
+    "heading": "More",
+    "empty": "All items are in your toolbar.",
+    "customizeToolbar": "Customize toolbar",
+    "moreOptions": "More options"
+  },
+  "support": {
+    "ariaLabel": "Support",
+    "title": "Support",
+    "heading": "Support",
+    "reportIssue": "Report issue",
+    "viewMyTickets": "View my tickets"
+  },
+  "invite": {
+    "ariaLabel": "Invite people to workspace",
+    "tooltip": "Invite people"
+  },
+  "dmsUnread": "DMs unread",
+  "windowLimitToast": "You can have up to {{limit}} extra windows open. Close one to open another."
+}

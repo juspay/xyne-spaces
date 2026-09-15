@@ -1,4 +1,5 @@
 import { useState, forwardRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight } from 'lucide-react';
 
 interface RefineInputProps {
@@ -8,10 +9,8 @@ interface RefineInputProps {
 }
 
 export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
-  (
-    { onSubmit, disabled = false, placeholder = 'Refine: make it shorter, add context...' },
-    ref,
-  ) => {
+  ({ onSubmit, disabled = false, placeholder }, ref) => {
+    const { t } = useTranslation('placeholders');
     const [value, setValue] = useState('');
 
     const handleSubmit = () => {
@@ -35,7 +34,7 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
             }
           }}
           disabled={disabled}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('desk.refine.default')}
           className='w-full text-sm border border-border rounded-lg bg-muted/30 pl-3 pr-9 py-2 outline-none placeholder:text-muted-foreground/60 disabled:opacity-50'
           data-track-category='AIDraft'
           data-track-name='RefineInput'

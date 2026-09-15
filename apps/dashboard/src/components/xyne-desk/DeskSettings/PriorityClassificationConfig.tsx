@@ -1,5 +1,6 @@
 import { ArrowLeft, Gauge, Sparkles, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TestClassificationForm } from './TestClassificationForm';
 import { DEFAULT_PRIORITY_PROMPT } from './constants';
 import type { PriorityClassificationPreviewResult } from '../../../types/priorityClassification';
@@ -54,6 +55,7 @@ export const PriorityClassificationConfigPanel: React.FC<
   runPreview,
   error,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [previewSubject, setPreviewSubject] = useState('');
   const [previewBody, setPreviewBody] = useState('');
   const [showPreview, setShowPreview] = useState(false);
@@ -149,7 +151,7 @@ export const PriorityClassificationConfigPanel: React.FC<
           id='priority-prompt'
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          placeholder='Enter the AI priority classification prompt...'
+          placeholder={t('desk.priorityClassification.enterPrompt')}
           spellCheck={false}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}

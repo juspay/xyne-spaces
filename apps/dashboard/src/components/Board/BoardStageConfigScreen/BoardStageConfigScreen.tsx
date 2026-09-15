@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useTranslation } from 'react-i18next';
 import {
   type ReactElement,
   type RefObject,
@@ -204,6 +205,7 @@ const LinearStageCard = ({
   handleDeleteCondition,
   handleOpenCreateForm,
 }: LinearStageCardProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const statusOption = getStatusOption(stage.defaultTicketStatusV2);
 
   // Calculate active stages for progress indicator (exclude TODO and CANCELLED from position calc)
@@ -302,7 +304,7 @@ const LinearStageCard = ({
                     }}
                     data-track-category='board_config'
                     data-track-name='edit_eta_input'
-                    placeholder='ETA'
+                    placeholder={t('board.eta')}
                     className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
                   />
                   <span className='text-[14px] font-[450] text-foreground'>hrs</span>
@@ -339,7 +341,7 @@ const LinearStageCard = ({
                 onChange={e => handleUpdateStage(stage.tempId, { name: e.target.value })}
                 data-track-category='board_config'
                 data-track-name='edit_stage_name'
-                placeholder='Stage name...'
+                placeholder={t('board.stageNameEllipsis')}
                 className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
               />
             </div>

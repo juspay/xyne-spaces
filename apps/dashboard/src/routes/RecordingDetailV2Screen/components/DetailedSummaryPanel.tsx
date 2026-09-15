@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, FileText, Loader2 } from 'lucide-react';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { Tooltip } from '../../../components/ui/Tooltip';
@@ -15,6 +16,7 @@ export function DetailedSummaryPanel({
   canvasId,
   onClose,
 }: DetailedSummaryPanelProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [canvasData] = useCachedQuery(queries.getCanvas({ canvasId }), {
     enabled: !!canvasId,
   });
@@ -57,7 +59,7 @@ export function DetailedSummaryPanel({
             channelId={canvas.channelId || undefined}
             title={canvas.title}
             editable={false}
-            placeholder='Detailed summary'
+            placeholder={t('routes.recordingDetailV2Screen.detailedSummaryPlaceholder')}
             className='detailed-summary-canvas-editor h-full'
             autoFocus={false}
           />

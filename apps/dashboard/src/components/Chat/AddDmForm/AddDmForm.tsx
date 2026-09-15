@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
@@ -20,6 +21,7 @@ interface AddDmFormProps {
 }
 
 export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCancel }) => {
+  const { t } = useTranslation('placeholders');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const context = useAuthContextValues();
   const { isMobile } = usePlatform();
@@ -88,7 +90,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
           <SearchUser
             selectedUsers={selectedUsers}
             onUsersChange={handleUsersChange}
-            placeholder='Type to find people...'
+            placeholder={t('chat.addDmForm.typeToFindPeople')}
             label={`Add people (${selectedUsers.length}/9)`}
             hintText='Search user by email or name'
             autoFocus={!isMobile}
@@ -120,7 +122,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 className='text-foreground'
                 value={field.state.value}
                 onChange={e => field.handleChange(e.target.value)}
-                placeholder='Say something to start the conversation...'
+                placeholder={t('chat.addDmForm.sayHelloToStart')}
                 rows={4}
                 data-testid='dm-message-textarea'
                 aria-invalid={field.state.meta.errors.length > 0}

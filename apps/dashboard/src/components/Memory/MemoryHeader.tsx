@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TextInput, MultiSelect } from '@juspay/blend-design-system';
 import { Search, Brain, Upload, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ interface MemoryHeaderProps {
 }
 
 const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange }) => {
+  const { t } = useTranslation('placeholders');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -130,13 +132,13 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
   const getSearchPlaceholder = (): string => {
     if (filters.includeQuery && filters.includeSummary) {
-      return 'Search in query and summary...';
+      return t('memory.header.searchInQueryAndSummary');
     } else if (filters.includeQuery) {
-      return 'Search in query...';
+      return t('memory.header.searchInQuery');
     } else if (filters.includeSummary) {
-      return 'Search in summary...';
+      return t('memory.header.searchInSummary');
     }
-    return 'Search context...';
+    return t('memory.header.searchContext');
   };
 
   useEffect(() => {
@@ -229,7 +231,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
               Repository URL <span className='text-red-500'>*</span>
             </p>
             <TextInput
-              placeholder='https://github.com/org/repo'
+              placeholder={t('memory.header.repoUrlPlaceholder')}
               value={repoUrl}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRepoUrl(e.target.value)}
             />
@@ -387,7 +389,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
                 onFiltersChange({ ...filters, scope: value });
               }
             }}
-            placeholder='Scope'
+            placeholder={t('memory.header.scope')}
             enableSearch={false}
             enableSelectAll={false}
           />
@@ -404,14 +406,14 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             ]}
             selectedValues={filters.docTypeFilter}
             onChange={handleDocTypeChange}
-            placeholder='Doc Type'
+            placeholder={t('memory.header.docType')}
             enableSearch={false}
             enableSelectAll={true}
           />
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by tag...'
+              placeholder={t('memory.header.filterByTag')}
               value={filters.tagsFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, tagsFilter: e.target.value })
@@ -421,7 +423,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by repo URL...'
+              placeholder={t('memory.header.filterByRepoUrl')}
               value={filters.repoUrlFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, repoUrlFilter: e.target.value })
@@ -431,7 +433,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by commit ID...'
+              placeholder={t('memory.header.filterByCommitId')}
               value={filters.commitIdFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, commitIdFilter: e.target.value })
@@ -441,7 +443,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by session ID...'
+              placeholder={t('memory.header.filterBySessionId')}
               value={filters.sessionIdFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, sessionIdFilter: e.target.value })
@@ -451,7 +453,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by file...'
+              placeholder={t('memory.header.filterByFile')}
               value={filters.filePointersFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, filePointersFilter: e.target.value })
@@ -461,7 +463,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
 
           <div className='w-[200px]'>
             <TextInput
-              placeholder='Filter by ticket ID...'
+              placeholder={t('memory.header.filterByTicketId')}
               value={filters.ticketIdFilter}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 onFiltersChange({ ...filters, ticketIdFilter: e.target.value })

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { callService } from '../../../services/Call/callService';
 import { conversationService } from '../../../services/Chat/conversationService';
@@ -39,6 +40,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
   messageId,
   queuePosition,
 }) => {
+  const { t } = useTranslation('placeholders');
   const allUsers = useUsers();
 
   // Pre-select the user that matches the LLM-extracted assignee email
@@ -245,7 +247,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                       type='text'
                       value={merchantSearch}
                       onChange={e => setMerchantSearch(e.target.value)}
-                      placeholder='Search alternative organisation…'
+                      placeholder={t('ui.pulseModal.searchOrganisation')}
                       className='w-full text-xs px-2 py-1.5 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                     />
                   </div>
@@ -318,7 +320,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               disabled={submitting}
               required
               className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition disabled:opacity-60'
-              placeholder='Actionable title'
+              placeholder={t('ui.pulseModal.actionableTitle')}
             />
           </div>
 
@@ -337,7 +339,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               disabled={submitting}
               rows={3}
               className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition resize-none disabled:opacity-60'
-              placeholder='Add more context (optional)'
+              placeholder={t('ui.pulseModal.addMoreContext')}
             />
           </div>
 
@@ -346,7 +348,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
             <SearchUser
               selectedUsers={selectedAssignees}
               onUsersChange={handleAssigneeChange}
-              placeholder='Search by name or email…'
+              placeholder={t('ui.pulseModal.searchAssignee')}
               label='ASSIGNEE'
               hintText=''
               disabled={{ value: submitting }}

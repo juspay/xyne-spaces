@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import type { TicketStatusV2 } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
@@ -25,6 +26,7 @@ export const StagesSubmenu = ({
   isLoading = false,
   className = '',
 }: StagesSubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -95,7 +97,7 @@ export const StagesSubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search status...'
+            placeholder={t('tickets.filters.searchStatus')}
             className='pl-9 h-9'
           />
         </div>

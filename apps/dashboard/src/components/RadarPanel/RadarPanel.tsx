@@ -25,6 +25,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   fetchRadarDebugRuns,
   fetchRadarItemTrail,
@@ -70,6 +71,7 @@ const AVATARS_SHOWN = 3;
  * side panel; the Debug drawer shows the worker's run trail.
  */
 const RadarPanel = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const { user } = useAuth();
   // The router is built at module scope, so the rollout gate has to live here:
@@ -1138,7 +1140,7 @@ const RadarPanel = (): ReactElement => {
           <Search className='absolute left-5 top-1/2 mt-1 -translate-y-1/2 size-3.5 text-muted-foreground' />
           <input
             className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
-            placeholder='Search people'
+            placeholder={t('radar.searchPeople')}
             data-track-category='RADAR'
             data-track-name='SEARCH_PICKER_PEOPLE'
             value={search}
@@ -1487,7 +1489,7 @@ const RadarPanel = (): ReactElement => {
               <input
                 autoFocus
                 className='w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground'
-                placeholder='e.g. Platform Pod'
+                placeholder={t('radar.teamNamePlaceholder')}
                 data-track-category='RADAR'
                 data-track-name='TEAM_NAME'
                 value={teamDraft.name}
@@ -1508,7 +1510,7 @@ const RadarPanel = (): ReactElement => {
                   <Search className='absolute left-5 top-1/2 mt-0.5 -translate-y-1/2 size-3.5 text-muted-foreground' />
                   <input
                     className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
-                    placeholder='Search people'
+                    placeholder={t('radar.searchPeople')}
                     data-track-category='RADAR'
                     data-track-name='SEARCH_TEAM_MEMBERS'
                     value={memberSearch}
@@ -1681,7 +1683,7 @@ const RadarPanel = (): ReactElement => {
                 <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
                 <input
                   className='w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground'
-                  placeholder='Search channels'
+                  placeholder={t('radar.searchChannels')}
                   data-track-category='RADAR'
                   data-track-name='SEARCH_CHANNELS'
                   value={channelSearch}
@@ -1812,7 +1814,7 @@ const RadarPanel = (): ReactElement => {
               className='w-56 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground'
               data-track-category='RADAR'
               data-track-name='DEBUG_THREAD_LOOKUP'
-              placeholder='Debug a thread id… ⏎'
+              placeholder={t('radar.debugThreadId')}
               title='Paste a conversation id and press Enter to open its thread debug'
               value={debugLookup}
               onChange={e => setDebugLookup(e.target.value)}

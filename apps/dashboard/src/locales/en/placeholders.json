@@ -1,0 +1,1117 @@
+{
+  "aiScreen": {
+    "searchByNameOrEmail": "Search by name or email",
+    "searchAgents": "Search agents",
+    "chat": {
+      "whatWentWrong": "what went wrong?",
+      "searchModels": "Search models…",
+      "searchAgentsInline": "Search agents…",
+      "writeMessage": "Write a message..."
+    },
+    "digitalTwin": {
+      "searchHotMemories": "Search hot memories",
+      "searchMemories": "Search memories",
+      "searchProposals": "Search proposals",
+      "askQuestion": "Ask a question your Twin might answer…",
+      "sentByTwin": "Sent by my Digital Twin · may contain mistakes"
+    },
+    "library": {
+      "admin": {
+        "searchAuditLog": "Search audit log",
+        "searchMcpServers": "Search MCP servers",
+        "searchRequests": "Search requests",
+        "searchScheduledJobs": "Search scheduled jobs"
+      },
+      "agents": {
+        "nameYourAgent": "Name your agent",
+        "agentHandle": "Agent handle",
+        "description": "Add a description so people and agents understand when to use it.",
+        "aiDraftedInstructions": "Ai drafted instructions will be updated here...",
+        "describeAgent": "Describe what this agent should do…",
+        "filterSchedules": "Filter schedules",
+        "filterRuns": "Filter runs",
+        "schedulePrompt": "eg. Summarise yesterday’s error buckets and post the top three",
+        "scheduleLabelOptional": "Optional — shown in the schedules list",
+        "cronExpression": "0 9 * * 1-5",
+        "timeoutSeconds": "60",
+        "languagePrompt": "eg. Always respond in the user's language",
+        "toolResultPrompt": "eg. Every number must come from a tool result, never from memory.",
+        "structuredOutline": "Optional outline the answer should follow",
+        "toolsExample": "search, read-file",
+        "filterMembers": "Filter members",
+        "providerDefault": "Provider default",
+        "pasteCode": "Paste the code, or the full callback URL",
+        "leaveBlankApiKey": "Leave blank to keep the stored key",
+        "apiKeyExample": "sk-…"
+      },
+      "shared": {
+        "whyCallAgent": "Why does this agent need to be called?",
+        "search": "Search"
+      },
+      "skills": {
+        "skillHandle": "skill-handle",
+        "whatCovers": "What this skill covers and when agents should reach for it.",
+        "playbook": "The markdown playbook an agent reads while working…",
+        "nameYourSkill": "Name your skill"
+      },
+      "subagents": {
+        "nameYourSubagent": "Name your subagent",
+        "whatSpecialistDoes": "What this specialist does and when agents should call it.",
+        "parentPasses": "What the parent agent passes in",
+        "focusedSpecialist": "You are a focused specialist that…",
+        "workingProgress": "Working…",
+        "filterContributors": "Filter contributors"
+      }
+    },
+    "organization": {
+      "productionBillingWorker": "Production billing worker",
+      "searchMembersByNameOrEmail": "Search members by name or email",
+      "filterAgents": "Filter agents",
+      "slackTokenExample": "xoxe.xoxp-…",
+      "slackRefreshTokenExample": "xoxe-1-…",
+      "searchMembers": "Search members"
+    }
+  },
+  "chat": {
+    "aboutChannel": {
+      "channelName": "channel-name",
+      "addDescription": "Add a description..."
+    },
+    "addChannelForm": {
+      "whatIsChannelAbout": "What is this channel about?",
+      "typeTagEnter": "Type a tag and press Enter or add comma",
+      "selectSource": "Select a source",
+      "selectSlackChannel": "Select a Slack channel",
+      "selectXyneApp": "Select a Xyne App",
+      "xynePlaceholder": "Xyne",
+      "appIdExample": "com.example.app",
+      "channelNameExamples": "e.g. general, development, support",
+      "searchProjects": "Search projects..."
+    },
+    "addDmForm": {
+      "sayHelloToStart": "Say something to start the conversation...",
+      "typeToFindPeople": "Type to find people..."
+    },
+    "addPeopleForm": {
+      "searchUsersToAdd": "Search users to add to channel..."
+    },
+    "sectionName": {
+      "example": "Ex: Project Beta"
+    },
+    "bookmark": {
+      "selectDate": "Select date",
+      "selectTime": "Select time"
+    },
+    "browseChannels": {
+      "searchChannels": "Search channels..."
+    },
+    "callSummary": {
+      "describeChange": "Describe what you want to change here"
+    },
+    "channelSettings": {
+      "selectPolicy": "Select policy"
+    },
+    "bubble": {
+      "editMessage": "Edit message…"
+    },
+    "manageSectionChannels": {
+      "filterByName": "Filter by name…"
+    },
+    "delayedMessage": {
+      "editYourMessage": "Edit your message..."
+    },
+    "dms": {
+      "searchDms": "Search DMs (Cmd+K)"
+    },
+    "emailRefetch": {
+      "startDate": "Start date",
+      "endDate": "End date"
+    },
+    "info": {
+      "findMembers": "Find members"
+    },
+    "linksTab": {
+      "urlExample": "https://example.com",
+      "linkTitle": "Link title",
+      "optionalDescription": "Optional description"
+    },
+    "search": {
+      "dateExample": "E.g. 2026-08-25",
+      "fieldExample": "e.g. Platform",
+      "anyTime": "Any time",
+      "searchPeople": "Search people…",
+      "searchChannels": "Search channels…"
+    },
+    "thread": {
+      "replyToThread": "Reply to this thread..."
+    },
+    "transcript": {
+      "searchTranscript": "Search transcript..."
+    },
+    "xyneAiSidebar": {
+      "enterDisplayName": "Enter display name",
+      "enterDisplayCategory": "Enter display category",
+      "searchAgents": "Search agents…",
+      "searchChats": "Search chats...",
+      "enterSkillName": "Enter skill name",
+      "skillDescription": "Brief description of what this skill does",
+      "skillInstructions": "Detailed instructions for how the AI should behave when using this skill"
+    }
+  },
+  "tickets": {
+    "assignGroup": "Assign Group",
+    "assignUser": "Assign User",
+    "selectAssignee": "Select assignee",
+    "selectPriority": "Select priority",
+    "selectBoard": "Select board",
+    "searchLabels": "Search labels...",
+    "createModal": {
+      "description": "Enter Ticket Description...",
+      "subTicketTitle": "Sub-ticket title",
+      "subTicketDescription": "Sub-ticket description (optional)",
+      "deployedExample": "deployed",
+      "newExample": "new",
+      "mainExample": "main",
+      "priorityLower": "priority",
+      "boardLower": "board",
+      "searchLabels": "Search labels",
+      "ticketTypeLower": "ticket type"
+    },
+    "stageForm": {
+      "selectOption": "Select an option",
+      "userId": "User ID",
+      "explainDecision": "Explain your decision…"
+    },
+    "aiClassification": {
+      "selectCategory": "Select category",
+      "featureRequestExample": "e.g. Feature Request",
+      "none": "— none —",
+      "optional": "optional"
+    },
+    "details": {
+      "addExistingSubTicket": "+ Add existing sub-ticket",
+      "searchOrCreateLabel": "Search or create label...",
+      "setStatus": "Set Status",
+      "setPriority": "Set Priority",
+      "setType": "Set Type",
+      "reasonKeepDates": "Reason for keeping the current dates...",
+      "addTicket": "+ Add ticket",
+      "searchByTicketIdOrName": "Search by ticket ID or name",
+      "searchBoards": "Search boards...",
+      "searchByIdOrName": "Search by ID or name"
+    },
+    "filters": {
+      "searchCategories": "Search categories...",
+      "searchOptions": "Search options...",
+      "searchTags": "Search tags...",
+      "searchRoles": "Search roles...",
+      "searchUsers": "Search users...",
+      "searchChannels": "Search channels...",
+      "searchStatus": "Search status...",
+      "searchTypes": "Search types...",
+      "searchUserGroups": "Search user groups...",
+      "nameThisView": "Name this view",
+      "searchTickets": "Search Tickets",
+      "searchUsersOrGroups": "Search users or groups...",
+      "searchPriority": "Search priority...",
+      "searchStages": "Search stages...",
+      "searchGroups": "Search groups...",
+      "selectDateRange": "Select date range"
+    },
+    "bulkAction": {
+      "assignee": "Assignee",
+      "status": "Status",
+      "priority": "Priority",
+      "stage": "Stage"
+    },
+    "cellEditor": {
+      "selectDefault": "Select...",
+      "searchDefault": "Search...",
+      "searchAssignees": "Search assignees..."
+    }
+  },
+  "clawAgents": {
+    "cloneDialog": {
+      "namePlaceholder": "New agent name"
+    },
+    "toolbox": {
+      "searchTools": "Search tools…",
+      "refinePlaceholder": "e.g. I also need Slack notifications and Jira ticket creation"
+    }
+  },
+  "automation": {
+    "whyRejecting": "Why are you rejecting this?",
+    "pickConversation": "Pick a conversation",
+    "pickBot": "Pick a bot (defaults to the automations bot)",
+    "value": "Value",
+    "approvals": {
+      "searchProposals": "Search proposals…"
+    },
+    "addStep": {
+      "searchSteps": "Search steps…"
+    },
+    "builder": {
+      "addDescription": "Add a description (optional)",
+      "nameRequired": "Give this automation a name (required)"
+    },
+    "condition": {
+      "operator": "Operator",
+      "select": "Select…",
+      "category": "Category…"
+    },
+    "schedule": {
+      "pickDateField": "Pick a date field…"
+    },
+    "entity": {
+      "searchUsers": "Search users…",
+      "searchGroups": "Search groups…",
+      "searchChannels": "Search channels…",
+      "searchBoards": "Search boards…",
+      "searchBots": "Search bots…",
+      "searchStages": "Search stages…",
+      "searchProjects": "Search projects…"
+    },
+    "schemaForm": {
+      "key": "key"
+    },
+    "applyLabel": {
+      "channelIdOrPrefix": "Channel id or",
+      "labelExample": "e.g. VIP / Refunds"
+    },
+    "emailDraft": {
+      "writeDraft": "Write the draft…"
+    },
+    "call": {
+      "pickUsersToInvite": "Pick users to invite",
+      "pickGroupsToInvite": "Pick user groups to invite"
+    },
+    "notify": {
+      "pickUser": "Pick a user",
+      "pickUserGroup": "Pick a user group",
+      "title": "Notification title",
+      "message": "Notification message"
+    },
+    "reply": {
+      "typeReplyMention": "Type your reply… use @ to mention someone"
+    },
+    "runAgent": {
+      "searchAgents": "Search agents by name or slug…",
+      "summarizePrompt": "Summarize this ticket and classify its urgency…"
+    },
+    "sendMessage": {
+      "typeMessageMention": "Type your message… use @ to mention someone",
+      "pickUsersToDm": "Pick users to DM"
+    },
+    "webhook": {
+      "urlExample": "https://example.com/webhook",
+      "timeoutExample": "10000",
+      "header": "Header",
+      "requestBody": "Request body…"
+    },
+    "trigger": {
+      "valueContains": "Value contains…",
+      "searchTriggers": "Search triggers…"
+    },
+    "variablePicker": {
+      "searchVariables": "Search variables…"
+    },
+    "list": {
+      "searchAutomations": "Search automations…"
+    }
+  },
+  "desk": {
+    "chooseUserGroup": "Choose user group",
+    "featureRequestExample": "eg. Feature Request",
+    "composer": {
+      "whatDoYouNeed": "What do you need?"
+    },
+    "label": {
+      "searchOrCreateArticle": "Search or create a label…",
+      "searchOrCreate": "Search or create label…",
+      "name": "Label name"
+    },
+    "integration": {
+      "androidAppExample": "My Android app",
+      "appIdExample": "com.example.app"
+    },
+    "metrics": {
+      "searchDesks": "Search desks…",
+      "searchFilters": "Search filters…",
+      "hourPlaceholder": "HH",
+      "minutePlaceholder": "MM"
+    },
+    "settings": {
+      "searchAgents": "Search agents…",
+      "selectXyneApp": "Select a Xyne App",
+      "signatureName": "Signature Name"
+    },
+    "classification": {
+      "queryTypeExample": "eg. Query Type",
+      "featureRequestTypeExample": "eg. Feature Request Type",
+      "enterPrompt": "Enter AI classification prompt",
+      "upiEmptyExample": "eg. UPI (empty = catch all)",
+      "upiExamplesList": "eg. UPI, mWeb Intent, UPI QR"
+    },
+    "priorityClassification": {
+      "enterPrompt": "Enter the AI priority classification prompt..."
+    },
+    "inbox": {
+      "emailExample": "support@yourcompany.com"
+    },
+    "tagGeneration": {
+      "topicExample": "eg. topic",
+      "describeHowToChoose": "Describe how to choose tags for this category",
+      "categoryExamplesList": "eg. billing, login, feature-request",
+      "spamExample": "eg. spam",
+      "numberExample": "eg. 3"
+    },
+    "draft": {
+      "refineSelectedText": "Refine the selected text (e.g., make it warmer, clearer...)"
+    },
+    "email": {
+      "subject": "Subject",
+      "composeDefault": "Compose email...",
+      "linkText": "Link text",
+      "urlExample": "https://example.com"
+    },
+    "refine": {
+      "default": "Refine: make it shorter, add context..."
+    },
+    "ozonetel": {
+      "apiKeyUnchanged": "•••••••• (unchanged)",
+      "apiKeyExample": "Ozonetel API key",
+      "widgetUrlExample": "https://agent.ccaas.ozonetel.com/toolbar_widget/index.html",
+      "saveWorkspaceFirst": "Save the workspace source to generate this URL.",
+      "selectDefaultCallDesk": "Select a default call desk",
+      "selectCampaign": "Select Ozonetel campaign",
+      "searchCampaigns": "Search campaigns",
+      "selectCallDesk": "Select call desk",
+      "searchCallDesks": "Search call desks"
+    }
+  },
+  "board": {
+    "selectSourceBoard": "Select source board",
+    "searchBoards": "Search boards...",
+    "selectNewStage": "Select new stage",
+    "searchStages": "Search stages...",
+    "searchRoles": "Search roles...",
+    "eta": "ETA",
+    "hours": "Hours",
+    "stageNameEllipsis": "Stage name...",
+    "search": "Search...",
+    "select": "Select...",
+    "optional": "Optional",
+    "searchForms": "Search forms...",
+    "roles": {
+      "addStageToStandardPath": "Add stage to Standard Path",
+      "addTicketControlRole": "Add ticket control role",
+      "addRoleToAutoAssign": "Add role to auto-assign",
+      "selectRole": "Select role"
+    },
+    "condition": {
+      "chooseField": "Choose field",
+      "chooseCondition": "Choose condition",
+      "chooseValue": "Choose value"
+    },
+    "form": {
+      "enterQuestion": "Enter question",
+      "onePerLineOptions": "One option per line. Paste from a spreadsheet, comma-separated list, etc.",
+      "customField": "Custom Field",
+      "fieldName": "Field name",
+      "formTitle": "Form Title",
+      "addDescription": "Add description",
+      "enterBoardName": "Enter board name",
+      "selectBoardType": "Select board type",
+      "enterBoardDescription": "Enter board description (optional)",
+      "stageName": "Stage name",
+      "etaHours": "ETA (hrs)",
+      "seqNumber": "Seq #",
+      "selectPrStatuses": "Select PR statuses..."
+    },
+    "editScreen": {
+      "enterBoardName": "Enter Board Name"
+    },
+    "flow": {
+      "customerOnboardingExample": "e.g. Customer Onboarding",
+      "chooseAField": "Choose a field…",
+      "comparisonText": "Comparison text",
+      "chooseNextStep": "Choose next step…",
+      "searchUsers": "Search users...",
+      "stepTitle": "Step title...",
+      "kycExample": "e.g. KYC documents verified against the registry",
+      "groupName": "Group name"
+    }
+  },
+  "canvas": {
+    "editComment": "Edit comment",
+    "addComment": "Add a comment",
+    "startWriting": "Start writing your canvas...",
+    "addPageTitle": "Add page title",
+    "searchOrCreateLabelDot": "Search or create a label.",
+    "searchCanvases": "Search canvases",
+    "filterChannels": "Filter channels",
+    "search": "Search...",
+    "folderName": "Folder name",
+    "findParticipants": "Find participants",
+    "untitledCanvas": "Untitled Canvas",
+    "searchInCanvas": "Search in canvas...",
+    "enterEmailAddress": "Enter email address...",
+    "untitledFolder1": "Untitled folder 1",
+    "versionName": "Version name",
+    "filterRows": "Filter rows"
+  },
+  "dashboard": {
+    "askAnything": "Ask anything…",
+    "searchDataSources": "Search data sources…",
+    "searchDatabases": "Search databases…",
+    "filterTables": "Filter tables…",
+    "visualBuilder": {
+      "revenueExample": "e.g: Revenue by Status",
+      "chooseDataSource": "Choose your data source",
+      "selectTable": "Select a table…",
+      "column": "Column…",
+      "bucket": "bucket",
+      "listExample": "a, b, c",
+      "value": "value",
+      "noLimit": "no limit",
+      "none": "(none)"
+    },
+    "table": {
+      "searchAllColumns": "Search all columns…",
+      "contains": "Contains…",
+      "min": "Min",
+      "max": "Max"
+    },
+    "create": {
+      "nameExample": "e.g. Q4 sales overview",
+      "descriptionOptional": "Optional. One line describing the dashboard."
+    },
+    "share": {
+      "searchUsersToAdd": "Search users to add..."
+    },
+    "variables": {
+      "statusKeyExample": "e.g. status",
+      "statusLabelExample": "e.g. Status",
+      "openClosedPendingExample": "open, closed, pending"
+    },
+    "dataSource": {
+      "enterSourceName": "Enter your source name",
+      "enterDescriptions": "Enter your descriptions",
+      "enterHostName": "Enter host name",
+      "enterPortNumber": "Enter port number",
+      "enterUsername": "Enter username",
+      "enterPassword": "Enter password",
+      "enterDatabase": "Enter database"
+    }
+  },
+  "ui": {
+    "common": {
+      "searchEllipsis": "Search..."
+    },
+    "linkDialog": {
+      "linkText": "Link text",
+      "url": "https://example.com"
+    },
+    "editorToolbar": {
+      "imageUrl": "https://example.com/image.png"
+    },
+    "emojiPicker": {
+      "customEmojiName": ":party_parrot:"
+    },
+    "timePicker": {
+      "selectTime": "Select time"
+    },
+    "pulseModal": {
+      "searchOrganisation": "Search alternative organisation…",
+      "actionableTitle": "Actionable title",
+      "addMoreContext": "Add more context (optional)",
+      "searchAssignee": "Search by name or email…"
+    },
+    "datePicker": {
+      "selectDate": "Select date"
+    },
+    "searchUser": {
+      "placeholder": "Search and add users...",
+      "label": "Add Users",
+      "hint": "Search user by email or name"
+    },
+    "searchUserGroups": {
+      "placeholder": "Search user groups..."
+    },
+    "dateRangeFilter": {
+      "startTime": "Start time",
+      "endTime": "End time"
+    },
+    "dateTimePicker": {
+      "selectDateTime": "Select date and time"
+    },
+    "filterMultiSelect": {
+      "selectPlaceholder": "Select..."
+    },
+    "userProfile": {
+      "teamNamePlaceholder": "Enter team name",
+      "displayNamePlaceholder": "Enter display name",
+      "phoneNumberPlaceholder": "Enter phone number",
+      "managerSearchPlaceholder": "Search for a manager..."
+    },
+    "multiSelect": {
+      "selectOptions": "Select options",
+      "searchOptions": "Search options..."
+    },
+    "inputBox": {
+      "typeMessage": "Type a message..."
+    }
+  },
+  "aiComposer": {
+    "askAnything": "Ask anything"
+  },
+  "appIcon": {
+    "searchIcons": "Search icons…"
+  },
+  "apps": {
+    "createApp": {
+      "namePlaceholder": "Enter app name"
+    },
+    "common": {
+      "descriptionPlaceholder": "Enter app description (optional)"
+    },
+    "editApp": {
+      "commandNamePlaceholder": "e.g. sell",
+      "commandDescriptionPlaceholder": "What does this command do?",
+      "shortcutIdPlaceholder": "e.g. create_task",
+      "shortcutDescriptionPlaceholder": "What does this shortcut do?",
+      "webhookUrlPlaceholder": "https://your-app.com/webhook",
+      "selectWebhookType": "Select a webhook type",
+      "selectWebhookAction": "Select a webhook action",
+      "selectChannel": "Select a channel",
+      "selectChannelFirst": "Select a channel first",
+      "noBoardsAvailable": "No boards available",
+      "selectBoard": "Select a board",
+      "webhookNamePlaceholder": "e.g., GitHub CI, Monitoring"
+    }
+  },
+  "analyticsDashboard": {
+    "queryNamePlaceholder": "Enter query name",
+    "searchFields": "Search fields...",
+    "selectFunction": "Select function...",
+    "searchFunctions": "Search functions...",
+    "selectField": "Select field...",
+    "alias": "alias",
+    "selectDirection": "Select direction...",
+    "searchDirections": "Search directions..."
+  },
+  "appSidebar": {
+    "updateStatus": {
+      "placeholder": "Update your status",
+      "searchEmoji": "Search emoji..."
+    },
+    "workspaceInvite": {
+      "emailsPlaceholder": "jane@acme.com, jhon@acme.com"
+    },
+    "workspaceSwitcher": {
+      "namePlaceholder": "Workspace name"
+    }
+  },
+  "call": {
+    "aiInvite": {
+      "messagePlaceholder": "Add a message for the invite..."
+    },
+    "inviteToCall": {
+      "searchPlaceholder": "Search users to invite...",
+      "label": "Select Users",
+      "hint": "Search by name or email to find users to invite"
+    },
+    "participantsSelection": {
+      "selectParticipants": "Select participants"
+    },
+    "invitationPreview": {
+      "messagePlaceholder": "Write a note for your invitees — add links, lists, bold accents…",
+      "titlePlaceholder": "Falls back to call title",
+      "organizerNameFallback": "Organizer",
+      "organizerEmailFallback": "you@company.com",
+      "orgNamePlaceholder": "Appears above the title"
+    },
+    "schedule": {
+      "titlePlaceholder": "Enter call title",
+      "selectStartDate": "Select start date",
+      "selectEndDate": "Select end date",
+      "selectStartTime": "Select start time",
+      "selectEndTime": "Select end time",
+      "pickEndDate": "Pick end date",
+      "searchToChangeChannel": "Search to change channel",
+      "selectChannel": "Select channel"
+    }
+  },
+  "claw": {
+    "composer": {
+      "placeholder": "Ask Claw..."
+    }
+  },
+  "errorReport": {
+    "titlePlaceholder": "Give it a short title so we know where to look",
+    "descriptionPlaceholder": "Tell us what happened, what you expected to see, and any steps that led here. Every detail helps!"
+  },
+  "fileViewer": {
+    "findBar": {
+      "placeholder": "Find in file"
+    }
+  },
+  "flowUI": {
+    "userQuestion": {
+      "typeAnswer": "Type your answer…",
+      "typeCustomAnswer": "Type your own answer…"
+    }
+  },
+  "form": {
+    "namePlaceholder": "Enter form name",
+    "descriptionPlaceholder": "Enter form description (optional)",
+    "loadingProjects": "Loading projects...",
+    "noProjectsAvailable": "No projects available",
+    "searchProjects": "Search projects",
+    "fieldNamePlaceholder": "e.g., Priority, Due Date",
+    "selectContextType": "Select a context type",
+    "selectEntityType": "Select an entity type",
+    "selectFieldType": "Select a field type"
+  },
+  "knowledgeBase": {
+    "createCollection": {
+      "namePlaceholder": "e.g. Product docs",
+      "channelPlaceholder": "No channel — visible to the whole workspace",
+      "searchChannels": "Search channels..."
+    }
+  },
+  "knowledgeBaseV2": {
+    "driveLink": {
+      "placeholder": "https://drive.google.com/file/d/…"
+    },
+    "searchField": {
+      "default": "Search"
+    },
+    "kbContents": {
+      "searchByName": "Search by name"
+    },
+    "newFolder": {
+      "namePlaceholder": "e.g. Drafts"
+    }
+  },
+  "labels": {
+    "searchOrCreate": "Search or create..."
+  },
+  "memory": {
+    "compareCard": {
+      "tagsPlaceholder": "tag1, tag2, tag3"
+    },
+    "header": {
+      "searchInQueryAndSummary": "Search in query and summary...",
+      "searchInQuery": "Search in query...",
+      "searchInSummary": "Search in summary...",
+      "searchContext": "Search context...",
+      "repoUrlPlaceholder": "https://github.com/org/repo",
+      "scope": "Scope",
+      "docType": "Doc Type",
+      "filterByTag": "Filter by tag...",
+      "filterByRepoUrl": "Filter by repo URL...",
+      "filterByCommitId": "Filter by commit ID...",
+      "filterBySessionId": "Filter by session ID...",
+      "filterByFile": "Filter by file...",
+      "filterByTicketId": "Filter by ticket ID..."
+    }
+  },
+  "project": {
+    "form": {
+      "namePlaceholder": "Enter project name",
+      "codePlaceholder": "e.g., EUL, PROJ, PRO1, XY2",
+      "descriptionPlaceholder": "Enter project description (optional)"
+    },
+    "sidebar": {
+      "searchProjectsBoards": "Search projects/Boards...",
+      "searchGroups": "Search groups...",
+      "searchPersons": "Search persons..."
+    },
+    "viewsSection": {
+      "viewNamePlaceholder": "View name"
+    },
+    "shareView": {
+      "searchUsers": "Search users…"
+    }
+  },
+  "queryBuilder": {
+    "selectUser": "Select user...",
+    "searchUsers": "Search users...",
+    "selectUserGroup": "Select user group...",
+    "selectBoard": "Select board...",
+    "searchBoards": "Search boards...",
+    "selectProject": "Select project...",
+    "selectChannel": "Select channel...",
+    "value": "Value",
+    "selectOperator": "Select operator...",
+    "searchOperators": "Search operators...",
+    "startDate": "Start date",
+    "endDate": "End date"
+  },
+  "radar": {
+    "searchPeople": "Search people",
+    "teamNamePlaceholder": "e.g. Platform Pod",
+    "searchChannels": "Search channels",
+    "debugThreadId": "Debug a thread id… ⏎"
+  },
+  "recap": {
+    "customPromptPlaceholder": "e.g. \"Focus on bugs and blockers. Highlight action items.\""
+  },
+  "release": {
+    "wizard": {
+      "selectOwnerTeam": "Select owner team",
+      "searchUserGroups": "Search user groups…",
+      "appNamePlaceholder": "e.g., backend",
+      "appRegexPlaceholder": "e.g., ^backend/",
+      "envPathsPlaceholder": "config/env.yml, .env.prod",
+      "migrationPathsPlaceholder": "migrations/, db/migrate/",
+      "repoUrlPlaceholder": "https://bitbucket.example.com/scm/PROJECT/repo.git",
+      "searchSelectChannel": "Search and select a channel..."
+    }
+  },
+  "resourceAccess": {
+    "searchResources": "Search resources..."
+  },
+  "roles": {
+    "detailHeader": {
+      "namePlaceholder": "e.g. XYNE_PM",
+      "descriptionPlaceholder": "What is this role for?"
+    }
+  },
+  "scheduledMessage": {
+    "filters": {
+      "allChannels": "All channels",
+      "allCreators": "All creators"
+    },
+    "modal": {
+      "selectChannel": "Select a channel",
+      "titlePlaceholder": "e.g., Daily Standup Message",
+      "messagePlaceholder": "The message that will be posted to the channel"
+    }
+  },
+  "teamIntelligence": {
+    "selectRange": "Select range"
+  },
+  "preferences": {
+    "keywordPlaceholder": "Add a keyword and press Enter",
+    "currentPassword": "Current password",
+    "newPassword": "New password (min 8 characters)",
+    "confirmPassword": "Confirm new password"
+  },
+  "tags": {
+    "decisionPane": {
+      "labelPlaceholder": "Feature request",
+      "summaryPlaceholder": "Something is broken. Done when it is fixed and verified.",
+      "descriptionPlaceholder": "Describe when this type applies, as if instructing someone who has never seen the thread."
+    },
+    "review": {
+      "searchNameOrEmail": "Search name or email"
+    },
+    "badge": {
+      "customTagPlaceholder": "custom-tag"
+    },
+    "threadMenu": {
+      "searchOrAddTag": "Search or add a tag"
+    }
+  },
+  "userGroups": {
+    "assignment": {
+      "infinitySymbol": "∞",
+      "maxWorkloadPlaceholder": "e.g. 20",
+      "boardWeightPlaceholder": "1",
+      "selectInterval": "Select an interval",
+      "allBoards": "All boards",
+      "selectRoles": "Select roles..."
+    },
+    "form": {
+      "namePlaceholder": "Enter user group name",
+      "aliasPlaceholder": "e.g., frontend-team, backend-devs (optional)",
+      "descriptionPlaceholder": "Enter user group description (optional)"
+    },
+    "userList": {
+      "searchPlaceholder": "Search members or add people",
+      "selectRole": "Select role",
+      "searchRoles": "Search roles..."
+    }
+  },
+  "userGuide": {
+    "mock": {
+      "messageChannel": "Message #engineering",
+      "messageDM": "Message Alice Chen"
+    }
+  },
+  "slackMigration": {
+    "tokenPlaceholder": "xoxp-…",
+    "slackChannelId": "C0…",
+    "destinationChannel": "Destination channel",
+    "startDatePlaceholder": "From the beginning"
+  },
+  "routes": {
+    "appsScreen": {
+      "searchPlaceholder": "Search apps by name, description or created by..."
+    },
+    "authScreen": {
+      "newWorkspaceNamePlaceholder": "Workspace name",
+      "orgNameExamplePlaceholder": "Juspay Inc",
+      "createOrgWorkspaceNamePlaceholder": "Engineering",
+      "fullNamePlaceholder": "Full name",
+      "emailPlaceholder": "Email address",
+      "passwordRequirementsPlaceholder": "Password (min 8 chars, 1 uppercase, 1 number, 1 special)",
+      "confirmPasswordPlaceholder": "Confirm password",
+      "sixDigitCodePlaceholder": "6-digit code",
+      "newPasswordPlaceholder": "New password (min 8 chars)",
+      "confirmNewPasswordPlaceholder": "Confirm new password",
+      "passwordPlaceholder": "Password"
+    },
+    "browserTabsScreen": {
+      "urlBarPlaceholder": "Enter a URL or search...",
+      "findInPagePlaceholder": "Find in page..."
+    },
+    "callDetailScreen": {
+      "detailedSummaryPlaceholder": "Detailed summary content...",
+      "prdPlaceholder": "PRD content..."
+    },
+    "callHistoryScreen": {
+      "searchByUserName": "Search by user name",
+      "searchByUserChannelGroup": "Search by user, channel, or group name",
+      "searchParticipantsPlaceholder": "Search participants..."
+    },
+    "confluenceMigrationScreen": {
+      "spaceKeyPlaceholder": "JR",
+      "autoResolveProjectPlaceholder": "Auto resolve by space name",
+      "searchProjectsPlaceholder": "Search projects...",
+      "selectChannelPlaceholder": "Select channel",
+      "searchChannelsPlaceholder": "Search channels..."
+    },
+    "dailyBriefScreen": {
+      "instructionsPlaceholder": "e.g. Keep it under six lines. Lead with anything touching payments, and always name who I am waiting on."
+    },
+    "dashboardCreation": {
+      "namePlaceholder": "Enter dashboard name",
+      "descriptionPlaceholder": "Enter description (optional)"
+    },
+    "formScreen": {
+      "searchPlaceholder": "Search Forms"
+    },
+    "intentPlaygroundScreen": {
+      "messagePlaceholder": "Type a message as it would appear in a channel…"
+    },
+    "jiraMigrationScreen": {
+      "mapUserEmailPlaceholder": "Map to Xyne user email",
+      "searchUsersPlaceholder": "Search users...",
+      "selectProjectPlaceholder": "Select project",
+      "searchProjectsPlaceholder": "Search projects...",
+      "selectChannelPlaceholder": "Select channel",
+      "searchChannelsPlaceholder": "Search channels...",
+      "timestampExamplePlaceholder": "2026-05-19T13:23:47.000Z",
+      "noMigrationsFoundPlaceholder": "No migrations found for this project",
+      "selectJiraProjectPlaceholder": "Select Jira project",
+      "selectProjectFirstPlaceholder": "Select a project first",
+      "searchJiraProjectsPlaceholder": "Search Jira projects...",
+      "selectProjectFirstShortPlaceholder": "Select project first",
+      "projectKeyExampleAbcPlaceholder": "ABC",
+      "projectKeyExampleEulPlaceholder": "EUL",
+      "selectBoardPlaceholder": "Select board",
+      "searchBoardsPlaceholder": "Search boards...",
+      "tagNamesExamplePlaceholder": "bug, urgent, customer-escalation",
+      "issueKeysExamplePlaceholder": "JP-1234, JP-4566",
+      "selectXyneBoardPlaceholder": "Select Xyne board",
+      "searchEpicsPlaceholder": "Search epics...",
+      "searchAssigneesPlaceholder": "Search assignees...",
+      "searchReportersPlaceholder": "Search reporters...",
+      "searchCreatorsPlaceholder": "Search creators...",
+      "searchLabelsPlaceholder": "Search labels..."
+    },
+    "kanbanBoardScreen": {
+      "savedViewNameExamplePlaceholder": "e.g. My open PRs",
+      "searchTicketsPlaceholder": "Search ticket ID or title"
+    },
+    "whatsAppMigrationPanel": {
+      "selectChannelOrUserPlaceholder": "Select channel or user",
+      "searchChannelsOrUsersPlaceholder": "Search channels or users...",
+      "mappingsExamplePlaceholder": "Alice Doe, alice@example.com\nBob Ops, bob@example.com"
+    },
+    "organisationsScreen": {
+      "communityWorkspaceNamePlaceholder": "Enter community workspace name...",
+      "orgNamePlaceholder": "Enter organisation name...",
+      "workspaceNamePlaceholder": "Enter workspace name...",
+      "ownerEmailPlaceholder": "owner@example.com",
+      "joinRequests": {
+        "commentPlaceholder": "Comment (required for reject)"
+      },
+      "memberEmailPlaceholder": "Enter email address..."
+    },
+    "productInsightsScreen": {
+      "selectProjectPlaceholder": "Select project",
+      "searchProjectsPlaceholder": "Search projects..."
+    },
+    "projectsListView": {
+      "searchPlaceholder": "Search by name or project code..."
+    },
+    "releaseManagerView": {
+      "searchPlaceholder": "Search by name or project code...",
+      "searchAttachableProjectsPlaceholder": "Search projects..."
+    },
+    "projectDetailScreen": {
+      "repositoryUrlPlaceholder": "https://github.com/org/repository.git"
+    },
+    "questionnaireScreen": {
+      "fullNamePlaceholder": "Enter your full name",
+      "rolePlaceholder": "Ex: Product Manager",
+      "companyNamePlaceholder": "Ex: Nike"
+    },
+    "rcaScreen": {
+      "searchSelectOwnerPlaceholder": "Search and select owner...",
+      "coeForm": {
+        "describeActionPlaceholder": "Describe the action to address the RCA...",
+        "selectQuickFixesPlaceholder": "Select quick fixes"
+      },
+      "impactForm": {
+        "describeImpactPlaceholder": "Describe the impact..."
+      },
+      "rcaForm": {
+        "titlePlaceholder": "Short RCA title...",
+        "overviewPlaceholder": "Short RCA overview...",
+        "rootCausePlaceholder": "Describe the root cause..."
+      },
+      "releaseMappingForm": {
+        "searchReleaseTicketsPlaceholder": "Search release tickets",
+        "searchApplicationReleasesPlaceholder": "Search application releases",
+        "selectReleaseTicketFirstPlaceholder": "Select a release ticket first",
+        "searchTicketsPlaceholder": "Search tickets",
+        "selectConfidencePlaceholder": "Select confidence"
+      }
+    },
+    "recordingDetailScreen": {
+      "detailedSummaryPlaceholder": "Detailed summary...",
+      "notesPlaceholder": "Recording notes..."
+    },
+    "recordingDetailV2Screen": {
+      "detailedSummaryPlaceholder": "Detailed summary",
+      "notesPlaceholder": "Add your notes here, you can view the transcript live in the transcript tab",
+      "recordingParticipants": {
+        "addPersonPlaceholder": "Add someone by name or email"
+      },
+      "postRecordingToEmailModal": {
+        "addPeoplePlaceholder": "Add people...",
+        "subjectPlaceholder": "Add a subject",
+        "recapPlaceholder": "Write the recording recap..."
+      },
+      "summaryTemplatesModal": {
+        "sectionTitlePlaceholder": "Section title",
+        "sectionInstructionsPlaceholder": "Instructions for this section…",
+        "searchTemplatesPlaceholder": "Search templates...",
+        "untitledTemplatePlaceholder": "Untitled template",
+        "meetingDescriptionPlaceholder": "Describe the meeting and the summary you want…",
+        "templateInstructionsPlaceholder": "Generate or write the instructions used to create summaries with this template…"
+      },
+      "recordingTicketLink": {
+        "linkPlaceholder": "Link",
+        "searchByIdOrTitlePlaceholder": "Search by ID or title"
+      }
+    },
+    "recordingsScreen": {
+      "findInTranscriptPlaceholder": "Find in transcript",
+      "typeSlashForCommandsPlaceholder": "Type '/' for commands",
+      "recordingTitlePlaceholder": "Recording title"
+    },
+    "recordingsV2Screen": {
+      "peoplePlaceholder": "People",
+      "searchPeoplePlaceholder": "Search people...",
+      "searchRecordingsPeopleLabelsPlaceholder": "Search recordings, people or labels..."
+    },
+    "releaseDetailScreen": {
+      "failureReasonPlaceholder": "Describe why this ticket failed QA / testing..."
+    },
+    "resourceAccessScreen": {
+      "searchUsersPlaceholder": "Search users by name or email..."
+    },
+    "roleManagementScreen": {
+      "roleNameExamplePlaceholder": "e.g. XYNE_PM",
+      "roleDescriptionPlaceholder": "What is this role for?",
+      "searchUsersPlaceholder": "Search users by name or email"
+    },
+    "sdlcHubDialog": {
+      "loadingProjectsPlaceholder": "Loading projects…",
+      "noProjectsAvailablePlaceholder": "No projects available",
+      "selectProjectPlaceholder": "Select a project",
+      "searchProjectsPlaceholder": "Search projects...",
+      "hubNameExamplePlaceholder": "e.g. Payments platform",
+      "chooseProjectFirstPlaceholder": "Choose a project first",
+      "noRepositoriesPlaceholder": "This project has no repositories",
+      "selectRepositoriesPlaceholder": "Select repositories",
+      "searchRepositoriesPlaceholder": "Search repositories..."
+    },
+    "sdlcHubSidebar": {
+      "selectHubPlaceholder": "Select hub",
+      "searchHubsAndRepositoriesPlaceholder": "Search hubs and repositories..."
+    },
+    "sdlcScreen": {
+      "trackPurposePlaceholder": "What is this track for?",
+      "workstreamNameExamplePlaceholder": "e.g. Payments revamp",
+      "workstreamDescriptionPlaceholder": "What is this workstream about?",
+      "artifactTitlePlaceholder": "Clear, outcome-focused title",
+      "selectTrackPlaceholder": "Select a track",
+      "searchTracksPlaceholder": "Search tracks...",
+      "searchArtifactsInTrackPlaceholder": "Search artifacts in this track…",
+      "aiFocusInstructionsPlaceholder": "e.g. focus on retry semantics and the ledger contract; skip the mobile flow.",
+      "artifactTypeExamplePlaceholder": "e.g. API Spec, RFC, Runbook",
+      "artifactStatusExamplePlaceholder": "e.g. Hub split, Approved, Archive",
+      "pasteEntityIdPlaceholder": "Paste stable entity ID"
+    },
+    "sdlcWikiSection": {
+      "startCommitShaPlaceholder": "40-character start commit SHA",
+      "searchWikiTitlesPlaceholder": "Search titles or repository paths",
+      "filterDocumentsPlaceholder": "Filter documents",
+      "filterFilesPlaceholder": "Filter files"
+    },
+    "supportScreen": {
+      "replyToReviewPlaceholder": "Reply to this review…"
+    },
+    "ticketReportsScreen": {
+      "allBoardsPlaceholder": "All boards",
+      "allStatusesPlaceholder": "All statuses",
+      "allPrioritiesPlaceholder": "All priorities",
+      "allAssigneesPlaceholder": "All assignees",
+      "allTagsPlaceholder": "All tags"
+    },
+    "userGroupsScreen": {
+      "searchPlaceholder": "Search user groups by name..."
+    },
+    "userGuideScreen": {
+      "trySearchPlaceholder": "Try 'create ticket' or 'Xyne AI'"
+    },
+    "whatsAppBulkMigrationScreen": {
+      "mappingsExamplePlaceholder": "Alice Example,alice@company.com\nBob Example,bob@company.com"
+    },
+    "workspaceManagementScreen": {
+      "generalAndMembersTab": {
+        "workspaceNamePlaceholder": "Enter workspace name...",
+        "workspaceDescriptionPlaceholder": "Enter workspace description...",
+        "searchMembersPlaceholder": "Search by name or email..."
+      },
+      "guestUsersTab": {
+        "searchPlaceholder": "Search by guest, email, entity, or grant type..."
+      },
+      "invitationsTab": {
+        "emailPlaceholder": "Enter email address..."
+      },
+      "organizationsTab": {
+        "orgNamePlaceholder": "Enter organization name...",
+        "orgDescriptionPlaceholder": "A brief description of your organization...",
+        "selectOrgPlaceholder": "Select an organization...",
+        "searchOrgsPlaceholder": "Search organizations..."
+      },
+      "repositoryCredentialsTab": {
+        "githubTokenPlaceholder": "github_pat_••••••••"
+      },
+      "toolbarTab": {
+        "searchToolbarItemsPlaceholder": "Search toolbar items..."
+      }
+    },
+    "workspaceSelectionScreen": {
+      "workspaceNameExamplePlaceholder": "e.g. Engineering, Design, Sales"
+    }
+  }
+}

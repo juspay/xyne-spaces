@@ -1,4 +1,5 @@
 import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   MailPlus,
   Send,
@@ -50,6 +51,7 @@ interface InvitationsTabProps {
 }
 
 export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const self = useSelf();
   const z = useZero();
   const [email, setEmail] = useState('');
@@ -223,7 +225,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
             <Input
               ref={emailInputRef}
               type='email'
-              placeholder='Enter email address...'
+              placeholder={t('routes.workspaceManagementScreen.invitationsTab.emailPlaceholder')}
               value={email}
               onChange={e => setEmail(e.target.value)}
               onKeyDown={e => {

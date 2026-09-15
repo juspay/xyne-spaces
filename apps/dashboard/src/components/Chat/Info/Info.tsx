@@ -1,4 +1,5 @@
 import React, { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
 import {
@@ -719,6 +720,7 @@ const ChannelMembers = ({
   channelDisplayName: string;
   popoverContainer?: HTMLElement | null;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const context = useAuthContextValues();
   const zero = useZero();
   const [searchQuery, setSearchQuery] = useState('');
@@ -931,7 +933,7 @@ const ChannelMembers = ({
           <Input
             ref={searchInputRef}
             type='text'
-            placeholder='Find members'
+            placeholder={t('chat.info.findMembers')}
             autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}

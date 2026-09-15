@@ -13,6 +13,7 @@
  * cannot derive any of the three for itself.
  */
 import { JSX, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, Tags } from 'lucide-react';
 import { useTagReview, type TagReviewFilters } from '../../../hooks/useTagReview';
 import { Button } from '../../ui/Button/Button';
@@ -46,6 +47,7 @@ const isDefault = (filters: TagReviewFilters): boolean =>
   filters.status[0] === 'UNDER_REVIEW';
 
 export const TagReviewView = (): JSX.Element => {
+  const { t } = useTranslation('placeholders');
   const [filters, setFilters] = useState<TagReviewFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
   // Held by ROW ID, not by name: two people proposing the same name give two rows, and
@@ -146,7 +148,7 @@ export const TagReviewView = (): JSX.Element => {
               selected={filters[group]}
               onChange={setGroup(group)}
               searchable={group === 'proposedBy'}
-              searchPlaceholder='Search name or email'
+              searchPlaceholder={t('tags.review.searchNameOrEmail')}
             />
           ))}
           {filtered && <ClearFiltersPill onClear={clear} />}

@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Plus, Search } from 'lucide-react';
 import { cn } from '@/utils/classNames';
@@ -110,6 +111,7 @@ const FilterButton = ({
 );
 
 const AgentsTab = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { data, isLoading, isError, refetch } = useClawAuthAgents();
   const agents = useMemo(() => data ?? [], [data]);
 
@@ -226,7 +228,7 @@ const AgentsTab = (): ReactElement => {
                   onChange={e => setQuery(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Search agents'
-                  placeholder='Search agents'
+                  placeholder={t('clawAgents.agentsTab.searchAgents')}
                   className='h-9 w-full rounded-lg border border-border bg-background pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
                 />
               </div>

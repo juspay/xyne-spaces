@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Play } from 'lucide-react';
 
 import Button from '../../components/ui/Button';
@@ -121,6 +122,7 @@ function scoreTone(score: number): string {
 }
 
 export default function IntentPlaygroundScreen(): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [text, setText] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +183,7 @@ export default function IntentPlaygroundScreen(): React.ReactElement {
                 void run(text);
               }
             }}
-            placeholder='Type a message as it would appear in a channel…'
+            placeholder={t('routes.intentPlaygroundScreen.messagePlaceholder')}
             className='min-h-[96px]'
           />
 

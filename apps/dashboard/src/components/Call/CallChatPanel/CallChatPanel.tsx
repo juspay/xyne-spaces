@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Room } from 'livekit-client';
 import { X, Send, User } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -122,6 +123,7 @@ export function CallChatPanel({
   onNewMessage,
   isExternalUser = false,
 }: CallChatPanelProps) {
+  const { t } = useTranslation('placeholders');
   const { messages, sendMessage, isLoading } = useCallChat(
     room,
     externalId,
@@ -230,7 +232,7 @@ export function CallChatPanel({
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder='Type a message...'
+            placeholder={t('ui.inputBox.typeMessage')}
             rows={1}
             className='flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none max-h-32 overflow-y-auto'
             style={{ minHeight: '38px' }}

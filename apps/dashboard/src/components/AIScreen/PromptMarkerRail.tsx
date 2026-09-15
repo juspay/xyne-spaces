@@ -20,6 +20,7 @@
  */
 
 import { useCallback, useEffect, useState, type ReactElement, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface PromptMarker {
   id: string;
@@ -38,6 +39,7 @@ export const PromptMarkerRail = ({
   /** The scroll container the ticks are measured against. */
   scrollRef: RefObject<HTMLDivElement | null>;
 }): ReactElement | null => {
+  const { t } = useTranslation('common');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
 
@@ -105,7 +107,7 @@ export const PromptMarkerRail = ({
         // the group, so crossing it keeps the last tick previewed.
         className='pointer-events-auto flex w-full flex-col items-start gap-[2px] py-2'
         role='navigation'
-        aria-label='Your prompts'
+        aria-label={t('aiScreen.promptMarkerRail.yourPromptsAriaLabel')}
         onMouseLeave={() => setHoverId(null)}
       >
         {markers.map(marker => {

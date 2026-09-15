@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2, Loader2, Mail, RefreshCw, UserCheck, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -51,6 +52,7 @@ const formatDate = (value: string): string =>
   });
 
 export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [requests, setRequests] = useState<WorkspaceJoinRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
@@ -187,7 +189,7 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
                           [request.id]: event.target.value,
                         }))
                       }
-                      placeholder='Comment (required for reject)'
+                      placeholder={t('routes.organisationsScreen.joinRequests.commentPlaceholder')}
                       disabled={isReviewing}
                     />
                     <div className='flex justify-end gap-2'>

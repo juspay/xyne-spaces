@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { FormContextType } from '@xyne/shared';
@@ -35,6 +36,7 @@ const SelectDropdown = ({
   placeholder,
   variant,
 }: SelectDropdownProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const entityOptions = useMemo<SelectorOption[]>(
     () =>
       options
@@ -64,8 +66,8 @@ const SelectDropdown = ({
         options={entityOptions}
         selectedValue={value || null}
         onSelect={selected => onChange(selected ?? '')}
-        placeholder={placeholder || 'Select...'}
-        searchPlaceholder='Search...'
+        placeholder={placeholder || t('board.select')}
+        searchPlaceholder={t('board.search')}
         showSearch
         width='100%'
         inputClassName={`w-full min-h-[32px] h-auto px-[8px] py-[7px] rounded-[8px] text-[13px] ${textColorClass} ${fontClass}`}
@@ -126,6 +128,7 @@ export const ConditionBuilder = ({
   nextStageName,
   allStages = [],
 }: ConditionBuilderProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   // Form state
   const [whenField, setWhenField] = useState<WhenFieldType | ''>('');
   const [whenCondition, setWhenCondition] = useState('');
@@ -389,7 +392,7 @@ export const ConditionBuilder = ({
                 value={whenField}
                 onChange={value => handleWhenFieldChange(value as WhenFieldType | '')}
                 options={WHEN_FIELD_OPTIONS}
-                placeholder='Choose field'
+                placeholder={t('board.condition.chooseField')}
               />
             </div>
 
@@ -400,7 +403,7 @@ export const ConditionBuilder = ({
                 onChange={setWhenCondition}
                 options={whenConditionOptions}
                 disabled={!whenField}
-                placeholder='Choose condition'
+                placeholder={t('board.condition.chooseCondition')}
                 variant='when'
               />
             </div>
@@ -412,7 +415,7 @@ export const ConditionBuilder = ({
                 onChange={setWhenValue}
                 options={whenValueOptions}
                 disabled={!whenCondition}
-                placeholder='Choose value'
+                placeholder={t('board.condition.chooseValue')}
               />
             </div>
           </div>
@@ -434,7 +437,7 @@ export const ConditionBuilder = ({
                 onChange={value => handleThenFieldChange(value as ThenFieldType | '')}
                 options={thenFieldOptions}
                 disabled={!whenValue}
-                placeholder='Choose field'
+                placeholder={t('board.condition.chooseField')}
               />
             </div>
 
@@ -445,7 +448,7 @@ export const ConditionBuilder = ({
                 onChange={setThenCondition}
                 options={thenConditionOptions}
                 disabled={!thenField}
-                placeholder='Choose condition'
+                placeholder={t('board.condition.chooseCondition')}
                 variant='then'
               />
             </div>
@@ -476,7 +479,7 @@ export const ConditionBuilder = ({
                   onChange={setThenValue}
                   options={thenValueOptions}
                   disabled={!thenCondition}
-                  placeholder='Choose value'
+                  placeholder={t('board.condition.chooseValue')}
                 />
               </div>
             )}

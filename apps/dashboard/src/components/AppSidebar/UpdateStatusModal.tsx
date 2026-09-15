@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import * as Select from '@radix-ui/react-select';
 import EmojiPicker, { EmojiStyle, Theme, EmojiClickData } from 'emoji-picker-react';
@@ -76,6 +77,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
   onClose,
   currentStatus,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { data: customEmojis } = useCustomEmojis();
   const { theme } = useTheme();
@@ -319,7 +321,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         height={400}
                         theme={emojiPickerTheme}
                         lazyLoadEmojis={true}
-                        searchPlaceHolder='Search emoji...'
+                        searchPlaceHolder={t('appSidebar.updateStatus.searchEmoji')}
                         customEmojis={customEmojis || []}
                         previewConfig={{ showPreview: true }}
                       />
@@ -333,7 +335,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 type='text'
                 value={statusText}
                 onChange={handleTextChange}
-                placeholder='Update your status'
+                placeholder={t('appSidebar.updateStatus.placeholder')}
                 className='w-full pl-10 text-foreground'
                 maxLength={100}
                 autoFocus={!isMobile}
@@ -439,7 +441,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         height={400}
                         theme={emojiPickerTheme}
                         lazyLoadEmojis={true}
-                        searchPlaceHolder='Search emoji...'
+                        searchPlaceHolder={t('appSidebar.updateStatus.searchEmoji')}
                         customEmojis={customEmojis || []}
                         previewConfig={{ showPreview: true }}
                       />
@@ -453,7 +455,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 type='text'
                 value={statusText}
                 onChange={handleTextChange}
-                placeholder='Update your status'
+                placeholder={t('appSidebar.updateStatus.placeholder')}
                 className='flex-1 bg-transparent border-none outline-none text-sm text-foreground'
                 maxLength={100}
                 data-track-event='blur'
@@ -520,7 +522,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   onSelect={date => setCustomDate(date ?? undefined)}
                   minDate={getStartOfToday()}
                   showClearButton={false}
-                  placeholder='Select date'
+                  placeholder={t('ui.datePicker.selectDate')}
                   inputClassName='h-9 flex-1 w-full'
                   contentClassName='z-[100]'
                 />

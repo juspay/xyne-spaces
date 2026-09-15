@@ -9,6 +9,7 @@ import {
 } from '@xyne/shared';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -41,6 +42,7 @@ export interface CreateDmFormData {
 }
 
 export const ComposeDmPanel: React.FC = () => {
+  const { t } = useTranslation('placeholders');
   const [searchValue, setSearchValue] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSearchUserOpen, setIsSearchUserOpen] = useState(false);
@@ -464,7 +466,7 @@ export const ComposeDmPanel: React.FC = () => {
                     ref={inputBoxRef}
                     id='dm-message'
                     value={field.state.value}
-                    placeholder='Say something to start the conversation...'
+                    placeholder={t('chat.addDmForm.sayHelloToStart')}
                     showTypingIndicator={false}
                     mentionItems={composeMentionItems}
                     onMentionSearch={handleMentionSearch}

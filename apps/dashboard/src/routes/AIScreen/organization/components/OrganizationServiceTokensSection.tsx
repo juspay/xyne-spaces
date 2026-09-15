@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Copy, KeyRound, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
@@ -46,6 +47,7 @@ export function OrganizationServiceTokensSection({
   orgId,
   canManage,
 }: OrganizationServiceTokensSectionProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
@@ -334,7 +336,7 @@ export function OrganizationServiceTokensSection({
               <Input
                 value={name}
                 maxLength={60}
-                placeholder='Production billing worker'
+                placeholder={t('aiScreen.organization.productionBillingWorker')}
                 onChange={event => setName(event.target.value)}
                 variant='flat'
                 data-track-category='Claw Organization'
@@ -371,7 +373,7 @@ export function OrganizationServiceTokensSection({
                 <>
                   <Input
                     value={memberQuery}
-                    placeholder='Search members by name or email'
+                    placeholder={t('aiScreen.organization.searchMembersByNameOrEmail')}
                     onChange={event => setMemberQuery(event.target.value)}
                     disabled={mintToken.isPending}
                     aria-label='Search members'
@@ -440,7 +442,7 @@ export function OrganizationServiceTokensSection({
               )}
               <Input
                 value={agentFilter}
-                placeholder='Filter agents'
+                placeholder={t('aiScreen.organization.filterAgents')}
                 onChange={event => setAgentFilter(event.target.value)}
                 disabled={mintToken.isPending}
                 aria-label='Filter agents'

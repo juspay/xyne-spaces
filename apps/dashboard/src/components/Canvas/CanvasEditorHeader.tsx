@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import Input from '../ui/Input';
 import { cn } from '../../utils/classNames';
 import type { Canvas } from './Canvas.types';
@@ -27,6 +28,7 @@ export const CanvasEditorHeader = ({
   onTitleSave,
   onTitleAutoFocused,
 }: CanvasEditorHeaderProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const displayTitle = title === UNTITLED_CANVAS_TITLE ? '' : title;
 
@@ -71,7 +73,7 @@ export const CanvasEditorHeader = ({
             }
           }}
           readOnly={!canEdit}
-          placeholder='Add page title'
+          placeholder={t('canvas.addPageTitle')}
           aria-label='Canvas title'
           data-testid='canvas-page-title-input'
           className={cn(

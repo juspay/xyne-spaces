@@ -1,4 +1,5 @@
 import { FC, ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   X,
   Palette,
@@ -67,6 +68,7 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
+import { SUPPORTED_UI_LOCALES, type UiLocale } from '../../../locales';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -109,6 +111,14 @@ const THEMES: Array<{ id: Theme; label: string; bg: string }> = [
   { id: 'summer_breeze', label: 'Summer Breeze', bg: 'var(--theme-preview-summer_breeze)' },
   { id: 'midnight', label: 'Midnight', bg: 'var(--theme-preview-midnight)' },
 ];
+
+// Each locale is labeled in its own language (not the currently-active UI
+// language) — the standard convention for a language picker, since a user
+// who can't read the current language still needs to find their own.
+const UI_LOCALE_LABELS: Record<UiLocale, string> = {
+  en: 'English',
+  es: 'Español',
+};
 
 const SectionHeader: FC<{ title: string; subtitle: string }> = ({ title, subtitle }) => (
   <div>
@@ -193,6 +203,49 @@ const QualitySelect: FC<{
   );
 };
 
+const LanguageSelect: FC<{
+  value: UiLocale;
+  onChange: (value: UiLocale) => void;
+}> = ({ value, onChange }) => {
+  const selectedLabel = UI_LOCALE_LABELS[value];
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id='display-language-label' className='text-sm font-medium text-foreground'>
+        Language
+      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            id='display-language'
+            type='button'
+            aria-labelledby='display-language-label display-language'
+            className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            data-track-category='PREFERENCES'
+            data-track-name='display-language'
+          >
+            <span className='truncate'>{selectedLabel}</span>
+            <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align='end' className='min-w-40'>
+          {SUPPORTED_UI_LOCALES.map(locale => (
+            <DropdownMenuItem
+              key={locale}
+              onClick={() => onChange(locale)}
+              className='flex items-center justify-between gap-3'
+              data-track-category='PREFERENCES'
+              data-track-name={`display-language-${locale}`}
+            >
+              <span>{UI_LOCALE_LABELS[locale]}</span>
+              {locale === value && <Check className='size-3.5 shrink-0 text-primary' aria-hidden />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+};
+
 // ─── Appearance ─────────────────────────────────────────────────────────────
 const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
@@ -233,6 +286,10 @@ const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
         </button>
       ))}
     </div>
+
+    <div className='pt-2 border-t border-border'>
+      <LanguageSelect value={state.displayLanguage} onChange={state.setDisplayLanguage} />
+    </div>
   </div>
 );
 
@@ -249,6 +306,7 @@ const KEYWORD_ERROR_MESSAGES: Record<'duplicate' | 'too_long' | 'limit_reached',
 };
 
 const NotificationKeywordsCard: FC = () => {
+  const { t } = useTranslation('placeholders');
   const { keywords, addKeyword, removeKeyword } = useNotificationKeywords();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -304,7 +362,7 @@ const NotificationKeywordsCard: FC = () => {
             handleAdd();
           }
         }}
-        placeholder='Add a keyword and press Enter'
+        placeholder={t('preferences.keywordPlaceholder')}
         className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
         data-track-category='PREFERENCES'
         data-track-name='AddNotificationKeyword'
@@ -849,6 +907,7 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 // ─── Password ───────────────────────────────────────────────────────────────
 const PasswordSection: FC = () => {
+  const { t } = useTranslation('placeholders');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -899,7 +958,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showCurrent ? 'text' : 'password'}
-              placeholder='Current password'
+              placeholder={t('preferences.currentPassword')}
               value={currentPassword}
               onChange={e => setCurrentPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
@@ -920,7 +979,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showNew ? 'text' : 'password'}
-              placeholder='New password (min 8 characters)'
+              placeholder={t('preferences.newPassword')}
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
@@ -941,7 +1000,7 @@ const PasswordSection: FC = () => {
           <div className='relative'>
             <input
               type={showConfirm ? 'text' : 'password'}
-              placeholder='Confirm new password'
+              placeholder={t('preferences.confirmPassword')}
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
               className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'

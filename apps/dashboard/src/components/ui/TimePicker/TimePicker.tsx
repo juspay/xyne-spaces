@@ -8,6 +8,7 @@ import * as Popover from '@radix-ui/react-popover';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import { Clock } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../../utils/classNames';
 import Input from '../Input';
 
@@ -35,10 +36,12 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   id,
   value,
   onChange,
-  placeholder = 'Select time',
+  placeholder,
   disabled = false,
   onClose,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.timePicker.selectTime');
   const [hour, setHour] = useState<string>(value ? (value.split(':')[0]?.split(' ')[0] ?? '') : '');
   const [minute, setMinute] = useState<string>(
     value ? (value.split(':')[1]?.split(' ')[0] ?? '') : '',
@@ -101,7 +104,9 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   }, [value, isEditing]);
 
   const displayTime =
-    hour && minute ? `${hour.padStart(2, '0')}:${minute.padStart(2, '0')} ${period}` : placeholder;
+    hour && minute
+      ? `${hour.padStart(2, '0')}:${minute.padStart(2, '0')} ${period}`
+      : resolvedPlaceholder;
 
   return (
     <Popover.Root
@@ -120,7 +125,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
             id={id}
             type='text'
             value={displayTime}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             disabled={disabled}
             readOnly
             className='pl-10 cursor-pointer hover:bg-muted text-foreground'

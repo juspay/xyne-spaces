@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Editor } from '@tiptap/react';
 import { MultipleCrossCancelDefault } from '@xyne/icons';
 import Dialog from '../Dialog';
@@ -109,84 +110,87 @@ export const LinkDialog: React.FC<LinkDialogProps> = ({
   isExistingLink,
   applyLink,
   removeLink,
-}) => (
-  <Dialog
-    open={open}
-    onOpenChange={setOpen}
-    {...(trigger !== undefined && { trigger })}
-    title={hasSelection ? 'Edit link' : 'Insert link'}
-    className='p-4 w-96 backdrop-blur-none'
-  >
-    <div className='space-y-3'>
-      <div className='flex items-center justify-between'>
-        <h2 className='text-sm font-medium text-foreground'>
-          {hasSelection ? 'Edit link' : 'Insert link'}
-        </h2>
-        <button
-          onClick={() => setOpen(false)}
-          data-track-category='EDITOR_TOOLBAR'
-          data-track-name='CLOSE_LINK_DIALOG'
-          className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
-        >
-          <MultipleCrossCancelDefault className='h-4 w-4' />
-        </button>
-      </div>
-
-      <div>
-        <input
-          type='text'
-          value={linkText}
-          onChange={e => setLinkText(e.target.value)}
-          placeholder='Link text'
-          autoFocus // eslint-disable-line jsx-a11y/no-autofocus
-          className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
-        />
-      </div>
-
-      <div>
-        <input
-          type='url'
-          value={linkUrl}
-          onChange={e => setLinkUrl(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && applyLink()}
-          placeholder='https://example.com'
-          className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
-        />
-      </div>
-
-      <div className='flex items-center justify-between pt-2'>
-        {isExistingLink && (
-          <Button
-            onClick={removeLink}
-            data-track-category='EDITOR_TOOLBAR'
-            data-track-name='REMOVE_LINK'
-            className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
-            variant='ghost'
-          >
-            Remove
-          </Button>
-        )}
-        <div className='flex gap-2 ml-auto'>
-          <Button
+}) => {
+  const { t } = useTranslation('placeholders');
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={setOpen}
+      {...(trigger !== undefined && { trigger })}
+      title={hasSelection ? 'Edit link' : 'Insert link'}
+      className='p-4 w-96 backdrop-blur-none'
+    >
+      <div className='space-y-3'>
+        <div className='flex items-center justify-between'>
+          <h2 className='text-sm font-medium text-foreground'>
+            {hasSelection ? 'Edit link' : 'Insert link'}
+          </h2>
+          <button
             onClick={() => setOpen(false)}
             data-track-category='EDITOR_TOOLBAR'
-            data-track-name='CANCEL_LINK'
-            variant='secondary'
-            className='rounded px-3 py-1.5 text-xs text-foreground'
+            data-track-name='CLOSE_LINK_DIALOG'
+            className='p-1 hover:bg-accent rounded text-muted-foreground hover:text-muted-foreground'
           >
-            Cancel
-          </Button>
-          <Button
-            onClick={applyLink}
-            data-track-category='EDITOR_TOOLBAR'
-            data-track-name='APPLY_LINK'
-            disabled={!linkUrl.trim()}
-            className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
-          >
-            {hasSelection && isExistingLink ? 'Update' : 'Apply'}
-          </Button>
+            <MultipleCrossCancelDefault className='h-4 w-4' />
+          </button>
+        </div>
+
+        <div>
+          <input
+            type='text'
+            value={linkText}
+            onChange={e => setLinkText(e.target.value)}
+            placeholder={t('ui.linkDialog.linkText')}
+            autoFocus // eslint-disable-line jsx-a11y/no-autofocus
+            className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+          />
+        </div>
+
+        <div>
+          <input
+            type='url'
+            value={linkUrl}
+            onChange={e => setLinkUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && applyLink()}
+            placeholder={t('ui.linkDialog.url')}
+            className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+          />
+        </div>
+
+        <div className='flex items-center justify-between pt-2'>
+          {isExistingLink && (
+            <Button
+              onClick={removeLink}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='REMOVE_LINK'
+              className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
+              variant='ghost'
+            >
+              Remove
+            </Button>
+          )}
+          <div className='flex gap-2 ml-auto'>
+            <Button
+              onClick={() => setOpen(false)}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='CANCEL_LINK'
+              variant='secondary'
+              className='rounded px-3 py-1.5 text-xs text-foreground'
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={applyLink}
+              data-track-category='EDITOR_TOOLBAR'
+              data-track-name='APPLY_LINK'
+              disabled={!linkUrl.trim()}
+              className='rounded bg-primary px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
+            >
+              {hasSelection && isExistingLink ? 'Update' : 'Apply'}
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
-  </Dialog>
-);
+    </Dialog>
+  );
+};

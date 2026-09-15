@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   X,
   Sparkles,
@@ -109,6 +110,7 @@ export const DraftCard = ({
   onCollapse,
   onSeeSources,
 }: DraftCardProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   // Inline citations (the [clf-…] tokens / [1.1] chips) are intentionally
   // stripped from the draft body — sources now live only in the sources panel
   // (auto-draft) or the AI sidebar (rerun / help-me-write).
@@ -437,7 +439,7 @@ export const DraftCard = ({
                 onRefine(instruction, { selectedText });
               }}
               disabled={isStreaming}
-              placeholder='Refine the selected text (e.g., make it warmer, clearer...)'
+              placeholder={t('desk.draft.refineSelectedText')}
             />
           </div>
         )}

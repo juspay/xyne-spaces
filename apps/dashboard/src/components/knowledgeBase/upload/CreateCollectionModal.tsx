@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Hash, Plus } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
@@ -36,6 +37,7 @@ const CreateCollectionModal = ({
   channels,
   onSuccess,
 }: CreateCollectionModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const zero = useZero();
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -174,7 +176,7 @@ const CreateCollectionModal = ({
               type='text'
               value={title}
               onChange={event => setTitle(event.target.value)}
-              placeholder='e.g. Product docs'
+              placeholder={t('knowledgeBase.createCollection.namePlaceholder')}
               disabled={isCreating}
               data-track-category='knowledge-base'
               data-track-name='collection-name-input'
@@ -193,8 +195,8 @@ const CreateCollectionModal = ({
                 options={channelOptions}
                 selectedValue={selectedChannelId}
                 onSelect={setSelectedChannelId}
-                placeholder='No channel — visible to the whole workspace'
-                searchPlaceholder='Search channels...'
+                placeholder={t('knowledgeBase.createCollection.channelPlaceholder')}
+                searchPlaceholder={t('knowledgeBase.createCollection.searchChannels')}
                 width='100%'
                 showClearButton
               />

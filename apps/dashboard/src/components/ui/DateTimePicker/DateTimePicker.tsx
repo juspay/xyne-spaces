@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import {
@@ -24,11 +25,13 @@ export interface DateTimePickerProps {
 export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   value,
   onChange,
-  placeholder = 'Select date and time',
+  placeholder,
   autoOpen = false,
   inline = false,
   onConfirm,
 }) => {
+  const { t } = useTranslation('placeholders');
+  const resolvedPlaceholder = placeholder ?? t('ui.dateTimePicker.selectDateTime');
   const [isOpen, setIsOpen] = useState(autoOpen);
   const [viewDate, setViewDate] = useState(() =>
     value instanceof Date && !isNaN(value.getTime()) ? value : new Date(),
@@ -352,7 +355,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
                   hour: '2-digit',
                   minute: '2-digit',
                 })
-              : placeholder}
+              : resolvedPlaceholder}
           </span>
           {isPast && <AlertCircle className='w-4 h-4 text-red-500' />}
         </button>

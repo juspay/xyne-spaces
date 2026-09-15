@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
@@ -31,6 +32,7 @@ export const AddSectionForm = ({
   submitLabel = 'Create section',
   title = 'Create a section',
 }: AddSectionFormProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [name, setName] = useState(initialName);
   const [emoji, setEmoji] = useState(initialEmoji);
   const [touched, setTouched] = useState(false);
@@ -106,7 +108,7 @@ export const AddSectionForm = ({
                 setEmoji('');
               }
             }}
-            placeholder='Ex: Project Beta'
+            placeholder={t('chat.sectionName.example')}
             maxLength={50}
             autoFocus
             autoComplete='off'

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ReactArtifactView } from './ReactArtifactView';
@@ -19,6 +20,7 @@ type SaveState = 'idle' | 'saving' | 'saved';
  * surface, so this is additive — anything that isn't an artifact is left alone.
  */
 export function MessageReactArtifacts({ message }: { message: Message }): ReactElement | null {
+  const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState<ReactArtifactRef | null>(null);
   // Keyed by attachmentId: one message can carry several artifacts, and each
   // saves independently.
@@ -52,11 +54,11 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
         onSuccess: () => setSaveStates(prev => ({ ...prev, [artifact.attachmentId]: 'saved' })),
         onError: (err: unknown) => {
           setSaveStates(prev => ({ ...prev, [artifact.attachmentId]: 'idle' }));
-          setSaveError(clawErrorText(err, 'Could not save this app.'));
+          setSaveError(clawErrorText(err, t('messageReactArtifacts.couldNotSave')));
         },
       });
     },
-    [saveMutation],
+    [saveMutation, t],
   );
 
   // `toArtifactRef` allocates, so without memoizing, every thread re-render
@@ -116,6 +118,7 @@ function ArtifactCard({
   onSave?: (a: ReactArtifactRef) => void;
   saveState: SaveState;
 }): ReactElement {
+  const { t } = useTranslation('common');
   const shownInPane = useIsShownInPane(artifact.savedAppId);
   const { active, enterForApp } = useAppCreationModeSignal();
   const { savedAppId, versionId } = artifact;
@@ -148,7 +151,11 @@ function ArtifactCard({
     <ReactArtifactView
       artifact={artifact}
       onExpand={expand}
-      expandLabel={savedAppId ? 'Open in the app panel' : 'Open full screen'}
+      expandLabel={
+        savedAppId
+          ? t('messageReactArtifacts.openInAppPanel')
+          : t('messageReactArtifacts.openFullScreen')
+      }
       {...(onSave ? { onSave } : {})}
       saveState={saveState}
     />

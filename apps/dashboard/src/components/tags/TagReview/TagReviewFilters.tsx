@@ -10,6 +10,7 @@
  * applied but not its own, so selecting one option never zeroes out its siblings.
  */
 import { JSX, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import type { VocabularyFacet } from '../../../api/threadTypeVocabularyApi';
 import { Button } from '../../ui/Button/Button';
@@ -36,8 +37,10 @@ export const TagReviewFilter = ({
   selected,
   onChange,
   searchable = false,
-  searchPlaceholder = 'Search',
+  searchPlaceholder,
 }: TagReviewFilterProps): JSX.Element => {
+  const { t } = useTranslation('placeholders');
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t('knowledgeBaseV2.searchField.default');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -94,8 +97,8 @@ export const TagReviewFilter = ({
             autoFocus
             value={search}
             onChange={event => setSearch(event.target.value)}
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
+            placeholder={resolvedSearchPlaceholder}
+            aria-label={resolvedSearchPlaceholder}
             data-track-category='TagReview'
             data-track-name='SearchFilter'
             className='w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground'

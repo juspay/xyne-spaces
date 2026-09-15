@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import Input from '../../../../ui/Input/Input';
@@ -14,6 +15,7 @@ export const AICategorySubmenu = ({
   onChange,
   availableCategories,
 }: AICategorySubmenuProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -81,7 +83,7 @@ export const AICategorySubmenu = ({
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search categories...'
+            placeholder={t('tickets.filters.searchCategories')}
             className='pl-9 h-9'
           />
         </div>

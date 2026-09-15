@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { CheckTickSingle, MultipleCrossCancelDefault, SearchDefault, Spinner } from '@xyne/icons';
@@ -32,6 +33,7 @@ import {
  * users with `ADMIN` on the `AUTOMATIONS` resource.
  */
 export function AutomationApprovalsList(): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const navigate = useNavigate();
   const me = useSelf();
   const zero = useZero();
@@ -111,7 +113,7 @@ export function AutomationApprovalsList(): React.ReactElement {
             <Input
               type='search'
               aria-label='Search proposals'
-              placeholder='Search proposals…'
+              placeholder={t('automation.approvals.searchProposals')}
               value={query}
               onChange={e => setQuery(e.target.value)}
               className='h-8 rounded-md pl-8 text-xs'
@@ -184,7 +186,7 @@ export function AutomationApprovalsList(): React.ReactElement {
           <Textarea
             value={rejectNote}
             onChange={e => setRejectNote(e.target.value)}
-            placeholder='Why are you rejecting this?'
+            placeholder={t('automation.whyRejecting')}
             rows={4}
             data-track-category='automation-approvals'
             data-track-name='reject-note'

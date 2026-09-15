@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { FilterSelect } from './components/FilterSelect';
@@ -37,6 +38,7 @@ export function UsageTab({
   orgNamesById: Record<string, string>;
   showOrgLabels: boolean;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [range, setRange] = useState<AdminDateRange>(30);
   const [query, setQuery] = useState('');
 
@@ -70,7 +72,7 @@ export function UsageTab({
         <AdminSearchField
           value={query}
           onChange={setQuery}
-          placeholder='Search agents'
+          placeholder={t('aiScreen.searchAgents')}
           ariaLabel='Search agent usage'
           trackName='Admin: search usage'
           className='w-full'

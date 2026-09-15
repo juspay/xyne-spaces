@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
@@ -274,6 +275,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   onChange,
   className,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [presetOpen, setPresetOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
 
@@ -417,14 +419,14 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
               <TimePicker
                 value={dateRange ? formatTimeLabel(dateRange.startDate) : ''}
                 onChange={value => handleTimeChange('startDate', false, value)}
-                placeholder='Start time'
+                placeholder={t('ui.dateRangeFilter.startTime')}
                 disabled={!dateRange}
               />
               <span className='text-xs text-muted-foreground'>–</span>
               <TimePicker
                 value={dateRange ? formatTimeLabel(dateRange.endDate) : ''}
                 onChange={value => handleTimeChange('endDate', true, value)}
-                placeholder='End time'
+                placeholder={t('ui.dateRangeFilter.endTime')}
                 disabled={!dateRange}
               />
             </div>

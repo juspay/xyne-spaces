@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button/index';
 import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
@@ -28,6 +29,7 @@ export function CreateScheduleDialog({
   saving,
   onCreate,
 }: CreateScheduleDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const [task, setTask] = useState('');
   const [label, setLabel] = useState('');
   const [type, setType] = useState<'once' | 'cron'>('cron');
@@ -111,7 +113,7 @@ export function CreateScheduleDialog({
             setTask(e.target.value);
             setError(null);
           }}
-          placeholder='eg. Summarise yesterday’s error buckets and post the top three'
+          placeholder={t('aiScreen.library.agents.schedulePrompt')}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: schedule task'
           className={`${FIELD} h-[86px] resize-y`}
@@ -126,7 +128,7 @@ export function CreateScheduleDialog({
           id='schedule-label'
           value={label}
           onChange={e => setLabel(e.target.value)}
-          placeholder='Optional — shown in the schedules list'
+          placeholder={t('aiScreen.library.agents.scheduleLabelOptional')}
           data-track-category='Claw Agents'
           data-track-name='Agent detail v2: schedule label'
           className={`${FIELD} h-11 py-0`}
@@ -158,7 +160,7 @@ export function CreateScheduleDialog({
               }}
               spellCheck={false}
               aria-label='Cron expression'
-              placeholder='0 9 * * 1-5'
+              placeholder={t('aiScreen.library.agents.cronExpression')}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: schedule cron'
               className={`${FIELD} h-11 py-0 font-mono text-xs`}
@@ -178,7 +180,7 @@ export function CreateScheduleDialog({
               }}
               inputMode='numeric'
               aria-label='Minutes from now'
-              placeholder='60'
+              placeholder={t('aiScreen.library.agents.timeoutSeconds')}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: schedule delay'
               className={`${FIELD} h-11 py-0`}

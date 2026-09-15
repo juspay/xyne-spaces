@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { PartialBlock } from '@blocknote/core';
 import type { CanvasVersion } from '@xyne/shared';
 import { Clock3, Copy, MoreHorizontal, Pencil, RotateCcw, X } from 'lucide-react';
@@ -51,6 +52,7 @@ export const CanvasVersionHistory = ({
   onRename,
   onMakeCopy,
 }: CanvasVersionHistoryProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const users = useUsers();
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renameVersion, setRenameVersion] = useState<CanvasVersionRecord | null>(null);
@@ -250,7 +252,7 @@ export const CanvasVersionHistory = ({
             value={renameValue}
             onChange={event => setRenameValue(event.target.value)}
             maxLength={120}
-            placeholder='Version name'
+            placeholder={t('canvas.versionName')}
           />
           <div className='flex justify-end gap-2'>
             <Button

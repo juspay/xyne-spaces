@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation } from '@tanstack/react-query';
 import { Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function PersonaStep({ state, update }: Props): ReactElement {
+  const { t } = useTranslation('placeholders');
   const generate = useMutation({
     mutationFn: generateAgentPrompt,
     onSuccess: prompt => {
@@ -37,7 +39,7 @@ export function PersonaStep({ state, update }: Props): ReactElement {
         <input
           value={state.aiIntent}
           onChange={e => update({ aiIntent: e.target.value })}
-          placeholder='Describe what this agent should do…'
+          placeholder={t('clawAgents.persona.describeAgentDo')}
           onKeyDown={e => {
             if (e.key === 'Enter') runGenerate();
           }}
@@ -69,7 +71,7 @@ export function PersonaStep({ state, update }: Props): ReactElement {
           id='claw-agent-system-prompt'
           value={state.systemPrompt}
           onChange={e => update({ systemPrompt: e.target.value })}
-          placeholder='You are a…'
+          placeholder={t('clawAgents.persona.youAre')}
           rows={10}
           data-track-category='Claw Agents'
           data-track-name='Agent system prompt input'

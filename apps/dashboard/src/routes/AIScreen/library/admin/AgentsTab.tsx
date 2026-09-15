@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -189,6 +190,7 @@ export function AgentsTab({
   showOrgLabels: boolean;
   registration: AgentRegistration;
 }): ReactElement {
+  const { t } = useTranslation('placeholders');
   const queryClient = useQueryClient();
   const [query, setQuery] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
@@ -269,8 +271,8 @@ export function AgentsTab({
       <AdminSearchField
         value={query}
         onChange={setQuery}
-        placeholder='Search agents'
-        ariaLabel='Search agents'
+        placeholder={t('aiScreen.searchAgents')}
+        ariaLabel={t('aiScreen.searchAgents')}
         trackName='Admin: search agents'
         className='w-full'
       />

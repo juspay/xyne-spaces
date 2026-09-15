@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FC, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createRoot, type Root } from 'react-dom/client';
 import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { Input } from '../ui/Input';
@@ -443,6 +444,7 @@ const getFilterRowGridClass = (filterCount: number): string => {
 };
 
 const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, table, wrapper }) => {
+  const { t } = useTranslation('placeholders');
   const initialMetadataRef = useRef<TableMetadata | null>(null);
   const getInitialMetadata = (): TableMetadata => {
     initialMetadataRef.current ??= getTableMetadata(table);
@@ -909,7 +911,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                               }}
                               value={filter.query}
                               className='h-[26px] min-w-0 border-0 bg-transparent px-0.5 text-xs leading-4 tracking-normal text-popover-foreground shadow-none outline-none placeholder:text-muted-foreground placeholder:opacity-80 focus-visible:border-0 focus-visible:ring-0'
-                              placeholder='Filter rows'
+                              placeholder={t('canvas.filterRows')}
                               aria-label='Filter table rows'
                               onFocus={() => {
                                 setOpenColumnFilterId(null);

@@ -1,4 +1,5 @@
 import { type ChangeEvent, ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChannelsByProjectId } from '../../hooks/useChannels';
 import { usePlatform } from '../../hooks/usePlatform';
 import { queries } from '../../zero/queries';
@@ -157,6 +158,7 @@ const clearPersistedJiraMigrationJob = (): void => {
 };
 
 const JiraMigrationScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { isMobile } = usePlatform();
   const [projects] = useCachedQuery(queries.getAllProjects());
   const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
@@ -571,8 +573,8 @@ const JiraMigrationScreen = (): ReactElement => {
             return next;
           });
         }}
-        placeholder='Map to Xyne user email'
-        searchPlaceholder='Search users...'
+        placeholder={t('routes.jiraMigrationScreen.mapUserEmailPlaceholder')}
+        searchPlaceholder={t('routes.jiraMigrationScreen.searchUsersPlaceholder')}
         width='100%'
         testId={`jira-unresolved-map-${primary}`}
       />
@@ -1599,8 +1601,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setChannelMoveSourceProjectId(value ?? '');
                         setChannelMoveChannelId('');
                       }}
-                      placeholder='Select project'
-                      searchPlaceholder='Search projects...'
+                      placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchProjectsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-source-project'
                     />
@@ -1618,8 +1620,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       }))}
                       selectedValue={channelMoveChannelId || null}
                       onSelect={value => setChannelMoveChannelId(value ?? '')}
-                      placeholder='Select channel'
-                      searchPlaceholder='Search channels...'
+                      placeholder={t('routes.jiraMigrationScreen.selectChannelPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchChannelsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-channel'
                     />
@@ -1640,8 +1642,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       }))}
                       selectedValue={channelMoveTargetProjectId || null}
                       onSelect={value => setChannelMoveTargetProjectId(value ?? '')}
-                      placeholder='Select project'
-                      searchPlaceholder='Search projects...'
+                      placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchProjectsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-target-project'
                     />
@@ -1662,7 +1664,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
                         setChannelMoveUpdatedAt(e.target.value)
                       }
-                      placeholder='2026-05-19T13:23:47.000Z'
+                      placeholder={t('routes.jiraMigrationScreen.timestampExamplePlaceholder')}
                     />
                     <p className='mt-2 text-xs text-muted-foreground'>
                       Leave empty to use current time.
@@ -1717,8 +1719,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setPurgeConfirmText('');
                         setPurgeResult(null);
                       }}
-                      placeholder='Select project'
-                      searchPlaceholder='Search projects...'
+                      placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchProjectsPlaceholder')}
                       width='100%'
                       testId='jira-purge-project'
                     />
@@ -1744,11 +1746,13 @@ const JiraMigrationScreen = (): ReactElement => {
                       placeholder={
                         purgeProjectId
                           ? purgeMigrationHistory.length === 0
-                            ? 'No migrations found for this project'
-                            : 'Select Jira project'
-                          : 'Select a project first'
+                            ? t('routes.jiraMigrationScreen.noMigrationsFoundPlaceholder')
+                            : t('routes.jiraMigrationScreen.selectJiraProjectPlaceholder')
+                          : t('routes.jiraMigrationScreen.selectProjectFirstPlaceholder')
                       }
-                      searchPlaceholder='Search Jira projects...'
+                      searchPlaceholder={t(
+                        'routes.jiraMigrationScreen.searchJiraProjectsPlaceholder',
+                      )}
                       width='100%'
                       testId='jira-purge-external-source'
                     />
@@ -1771,7 +1775,9 @@ const JiraMigrationScreen = (): ReactElement => {
                         setPurgeConfirmText(e.target.value)
                       }
                       placeholder={
-                        purgeProjectId ? `DELETE ${purgeProjectId}` : 'Select project first'
+                        purgeProjectId
+                          ? `DELETE ${purgeProjectId}`
+                          : t('routes.jiraMigrationScreen.selectProjectFirstShortPlaceholder')
                       }
                     />
                     <p className='mt-2 text-xs text-muted-foreground'>
@@ -1972,7 +1978,7 @@ const JiraMigrationScreen = (): ReactElement => {
                         setMoveChannelJiraProjectKey(e.target.value);
                         setMoveChannelResult(null);
                       }}
-                      placeholder='ABC'
+                      placeholder={t('routes.jiraMigrationScreen.projectKeyExampleAbcPlaceholder')}
                     />
                   </div>
 
@@ -1994,8 +2000,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setMoveChannelConfirmText('');
                         setMoveChannelResult(null);
                       }}
-                      placeholder='Select project'
-                      searchPlaceholder='Search projects...'
+                      placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchProjectsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-project'
                     />
@@ -2016,8 +2022,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setMoveChannelSourceId(value ?? '');
                         setMoveChannelResult(null);
                       }}
-                      placeholder='Select channel'
-                      searchPlaceholder='Search channels...'
+                      placeholder={t('routes.jiraMigrationScreen.selectChannelPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchChannelsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-source'
                     />
@@ -2040,8 +2046,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setMoveChannelTargetId(value ?? '');
                         setMoveChannelResult(null);
                       }}
-                      placeholder='Select channel'
-                      searchPlaceholder='Search channels...'
+                      placeholder={t('routes.jiraMigrationScreen.selectChannelPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchChannelsPlaceholder')}
                       width='100%'
                       testId='jira-move-channel-target'
                     />
@@ -2193,7 +2199,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
                         setMoveJiraProjectKey(e.target.value)
                       }
-                      placeholder='ABC'
+                      placeholder={t('routes.jiraMigrationScreen.projectKeyExampleAbcPlaceholder')}
                     />
                   </div>
 
@@ -2216,8 +2222,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setMoveConfirmText('');
                         setMoveResult(null);
                       }}
-                      placeholder='Select project'
-                      searchPlaceholder='Search projects...'
+                      placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchProjectsPlaceholder')}
                       width='100%'
                       testId='jira-move-project-xyne-project'
                     />
@@ -2235,8 +2241,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       }))}
                       selectedValue={moveJiraChannelId || null}
                       onSelect={value => setMoveJiraChannelId(value ?? '')}
-                      placeholder='Select channel'
-                      searchPlaceholder='Search channels...'
+                      placeholder={t('routes.jiraMigrationScreen.selectChannelPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchChannelsPlaceholder')}
                       width='100%'
                       testId='jira-move-project-channel'
                     />
@@ -2254,8 +2260,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       }))}
                       selectedValue={moveSourceBoardId || null}
                       onSelect={value => setMoveSourceBoardId(value ?? '')}
-                      placeholder='Select board'
-                      searchPlaceholder='Search boards...'
+                      placeholder={t('routes.jiraMigrationScreen.selectBoardPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchBoardsPlaceholder')}
                       width='100%'
                       testId='jira-move-project-source-board'
                     />
@@ -2273,8 +2279,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       }))}
                       selectedValue={moveTargetBoardId || null}
                       onSelect={value => setMoveTargetBoardId(value ?? '')}
-                      placeholder='Select board'
-                      searchPlaceholder='Search boards...'
+                      placeholder={t('routes.jiraMigrationScreen.selectBoardPlaceholder')}
+                      searchPlaceholder={t('routes.jiraMigrationScreen.searchBoardsPlaceholder')}
                       width='100%'
                       testId='jira-move-project-target-board'
                     />
@@ -2296,7 +2302,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       setMoveTagNamesInput(e.target.value);
                       setMoveResult(null);
                     }}
-                    placeholder='bug, urgent, customer-escalation'
+                    placeholder={t('routes.jiraMigrationScreen.tagNamesExamplePlaceholder')}
                   />
                   <p className='mt-2 text-xs text-muted-foreground'>
                     Optional. When set, only tickets with any of these tags will be moved.
@@ -2460,7 +2466,9 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPerBoardMappings([]);
                           setPerBoardJobs([]);
                         }}
-                        placeholder='EUL'
+                        placeholder={t(
+                          'routes.jiraMigrationScreen.projectKeyExampleEulPlaceholder',
+                        )}
                       />
                       <p className='mt-2 text-xs text-muted-foreground'>
                         Short Jira project identifier, for example `EUL`.
@@ -2486,7 +2494,7 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageTokens([undefined]);
                           setPageIndex(0);
                         }}
-                        placeholder='JP-1234, JP-4566'
+                        placeholder={t('routes.jiraMigrationScreen.issueKeysExamplePlaceholder')}
                       />
                       <p className='mt-2 text-xs text-muted-foreground'>
                         Optional. Migrate only specific ticket keys. If provided, these keys take
@@ -2532,8 +2540,10 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageTokens([undefined]);
                           setPageIndex(0);
                         }}
-                        placeholder='Select project'
-                        searchPlaceholder='Search projects...'
+                        placeholder={t('routes.jiraMigrationScreen.selectProjectPlaceholder')}
+                        searchPlaceholder={t(
+                          'routes.jiraMigrationScreen.searchProjectsPlaceholder',
+                        )}
                         width='100%'
                         testId='jira-target-project'
                       />
@@ -2567,8 +2577,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageTokens([undefined]);
                           setPageIndex(0);
                         }}
-                        placeholder='Select board'
-                        searchPlaceholder='Search boards...'
+                        placeholder={t('routes.jiraMigrationScreen.selectBoardPlaceholder')}
+                        searchPlaceholder={t('routes.jiraMigrationScreen.searchBoardsPlaceholder')}
                         width='100%'
                         testId='jira-target-board'
                       />
@@ -2600,8 +2610,10 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageTokens([undefined]);
                           setPageIndex(0);
                         }}
-                        placeholder='Select channel'
-                        searchPlaceholder='Search channels...'
+                        placeholder={t('routes.jiraMigrationScreen.selectChannelPlaceholder')}
+                        searchPlaceholder={t(
+                          'routes.jiraMigrationScreen.searchChannelsPlaceholder',
+                        )}
                         width='100%'
                         testId='jira-target-channel'
                       />
@@ -2715,8 +2727,12 @@ const JiraMigrationScreen = (): ReactElement => {
                                             ),
                                           );
                                         }}
-                                        placeholder='Select Xyne board'
-                                        searchPlaceholder='Search boards...'
+                                        placeholder={t(
+                                          'routes.jiraMigrationScreen.selectXyneBoardPlaceholder',
+                                        )}
+                                        searchPlaceholder={t(
+                                          'routes.jiraMigrationScreen.searchBoardsPlaceholder',
+                                        )}
                                         width='220px'
                                         testId={`per-board-selector-${mapping.jiraBoard.id}`}
                                       />
@@ -2955,8 +2971,10 @@ const JiraMigrationScreen = (): ReactElement => {
                                     epicKeys: values,
                                   }))
                                 }
-                                placeholder='Search epics...'
-                                searchPlaceholder='Search epics...'
+                                placeholder={t('routes.jiraMigrationScreen.searchEpicsPlaceholder')}
+                                searchPlaceholder={t(
+                                  'routes.jiraMigrationScreen.searchEpicsPlaceholder',
+                                )}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />
@@ -2979,8 +2997,12 @@ const JiraMigrationScreen = (): ReactElement => {
                                     assigneeAccountIds: values,
                                   }))
                                 }
-                                placeholder='Search assignees...'
-                                searchPlaceholder='Search assignees...'
+                                placeholder={t(
+                                  'routes.jiraMigrationScreen.searchAssigneesPlaceholder',
+                                )}
+                                searchPlaceholder={t(
+                                  'routes.jiraMigrationScreen.searchAssigneesPlaceholder',
+                                )}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />
@@ -3003,8 +3025,12 @@ const JiraMigrationScreen = (): ReactElement => {
                                     reporterAccountIds: values,
                                   }))
                                 }
-                                placeholder='Search reporters...'
-                                searchPlaceholder='Search reporters...'
+                                placeholder={t(
+                                  'routes.jiraMigrationScreen.searchReportersPlaceholder',
+                                )}
+                                searchPlaceholder={t(
+                                  'routes.jiraMigrationScreen.searchReportersPlaceholder',
+                                )}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />
@@ -3027,8 +3053,12 @@ const JiraMigrationScreen = (): ReactElement => {
                                     creatorAccountIds: values,
                                   }))
                                 }
-                                placeholder='Search creators...'
-                                searchPlaceholder='Search creators...'
+                                placeholder={t(
+                                  'routes.jiraMigrationScreen.searchCreatorsPlaceholder',
+                                )}
+                                searchPlaceholder={t(
+                                  'routes.jiraMigrationScreen.searchCreatorsPlaceholder',
+                                )}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />
@@ -3047,8 +3077,12 @@ const JiraMigrationScreen = (): ReactElement => {
                                 onMultiSelect={values =>
                                   setFilters(previous => ({ ...previous, labels: values }))
                                 }
-                                placeholder='Search labels...'
-                                searchPlaceholder='Search labels...'
+                                placeholder={t(
+                                  'routes.jiraMigrationScreen.searchLabelsPlaceholder',
+                                )}
+                                searchPlaceholder={t(
+                                  'routes.jiraMigrationScreen.searchLabelsPlaceholder',
+                                )}
                                 width='100%'
                                 inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
                               />

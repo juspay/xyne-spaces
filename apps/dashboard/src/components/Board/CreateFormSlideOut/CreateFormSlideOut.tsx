@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, GripVertical, Trash2, ChevronDown } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { FormFieldType, type FieldEnumOption } from '@xyne/shared';
@@ -138,6 +139,7 @@ const FieldEditor = ({
   onExpandBranchField,
   onToggleExpandBranchField,
 }: FieldEditorProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const showOptions = isSelectField(field.fieldType);
   const options = field.fieldEnum ?? [];
   const supportsBranching =
@@ -336,7 +338,7 @@ const FieldEditor = ({
               onChange={value => onNameChange(field.id, value)}
               projectId={projectId}
               inputRef={el => registerInputRef(field.id, el)}
-              placeholder='Enter question'
+              placeholder={t('board.form.enterQuestion')}
               className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
               data-track-category='board_config'
               data-track-name='field_name_input'
@@ -388,7 +390,7 @@ const FieldEditor = ({
                       value={bulkDraft}
                       onChange={e => setBulkDraft(e.target.value)}
                       onBlur={applyBulkDraft}
-                      placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
+                      placeholder={t('board.form.onePerLineOptions')}
                       rows={8}
                       className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
                       data-track-category='board_config'
@@ -557,6 +559,7 @@ export const CreateFormSlideOut = ({
   embedded = false,
   submitLabel = 'Save',
 }: CreateFormSlideOutProps): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [fields, setFields] = useState<FormField[]>([]);
@@ -944,7 +947,7 @@ export const CreateFormSlideOut = ({
               type='text'
               value={formName}
               onChange={e => setFormName(e.target.value)}
-              placeholder='Form Title'
+              placeholder={t('board.form.formTitle')}
               className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
               data-track-category='board_config'
               data-track-name='form_title_input'
@@ -952,7 +955,7 @@ export const CreateFormSlideOut = ({
             <textarea
               value={formDescription}
               onChange={e => setFormDescription(e.target.value)}
-              placeholder='Add description'
+              placeholder={t('board.form.addDescription')}
               rows={2}
               className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
               data-track-category='board_config'

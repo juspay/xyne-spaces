@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -45,6 +46,7 @@ interface ClawAgentCreateV2Props {
 }
 
 const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -141,7 +143,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                       ...(state.slugManual ? {} : { slug: slugify(next) }),
                     })
                   }
-                  placeholder='Name your agent'
+                  placeholder={t('aiScreen.library.agents.nameYourAgent')}
                   aria-label='Agent name'
                   autoFocus
                   data-track-category='Claw Agents'
@@ -160,7 +162,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                       const next = slugify(raw);
                       update({ slugManual: next.length > 0, slug: next });
                     }}
-                    placeholder='Agent handle'
+                    placeholder={t('aiScreen.library.agents.agentHandle')}
                     aria-label='Agent handle'
                     style={{ width: inlineWidth(slug, 'Agent handle') }}
                     className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
@@ -199,7 +201,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 id='agent-v2-description'
                 value={state.description}
                 onChange={e => update({ description: e.target.value })}
-                placeholder='Add a description so people and agents understand when to use it.'
+                placeholder={t('aiScreen.library.agents.description')}
                 data-track-category='Claw Agents'
                 data-track-name='Create agent v2: description'
                 className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
@@ -219,7 +221,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   id='agent-v2-prompt'
                   value={state.systemPrompt}
                   onChange={e => update({ systemPrompt: e.target.value })}
-                  placeholder='Ai drafted instructions will be updated here...'
+                  placeholder={t('aiScreen.library.agents.aiDraftedInstructions')}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: prompt'
                   className='h-[250px] w-full resize-none bg-transparent p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
@@ -238,7 +240,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                         onKeyDown={e => {
                           if (e.key === 'Enter') runGenerate();
                         }}
-                        placeholder='Describe what this agent should do…'
+                        placeholder={t('aiScreen.library.agents.describeAgent')}
                         aria-label='Describe what this agent should do'
                         data-track-category='Claw Agents'
                         data-track-name='Create agent v2: AI intent'

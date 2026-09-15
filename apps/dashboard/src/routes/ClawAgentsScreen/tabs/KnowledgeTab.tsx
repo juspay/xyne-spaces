@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, Search } from 'lucide-react';
@@ -60,6 +61,7 @@ const KB_SCOPES = [
  * the header's Persona/Behaviour save — same convention as ModelProviderTab.
  */
 const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const canEdit = permissions.canEdit;
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -300,7 +302,7 @@ const KnowledgeTab = ({ agent, permissions }: KnowledgeTabProps): ReactElement =
                 <Input
                   value={skillSearch}
                   onChange={e => setSkillSearch(e.target.value)}
-                  placeholder='Search skills…'
+                  placeholder={t('clawAgents.knowledge.searchSkills')}
                   className='pl-8'
                 />
               </div>

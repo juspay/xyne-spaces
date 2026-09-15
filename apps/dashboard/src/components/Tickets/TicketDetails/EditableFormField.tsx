@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SingleSelect, SelectMenuAlignment } from '@juspay/blend-design-system';
 import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { FormFieldType, User } from '@xyne/shared';
@@ -81,6 +82,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   fieldEnum,
   onSave,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(
     fieldType === FormFieldType.MULTI_SELECT
@@ -279,7 +281,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                 }
               }}
               enableSearch
-              searchPlaceholder='Search...'
+              searchPlaceholder={t('tickets.cellEditor.searchDefault')}
               alignment={SelectMenuAlignment.START}
             />
           </div>

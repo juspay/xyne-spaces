@@ -1,5 +1,6 @@
 import { ArrowLeft, Loader2, Pencil, SendHorizontal, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { DEFAULT_SUMMARY_FIELDS, SUMMARY_PROMPT_MAX_LENGTH } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
@@ -32,6 +33,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
   canManage,
   onBack,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const savedPrompt = currentPrompt ?? DEFAULT_SUMMARY_FIELDS;
   const [draft, setDraft] = useState<string>(savedPrompt);
@@ -266,7 +268,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                         void handleEditWithAI();
                       }
                     }}
-                    placeholder='Describe what you want to change here'
+                    placeholder={t('chat.callSummary.describeChange')}
                     disabled={aiLoading}
                     className='w-full rounded-[10px] border border-border bg-background py-2 pl-3 pr-10 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50'
                     data-track-category='CallSummary'

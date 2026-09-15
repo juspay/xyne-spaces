@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Button from '../../ui/Button';
@@ -34,6 +35,7 @@ export function AIInviteDialog({
   suggestedMessage,
   roomLink,
 }: AIInviteDialogProps): React.ReactElement | null {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
@@ -202,7 +204,7 @@ export function AIInviteDialog({
             id='invite-message'
             value={message}
             onChange={e => setMessage(e.target.value)}
-            placeholder='Add a message for the invite...'
+            placeholder={t('call.aiInvite.messagePlaceholder')}
             className='w-full px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none'
             rows={3}
             data-track-event='change'

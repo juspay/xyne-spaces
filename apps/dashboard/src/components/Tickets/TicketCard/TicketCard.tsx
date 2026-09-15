@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CalendarDefault as Calendar,
   UserDefault as User,
@@ -148,6 +149,7 @@ const AssigneeEditor: React.FC<{
   onOpenChange: (open: boolean) => void;
   channelId: string | undefined;
 }> = ({ selectedValue, onSelect, onOpenChange, channelId }) => {
+  const { t } = useTranslation('placeholders');
   const users = useUsers();
   const userGroups = useUserGroups();
   const selfId = useSelf()?.id;
@@ -180,8 +182,8 @@ const AssigneeEditor: React.FC<{
       options={options}
       selectedValue={selectedValue}
       onSelect={handleSelect}
-      placeholder='Select assignee'
-      searchPlaceholder='Search...'
+      placeholder={t('tickets.selectAssignee')}
+      searchPlaceholder={t('tickets.cellEditor.searchDefault')}
       variant='inline'
       virtualize
       isOpen={true}
@@ -231,6 +233,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   showEmailReads = false,
   slaPolicies: slaPoliciesProp,
 }) => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const { userID } = useAuthContextValues();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -708,8 +711,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           options={PriorityOptions}
                           selectedValue={ticket.priority || null}
                           onSelect={handlePriorityChange}
-                          placeholder='Select priority'
-                          searchPlaceholder='Search...'
+                          placeholder={t('tickets.selectPriority')}
+                          searchPlaceholder={t('tickets.cellEditor.searchDefault')}
                           variant='inline'
                           isOpen={true}
                           onOpenChange={open => !open && setIsEditingPriority(false)}

@@ -1,4 +1,5 @@
 import { type ChangeEvent, type ReactElement, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUsers } from '../../hooks/useUsers';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -80,6 +81,7 @@ const parseTargetValue = (
 };
 
 const WhatsAppMigrationPanel = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const [workspaceUsers] = useCachedQuery(queries.getUsersV2());
   const [selectedTargetValue, setSelectedTargetValue] = useState('');
   const [selectedChannelId, setSelectedChannelId] = useState('');
@@ -432,8 +434,10 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                           );
                         });
                     }}
-                    placeholder='Select channel or user'
-                    searchPlaceholder='Search channels or users...'
+                    placeholder={t('routes.whatsAppMigrationPanel.selectChannelOrUserPlaceholder')}
+                    searchPlaceholder={t(
+                      'routes.whatsAppMigrationPanel.searchChannelsOrUsersPlaceholder',
+                    )}
                     width='100%'
                   />
                 </div>
@@ -453,7 +457,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                   onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
                     setMappingsInput(event.target.value)
                   }
-                  placeholder={`Alice Doe, alice@example.com\nBob Ops, bob@example.com`}
+                  placeholder={t('routes.whatsAppMigrationPanel.mappingsExamplePlaceholder')}
                   className='min-h-[150px]'
                 />
                 <p className='mt-2 text-xs text-muted-foreground'>
@@ -545,8 +549,10 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                           );
                         });
                     }}
-                    placeholder='Select channel or user'
-                    searchPlaceholder='Search channels or users...'
+                    placeholder={t('routes.whatsAppMigrationPanel.selectChannelOrUserPlaceholder')}
+                    searchPlaceholder={t(
+                      'routes.whatsAppMigrationPanel.searchChannelsOrUsersPlaceholder',
+                    )}
                     width='100%'
                   />
                 </div>

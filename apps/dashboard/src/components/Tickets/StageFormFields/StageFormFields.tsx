@@ -1,4 +1,5 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shared';
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
@@ -61,6 +62,7 @@ export const StageFormFields = ({
   booleanButtonsFullWidth = false,
   readOnlySummary = false,
 }: StageFormFieldsProps): React.JSX.Element => {
+  const { t } = useTranslation('placeholders');
   const docAttachmentIds = useMemo(() => {
     const attachmentIds = new Set<string>();
     fields.forEach(field => {
@@ -220,7 +222,7 @@ export const StageFormFields = ({
                 >
                   <SingleSelect
                     fullWidth
-                    placeholder='Select an option'
+                    placeholder={t('tickets.stageForm.selectOption')}
                     items={[
                       {
                         items: fieldEnumOptions.map(option => ({ label: option, value: option })),
@@ -230,7 +232,7 @@ export const StageFormFields = ({
                     onSelect={value => updateFieldValue(field.id, [value])}
                     disabled={disabled}
                     enableSearch
-                    searchPlaceholder='Search options...'
+                    searchPlaceholder={t('tickets.filters.searchOptions')}
                     alignment={SelectMenuAlignment.START}
                   />
                 </div>
@@ -257,7 +259,7 @@ export const StageFormFields = ({
               {field.fieldType === FormFieldType.USER && (
                 <input
                   type='text'
-                  placeholder='User ID'
+                  placeholder={t('tickets.stageForm.userId')}
                   value={fieldValue[0] ?? ''}
                   onChange={event => updateFieldValue(field.id, [event.target.value])}
                   disabled={disabled}

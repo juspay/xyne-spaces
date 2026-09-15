@@ -5,6 +5,7 @@
  */
 
 import { KeyboardEvent, ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Layers, Loader2 } from 'lucide-react';
 import { CollaborativeCanvasEditor } from '../../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import { canvasService } from '../../../services/Canvas/canvasService';
@@ -25,6 +26,7 @@ export function RecordingCanvasPane({
   channelId,
   notesCanvasId,
 }: RecordingCanvasPaneProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const z = useZero();
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -169,7 +171,7 @@ export function RecordingCanvasPane({
               channelId={channelId ?? undefined}
               editable
               autoFocus
-              placeholder="Type '/' for commands"
+              placeholder={t('routes.recordingsScreen.typeSlashForCommandsPlaceholder')}
               onFileUpload={handleFileUpload}
             />
           </div>

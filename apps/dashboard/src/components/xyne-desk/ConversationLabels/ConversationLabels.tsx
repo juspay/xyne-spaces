@@ -1,4 +1,5 @@
 import { JSX, useMemo, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 import { Check, Plus, Tag as TagIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -56,6 +57,7 @@ export const ConversationLabels = ({
   slot,
   appliedMappings,
 }: ConversationLabelsProps): JSX.Element | null => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -157,7 +159,7 @@ export const ConversationLabels = ({
             setPickerOpen(false);
           }
         }}
-        placeholder='Search or create label…'
+        placeholder={t('desk.label.searchOrCreate')}
         className='w-full bg-transparent border-b border-border text-sm px-2 py-1.5 outline-none mb-1'
         data-track-category='Support'
         data-track-name='LabelSearchInput'

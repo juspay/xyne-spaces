@@ -1,4 +1,5 @@
 import { useMemo, useState, type ChangeEvent, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Hash, Lock, MessageCircle, Search, X } from 'lucide-react';
 import { ChannelVisibility, type ChannelSection } from '@xyne/shared';
 import { isDMChannel, getDMSearchableName } from './ChatDirectory.utils';
@@ -58,6 +59,7 @@ export const ManageSectionChannelsDialog = ({
   onSave,
   onClose,
 }: ManageSectionChannelsDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const original = useMemo(() => new Set(currentChannelIds), [currentChannelIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set(currentChannelIds));
   const [filter, setFilter] = useState('');
@@ -137,7 +139,7 @@ export const ManageSectionChannelsDialog = ({
         <input
           value={filter}
           onChange={(e: ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
-          placeholder='Filter by name…'
+          placeholder={t('chat.manageSectionChannels.filterByName')}
           autoComplete='off'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='MANAGE_SECTION_FILTER_CHANNELS'

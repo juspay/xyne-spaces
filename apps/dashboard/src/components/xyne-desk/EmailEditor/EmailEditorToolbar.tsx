@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import {
@@ -126,6 +127,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
   rightSlot,
   bubble = false,
 }) => {
+  const { t } = useTranslation('placeholders');
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
@@ -714,7 +716,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               type='text'
               value={linkText}
               onChange={e => setLinkText(e.target.value)}
-              placeholder='Link text'
+              placeholder={t('desk.email.linkText')}
               autoFocus // eslint-disable-line jsx-a11y/no-autofocus
               className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
@@ -728,7 +730,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               value={linkUrl}
               onChange={e => setLinkUrl(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && applyLink()}
-              placeholder='https://example.com'
+              placeholder={t('desk.email.urlExample')}
               className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
               data-track-name='edit-link-url'

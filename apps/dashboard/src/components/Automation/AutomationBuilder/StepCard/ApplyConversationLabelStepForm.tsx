@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { VariableRefField } from '../SchemaForm/VariableRefField';
@@ -48,6 +49,7 @@ export function ApplyConversationLabelStepForm({
   pathPrefix,
   variableSources,
 }: ApplyConversationLabelStepFormProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const { user } = useAuth();
   const cfg = value as ApplyConversationLabelConfigShape;
   const channelId =
@@ -109,7 +111,7 @@ export function ApplyConversationLabelStepForm({
           onChange={next => setField('channelId', next)}
           variableSources={variableSources}
           targetEntityKind={EntityKind.CHANNEL}
-          placeholder='Channel id or {{context…}}'
+          placeholder={`${t('automation.applyLabel.channelIdOrPrefix')} {{context…}}`}
         />
       </FieldRow>
 
@@ -135,7 +137,7 @@ export function ApplyConversationLabelStepForm({
             });
           }}
           list={`apply-label-suggestions-${pathPrefix}`}
-          placeholder='e.g. VIP / Refunds'
+          placeholder={t('automation.applyLabel.labelExample')}
           className='h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground'
           data-track-category='automation-builder'
           data-track-name='apply-conversation-label-name'

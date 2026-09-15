@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../../../utils/logger';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { Tooltip } from '../../../ui/Tooltip/Tooltip';
@@ -23,6 +24,7 @@ export function VariablePicker({
   targetEntityKind,
   targetLeafType,
 }: VariablePickerProps): React.ReactElement {
+  const { t } = useTranslation('placeholders');
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -115,7 +117,7 @@ export function VariablePicker({
           type='text'
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder='Search variables…'
+          placeholder={t('automation.variablePicker.searchVariables')}
           data-track-category='automation-builder'
           data-track-name='variable-picker-search'
           className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
