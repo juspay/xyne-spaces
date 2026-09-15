@@ -1216,5 +1216,51 @@
     "download": "Descargar",
     "pdfPreviewAriaLabel": "Vista previa del PDF",
     "fullscreenHint": "Usa la barra de herramientas del PDF para hacer zoom y navegar • Presiona Esc para cerrar"
+  },
+  "pptxViewer": {
+    "preview": "Vista previa",
+    "download": "Descargar",
+    "clickToPreview": "Haz clic para previsualizar",
+    "pptxPreviewAriaLabel": "Vista previa de PPTX",
+    "powerPointPresentation": "Presentación de PowerPoint",
+    "slidePreviewUnavailable": "La vista previa de la diapositiva no está disponible para este archivo.",
+    "downloadToView": "Descarga el archivo para verlo.",
+    "downloadPresentation": "Descargar presentación",
+    "escToClose": "Presiona Esc para cerrar • Descarga para ver en PowerPoint"
+  },
+  "labels": {
+    "labelsButton": "Etiquetas",
+    "searchLabelsAriaLabel": "Buscar etiquetas",
+    "noLabelsFound": "No se encontraron etiquetas",
+    "labelsSelectedAriaLabel": "Etiquetas, {{count}} seleccionadas",
+    "removeLabelAriaLabel": "Quitar etiqueta {{label}}",
+    "confirmSuggestedLabelAriaLabel": "Confirmar etiqueta sugerida {{label}}",
+    "dismissSuggestedLabelAriaLabel": "Descartar etiqueta sugerida {{label}}",
+    "maxLabelsReached": "Puedes agregar hasta {{max}} etiquetas",
+    "needsLetterOrNumber": "La etiqueta necesita al menos una letra o número",
+    "confirmFailed": "No se pudo confirmar la etiqueta",
+    "searchOrCreateAriaLabel": "Buscar o crear una etiqueta",
+    "noLabelsYet": "Aún no hay etiquetas",
+    "addLabelAriaLabel": "Agregar una etiqueta",
+    "labelSingular": "Etiqueta"
+  },
+  "globalTopBar": {
+    "searchUnavailable": "Búsqueda no disponible",
+    "goBackAriaLabel": "Retroceder",
+    "goForwardAriaLabel": "Avanzar",
+    "searchColon": "Buscar:",
+    "search": "Buscar",
+    "userGuide": "Guía del usuario",
+    "inviteLinkCopied": "Enlace de invitación copiado",
+    "inviteLinkCopyFailed": "No se pudo copiar el enlace de invitación",
+    "inviteToNamedWorkspace": "Invitar al espacio de trabajo {{name}}",
+    "inviteToWorkspace": "Invitar al espacio de trabajo",
+    "copyWorkspaceInviteLinkAriaLabel": "Copiar enlace de invitación al espacio de trabajo",
+    "copied": "Copiado",
+    "invite": "Invitar",
+    "stopRecording": "Detener grabación",
+    "support": "Soporte",
+    "reportIssue": "Reportar un problema",
+    "viewMyTickets": "Ver mis tickets"
   }
 }

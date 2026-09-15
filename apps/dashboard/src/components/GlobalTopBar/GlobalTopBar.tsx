@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import {
@@ -36,6 +37,7 @@ interface GlobalTopBarProps {
 }
 
 const NavigationAndSearch = (): ReactElement => {
+  const { t } = useTranslation('common');
   const navigate = useNavigate();
   const location = useLocation();
   const { searchMode } = useSearchMode();
@@ -109,7 +111,7 @@ const NavigationAndSearch = (): ReactElement => {
       return;
     }
     const success = invokeShortcut('mod+k');
-    if (!success) toast.error('Search unavailable');
+    if (!success) toast.error(t('globalTopBar.searchUnavailable'));
   };
 
   return (
@@ -124,7 +126,7 @@ const NavigationAndSearch = (): ReactElement => {
           onDoubleClick={e => e.stopPropagation()}
           disabled={!canGoBack}
           className={`p-1 ${canGoBack ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-          aria-label='go-back'
+          aria-label={t('globalTopBar.goBackAriaLabel')}
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='GoBack'
         >
@@ -141,7 +143,7 @@ const NavigationAndSearch = (): ReactElement => {
           onDoubleClick={e => e.stopPropagation()}
           disabled={!canGoForward}
           className={`p-1 ${canGoForward ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-          aria-label='go-next'
+          aria-label={t('globalTopBar.goForwardAriaLabel')}
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='GoForward'
         >
@@ -183,13 +185,13 @@ const NavigationAndSearch = (): ReactElement => {
               {isOnSearchScreen && searchScreenQuery ? (
                 <span className='truncate'>
                   <span style={{ color: 'var(--nav-search-btn-text)', opacity: 0.6 }}>
-                    Search:{' '}
+                    {t('globalTopBar.searchColon')}{' '}
                   </span>
                   {searchScreenQuery}
                 </span>
               ) : (
                 <div className='flex gap-2 items-center'>
-                  <span>Search</span>
+                  <span>{t('globalTopBar.search')}</span>
                   <div className='flex items-center gap-1'>
                     <span>(</span>
                     <LucideCommand size={14} />
@@ -250,8 +252,8 @@ const NavigationAndSearch = (): ReactElement => {
           onClick={() => void navigate('/guide')}
           style={{ color: 'var(--nav-search-btn-text)' }}
           className='flex items-center justify-center h-[28px] w-[28px] rounded-lg cursor-pointer hover:bg-[var(--nav-search-btn-bg)]'
-          aria-label='User Guide'
-          title='User Guide'
+          aria-label={t('globalTopBar.userGuide')}
+          title={t('globalTopBar.userGuide')}
           data-track-category='GLOBAL_TOP_BAR'
           data-track-name='OpenUserGuide'
         >
@@ -263,6 +265,7 @@ const NavigationAndSearch = (): ReactElement => {
 };
 
 const WorkspaceInviteButton = (): ReactElement | null => {
+  const { t } = useTranslation('common');
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [copied, setCopied] = useState(false);
   const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId ?? '' }), {
@@ -284,16 +287,20 @@ const WorkspaceInviteButton = (): ReactElement | null => {
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
-      toast.success('Invite link copied');
+      toast.success(t('globalTopBar.inviteLinkCopied'));
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      toast.error('Failed to copy invite link');
+      toast.error(t('globalTopBar.inviteLinkCopyFailed'));
     }
   };
 
   return (
     <Tooltip
-      content={workspace?.name ? `Invite to ${workspace.name} workspace` : 'Invite to workspace'}
+      content={
+        workspace?.name
+          ? t('globalTopBar.inviteToNamedWorkspace', { name: workspace.name })
+          : t('globalTopBar.inviteToWorkspace')
+      }
       side='bottom'
       delayDuration={300}
     >
@@ -301,13 +308,13 @@ const WorkspaceInviteButton = (): ReactElement | null => {
         type='button'
         onClick={() => void handleCopyInviteLink()}
         className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
-        aria-label='copy-workspace-invite-link'
+        aria-label={t('globalTopBar.copyWorkspaceInviteLinkAriaLabel')}
         data-track-category='GLOBAL_TOP_BAR'
         data-track-name='CopyCommunityWorkspaceInvite'
         data-track-metadata={JSON.stringify({ workspaceId })}
       >
         {copied ? <Check className='size-3.5 text-emerald-500' /> : <Share2 className='size-3.5' />}
-        <span>{copied ? 'Copied' : 'Invite'}</span>
+        <span>{copied ? t('globalTopBar.copied') : t('globalTopBar.invite')}</span>
       </button>
     </Tooltip>
   );
@@ -320,6 +327,7 @@ const GlobalTopBar = ({
   recordingSeconds = 0,
   onStopRecording,
 }: GlobalTopBarProps): ReactElement => {
+  const { t } = useTranslation('common');
   const [supportMenuOpen, setSupportMenuOpen] = useState(false);
   const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -364,12 +372,12 @@ const GlobalTopBar = ({
             <WorkspaceInviteButton />
           </div>
           {isRecording && onStopRecording && (
-            <Tooltip content='Stop recording'>
+            <Tooltip content={t('globalTopBar.stopRecording')}>
               <button
                 type='button'
                 onClick={onStopRecording}
                 className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer max-[820px]:hidden'
-                aria-label='stop-recording'
+                aria-label={t('globalTopBar.stopRecording')}
                 data-track-category='ERROR_REPORT'
                 data-track-name='StopRecordingTopBar'
               >
@@ -388,14 +396,14 @@ const GlobalTopBar = ({
               <button
                 type='button'
                 className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
-                aria-label='support'
+                aria-label={t('globalTopBar.support')}
                 aria-haspopup='true'
                 aria-expanded={supportMenuOpen}
                 data-track-category='ERROR_REPORT'
                 data-track-name='OpenSupportMenu'
               >
                 <Headset size={14} className='text-[var(--metrics-bar-color)]' />
-                <span>Support</span>
+                <span>{t('globalTopBar.support')}</span>
               </button>
               {supportMenuOpen && (
                 <div
@@ -414,7 +422,7 @@ const GlobalTopBar = ({
                     data-track-name='OpenModal'
                   >
                     <AlertCircle className='size-4 shrink-0' />
-                    <span>Report issue</span>
+                    <span>{t('globalTopBar.reportIssue')}</span>
                   </button>
                   {onViewMyTickets && (
                     <button
@@ -429,7 +437,7 @@ const GlobalTopBar = ({
                       data-track-name='ViewMyTickets'
                     >
                       <ExternalLink className='size-4 shrink-0' />
-                      <span>View my tickets</span>
+                      <span>{t('globalTopBar.viewMyTickets')}</span>
                     </button>
                   )}
                 </div>

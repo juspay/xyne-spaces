@@ -48,6 +48,7 @@ export function LabelChip({
   onRemove?: (() => void) | undefined;
   trackCategory?: string | undefined;
 }): ReactElement {
+  const { t } = useTranslation('common');
   const theme = getTagTheme(label);
   return (
     <span className={cn(CHIP_BASE_CLASS_NAME, theme.bg, theme.text)}>
@@ -57,7 +58,7 @@ export function LabelChip({
         <button
           type='button'
           className='rounded-sm opacity-70 hover:opacity-100'
-          aria-label={`Remove label ${label}`}
+          aria-label={t('labels.removeLabelAriaLabel', { label })}
           onClick={onRemove}
           data-track-category={trackCategory}
           data-track-name='remove_recording_label'
@@ -81,6 +82,7 @@ export function SuggestedLabelChip({
   onReject: () => void;
   trackCategory: string;
 }): ReactElement {
+  const { t } = useTranslation('common');
   const theme = getTagTheme(label);
   return (
     <span className={cn(SUGGESTION_CHIP_CLASS_NAME, 'text-foreground')}>
@@ -89,7 +91,7 @@ export function SuggestedLabelChip({
       <button
         type='button'
         className='rounded-sm opacity-70 hover:opacity-100'
-        aria-label={`Confirm suggested label ${label}`}
+        aria-label={t('labels.confirmSuggestedLabelAriaLabel', { label })}
         onClick={event => {
           event.stopPropagation();
           onConfirm();
@@ -102,7 +104,7 @@ export function SuggestedLabelChip({
       <button
         type='button'
         className='rounded-sm opacity-70 hover:opacity-100'
-        aria-label={`Dismiss suggested label ${label}`}
+        aria-label={t('labels.dismissSuggestedLabelAriaLabel', { label })}
         onClick={event => {
           event.stopPropagation();
           onReject();
@@ -124,6 +126,7 @@ export function LabelPicker({
   onChange,
 }: LabelPickerProps): ReactElement | null {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [isOpen, setIsOpen] = useState(false);
   const resolvable = useMemo(() => [...labels, ...suggestions], [labels, suggestions]);
   const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(resolvable);
@@ -161,12 +164,12 @@ export function LabelPicker({
 
   const handleCreate = (label: string): void => {
     if (confirmedLabels.length >= MAX_LABELS) {
-      toast.error(`You can add up to ${MAX_LABELS} labels`);
+      toast.error(tc('labels.maxLabelsReached', { max: MAX_LABELS }));
       return;
     }
     const slug = slugifyRecordingLabel(label);
     if (!slug) {
-      toast.error('Label needs at least one letter or number');
+      toast.error(tc('labels.needsLetterOrNumber'));
       return;
     }
     onChange(normalizeRecordingTags([...labels, slug]));
@@ -176,7 +179,7 @@ export function LabelPicker({
   // here always means a confirmed/manual label is being added.
   const handleSelectedValuesChange = (values: string[]): void => {
     if (values.length > labels.length && confirmedLabels.length >= MAX_LABELS) {
-      toast.error(`You can add up to ${MAX_LABELS} labels`);
+      toast.error(tc('labels.maxLabelsReached', { max: MAX_LABELS }));
       return;
     }
     onChange(values);
@@ -188,7 +191,7 @@ export function LabelPicker({
     try {
       await confirmRecordingLabelSuggestion(labelId, revertMethod);
     } catch {
-      toast.error('Failed to confirm label');
+      toast.error(tc('labels.confirmFailed'));
     }
   };
 
@@ -244,9 +247,9 @@ export function LabelPicker({
         onOpenChange={setIsOpen}
         searchPlaceholder={t('labels.searchOrCreate')}
         searchMaxLength={LABEL_MAX_LENGTH}
-        searchAriaLabel='Search or create a label'
-        listAriaLabel='Labels'
-        emptyMessage='No labels yet'
+        searchAriaLabel={tc('labels.searchOrCreateAriaLabel')}
+        listAriaLabel={tc('labels.labelsButton')}
+        emptyMessage={tc('labels.noLabelsYet')}
         trackCategory={trackCategory}
         trackName='toggle_recording_label'
         trigger={
@@ -255,12 +258,12 @@ export function LabelPicker({
             variant='outline'
             size='sm'
             className='h-6 gap-1.5 rounded-lg border-dashed border-muted-foreground/40 pl-2 pr-2.5 text-xs font-medium text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-            aria-label='Add a label'
+            aria-label={tc('labels.addLabelAriaLabel')}
             data-track-category={trackCategory}
             data-track-name='open_recording_labels'
           >
             <PlusDefault className='size-3.5' aria-hidden='true' />
-            Label
+            {tc('labels.labelSingular')}
           </Button>
         }
       />

@@ -1216,5 +1216,51 @@
     "download": "Download",
     "pdfPreviewAriaLabel": "PDF preview",
     "fullscreenHint": "Use the PDF toolbar for zoom and navigation • Press Esc to close"
+  },
+  "pptxViewer": {
+    "preview": "Preview",
+    "download": "Download",
+    "clickToPreview": "Click to preview",
+    "pptxPreviewAriaLabel": "PPTX preview",
+    "powerPointPresentation": "PowerPoint Presentation",
+    "slidePreviewUnavailable": "Slide preview is not available for this file.",
+    "downloadToView": "Please download the file to view it.",
+    "downloadPresentation": "Download Presentation",
+    "escToClose": "Press Esc to close • Download to view in PowerPoint"
+  },
+  "labels": {
+    "labelsButton": "Labels",
+    "searchLabelsAriaLabel": "Search labels",
+    "noLabelsFound": "No labels found",
+    "labelsSelectedAriaLabel": "Labels, {{count}} selected",
+    "removeLabelAriaLabel": "Remove label {{label}}",
+    "confirmSuggestedLabelAriaLabel": "Confirm suggested label {{label}}",
+    "dismissSuggestedLabelAriaLabel": "Dismiss suggested label {{label}}",
+    "maxLabelsReached": "You can add up to {{max}} labels",
+    "needsLetterOrNumber": "Label needs at least one letter or number",
+    "confirmFailed": "Failed to confirm label",
+    "searchOrCreateAriaLabel": "Search or create a label",
+    "noLabelsYet": "No labels yet",
+    "addLabelAriaLabel": "Add a label",
+    "labelSingular": "Label"
+  },
+  "globalTopBar": {
+    "searchUnavailable": "Search unavailable",
+    "goBackAriaLabel": "Go back",
+    "goForwardAriaLabel": "Go forward",
+    "searchColon": "Search:",
+    "search": "Search",
+    "userGuide": "User Guide",
+    "inviteLinkCopied": "Invite link copied",
+    "inviteLinkCopyFailed": "Failed to copy invite link",
+    "inviteToNamedWorkspace": "Invite to {{name}} workspace",
+    "inviteToWorkspace": "Invite to workspace",
+    "copyWorkspaceInviteLinkAriaLabel": "Copy workspace invite link",
+    "copied": "Copied",
+    "invite": "Invite",
+    "stopRecording": "Stop recording",
+    "support": "Support",
+    "reportIssue": "Report issue",
+    "viewMyTickets": "View my tickets"
   }
 }

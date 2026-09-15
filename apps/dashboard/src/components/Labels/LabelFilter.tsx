@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from '@xyne/icons';
 import { SearchableMultiSelect } from '../ui/SearchableMultiSelect/SearchableMultiSelect';
 import type { SearchableMultiSelectOption } from '../ui/SearchableMultiSelect/SearchableMultiSelect.types';
@@ -39,6 +40,7 @@ export function LabelFilter({
   isDisabled = false,
   triggerClassName = TRIGGER_CLASS_NAME,
 }: LabelFilterProps): ReactElement {
+  const { t } = useTranslation('common');
   const [isOpen, setIsOpen] = useState(false);
 
   // Values stay Tag ids — what the selection is keyed by — while the resolved text
@@ -70,7 +72,7 @@ export function LabelFilter({
         className={triggerClassName}
         aria-label={disabledAriaLabel}
       >
-        Labels
+        {t('labels.labelsButton')}
         <ChevronDown className='size-4' aria-hidden='true' />
       </Button>
     );
@@ -83,9 +85,9 @@ export function LabelFilter({
       onSelectedValuesChange={onSelectedLabelsChange}
       isOpen={isOpen}
       onOpenChange={setIsOpen}
-      searchAriaLabel='Search labels'
-      listAriaLabel='Labels'
-      emptyMessage='No labels found'
+      searchAriaLabel={t('labels.searchLabelsAriaLabel')}
+      listAriaLabel={t('labels.labelsButton')}
+      emptyMessage={t('labels.noLabelsFound')}
       trackCategory={trackCategory}
       trackName='toggle_label_filter'
       className={LIST_INHERITS_POPOVER_CLASS_NAME}
@@ -99,13 +101,13 @@ export function LabelFilter({
           )}
           aria-label={
             selectedLabels.length > 0
-              ? `Labels, ${selectedLabels.length} selected`
+              ? t('labels.labelsSelectedAriaLabel', { count: selectedLabels.length })
               : triggerAriaLabel
           }
           data-track-category={trackCategory}
           data-track-name='open_label_filter'
         >
-          Labels
+          {t('labels.labelsButton')}
           {selectedLabels.length > 0 && (
             <span className='flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold leading-none tabular-nums text-background'>
               {selectedLabels.length}

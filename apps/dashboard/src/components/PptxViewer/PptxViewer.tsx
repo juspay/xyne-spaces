@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, X, Presentation } from 'lucide-react';
 import { PptSlideViewer } from '../PptSlideViewer';
 import type { PptSlide } from '../PptSlideViewer';
@@ -23,6 +24,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
   slides,
   slideCount,
 }) => {
+  const { t } = useTranslation('common');
   const [presenting, setPresenting] = useState(false);
   const fullscreenRef = useRef<HTMLDivElement>(null);
 
@@ -130,7 +132,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               data-track-category='XyneAI'
               data-track-name='PPTX_PREVIEW'
             >
-              Preview
+              {t('pptxViewer.preview')}
             </button>
             <div className='w-px h-3 bg-border' />
             <button
@@ -140,7 +142,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               data-track-name='PPTX_DOWNLOAD'
             >
               <Download size={12} />
-              Download
+              {t('pptxViewer.download')}
             </button>
           </div>
         </div>
@@ -183,7 +185,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                   <Presentation size={32} className='text-white' />
                 </div>
                 <span className="text-xs text-muted-foreground font-['Inter']">
-                  Click to preview
+                  {t('pptxViewer.clickToPreview')}
                 </span>
               </div>
             </button>
@@ -197,7 +199,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           ref={fullscreenRef}
           role='dialog'
           aria-modal='true'
-          aria-label='PPTX preview'
+          aria-label={t('pptxViewer.pptxPreviewAriaLabel')}
           style={{
             position: 'fixed',
             inset: 0,
@@ -256,7 +258,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                 data-track-name='PPTX_FS_DOWNLOAD'
               >
                 <Download size={14} />
-                Download
+                {t('pptxViewer.download')}
               </button>
               <button
                 onClick={exitPresent}
@@ -309,12 +311,12 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                     <Presentation size={48} className='text-white' />
                   </div>
                   <h3 className="text-xl font-semibold text-white font-['Inter'] mb-3">
-                    PowerPoint Presentation
+                    {t('pptxViewer.powerPointPresentation')}
                   </h3>
                   <p className="text-sm text-gray-400 font-['Inter'] mb-6 max-w-md">
-                    Slide preview is not available for this file.
+                    {t('pptxViewer.slidePreviewUnavailable')}
                     <br />
-                    Please download the file to view it.
+                    {t('pptxViewer.downloadToView')}
                   </p>
                   <button
                     onClick={() => void handleDownload()}
@@ -335,7 +337,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                     }}
                   >
                     <Download size={18} />
-                    Download Presentation
+                    {t('pptxViewer.downloadPresentation')}
                   </button>
                 </div>
               </div>
@@ -353,7 +355,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               color: '#888',
             }}
           >
-            Press Esc to close • Download to view in PowerPoint
+            {t('pptxViewer.escToClose')}
           </div>
         </div>
       )}
