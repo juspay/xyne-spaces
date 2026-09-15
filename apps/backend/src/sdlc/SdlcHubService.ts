@@ -148,11 +148,11 @@ export class SdlcHubService implements SdlcHub {
     }
   }
 
-  /** The private channel a hub lives in, plus its starting artifact-type folders. */
+  /** The channel a hub lives in, plus its starting artifact-type folders. */
   private async createSdlcChannel(
     tx: TransactionClient,
     actor: SdlcActor,
-    input: { projectId: string; name: string }
+    input: { projectId: string; name: string; visibility: CreateSdlcChannelInput['visibility'] }
   ): Promise<string> {
     const name = normalizeChannelName(input.name.trim());
     const nameError = validateChannelName(name);
@@ -165,20 +165,26 @@ export class SdlcHubService implements SdlcHub {
 
     const channelId = randomUUID();
     const now = new Date();
+    const isPublic = input.visibility === 'PUBLIC';
+    // A public hub lets its members add people too; a private one keeps adding to
+    // admins. Written to both tables because readers are split across them.
+    const addUserPolicy = isPublic
+      ? ChannelAddUserPolicy.EVERYONE
+      : ChannelAddUserPolicy.ADMINS_ONLY;
 
     await tx.channel.create({
       data: {
         id: channelId,
         name,
-        description: `Private SDLC workspace for ${name}`,
+        description: `${isPublic ? 'SDLC' : 'Private SDLC'} workspace for ${name}`,
         type: ChannelType.SDLC,
         scopeType: ChannelScopeType.DEFAULT,
-        visibility: ChannelVisibility.PRIVATE,
+        visibility: isPublic ? ChannelVisibility.PUBLIC : ChannelVisibility.PRIVATE,
         createdBy: actor.userId,
         projectId: input.projectId,
         workspaceId: actor.workspaceId,
         participantCount: 1,
-        addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
+        addUserPolicy,
         showTicketsTabTicketsInChat: false,
         metadata: {},
         channelStats: {
@@ -186,7 +192,7 @@ export class SdlcHubService implements SdlcHub {
             workspaceId: actor.workspaceId,
             lastActivityAt: now,
             participantCount: 1,
-            addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
+            addUserPolicy,
           },
         },
         participants: {
@@ -235,6 +241,7 @@ export class SdlcHubService implements SdlcHub {
       const channelId = await this.createSdlcChannel(tx, actor, {
         projectId: project.id,
         name: input.name,
+        visibility: input.visibility,
       });
 
       const repoIds = await this.attachRepositoriesToChannel(tx, actor, channelId, input.repoIds);
