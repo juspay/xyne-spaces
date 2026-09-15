@@ -128,6 +128,7 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
 import {
@@ -830,6 +831,21 @@ const SupportScreen = (): ReactElement => {
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
+
+  // Mode-B label counts drop the label scoping from the shared filter surface.
+  const labelUnreadFilters = useMemo<LabelUnreadFilters>(() => {
+    const {
+      conversationIdWhitelist,
+      conversationLabelId: _conversationLabelId,
+      ...restTicketFilter
+    } = ticketFilter;
+    return {
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
+    };
+  }, [ticketFilter]);
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
@@ -2810,6 +2826,7 @@ const SupportScreen = (): ReactElement => {
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
+              labelUnreadFilters={labelUnreadFilters}
             />
           </div>
         )}
@@ -5443,6 +5460,7 @@ export const SupportTicketDetail = ({
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
                         stageLabel={ticket.stageName || 'To Do'}
+                        statusV2={ticket.statusV2}
                         boardId={boardId}
                       />
                     </div>

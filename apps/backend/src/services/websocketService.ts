@@ -47,6 +47,10 @@ interface TicketCountsRoomSubscriptionData {
   room: string;
 }
 
+interface LabelUnreadCountsRoomSubscriptionData {
+  room: string;
+}
+
 class WebSocketService {
   /**
    * The only room shape a client is allowed to subscribe to. Used on BOTH sides: the
@@ -416,6 +420,16 @@ class WebSocketService {
     // Handle ticket count room unsubscription
     socket.on('unsubscribe_from_ticket_counts', (data: TicketCountsRoomSubscriptionData) => {
       this.handleTicketCountsUnsubscription(socket, data.room);
+    });
+
+    // Handle label unread count room subscription (desk label badges)
+    socket.on('subscribe_to_label_unread_counts', (data: LabelUnreadCountsRoomSubscriptionData) => {
+      this.handleLabelUnreadCountsSubscription(socket, data.room);
+    });
+
+    // Handle label unread count room unsubscription
+    socket.on('unsubscribe_from_label_unread_counts', (data: LabelUnreadCountsRoomSubscriptionData) => {
+      this.handleLabelUnreadCountsUnsubscription(socket, data.room);
     });
 
     // Handle user status update (ONLINE/AWAY/OFFLINE)
@@ -1640,6 +1654,46 @@ class WebSocketService {
     logger.info(
       `[TICKET-COUNTS] Socket ${socket.id} (user ${socket.userId}) left "${room}" — room now has ${members} member(s)`,
     );
+  }
+
+  // Desk label unread badges: one open room per channel. The payload carries no
+  // user data, so (like project/board/group rooms, and unlike ticket-counts user
+  // rooms) there is no per-user gating. Node-local emit only — no Redis bridge,
+  // mirroring ticket-counts.
+  private getLabelUnreadCountsRoomName(channelId: string): string {
+    return `label-unread-counts:channel:${channelId}`;
+  }
+
+  broadcastLabelUnreadCountsUpdate(channelId: string): void {
+    if (!this.io) {
+      logger.warn('WebSocket server not initialized');
+      return;
+    }
+
+    this.io
+      .to(this.getLabelUnreadCountsRoomName(channelId))
+      .emit('label_unread_counts_updated', {
+        channelId,
+        timestamp: new Date().toISOString(),
+      });
+  }
+
+  private handleLabelUnreadCountsSubscription(socket: AuthenticatedSocket, room: string): void {
+    if (!room || typeof room !== 'string') return;
+
+    // Only allow well-formed label-unread-counts rooms — never an arbitrary room string.
+    if (!/^label-unread-counts:channel:[^:]+$/.test(room)) {
+      logger.warn(`[LABEL-UNREAD-COUNTS] Rejected malformed room "${room}" from user ${socket.userId}`);
+      return;
+    }
+
+    socket.join(room);
+  }
+
+  private handleLabelUnreadCountsUnsubscription(socket: AuthenticatedSocket, room: string): void {
+    if (!room) return;
+
+    socket.leave(room);
   }
 
   // Debug method to get subscription stats
