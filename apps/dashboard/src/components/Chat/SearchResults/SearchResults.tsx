@@ -1197,7 +1197,10 @@ function ResultsBody({
   };
 
   // Renders a single result card — shared between flat and grouped views
-  const renderCard = (result: DisplaySearchResult): ReactElement | null => {
+  // `resultIndex` is the 0-based rank of this card in the result list. It is the
+  // whole search-quality signal — mean click rank and click-through by position
+  // are uncomputable without it — so it rides down to the tracked elements.
+  const renderCard = (result: DisplaySearchResult, resultIndex?: number): ReactElement | null => {
     const key = `${result.type}-${result.id}`;
 
     // User card — opens the user's DM chat in the right pane.
@@ -1402,6 +1405,8 @@ function ResultsBody({
     return (
       <SearchResultMessageCard
         key={key}
+        {...(resultIndex !== undefined && { resultIndex })}
+        resultCount={results.length}
         channelId={ctx.channelId}
         conversationId={ctx.conversationId}
         matchedMessageId={ctx.messageId ?? null}
@@ -1662,7 +1667,7 @@ function ResultsBody({
   return (
     <div className='w-full space-y-2 pt-2 pb-6'>
       {results.map((result, index) => {
-        const el = renderCard(result);
+        const el = renderCard(result, index);
         if (!el) return null;
         if (!compareMode) return el;
         const key = `${result.type}-${result.id}`;

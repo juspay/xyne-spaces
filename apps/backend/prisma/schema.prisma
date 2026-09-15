@@ -494,7 +494,7 @@ model WorkflowExecution {
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model WorkflowExecutionState {
@@ -2520,7 +2520,11 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  // NOT @updatedAt: clients sort, cursor-paginate AND render the row timestamp from
+  // this column (zero/queries.ts userActivitiesPaginatedV2, ActivityItemCard.tsx),
+  // so bumping it is user-visible. Set it explicitly at the few sites that intend to
+  // re-surface a row; bookkeeping writes must leave it alone.
+  updatedAt       DateTime @default(now())
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated

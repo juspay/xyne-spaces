@@ -238,6 +238,17 @@ router.get(
   })
 );
 
+router.get(
+  '/repositories/:repoId/setup-execution',
+  route(async (req, res) => {
+    const execution = await sdlcHub.getRepositorySetupExecution(
+      actorFromRequest(req),
+      req.params.repoId
+    );
+    res.status(200).json({ success: true, execution });
+  })
+);
+
 router.post(
   '/repositories/:repoId/wiki/generate',
   route(async (req, res) => {

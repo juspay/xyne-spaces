@@ -20,6 +20,7 @@
 import { callTool } from "./runner.js";
 import { errMsg } from "../lib/errors.js";
 import type { McpCallResult } from "./types.js";
+import { pathSegment } from "../lib/url-path.js";
 
 const MAX_CONCURRENT_PER_USER = Number(process.env["BITBUCKET_MAX_CONCURRENCY"] ?? 2);
 const MIN_INTERVAL_MS = Number(process.env["BITBUCKET_MIN_INTERVAL_MS"] ?? 300);
@@ -80,7 +81,10 @@ async function probeBitbucketStatus(
   const token = credentials["token"] as string | undefined;
   if (!username || !token) return null;
   const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
-  const url = `${baseUrl}/rest/api/1.0/projects/${project}/repos/${repo}/pull-requests/${prId}`;
+  const url =
+    `${baseUrl}/rest/api/1.0/projects/${pathSegment("bitbucket probe: project", project)}` +
+    `/repos/${pathSegment("bitbucket probe: repo", repo)}` +
+    `/pull-requests/${pathSegment("bitbucket probe: prId", prId)}`;
   try {
     const res = await fetch(url, {
       method: "GET",

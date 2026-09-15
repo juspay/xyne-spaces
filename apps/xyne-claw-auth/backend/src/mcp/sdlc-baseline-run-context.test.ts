@@ -60,8 +60,7 @@ describe("SDLC baseline run context", () => {
     expect(parseSdlcAgentRunContext({
       ...pinned,
       operation: "work",
-      ticketId: "ticket-1",
-      permissions: { ...pinned.permissions, writeRequested: false },
+      ticketId: null,
     })).toBeNull();
     expect(parseSdlcAgentRunContext({
       ...pinned,
