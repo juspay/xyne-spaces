@@ -18,11 +18,21 @@ const selectorSchema = z.discriminatedUnion('type', [
   }).strict(),
 ]);
 
-const bindingSchema = z.object({
-  repoId: z.string().trim().min(1),
-  workspaceId: z.string().trim().min(1),
-  actorUserId: z.string().trim().min(1),
-}).passthrough();
+// Two callers, two scopes: the hub-scoped claw sends channelId (+ optional
+// repoIds to narrow), the repository-scoped one sends a single repoId.
+const bindingSchema = z
+  .object({
+    repoId: z.string().trim().min(1).optional(),
+    channelId: z.string().trim().min(1).optional(),
+    repoIds: z.array(z.string().trim().min(1)).max(50).optional(),
+    workspaceId: z.string().trim().min(1),
+    actorUserId: z.string().trim().min(1),
+  })
+  .passthrough()
+  .refine(value => Boolean(value.repoId || value.channelId), {
+    message: 'Required',
+    path: ['channelId'],
+  });
 
 function route(
   handler: (req: Request, res: Response) => Promise<void>
@@ -50,7 +60,9 @@ function binding(req: Request) {
     throw new AppError('SDLC artifact history binding mismatch', 403);
   }
   return {
-    repoId: parsed.repoId,
+    ...(parsed.repoId ? { repoId: parsed.repoId } : {}),
+    ...(parsed.channelId ? { channelId: parsed.channelId } : {}),
+    ...(parsed.repoIds ? { repoIds: parsed.repoIds } : {}),
     workspaceId: parsed.workspaceId,
     userId: parsed.actorUserId,
   };
