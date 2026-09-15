@@ -495,6 +495,61 @@ export class GitHubService implements VcsClient {
       throw error;
     }
   }
+
+  /**
+   * Fetch all commits for a pull request (for bot attribution tracking)
+   * Returns full commit messages for Co-authored-by parsing
+   */
+  async getCommitsForPullRequest(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<Array<{
+    sha: string;
+    authorName: string;
+    authorEmail: string;
+    message: string;
+    committedAt: Date;
+  }>> {
+    try {
+      const commits: Array<{
+        sha: string;
+        commit: {
+          author: { name: string; email: string; date: string };
+          message: string;
+        };
+      }> = [];
+
+      const PER_PAGE = 100;
+      let page = 1;
+
+      // Fetch all pages
+      while (true) {
+        const url = `/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=${PER_PAGE}&page=${page}`;
+        const data = await this.restRequest<typeof commits>(url);
+
+        commits.push(...data);
+
+        // Last page reached
+        if (data.length < PER_PAGE) break;
+        page++;
+      }
+
+      logger.info(`GitHub: fetched ${commits.length} commit(s) for PR #${prNumber} in ${owner}/${repo}`);
+
+      return commits.map((c) => ({
+        sha: c.sha,
+        authorName: c.commit.author.name,
+        authorEmail: c.commit.author.email,
+        message: c.commit.message, // FULL message for Co-authored-by parsing
+        committedAt: new Date(c.commit.author.date),
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`GitHub: failed to fetch commits for PR #${prNumber} in ${owner}/${repo}: ${msg}`);
+      throw error;
+    }
+  }
 }
 
 export const createGitHubService = (owner: string, repo: string): GitHubService => {

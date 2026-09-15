@@ -45,4 +45,27 @@ export interface VcsClient {
     commitId: string,
     filePath: string,
   ): string;
+
+  // Fetch all commits for a pull request (for bot attribution tracking)
+  getCommitsForPullRequest(
+    projectKey: string,
+    repositorySlug: string,
+    prId: number,
+  ): Promise<CommitInfo[]>;
+}
+
+// Commit information from VCS API
+export interface CommitInfo {
+  sha: string;
+  authorName: string;
+  authorEmail: string;
+  message: string; // FULL commit message (for Co-authored-by parsing)
+  committedAt: Date;
+}
+
+// Commit analysis status for tracking bot attribution analysis progress
+export enum CommitAnalysisStatus {
+  PENDING = 'PENDING',     // Analysis queued but not started
+  COMPLETED = 'COMPLETED', // Analysis finished successfully
+  FAILED = 'FAILED',       // Analysis encountered an error
 }
