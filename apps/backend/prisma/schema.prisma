@@ -2519,7 +2519,12 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  /// Set once at creation. Prisma does NOT auto-bump this column on update:
+  /// the activity feed sorts by `updatedAt desc`, and background writes
+  /// (classification pipeline, markAsRead) must not re-sort rows.
+  /// Update paths that intentionally re-sort the feed (reaction/reply
+  /// bubbling, recording-summary regeneration) pass `updatedAt` explicitly.
+  updatedAt       DateTime @default(now())
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated

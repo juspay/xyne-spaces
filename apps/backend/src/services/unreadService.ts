@@ -37,8 +37,8 @@ export class UnreadService {
           conversationId,
           isRead: false,
         }, data: {
+          // Read state only — reading must not re-sort the activity feed.
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
 
@@ -107,8 +107,8 @@ export class UnreadService {
           channelId,
           isRead: false,
         }, data: {
+          // Read state only — reading must not re-sort the activity feed.
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
       const conversationSeenCutoffAt =
