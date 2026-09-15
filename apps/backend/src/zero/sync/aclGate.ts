@@ -127,11 +127,28 @@ export interface AclGate {
    *  ACLs like channelLatest). See StructureChain. */
   structureChains: StructureChain[];
   /**
+   * SHAREABILITY CONTRACT (gate-only): does this ACL collapse to ONE boolean per (user, instance),
+   * CONSTANT across every row of the instance? True iff every TOP-LEVEL term resolves from ctx
+   * constants or the instance's partition/scope — a `simple` on `partitionColumn`, or an `exists`
+   * correlated on `partitionColumn`. Any per-row-varying reference (a base column other than the
+   * partition, or a join keyed on such — e.g. calls' `callId`/`channelId` membership arms, or a
+   * per-row `createdBy==me`) makes admission PER-ROW ⇒ NOT shareable ⇒ served by native Zero.
+   * `partitionDetermines` is the audited escape hatch: columns functionally determined by the
+   * partition through a DB-enforced FK (NO silent data invariants). See checkGateCollapsible.
+   */
+  collapsibility(partitionColumn: string, partitionDetermines?: readonly string[]): CollapseResult;
+  /**
    * Is `userId` (in `workspaceId`) granted a row of the root scope? `rootRow` is the
    * scope binding (the root table's key columns, e.g. `{ channelId }`); `snapshot`
    * returns each grant table's current rows.
    */
   evaluate(rootRow: Row, userId: string, workspaceId: string, snapshot: SnapshotProvider): boolean;
+}
+
+export interface CollapseResult {
+  ok: boolean;
+  /** the offending top-level term (present iff !ok) — for the refuse log / CI failure message. */
+  reason?: string;
 }
 
 /** deriveAclGate is pure per rootTable and its result is immutable (ACLs change only at deploy),
@@ -170,6 +187,9 @@ function buildAclGate(rootTable: string): AclGate {
     grantTables: [...new Set(grantSources.map((s) => s.table))],
     perRowExcluded: gated?.excluded ?? false,
     structureChains: where ? deriveStructureChains(where) : [],
+    collapsibility(partitionColumn, partitionDetermines = []) {
+      return checkGateCollapsible(where, partitionColumn, partitionDetermines);
+    },
     evaluate(rootRow, userId, workspaceId, snapshot) {
       // No ACL predicate = unrestricted at the row level (workspace backstop lives outside canSelect).
       return gated ? evalCond(gated.cond, rootRow, { userId, workspaceId }, snapshot) : true;
@@ -205,6 +225,53 @@ export function validateGateAst(cond: Cond): void {
     default:
       throw new Error(`ACL gate: unsupported condition '${(cond as { type: string }).type}'`);
   }
+}
+
+/**
+ * Gate-only shareability predicate (see AclGate.collapsibility). Walk the TOP-LEVEL where — descend
+ * `and`/`or`, but NOT into a correlatedSubquery (inside a subquery you're on the grant/scope side,
+ * free to reference anything). Every top-level leaf must be INSTANCE-CONSTANT:
+ *  - `simple`: its column must be `partitionColumn` (or an escape-hatch column). A base-row column
+ *    other than the partition varies per row ⇒ per-row admission ⇒ reject. (This covers ctx-bound
+ *    `createdBy==me`, per-row `visibleTo==me`, and a global `workspaceId==me`.)
+ *  - `correlatedSubquery`: its parentField[0] (the base-side join key) must be `partitionColumn` (or
+ *    an escape-hatch column). A membership/scope join keyed on any other per-row column (calls'
+ *    `callId`/`channelId` arms) ⇒ per-row ⇒ reject.
+ * Returns the first offending term. `where === undefined` (no ACL predicate) is trivially collapsible.
+ */
+function checkGateCollapsible(
+  where: Cond | undefined,
+  partitionColumn: string,
+  partitionDetermines: readonly string[],
+): CollapseResult {
+  if (!where) return { ok: true };
+  const anchored = new Set<string>([partitionColumn, ...partitionDetermines]);
+  let reason: string | undefined;
+  const walk = (c: Cond): void => {
+    if (reason) return;
+    switch (c.type) {
+      case 'and':
+      case 'or':
+        c.conditions.forEach(walk);
+        return;
+      case 'simple':
+        if (!anchored.has(c.left.name)) {
+          reason = `top-level '${c.left.name} ${c.op} …' is a per-row predicate (not the partition column '${partitionColumn}')`;
+        }
+        return;
+      case 'correlatedSubquery': {
+        const key = c.related.correlation.parentField[0];
+        if (!anchored.has(key)) {
+          reason = `top-level exists('${c.related.subquery.table}') is correlated on per-row column '${key}', not the partition '${partitionColumn}'`;
+        }
+        return; // do NOT descend — inside the subquery is the grant/scope side
+      }
+      case 'excluded':
+        return;
+    }
+  };
+  walk(where);
+  return reason ? { ok: false, reason } : { ok: true };
 }
 
 /**

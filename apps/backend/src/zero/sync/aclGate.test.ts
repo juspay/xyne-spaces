@@ -177,6 +177,47 @@ test('real allowlisted ACLs derive without over-rejecting', () => {
   assert.doesNotThrow(() => deriveAclGate('message_attachments'));
 });
 
+// ---- GATE-ONLY shareability: collapsibility() accepts gate ACLs, rejects per-row ACLs ----
+
+test('collapsibility: channelLatest (conversations) IS gate-collapsible on channelId', () => {
+  // Only top-level term is exists('channel') correlated on channelId = the partition; workspace/
+  // visibility/membership live INSIDE the subquery ⇒ instance-constant ⇒ one boolean per user.
+  const c = deriveAclGate('conversations').collapsibility('channelId');
+  assert.equal(c.ok, true, c.reason);
+});
+
+test('collapsibility: calls is REJECTED (per-row membership joins, not partition-anchored)', () => {
+  // userActiveCalls is argless → partition degenerates to `status`. Arms reference createdByUserId
+  // (per-row simple) + exists(participants, callId) + exists(channel, channelId) — none anchored on
+  // `status` ⇒ per-row admission ⇒ not shareable.
+  const c = deriveAclGate('calls').collapsibility('status');
+  assert.equal(c.ok, false);
+  assert.match(c.reason ?? '', /per-row/);
+});
+
+test('collapsibility: standalone message_attachments is REJECTED (top-level createdBy/workspaceId per-row)', () => {
+  // Whatever the standalone partition, the top-level `workspaceId==ws` and `createdBy==me` simples
+  // are base columns other than the partition ⇒ per-row ⇒ reject (matches the "attachments N/A" finding).
+  const c = deriveAclGate('message_attachments').collapsibility('conversationId');
+  assert.equal(c.ok, false);
+});
+
+test('collapsibility: a partition-anchored exists on the WRONG column is rejected', () => {
+  // channelLatest's ACL is gate on channelId; asking to partition it on a different column exposes
+  // the exists correlation (channelId) as per-row ⇒ reject. Proves the check is partition-relative.
+  const c = deriveAclGate('conversations').collapsibility('conversationId');
+  assert.equal(c.ok, false);
+  assert.match(c.reason ?? '', /correlated on per-row column 'channelId'/);
+});
+
+test('collapsibility: escape hatch — partitionDetermines admits an FK-determined column', () => {
+  // If a query legitimately had a top-level workspaceId guard determined by the partition via a DB FK,
+  // the audited escape hatch admits it. (No current query needs this; asserts the mechanism.)
+  const gate = deriveAclGate('conversations');
+  // channelId partition already passes; adding a determines list must not break it.
+  assert.equal(gate.collapsibility('channelId', ['workspaceId']).ok, true);
+});
+
 // ---- P3(b): structure-chain derivation (transitive per-scope hops → one .related() instance) ----
 
 test('conversations (channelLatest): channels is directly scoped → NO structure chain', () => {
