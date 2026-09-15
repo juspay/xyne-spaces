@@ -270,5 +270,23 @@
     "closeAllDocumentsLabel": "Close all documents",
     "closeAllLabel": "Close all",
     "ticketTabTitle": "Ticket {{id}}"
+  },
+  "reactArtifact": {
+    "restoreNotice": {
+      "restoredToPrefix": "Restored to",
+      "versionLabel": "Version {{number}}",
+      "fromVersion": "from Version {{number}}"
+    },
+    "bootOverlay": {
+      "loadingAppAriaLabel": "Loading app"
+    },
+    "savedIndicator": {
+      "movedOnTitle": "This app has moved on to version {{number}}. Open the current version.",
+      "newerVersionExistsTitle": "A newer version of this app exists. Open the current version.",
+      "newerVersionWithNumber": "Newer version (v{{number}})",
+      "newerVersion": "Newer version",
+      "savedTitle": "Saved to your apps. Open it in the Library.",
+      "savedLabel": "Saved"
+    }
   }
 }

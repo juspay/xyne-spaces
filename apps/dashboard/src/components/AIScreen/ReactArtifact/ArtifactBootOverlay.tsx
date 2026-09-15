@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSandpack } from '@codesandbox/sandpack-react';
 import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
 
@@ -32,6 +33,7 @@ import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
  * wrong shade inside the other.
  */
 export const ArtifactBootOverlay = ({ fill }: { fill: boolean }): ReactElement | null => {
+  const { t } = useTranslation('common');
   const { sandpack, listen } = useSandpack();
   const [booted, setBooted] = useState(false);
 
@@ -59,7 +61,7 @@ export const ArtifactBootOverlay = ({ fill }: { fill: boolean }): ReactElement |
         fill ? 'bg-background' : 'bg-card'
       }`}
       role='status'
-      aria-label='Loading app'
+      aria-label={t('reactArtifact.bootOverlay.loadingAppAriaLabel')}
     >
       <AppLoaderMark size={fill ? 'md' : 'sm'} />
     </div>

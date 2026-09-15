@@ -14,6 +14,7 @@
  */
 
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RotateLeft } from '@xyne/icons';
 import type { ArtifactAppRestoreEvent } from '../../../services/claw/artifactAppsService';
 
@@ -28,6 +29,7 @@ export const ArtifactRestoreNotice = ({
 }: {
   event: ArtifactAppRestoreEvent;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const when = formatWhen(event.createdAt);
 
   return (
@@ -36,8 +38,18 @@ export const ArtifactRestoreNotice = ({
       <span className='flex shrink-0 items-center gap-1.5 px-2 text-xs text-muted-foreground'>
         <RotateLeft size={13} aria-hidden='true' />
         <span>
-          Restored to <span className='font-medium'>Version {event.versionNumber}</span>
-          {event.fromVersionNumber !== null && <> from Version {event.fromVersionNumber}</>}
+          {t('reactArtifact.restoreNotice.restoredToPrefix')}{' '}
+          <span className='font-medium'>
+            {t('reactArtifact.restoreNotice.versionLabel', { number: event.versionNumber })}
+          </span>
+          {event.fromVersionNumber !== null && (
+            <>
+              {' '}
+              {t('reactArtifact.restoreNotice.fromVersion', {
+                number: event.fromVersionNumber,
+              })}
+            </>
+          )}
         </span>
         {when && <span className='opacity-70'>· {when}</span>}
       </span>
