@@ -41,6 +41,7 @@ export function AskAiRatingButtons({
   className?: string | undefined;
 }): ReactElement {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [current, setCurrent] = useState<FeedbackNum>(feedback ?? 0);
   const [saving, setSaving] = useState(false);
   const [showComment, setShowComment] = useState(false);
@@ -92,7 +93,11 @@ export function AskAiRatingButtons({
           void submit('up');
         }}
         disabled={disabled || saving}
-        title={disabled ? 'Rating available once the response is saved' : 'Helpful'}
+        title={
+          disabled
+            ? tc('aiScreen.askAiRatingButtons.ratingUnavailableTitle')
+            : tc('aiScreen.askAiRatingButtons.helpfulTitle')
+        }
         className={cn(
           'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
           isUp ? 'text-foreground' : 'text-muted-foreground',
@@ -116,7 +121,11 @@ export function AskAiRatingButtons({
           if (!isDown) void submit('down');
         }}
         disabled={disabled || saving}
-        title={disabled ? 'Rating available once the response is saved' : 'Not helpful'}
+        title={
+          disabled
+            ? tc('aiScreen.askAiRatingButtons.ratingUnavailableTitle')
+            : tc('aiScreen.askAiRatingButtons.notHelpfulTitle')
+        }
         className={cn(
           'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
           isDown ? 'text-foreground' : 'text-muted-foreground',
@@ -163,7 +172,7 @@ export function AskAiRatingButtons({
             data-track-name='RATING_COMMENT_SAVE'
             className='rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted'
           >
-            Save
+            {tc('aiScreen.askAiRatingButtons.saveButton')}
           </button>
         </span>
       )}

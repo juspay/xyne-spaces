@@ -1,17 +1,19 @@
 import { useAuth } from '../../hooks/useAuth';
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 /**
  * Time-aware greeting heading ("Good morning, Om") extracted from the user's email.
  * Styled exactly like xyne-search/ui2 EmptyState component.
  */
 
-const timeGreeting = (now = new Date()): string => {
+const timeGreeting = (t: TFunction, now = new Date()): string => {
   const h = now.getHours();
-  if (h < 5) return 'Working late';
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+  if (h < 5) return t('aiScreen.emptyState.workingLate');
+  if (h < 12) return t('aiScreen.emptyState.goodMorning');
+  if (h < 17) return t('aiScreen.emptyState.goodAfternoon');
+  return t('aiScreen.emptyState.goodEvening');
 };
 
 const firstName = (email?: string): string | undefined => {
@@ -27,8 +29,9 @@ interface AIEmptyStateProps {
 }
 
 export function AIEmptyState({ className }: AIEmptyStateProps): ReactElement {
+  const { t } = useTranslation('common');
   const { user } = useAuth();
-  const greet = timeGreeting();
+  const greet = timeGreeting(t);
   const display = firstName(user?.email);
 
   return (

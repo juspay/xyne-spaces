@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Hash,
   Ticket,
@@ -77,6 +78,7 @@ export function ReadonlyContextPills({
   /** Tailwind max-width for the expanded scrollable strip (surface-specific). */
   expandedWidthClass?: string;
 }): ReactElement | null {
+  const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
 
   if (!items || items.length === 0) return null;
@@ -99,8 +101,12 @@ export function ReadonlyContextPills({
         type='button'
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        aria-label={`${items.length} attached context ${items.length === 1 ? 'item' : 'items'}`}
-        title={`${items.length} attached context ${items.length === 1 ? 'item' : 'items'}`}
+        aria-label={t('aiScreen.readonlyContextPills.attachedContextAriaLabel', {
+          count: items.length,
+        })}
+        title={t('aiScreen.readonlyContextPills.attachedContextAriaLabel', {
+          count: items.length,
+        })}
         className='flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 text-[11.5px] font-medium text-muted-foreground transition hover:border-secondary hover:bg-secondary hover:text-foreground'
         data-track-category='XyneAI'
         data-track-name='TOGGLE_CONTEXT_PILLS'

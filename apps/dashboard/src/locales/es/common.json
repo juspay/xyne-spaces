@@ -155,5 +155,29 @@
       "callCount_other": "{{count}} llamadas",
       "errorSuffix": " · error"
     }
+  },
+  "aiScreen": {
+    "comingSoon": {
+      "description": "Esta sección estará disponible próximamente. Aparecerá aquí en cuanto esté lista."
+    },
+    "emptyState": {
+      "workingLate": "Trabajando hasta tarde",
+      "goodMorning": "Buenos días",
+      "goodAfternoon": "Buenas tardes",
+      "goodEvening": "Buenas noches"
+    },
+    "readonlyContextPills": {
+      "attachedContextAriaLabel_one": "{{count}} elemento de contexto adjunto",
+      "attachedContextAriaLabel_other": "{{count}} elementos de contexto adjuntos"
+    },
+    "askAiRatingButtons": {
+      "ratingUnavailableTitle": "La calificación estará disponible una vez que se guarde la respuesta",
+      "helpfulTitle": "Útil",
+      "notHelpfulTitle": "No útil",
+      "saveButton": "Guardar"
+    },
+    "promptMarkerRail": {
+      "yourPromptsAriaLabel": "Tus mensajes"
+    }
   }
 }

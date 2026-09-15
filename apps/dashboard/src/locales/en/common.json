@@ -155,5 +155,29 @@
       "callCount_other": "{{count}} calls",
       "errorSuffix": " · error"
     }
+  },
+  "aiScreen": {
+    "comingSoon": {
+      "description": "This section is coming soon. It will show up here once it's ready."
+    },
+    "emptyState": {
+      "workingLate": "Working late",
+      "goodMorning": "Good morning",
+      "goodAfternoon": "Good afternoon",
+      "goodEvening": "Good evening"
+    },
+    "readonlyContextPills": {
+      "attachedContextAriaLabel_one": "{{count}} attached context item",
+      "attachedContextAriaLabel_other": "{{count}} attached context items"
+    },
+    "askAiRatingButtons": {
+      "ratingUnavailableTitle": "Rating available once the response is saved",
+      "helpfulTitle": "Helpful",
+      "notHelpfulTitle": "Not helpful",
+      "saveButton": "Save"
+    },
+    "promptMarkerRail": {
+      "yourPromptsAriaLabel": "Your prompts"
+    }
   }
 }
