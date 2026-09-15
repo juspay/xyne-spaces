@@ -21,6 +21,7 @@ import {
 import { workspacePath } from "./workspace.js";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { AGENT, LITELLM, SERVER } from "./config.js";
+import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
@@ -549,7 +550,7 @@ function resolveProviderForSubagent(
   return undefined;
 }
 
-function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skillTriggers?: SkillTrigger[], skills?: Array<{ slug?: string; name: string; description?: string; content: string }>, providerResolution?: SubagentProviderResolution, progressCtx?: SubagentProgressCtx): ToolDefinition {
+function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skillTriggers?: SkillTrigger[], skills?: Array<{ slug?: string; name: string; description?: string; content: string }>, providerResolution?: SubagentProviderResolution, progressCtx?: SubagentProgressCtx, subagentDbId?: string): ToolDefinition {
   const resolvedProvider = resolveProviderForSubagent(def, providerResolution);
   // Tag the description so the parent LLM can tell subagent wrappers apart
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
@@ -686,7 +687,10 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
       // The body below — extracted as a closure so the cache wrapper can call
       // it once and share the resulting promise. No behaviour change inside.
-      async function doExecute(): Promise<SubagentExecResult> {
+      function doExecute(): Promise<SubagentExecResult> {
+        return runWithSubagentMcpId(subagentDbId, doExecuteInner);
+      }
+      async function doExecuteInner(): Promise<SubagentExecResult> {
 
       // Sticky-label state hoisted out of the try block so the catch handler
       // can clear the timer on early failures without leaking the interval.
@@ -1450,8 +1454,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 /**
  * Extract the original tool name from a prefixed name (e.g. "Xyne_Spaces__spaces-search" → "spaces-search")
  */
-function extractToolName(prefixedName: string): string {
-  const idx = prefixedName.indexOf("__");
+function extractToolName(tool: ToolDefinition | string): string {
+  if (typeof tool !== "string") {
+    const raw = (tool as ToolDefinition & { mcpToolName?: string }).mcpToolName;
+    if (raw) return raw;
+  }
+  const prefixedName = typeof tool === "string" ? tool : tool.name;
+  const idx = prefixedName.lastIndexOf("__");
   return idx >= 0 ? prefixedName.slice(idx + 2) : prefixedName;
 }
 
@@ -1470,6 +1479,7 @@ function isCustomWriteTool(tool: ToolDefinition): boolean {
  * never travel this path.
  */
 export interface CustomSubagentSpec {
+  id?: string;
   name: string;
   description: string;
   progressLabels: string[];
@@ -1498,7 +1508,7 @@ function resolveCustomSubagentTools(
   if (directNames.size > 0) {
     for (const group of groups) {
       for (const t of group.tools) {
-        const name = extractToolName(t.name);
+        const name = extractToolName(t);
         // Include write tools too. Their ToolDefinition still queues a signed
         // pendingAction via the parent run's MCP wrapper; it does not execute
         // until the human approval card is approved in claw-auth.
@@ -1564,11 +1574,16 @@ export function buildSubagentTools(
   };
 
   for (const group of groups) {
+    // Subagent-sourced groups exist only because a subagent definition holds
+    // the credentials. resolveCustomSubagentTools below still reads them out
+    // of `groups`, so the palette is built — but nothing here may hoist them
+    // into the parent agent's direct/write tools.
+    if (group.sourceSubagent) continue;
     const def = findSubagentDefinitionForServer(group.serverType);
 
     if (def) {
       const writeSet = new Set(group.writeTools.map(String));
-      const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t.name)));
+      const writeTools = group.tools.filter((t) => writeSet.has(extractToolName(t)));
 
       if (group.tools.length > 0) {
         const skills = subagentSkills?.[def.name] ?? subagentSkills?.["__default"];
@@ -1702,6 +1717,7 @@ export function buildSubagentTools(
           spec.skills,
           providerResolution,
           progressCtx,
+          spec.id,
         ),
       );
     }
@@ -1742,42 +1758,3 @@ export async function loadContext7Tools(): Promise<McpToolGroup | null> {
   }
 }
 
-// Playwright MCP runs in the xyne-claw pod (NOT inside the sandbox VM).
-// Trade-off: avoids the per-conversation `npx playwright install chromium`
-// bootstrap (170 MB download seen in prod) and gives the LLM typed tools
-// (browser_navigate / browser_click / browser_screenshot / …) instead of
-// inline `node -e` scripts. But the browser cannot reach localhost services
-// running inside the user's sandbox VM (different network namespace) — for
-// driving sandbox-internal dev servers (e.g. http://localhost:5173 inside
-// the sandbox), the agent still needs `sandbox-run`.
-//
-// `--isolated` gives each MCP tool call a fresh browser context so concurrent
-// invocations don't share cookies/storage. Heavy parallel use will still
-// queue on this single MCP process per pod.
-let cachedPlaywrightTools: McpToolGroup | null = null;
-
-export async function loadPlaywrightTools(): Promise<McpToolGroup | null> {
-  if (cachedPlaywrightTools) return cachedPlaywrightTools;
-  try {
-    // Use the globally-installed @playwright/mcp from the Dockerfile rather
-    // than `npx -y @playwright/mcp@latest`. The latter:
-    //   - hits the npm registry on every spawn to resolve @latest,
-    //   - writes into the shared /home/claw/.npm/_npx/<hash>/ cache,
-    //   - and has no locking between concurrent spawns, so two parallel
-    //     conversations can race the install and leave the cache half-deleted
-    //     (ENOTEMPTY on rmdir → next spawn sees missing coreBundle.js).
-    // `npx --no-install` resolves the binary from $PATH (where the global
-    // install lives) without ever touching the _npx cache.
-    const { tools } = await loadMcpTools(
-      "npx",
-      ["--no-install", "@playwright/mcp", "--headless", "--isolated"],
-      "playwright",
-    );
-    cachedPlaywrightTools = { serverType: "playwright", serverName: "playwright", tools, writeTools: [] };
-    log.info(`[playwright] Loaded ${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`);
-    return cachedPlaywrightTools;
-  } catch (err) {
-    log.warn(`[playwright] Failed to load tools: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }
-}

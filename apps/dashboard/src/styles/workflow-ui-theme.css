@@ -78,14 +78,6 @@
   --wui-status-skipped: hsl(var(--border));
 }
 
-/* WorkflowUIProvider renders an unstyled wrapper between the app shell's <main> and
-   WorkflowApp, so the app's own `h-full` resolves against a parent that has collapsed to
-   content height — leaving the pane floating above the wallpaper. Give that wrapper the
-   height instead of fighting it from inside. */
-:where(div):has(> .xyne-workflow-ui) {
-  height: 100%;
-}
-
 /* The package's Tailwind preflight pins `font-family: ui-sans-serif, system-ui`, so
    Inter has to be reasserted — including on form controls, which never inherit it. */
 .xyne-workflow-ui,

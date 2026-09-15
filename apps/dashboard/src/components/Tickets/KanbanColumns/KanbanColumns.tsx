@@ -7,7 +7,19 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
-type TicketWithTags = Ticket & { tagMappings?: TicketTagMapping[] };
+/**
+ * A tag as it arrives on a Vespa search row. `toTicket` (useVespaTicketSearch) builds
+ * these objects from the search context, but the raw context carries plain strings, so
+ * both forms are accepted here.
+ */
+type VespaSearchTag = string | { id?: string; name?: string; workspaceId?: string };
+
+type TicketWithTags = Ticket & {
+  /** Present on Zero/DB rows. */
+  tagMappings?: TicketTagMapping[];
+  /** Present on direct-Vespa search rows, which have no tagMappings relation. */
+  tags?: VespaSearchTag[];
+};
 import type {
   DroppableStageProps,
   SortableTicketCardProps,
@@ -96,6 +108,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   tags,
   onClick,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -128,6 +143,9 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
         tags={tags}
         onClick={onClick}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -149,14 +167,17 @@ const VirtualizedStageList: React.FC<{
   stageTickets: Ticket[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
-  onLoadMore?: () => void;
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onLoadMore?: (() => void) | undefined;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stageId,
@@ -168,6 +189,9 @@ const VirtualizedStageList: React.FC<{
   onTicketsChange,
   onAddTicket,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -242,13 +266,29 @@ const VirtualizedStageList: React.FC<{
             >
               <SortableTicketCard
                 ticket={ticket}
-                tags={((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
-                  workspaceId: m.workspaceId,
-                  id: m.id,
-                  name: m.tagName,
-                  ticketId: m.ticketId,
-                }))}
+                tags={
+                  // Use tagMappings from Zero/DB, or fall back to tags from Vespa search results
+                  ((ticket as TicketWithTags).tagMappings ?? []).length > 0
+                    ? ((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
+                        workspaceId: m.workspaceId,
+                        id: m.id,
+                        name: m.tagName,
+                        ticketId: m.ticketId,
+                      }))
+                    : ((ticket as TicketWithTags).tags ?? []).map(t => {
+                        const name = typeof t === 'string' ? t : (t.name ?? '');
+                        return {
+                          workspaceId: typeof t === 'string' ? '' : (t.workspaceId ?? ''),
+                          id: (typeof t === 'string' ? undefined : t.id) ?? `${ticket.id}:${name}`,
+                          name,
+                          ticketId: ticket.id,
+                        };
+                      })
+                }
                 availableTags={availableTags}
+                onLoadMoreTags={onLoadMoreTags}
+                hasMoreTags={hasMoreTags}
+                onSearchTags={onSearchTags}
                 onClick={e => onTicketClick(e, ticket)}
                 visibleColumns={visibleColumns}
                 {...(activeTicketId !== undefined && { activeTicketId })}
@@ -284,13 +324,16 @@ const PaginatedStageList: React.FC<{
   paginationArgs: KanbanTicketsPageBaseArgs;
   columnType: 'stage' | 'status';
   allKnownTickets: Ticket[];
-  onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
+  onLoadMoreTags?: (() => void) | undefined;
+  hasMoreTags?: boolean;
+  onSearchTags?: ((query: string) => void) | undefined;
   visibleColumns?: Set<string> | undefined;
   activeTicketId?: string;
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
-  onAddTicket?: () => void;
+  onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
 }> = ({
   stage,
@@ -300,6 +343,9 @@ const PaginatedStageList: React.FC<{
   allKnownTickets,
   onTicketsChange,
   availableTags,
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -453,6 +499,9 @@ const PaginatedStageList: React.FC<{
         isLoadingMore={isLoadingMore}
         onLoadMore={loadMore}
         availableTags={availableTags}
+        onLoadMoreTags={onLoadMoreTags}
+        hasMoreTags={hasMoreTags}
+        onSearchTags={onSearchTags}
         visibleColumns={visibleColumns}
         {...(activeTicketId !== undefined && { activeTicketId })}
         {...(showEmailReads !== undefined && { showEmailReads })}
@@ -491,6 +540,12 @@ interface KanbanColumnsProps {
   /** Scopes the saved layout: status columns carry the same ids on every board. */
   layoutScope?: string;
   availableTags?: string[];
+  /** Callback to load more tags */
+  onLoadMoreTags?: () => void;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean;
+  /** Callback for server-side tag search */
+  onSearchTags?: (query: string) => void;
   containerClassName?: string;
   visibleColumns?: Set<string> | undefined;
   paginatedColumnConfig?: {
@@ -538,6 +593,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   layoutScope = '',
   containerClassName,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   visibleColumns,
   activeTicketId,
   showEmailReads,
@@ -715,6 +773,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     allKnownTickets={knownTicketsForOptimisticMerge}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                     availableTags={availableTags}
+                    onLoadMoreTags={onLoadMoreTags}
+                    hasMoreTags={hasMoreTags}
+                    onSearchTags={onSearchTags}
                     visibleColumns={visibleColumns}
                     {...(activeTicketId !== undefined && { activeTicketId })}
                     {...(showEmailReads !== undefined && { showEmailReads })}
@@ -732,6 +793,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       stageTickets={stageTickets}
                       {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                       availableTags={availableTags}
+                      onLoadMoreTags={onLoadMoreTags}
+                      hasMoreTags={hasMoreTags}
+                      onSearchTags={onSearchTags}
                       visibleColumns={visibleColumns}
                       {...(activeTicketId !== undefined && { activeTicketId })}
                       {...(showEmailReads !== undefined && { showEmailReads })}

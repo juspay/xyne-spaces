@@ -633,6 +633,8 @@ export default function RecordingDetailV2Screen(): ReactElement {
               ? {
                   ...current,
                   hasRecording: !!fresh.hasRecording,
+                  recordingType: fresh.recordingType ?? current.recordingType ?? null,
+                  attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
                   durationMs: fresh.durationMs ?? current.durationMs,
                 }
               : current,

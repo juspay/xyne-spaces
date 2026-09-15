@@ -37,6 +37,8 @@ COPY apps/dashboard apps/dashboard
 # logger.ts imports the version from the repo-root package.json (../../../package.json)
 COPY package.json /package.json
 
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
 # Run validation (TypeScript + ESLint)
 # validate:raw, not validate: the image has no scripts/ directory, and an image
 # build has no use for the interactive agent handoff the wrapper adds.

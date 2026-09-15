@@ -868,6 +868,10 @@ const parseNode = (
   preserveThreadRoute = false,
   slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
   disableLinks = false,
+  // True when this node is inside a <code>/<pre> region. Unlike `insideCodeBlock`
+  // (which is also set for anchors to suppress URL auto-linking), this is strictly
+  // code context, so mentions can be flattened to inert text without affecting links.
+  insideCode = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -952,6 +956,17 @@ const parseNode = (
 
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();
+
+  // Inside code blocks / inline code, a mention span is almost always a false
+  // positive — e.g. `@Juspay` inside the email `guruprasad.bhosale@Juspay.in`
+  // in a SQL snippet. Render it as inert text instead of an interactive chip.
+  if (insideCode && el.hasAttribute('data-mention')) {
+    return (
+      <React.Fragment key={`${keyPrefix}-code-mention-${idx}`}>
+        {el.textContent ?? ''}
+      </React.Fragment>
+    );
+  }
 
   if (el.hasAttribute('data-mention') && el.getAttribute('data-mention-type') === 'user') {
     const userId = el.getAttribute('data-user-id') || '';
@@ -1131,6 +1146,7 @@ const parseNode = (
       preserveThreadRoute,
       slashCommandArtifactContext,
       disableLinks,
+      insideCode || isCodeElement,
     );
     if (parsed !== null) children.push(parsed);
   });

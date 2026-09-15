@@ -1,6 +1,7 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
 import type { Citation } from "xyne-claw-shared";
 import { prefixChunk } from "./grafana.js";
+import { pathSegment } from "../../lib/url-path.js";
 
 export const githubAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -146,6 +147,8 @@ export async function handleUploadPrAttachment(
   if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {
     throw new Error("upload-pr-attachment: owner/repo contain unsupported characters");
   }
+  const safeOwner = pathSegment("upload-pr-attachment: owner", owner);
+  const safeRepo = pathSegment("upload-pr-attachment: repo", repo);
   if (!fileData || typeof fileData !== "string") {
     throw new Error("upload-pr-attachment: fileData (base64) is required");
   }
@@ -182,7 +185,7 @@ export async function handleUploadPrAttachment(
   };
 
   // The upload endpoint keys off the numeric repository id, not owner/name.
-  const lookupRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+  const lookupRes = await fetch(`https://api.github.com/repos/${safeOwner}/${safeRepo}`, {
     headers: { ...auth, Accept: "application/vnd.github+json" },
     signal: AbortSignal.timeout(20_000),
   });
@@ -248,7 +251,7 @@ export async function handleUploadPrAttachment(
 
   // PR/issue comments share the issues endpoint on GitHub.
   const commentRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+    `https://api.github.com/repos/${safeOwner}/${safeRepo}/issues/${prNumber}/comments`,
     {
       method: "POST",
       headers: { ...auth, Accept: "application/vnd.github+json", "Content-Type": "application/json" },

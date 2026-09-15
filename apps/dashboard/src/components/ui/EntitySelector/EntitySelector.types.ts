@@ -122,6 +122,11 @@ export interface EntitySelectorProps {
 
   /** Lock the dropdown to the trigger's width instead of letting content size it. */
   matchTriggerWidth?: boolean;
+  /**
+   * Floor for the dropdown's width, for triggers too narrow to read the options
+   * against — a sidebar selector, say. Defaults to the trigger's own width.
+   */
+  dropdownMinWidth?: string;
 
   /** Opt in to virtualizing the options list (for large user/group lists). */
   virtualize?: boolean;

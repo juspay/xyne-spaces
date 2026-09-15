@@ -45,6 +45,12 @@ import {
   type SpacesTriggerPropertySchema,
 } from "../lib/api";
 import type { AgentLight } from "../lib/types";
+import {
+  CHAIN_COMMAND_PRESETS,
+  chainCommandFieldsHaveCustomEntries,
+  isChainCommandPresetActive,
+  toggleChainCommandPreset,
+} from "../lib/chainCommandPresets";
 
 /** Claw-defined VCS trigger templates (compiled to a generic WEBHOOK automation
  *  + RUN_AGENT server-side). Surfaced alongside Spaces' native trigger catalog. */
@@ -151,9 +157,11 @@ interface AgentNodeData extends Record<string, unknown> {
 // ChainEdgeData (defined below) extends this with the inline-popover state +
 // callbacks the custom edge component needs at render time.
 interface EdgeData extends Record<string, unknown> {
-  mode: "always" | "tools" | "judge";
+  mode: "always" | "tools" | "judge" | "commands";
   toolsMustInclude: string;
   toolsMustExclude: string;
+  commandsMustMatch: string;
+  commandsMustNotMatch: string;
   judgeContext: string;
   taskTemplate: string;
 }
@@ -419,7 +427,7 @@ function ChainConfigEdge({
   const { mode, isOpen } = data;
   const modeColor =
     mode === "always" ? "bg-zinc-700 text-zinc-200"
-    : mode === "tools" ? "bg-blue-900 text-blue-200"
+    : mode === "tools" || mode === "commands" ? "bg-blue-900 text-blue-200"
     : "bg-purple-900 text-purple-200";
 
   return (
@@ -485,6 +493,7 @@ function ChainConfigEdge({
               >
                 <option value="always">always</option>
                 <option value="tools">tools</option>
+                <option value="commands">commands</option>
                 <option value="judge">judge</option>
               </select>
 
@@ -519,6 +528,20 @@ function ChainConfigEdge({
                 </>
               )}
 
+              {data.mode === "always" && (
+                <p className="mb-2 rounded border border-amber-700/40 bg-amber-900/20 px-2 py-1 text-[10px] text-amber-200">
+                  This edge traverses unconditionally — the next agent runs after every upstream turn.
+                </p>
+              )}
+
+              {data.mode === "commands" && (
+                <CommandsPresetEditor
+                  commandsMustMatch={data.commandsMustMatch}
+                  commandsMustNotMatch={data.commandsMustNotMatch}
+                  onChange={(patch) => data.onChange(id, patch)}
+                />
+              )}
+
               {data.mode === "judge" && (
                 <>
                   <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Judge context</label>
@@ -538,6 +561,76 @@ function ChainConfigEdge({
           )}
         </div>
       </EdgeLabelRenderer>
+    </>
+  );
+}
+
+function CommandsPresetEditor({
+  commandsMustMatch,
+  commandsMustNotMatch,
+  onChange,
+}: {
+  commandsMustMatch: string;
+  commandsMustNotMatch: string;
+  onChange: (patch: { commandsMustMatch?: string; commandsMustNotMatch?: string }) => void;
+}) {
+  const fields = { commandsMustMatch, commandsMustNotMatch };
+  const [advancedOpen, setAdvancedOpen] = useState(() => chainCommandFieldsHaveCustomEntries(fields));
+
+  return (
+    <>
+      <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">Presets</label>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {CHAIN_COMMAND_PRESETS.map((preset) => {
+          const active = isChainCommandPresetActive(fields, preset);
+          return (
+            <button
+              key={preset.key}
+              type="button"
+              title={preset.description}
+              onClick={() => onChange(toggleChainCommandPreset(fields, preset))}
+              className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+                active
+                  ? "border-blue-500 bg-blue-900/50 text-blue-100"
+                  : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setAdvancedOpen((v) => !v)}
+        className="mb-2 text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
+      >
+        {advancedOpen ? "▾ Advanced" : "▸ Advanced"}
+      </button>
+
+      {advancedOpen && (
+        <>
+          <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">commands must match (csv)</label>
+          <input
+            value={commandsMustMatch}
+            onChange={(e) => onChange({ commandsMustMatch: e.target.value })}
+            placeholder="e.g. git commit, /^git (add|commit)/"
+            className="mb-2 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200"
+          />
+          <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-500">commands must not match (csv)</label>
+          <input
+            value={commandsMustNotMatch}
+            onChange={(e) => onChange({ commandsMustNotMatch: e.target.value })}
+            placeholder="e.g. git push"
+            className="mb-2 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200"
+          />
+          <p className="mb-2 text-[10px] text-zinc-500">
+            Matched against each tool call's name plus its command/argument text. Plain text is a
+            case-insensitive substring; wrap in slashes for a case-insensitive regex. Max 200 chars per pattern.
+          </p>
+        </>
+      )}
     </>
   );
 }
@@ -810,6 +903,8 @@ function CreateWorkflowModalInner({ open, onOpenChange, agents, onCreated, editi
         mode: e.mode ?? "always",
         toolsMustInclude: (e.toolsMustInclude ?? []).join(", "),
         toolsMustExclude: (e.toolsMustExclude ?? []).join(", "),
+        commandsMustMatch: (e.commandsMustMatch ?? []).join(", "),
+        commandsMustNotMatch: (e.commandsMustNotMatch ?? []).join(", "),
         judgeContext: e.judgeContext ?? "",
         taskTemplate: e.taskTemplate ?? "{{result}}",
         isOpen: false,
@@ -879,6 +974,8 @@ function CreateWorkflowModalInner({ open, onOpenChange, agents, onCreated, editi
             mode: "always",
             toolsMustInclude: "",
             toolsMustExclude: "",
+            commandsMustMatch: "",
+            commandsMustNotMatch: "",
             judgeContext: "",
             taskTemplate: "{{result}}",
             isOpen: true, // auto-open the popover for the freshly drawn edge
@@ -951,6 +1048,12 @@ function CreateWorkflowModalInner({ open, onOpenChange, agents, onCreated, editi
             : {}),
           ...(fromCsv(d.toolsMustExclude ?? "").length > 0
             ? { toolsMustExclude: fromCsv(d.toolsMustExclude ?? "") }
+            : {}),
+          ...(fromCsv(d.commandsMustMatch ?? "").length > 0
+            ? { commandsMustMatch: fromCsv(d.commandsMustMatch ?? "") }
+            : {}),
+          ...(fromCsv(d.commandsMustNotMatch ?? "").length > 0
+            ? { commandsMustNotMatch: fromCsv(d.commandsMustNotMatch ?? "") }
             : {}),
           ...(d.judgeContext?.trim() ? { judgeContext: d.judgeContext.trim() } : {}),
           ...(d.taskTemplate?.trim() ? { taskTemplate: d.taskTemplate.trim() } : {}),

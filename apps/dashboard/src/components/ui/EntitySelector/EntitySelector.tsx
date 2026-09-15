@@ -25,6 +25,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   searchPlaceholder,
   showSearch = true,
   matchTriggerWidth = false,
+  dropdownMinWidth,
   isLoading = false,
   width = 'auto',
   onSearchChange,
@@ -420,7 +421,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             pointerEvents: 'auto',
             // Never narrower than the trigger it drops from; a compact trigger
             // still lets the content size the popover as before.
-            minWidth: 'var(--radix-popover-trigger-width)',
+            minWidth: dropdownMinWidth
+              ? `max(${dropdownMinWidth}, var(--radix-popover-trigger-width))`
+              : 'var(--radix-popover-trigger-width)',
             ...(matchTriggerWidth && {
               width: 'var(--radix-popover-trigger-width)',
               maxWidth: 'var(--radix-popover-trigger-width)',

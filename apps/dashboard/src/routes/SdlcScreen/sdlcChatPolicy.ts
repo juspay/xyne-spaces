@@ -1,5 +1,3 @@
-import type { SdlcEntityType, SdlcRelationType } from '@xyne/shared';
-
 export type SdlcChatTab = 'conversations' | 'ai';
 export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
 
@@ -97,14 +95,3 @@ export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
-
-export const shouldShowSdlcRelatedLink = (input: {
-  relationType: SdlcRelationType;
-  entityType: SdlcEntityType;
-  entityChannelId?: string | null;
-  repositoryChannelId?: string | null;
-}): boolean => {
-  if (input.relationType === 'DISCUSSION') return false;
-  if (input.entityType !== 'CONVERSATION') return true;
-  return Boolean(input.entityChannelId && input.entityChannelId !== input.repositoryChannelId);
-};

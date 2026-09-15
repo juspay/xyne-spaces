@@ -13,6 +13,12 @@ export interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  /**
+   * Set when the group exists ONLY because a subagent definition carries the
+   * credentials for this server. xyne-claw uses it to keep those tools inside
+   * the subagent's palette instead of the parent agent's direct tools.
+   */
+  readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
 export interface McpCallResult {

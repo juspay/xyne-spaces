@@ -10,6 +10,7 @@ import { config } from "@/config/env";
 import { outageAlertService } from "@/services/outageAlertService";
 import { extractMentionsFromContent } from "@/utils/mentionUtils";
 import {
+	deleteConversationMessage,
 	findOrCreateConversation,
 	getChannelHistory,
 	getConversationReplies,
@@ -32,6 +33,7 @@ import {
 	resolveSlackChannel,
 } from "./middleware";
 import {
+	transformDelete,
 	transformPostMessage,
 	transformUpdate,
 } from "./request-transformers/chat";
@@ -47,6 +49,7 @@ import {
 	transformUsersLookupByEmail,
 } from "./request-transformers/users";
 import {
+	transformDeleteResponse,
 	transformPostMessageResponse,
 	transformUpdateResponse,
 } from "./response-transformers/chat";
@@ -163,6 +166,11 @@ const UpdateSchema = z
 			path: ["text"],
 		},
 	);
+
+const DeleteSchema = z.object({
+	channel: z.string().min(1, "channel is required"),
+	ts: z.string().min(1, "ts is required"),
+});
 
 const HistorySchema = z.object({
 	channel: z.string().min(1, "channel is required"),
@@ -455,6 +463,39 @@ export class SlackController {
 			context.userId,
 		);
 		res.status(200).json(slackResponse);
+	});
+
+
+	chatDelete = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = DeleteSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+		const args = transformDelete({ ...parsed.data, channel: channelId });
+		const existingMessage = await repositories.messages.findById(args.messageId);
+		if (!existingMessage) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		if (existingMessage.isDeleted) {
+			res.status(200).json({ ok: true, channel: channelId, ts: args.messageId });
+			return;
+		}
+		if (existingMessage.senderId !== context.userId || existingMessage.msgType !== MessageType.BOT) {
+			res.status(200).json({ ok: false, error: "cant_delete_message" });
+			return;
+		}
+		const existingConversation = await repositories.conversations.findById(existingMessage.conversationId);
+		if (!existingConversation || existingConversation.channelId !== args.channelId) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		const result = await deleteConversationMessage(args.messageId, context.userId);
+		res.status(200).json(transformDeleteResponse(result, channelId));
 	});
 
 	conversationsHistory = wrapSlackHandler(

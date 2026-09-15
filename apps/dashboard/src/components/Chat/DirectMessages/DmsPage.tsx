@@ -885,8 +885,17 @@ const DmsPage = (): ReactElement => {
           <div className='flex-1 flex flex-col bg-background relative h-full rounded-2xl'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
-                <div className='max-w-full max-h-full flex items-center justify-center'>
-                  <DirectMessagesIcon />
+                <div className='flex flex-col items-center justify-center p-8 text-center'>
+                  <DirectMessagesIcon className='mb-6' />
+                  <h3
+                    className='text-xl font-medium text-foreground mb-2'
+                    data-testid='select-conversation-heading'
+                  >
+                    Select a conversation
+                  </h3>
+                  <p className='text-muted-foreground max-w-md'>
+                    Choose a direct message from the list to read it here
+                  </p>
                 </div>
               ) : (
                 <div className='w-full h-full'>

@@ -45,11 +45,12 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
+  // Special type 'ticket_tags' is used for tag search aggregation
   type: Joi.string()
-    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
+    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, calls'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, ticket_tags'
     }),
 
   from: Joi.alternatives()
@@ -286,6 +287,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   assignee: Joi.string().optional().messages({
     'string.base': 'Assignee must be a string'
+  }),
+
+  userGroup: Joi.string().optional().messages({
+    'string.base': 'UserGroup must be a string'
   }),
 
   subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca', 'collections').optional().messages({

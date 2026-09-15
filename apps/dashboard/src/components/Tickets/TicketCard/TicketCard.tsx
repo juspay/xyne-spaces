@@ -192,21 +192,27 @@ const AssigneeEditor: React.FC<{
 
 interface TicketCardProps {
   ticket: Ticket;
-  tags?: TicketTag[];
-  availableTags?: string[];
-  onClick?: (e: React.MouseEvent | KeyboardEvent) => void;
-  width?: string;
-  isCompact?: boolean;
+  tags?: TicketTag[] | undefined;
+  availableTags?: string[] | undefined;
+  /** Callback to load more tags */
+  onLoadMoreTags?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean | undefined;
+  /** Callback for server-side tag search */
+  onSearchTags?: ((query: string) => void) | undefined;
+  onClick?: ((e: React.MouseEvent | KeyboardEvent) => void) | undefined;
+  width?: string | undefined;
+  isCompact?: boolean | undefined;
   visibleColumns?: Set<string> | undefined;
-  isConversation?: boolean;
-  activeTicketId?: string;
+  isConversation?: boolean | undefined;
+  activeTicketId?: string | undefined;
   /** Only true for email-type desks; hides the email unread indicator everywhere else. */
-  showEmailReads?: boolean;
+  showEmailReads?: boolean | undefined;
   /**
    * SLA policies pre-fetched by the parent for the whole board.
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
-  slaPolicies?: BoardSlaPolicy[];
+  slaPolicies?: BoardSlaPolicy[] | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -215,6 +221,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   width = 'w-full',
   tags,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
@@ -865,6 +874,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           selectedTags={selectedTagNames}
                           onTagsChange={handleTagsChange}
                           stopEditing={() => setIsEditingTags(false)}
+                          onLoadMore={onLoadMoreTags}
+                          hasMore={hasMoreTags}
+                          onSearch={onSearchTags}
                         />
                       </div>
                     ) : hasTags ? (
