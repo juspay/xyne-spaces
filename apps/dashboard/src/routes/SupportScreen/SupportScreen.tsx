@@ -13,8 +13,24 @@ import {
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  useLocation,
+  useNavigate,
+  useNavigationType,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import {
+  deskTicketTrackingMetadata,
+  trackDeskOutcome,
+  markDeskListViewed,
+  markDeskTicketViewed,
+  msSinceDeskListViewed,
+} from '../../services/Analytics/deskTracking';
+import { readTrackSource, lengthBucket } from '../../services/Analytics/trackSource';
+import { ticketCountBucket, trackTicketOutcome } from '../../services/Analytics/ticketTracking';
 import {
   SUPPORT_SIDEBAR_DEFAULT_WIDTH,
   SUPPORT_SIDEBAR_MAX_WIDTH,
@@ -290,6 +306,8 @@ interface ComposeInstance {
   /** Incremented to force-remount the inner EmailComposer when needed. */
   key: number;
   initialTo?: string[] | undefined;
+  /** Analytics `source` for COMPOSER_OPENED: header · mailto · reopen_draft. */
+  trackSource?: string | undefined;
 }
 
 /** Persisted shape — only the stable fields, no ephemeral UI state. */
@@ -443,16 +461,43 @@ const EmailImageThumbnail = ({
  * the chat MessageAttachment uses (zoom, pan, next/prev). Non-image clicks
  * download the file via the standard `downloadFile` helper.
  */
+/** Coarse attachment dimensions for the open / download clicks — never the filename. */
+const attachmentTrackMetadata = (
+  att: { mimetype?: string | null; size?: number | null },
+  ctx: { ticketId: string | null; emailIndex: number; emailCount: number } | undefined,
+): string => {
+  const mime = typeof att.mimetype === 'string' ? att.mimetype : '';
+  const mimeGroup = mime.startsWith('image/')
+    ? 'image'
+    : mime === 'application/pdf'
+      ? 'pdf'
+      : /word|excel|powerpoint|officedocument|text\/|csv/i.test(mime)
+        ? 'doc'
+        : 'other';
+  const size = att.size ?? 0;
+  const sizeBucket =
+    size <= 100_000
+      ? '<100KB'
+      : size <= 1_000_000
+        ? '100KB-1MB'
+        : size <= 10_000_000
+          ? '1-10MB'
+          : '10MB+';
+  return JSON.stringify({ ...ctx, mimeGroup, sizeBucket });
+};
+
 const EmailAttachmentsRow = ({
   attachments: rows,
   conversationId,
   channelId,
   body,
+  trackContext,
 }: {
   attachments: NonNullable<Email['attachments']>;
   conversationId?: string;
   channelId?: string;
   body?: string;
+  trackContext?: { ticketId: string | null; emailIndex: number; emailCount: number };
 }): ReactElement | null => {
   const inlineCids = new Set<string>();
   const inlineAttachmentIds = new Set<string>();
@@ -512,6 +557,7 @@ const EmailAttachmentsRow = ({
               title={att.originalFilename}
               data-track-category='Support'
               data-track-name='OpenEmailAttachmentImage'
+              data-track-metadata={attachmentTrackMetadata(att, trackContext)}
               className='group relative block rounded-lg overflow-hidden border border-border bg-muted hover:border-foreground/40 transition-colors'
             >
               <EmailImageThumbnail attachmentId={att.id} filename={att.originalFilename} />
@@ -537,6 +583,7 @@ const EmailAttachmentsRow = ({
             title={att.originalFilename}
             data-track-category='Support'
             data-track-name='DownloadEmailAttachment'
+            data-track-metadata={attachmentTrackMetadata(att, trackContext)}
             className='flex items-center gap-2 px-3 py-2 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors min-w-0 max-w-[260px]'
           >
             <Paperclip size={14} className='text-muted-foreground shrink-0' />
@@ -604,6 +651,18 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     setKanbanTickets([]);
   }, [selectedChannelId]);
+  // Which desk + folder + view the last onTicketsLoaded belonged to. The view
+  // components call it whenever their rows change (including the empty result
+  // of an empty inbox), so SUPPORT_LIST_VIEWED keys on "loaded for the current
+  // key" rather than on a non-zero count.
+  const listKeyRef = useRef<string | null>(null);
+  const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
+  const handleTicketsLoaded = useCallback((tickets: Ticket[]): void => {
+    setKanbanTickets(tickets);
+    setLoadedListKey(listKeyRef.current);
+  }, []);
+  const listLocation = useLocation();
+  const listNavigationType = useNavigationType();
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('support-view-mode');
@@ -880,6 +939,17 @@ const SupportScreen = (): ReactElement => {
   const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+  const activeFilterCount =
+    (hasAssigneeFilter ? 1 : 0) +
+    (hasPriorityFilter ? 1 : 0) +
+    (hasStagesFilter ? 1 : 0) +
+    moreFiltersActiveCount;
+  // Desk dimensions shared by the inbox click metadata below.
+  const inboxDeskType = channelPreference?.deskType ?? null;
+  const deskClickMetadata = useMemo(
+    () => ({ deskType: inboxDeskType, channelId: selectedChannelId, activeFilterCount }),
+    [inboxDeskType, selectedChannelId, activeFilterCount],
+  );
 
   // Desk ticket saved views
   const ticketViewsChannelId =
@@ -1203,6 +1273,11 @@ const SupportScreen = (): ReactElement => {
                     type='button'
                     data-track-category='Support'
                     data-track-name='SelectDatePreset'
+                    data-track-metadata={JSON.stringify({
+                      ...deskClickMetadata,
+                      filterKey: 'lastEmailAt',
+                      preset: preset.label,
+                    })}
                     onClick={() => {
                       handleDateRangeChange(v);
                     }}
@@ -1252,6 +1327,11 @@ const SupportScreen = (): ReactElement => {
                     type='button'
                     data-track-category='Support'
                     data-track-name='SelectCreatedAtPreset'
+                    data-track-metadata={JSON.stringify({
+                      ...deskClickMetadata,
+                      filterKey: 'createdAt',
+                      preset: preset.label,
+                    })}
                     onClick={() => {
                       handleCreatedDateRangeChange(v);
                     }}
@@ -1349,18 +1429,21 @@ const SupportScreen = (): ReactElement => {
     useComposeDraftOperations(selectedChannelId);
 
   /** Add a new compose window for the given channel. */
-  const openNewCompose = useCallback((channelId: string, initialTo?: string[]): void => {
-    const id = uuidv4();
-    setComposeInstances(prev => [
-      ...prev,
-      { id, channelId, minimized: false, key: 0, initialTo: initialTo ?? [] },
-    ]);
-  }, []);
+  const openNewCompose = useCallback(
+    (channelId: string, initialTo?: string[], trackSource: string = 'header'): void => {
+      const id = uuidv4();
+      setComposeInstances(prev => [
+        ...prev,
+        { id, channelId, minimized: false, key: 0, initialTo: initialTo ?? [], trackSource },
+      ]);
+    },
+    [],
+  );
 
   const handleMailtoClick = useCallback(
     (email: string): void => {
       if (!selectedChannelId) return;
-      openNewCompose(selectedChannelId, [email]);
+      openNewCompose(selectedChannelId, [email], 'mailto');
     },
     [openNewCompose, selectedChannelId],
   );
@@ -1408,7 +1491,10 @@ const SupportScreen = (): ReactElement => {
       if (!channelId) return;
       setComposeInstances(prev => {
         if (prev.find(i => i.id === instanceId)) return prev; // already open
-        return [...prev, { id: instanceId, channelId, minimized: false, key: 0 }];
+        return [
+          ...prev,
+          { id: instanceId, channelId, minimized: false, key: 0, trackSource: 'reopen_draft' },
+        ];
       });
     },
     [composeDraftRows, selectedChannelId],
@@ -1508,8 +1594,30 @@ const SupportScreen = (): ReactElement => {
         const email = searchParams.get('email');
         toast.success(email ? `Connected ${email}` : 'Shared mailbox connected');
         void queryClient.invalidateQueries({ queryKey: ['workspace-shared-mailbox-status'] });
+        // The OAuth round-trip lands here, not on a click, so the outcome is a
+        // manual event. Provider only — never the address.
+        globalClickTracker.trackManualEvent(
+          'workspace-desk-email',
+          'EMAIL_ACCOUNT_CONNECTED',
+          undefined,
+          {
+            provider: searchParams.get('provider') ?? 'unknown',
+            scope: 'workspace',
+            isReconnect: false,
+          },
+        );
       } else if (emailError) {
         toast.error(emailError);
+        globalClickTracker.trackManualEvent(
+          'workspace-desk-email',
+          'EMAIL_ACCOUNT_CONNECT_FAILED',
+          undefined,
+          {
+            provider: searchParams.get('provider') ?? 'unknown',
+            scope: 'workspace',
+            errorKind: 'oauth',
+          },
+        );
       }
       setSearchParams(
         prev => {
@@ -1528,6 +1636,17 @@ const SupportScreen = (): ReactElement => {
       const action = emailReconnected === 'true' ? 'reconnected' : 'connected';
       toast.success(
         `${provider.charAt(0).toUpperCase() + provider.slice(1)} mailbox ${action} successfully`,
+      );
+      globalClickTracker.trackManualEvent(
+        'workspace-desk-email',
+        'EMAIL_ACCOUNT_CONNECTED',
+        undefined,
+        {
+          provider: provider.toLowerCase(),
+          scope: 'channel',
+          isReconnect: emailReconnected === 'true',
+          ...(channelFromCallback && { channelId: channelFromCallback }),
+        },
       );
       // Bust the per-channel hook caches so the just-changed integration
       // state propagates immediately. Without this, the contacts hook (5h
@@ -1552,6 +1671,17 @@ const SupportScreen = (): ReactElement => {
       }
     } else if (emailError) {
       toast.error(emailError);
+      globalClickTracker.trackManualEvent(
+        'workspace-desk-email',
+        'EMAIL_ACCOUNT_CONNECT_FAILED',
+        undefined,
+        {
+          provider: (searchParams.get('provider') ?? 'unknown').toLowerCase(),
+          scope: 'channel',
+          errorKind: 'oauth',
+          ...(channelFromCallback && { channelId: channelFromCallback }),
+        },
+      );
       if (channelFromCallback) {
         void navigate(`${supportBase}/${channelFromCallback}`, { replace: true });
       } else {
@@ -1675,6 +1805,46 @@ const SupportScreen = (): ReactElement => {
     () => new Set((myAdminParticipations ?? []).map(p => p.channelId)),
     [myAdminParticipations],
   );
+
+  // SUPPORT_LIST_VIEWED: one event per desk + folder + view the agent lands on,
+  // fired once the active view has handed its rows over (handleTicketsLoaded)
+  // so the count rides along. Latched on the key so re-renders, pagination and
+  // filter edits inside the same list don't refire. `source` follows the
+  // CHANNEL_VIEWED rule (see readTrackSource).
+  const listFolder: string = selectedLabel
+    ? 'label'
+    : selectedChannelHasMailboxFolders
+      ? selectedFolder.key
+      : 'all';
+  const listKey =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? `${selectedChannelId}:${listFolder}:${viewMode}`
+      : null;
+  listKeyRef.current = listKey;
+  const listViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!listKey || loadedListKey !== listKey) return;
+    if (listViewedKeyRef.current === listKey) return;
+    listViewedKeyRef.current = listKey;
+    markDeskListViewed();
+    const activeFilterKeys = Object.entries(ticketFilter)
+      .filter(([, value]) => value !== undefined && !(Array.isArray(value) && value.length === 0))
+      .map(([key]) => key);
+    globalClickTracker.trackManualEvent('Support', 'SUPPORT_LIST_VIEWED', undefined, {
+      deskType: inboxDeskType,
+      channelId: selectedChannelId,
+      viewMode,
+      folder: listFolder,
+      ...(selectedLabel && { labelId: selectedLabel.id }),
+      activeFilterKeys,
+      activeFilterCount,
+      ticketCountBucket: ticketCountBucket(kanbanTickets.length),
+      hasAiDraftFilter: filters.hasAiDraft === true,
+      source: readTrackSource(listLocation.state, listNavigationType),
+    });
+    // kanbanTickets/ticketFilter are read at fire time only; the latch key is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey, loadedListKey]);
   // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
   const canExploreTopics =
     canManageDeskInsights &&
@@ -1833,16 +2003,44 @@ const SupportScreen = (): ReactElement => {
   const handleMarkSelectedAsRead = useCallback((): void => {
     if (selectedTickets.size === 0) return;
     const tickets = Array.from(selectedTickets.values());
-    markBulkAsRead(tickets);
+    const changed = markBulkAsRead(tickets);
+    if (changed > 0) {
+      trackDeskOutcome(
+        'READ_STATE_CHANGED',
+        null,
+        { deskType: inboxDeskType },
+        {
+          to: 'read',
+          trigger: 'bulk',
+          bulkCount: changed,
+          selectedCount: tickets.length,
+          channelId: selectedChannelId,
+        },
+      );
+    }
     setSelectedTickets(new Map());
-  }, [selectedTickets, markBulkAsRead]);
+  }, [selectedTickets, markBulkAsRead, inboxDeskType, selectedChannelId]);
 
   const handleMarkSelectedAsUnread = useCallback((): void => {
     if (selectedTickets.size === 0) return;
     const tickets = Array.from(selectedTickets.values());
-    markBulkAsUnread(tickets);
+    const changed = markBulkAsUnread(tickets);
+    if (changed > 0) {
+      trackDeskOutcome(
+        'READ_STATE_CHANGED',
+        null,
+        { deskType: inboxDeskType },
+        {
+          to: 'unread',
+          trigger: 'bulk',
+          bulkCount: changed,
+          selectedCount: tickets.length,
+          channelId: selectedChannelId,
+        },
+      );
+    }
     setSelectedTickets(new Map());
-  }, [selectedTickets, markBulkAsUnread]);
+  }, [selectedTickets, markBulkAsUnread, inboxDeskType, selectedChannelId]);
 
   const handleToggleSelectAll = useCallback(
     (
@@ -2020,6 +2218,16 @@ const SupportScreen = (): ReactElement => {
         );
         toast.success('Tickets merged');
         const parentTicket = selectedTickets.get(parentTicketId);
+        trackDeskOutcome(
+          'TICKETS_MERGED',
+          parentTicket ?? { id: parentTicketId },
+          { deskType: inboxDeskType },
+          {
+            mergedCount: ticketIds.filter(id => id !== parentTicketId).length,
+            parentTicketId,
+            surface: 'bulk',
+          },
+        );
         clearTicketSelection();
         setShowMergeDialog(false);
         if (parentTicket) {
@@ -2028,6 +2236,7 @@ const SupportScreen = (): ReactElement => {
               conversationId: parentTicket.conversationId,
               ticketId: parentTicket.id,
               shouldNavigateBack: true,
+              trackSource: 'merge',
             },
           });
         }
@@ -2316,15 +2525,18 @@ const SupportScreen = (): ReactElement => {
     );
   }, [searchParams, selectedChannelId, setSearchParams]);
 
+  // `trackSource` names the surface the open came from (kanban_card, inbox_row,
+  // table_row, calendar); SUPPORT_TICKET_VIEWED reads it off the router state.
+  // A new tab has no state, so the source rides the URL as ?src= instead.
   const handleTicketClick = useCallback(
-    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
+    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket, trackSource = 'inbox_row') => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ticketData = ticket as SupportTicket;
       const ticketUrl = `${supportBase}/${ticketData.channelId}/${ticketData.xyneId}`;
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
-        window.open(ticketUrl, '_blank');
+        window.open(`${ticketUrl}?src=new_tab`, '_blank');
         return;
       }
 
@@ -2336,6 +2548,7 @@ const SupportScreen = (): ReactElement => {
           conversationId: ticketData.conversationId,
           ticketId: ticketData.id,
           shouldNavigateBack: true,
+          trackSource,
         },
       });
     },
@@ -2500,6 +2713,7 @@ const SupportScreen = (): ReactElement => {
           }}
           data-track-category='Support'
           data-track-name='SelectEmailChannel'
+          data-track-metadata={JSON.stringify({ to: c.id, from: selectedChannelId })}
         >
           <span className='flex items-center gap-1 shrink-0'>
             {canExpandDesk ? (
@@ -3146,7 +3360,10 @@ const SupportScreen = (): ReactElement => {
                             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='Support'
                             data-track-name='OpenDeskSearch'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            data-track-metadata={JSON.stringify({
+                              ...deskClickMetadata,
+                              trigger: 'button',
+                            })}
                           >
                             <Search size={16} />
                           </button>
@@ -3304,6 +3521,8 @@ const SupportScreen = (): ReactElement => {
                                   data-track-category='Support'
                                   data-track-name='ToggleMyTickets'
                                   data-track-metadata={JSON.stringify({
+                                    ...deskClickMetadata,
+                                    filterKey: 'assigned',
                                     assigned: !filters.assigned,
                                   })}
                                 >
@@ -3320,6 +3539,8 @@ const SupportScreen = (): ReactElement => {
                                   data-track-category='Support'
                                   data-track-name='ToggleHasAiDraft'
                                   data-track-metadata={JSON.stringify({
+                                    ...deskClickMetadata,
+                                    filterKey: 'hasAiDraft',
                                     hasAiDraft: filters.hasAiDraft !== true,
                                   })}
                                 >
@@ -3336,6 +3557,8 @@ const SupportScreen = (): ReactElement => {
                                   data-track-category='Support'
                                   data-track-name='ToggleHasSubTickets'
                                   data-track-metadata={JSON.stringify({
+                                    ...deskClickMetadata,
+                                    filterKey: 'hasSubTickets',
                                     hasSubTickets: filters.hasSubTickets !== true,
                                   })}
                                 >
@@ -3396,6 +3619,8 @@ const SupportScreen = (): ReactElement => {
                                       data-track-category='Support'
                                       data-track-name='OpenFilterSubmenu'
                                       data-track-metadata={JSON.stringify({
+                                        ...deskClickMetadata,
+                                        filterKey: item.id,
                                         filterId: item.id,
                                         filterLabel: item.label,
                                       })}
@@ -3455,6 +3680,7 @@ const SupportScreen = (): ReactElement => {
                               }}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
+                              data-track-metadata={JSON.stringify(deskClickMetadata)}
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
@@ -3595,6 +3821,10 @@ const SupportScreen = (): ReactElement => {
                             title='Kanban View'
                             data-track-category='Support'
                             data-track-name='SetKanbanView'
+                            data-track-metadata={JSON.stringify({
+                              ...deskClickMetadata,
+                              from: viewMode,
+                            })}
                           >
                             <LayoutGrid size={16} />
                           </button>
@@ -3609,6 +3839,10 @@ const SupportScreen = (): ReactElement => {
                             title='List View'
                             data-track-category='Support'
                             data-track-name='SetListView'
+                            data-track-metadata={JSON.stringify({
+                              ...deskClickMetadata,
+                              from: viewMode,
+                            })}
                           >
                             <List size={16} />
                           </button>
@@ -3623,6 +3857,10 @@ const SupportScreen = (): ReactElement => {
                             title='Table View'
                             data-track-category='Support'
                             data-track-name='SetTableView'
+                            data-track-metadata={JSON.stringify({
+                              ...deskClickMetadata,
+                              from: viewMode,
+                            })}
                           >
                             <Table2 size={16} />
                           </button>
@@ -3637,6 +3875,10 @@ const SupportScreen = (): ReactElement => {
                             title='Calendar View'
                             data-track-category='Support'
                             data-track-name='SetCalendarView'
+                            data-track-metadata={JSON.stringify({
+                              ...deskClickMetadata,
+                              from: viewMode,
+                            })}
                           >
                             <CalendarRange size={16} />
                           </button>
@@ -3900,8 +4142,8 @@ const SupportScreen = (): ReactElement => {
                         onBoardIdResolved={handleChannelBoardIdResolved}
                         ticketFilter={ticketFilter}
                         dynamicFieldEntries={dynamicFieldEntries}
-                        onTicketClick={handleTicketClick}
-                        onTicketsLoaded={setKanbanTickets}
+                        onTicketClick={(e, ticket) => handleTicketClick(e, ticket, 'kanban_card')}
+                        onTicketsLoaded={handleTicketsLoaded}
                         {...(ticketId !== undefined && { activeTicketId: ticketId })}
                       />
                     ) : viewMode === 'calendar' && selectedChannelId ? (
@@ -3915,10 +4157,11 @@ const SupportScreen = (): ReactElement => {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
                               shouldNavigateBack: true,
+                              trackSource: 'calendar',
                             },
                           });
                         }}
-                        onTicketsLoaded={setKanbanTickets}
+                        onTicketsLoaded={handleTicketsLoaded}
                       />
                     ) : viewMode === 'table' ? (
                       <SupportTicketTable
@@ -3928,7 +4171,7 @@ const SupportScreen = (): ReactElement => {
                         visibleColumns={tableVisibleColumns}
                         dynamicFieldColumns={tableDynamicFieldColumns}
                         onBoardIdResolved={handleChannelBoardIdResolved}
-                        onTicketsLoaded={setKanbanTickets}
+                        onTicketsLoaded={handleTicketsLoaded}
                         selectedIds={selectedTicketIds}
                         onSelectionChange={handleTableSelectionChange}
                         onTicketClick={ticket => {
@@ -3937,6 +4180,7 @@ const SupportScreen = (): ReactElement => {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
                               shouldNavigateBack: true,
+                              trackSource: 'table_row',
                             },
                           });
                         }}
@@ -3961,13 +4205,14 @@ const SupportScreen = (): ReactElement => {
                         onBoardIdReady={handleChannelBoardIdResolved}
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
-                        onTicketsLoaded={setKanbanTickets}
+                        onTicketsLoaded={handleTicketsLoaded}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
                               conversationId: ticket.conversationId,
                               ticketId: ticket.id,
                               shouldNavigateBack: true,
+                              trackSource: 'inbox_row',
                             },
                           });
                         }}
@@ -4169,6 +4414,7 @@ const SupportScreen = (): ReactElement => {
                   resetKey={inst.key}
                   minimized={inst.minimized}
                   initialTo={inst.initialTo}
+                  trackSource={inst.trackSource ?? 'header'}
                   onMinimizedChange={next => setComposeMinimized(inst.id, next)}
                   onClose={() => closeCompose(inst.id)}
                   onDiscard={() => discardCompose(inst.id)}
@@ -4285,6 +4531,14 @@ type SupportTicketDetailProps = {
    * the search-results pane disables them since there's no ticket list to page through there.
    */
   showAdjacentNav?: boolean;
+  /**
+   * Analytics `source` for SUPPORT_TICKET_VIEWED when the host shows a ticket
+   * without a navigation (search side panel). Route-driven hosts leave it unset
+   * and the event reads `location.state.trackSource` / `?src=` instead.
+   */
+  trackSource?: string;
+  /** Which surface hosts the detail — `support` (default), `activity`, `search_panel`. */
+  host?: 'support' | 'activity' | 'search_panel';
 };
 
 type TicketReplyKind = 'app' | 'channel';
@@ -4310,6 +4564,8 @@ export const SupportTicketDetail = ({
   onBack,
   navTickets,
   showAdjacentNav = true,
+  trackSource: trackSourceProp,
+  host = 'support',
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -4340,6 +4596,11 @@ export const SupportTicketDetail = ({
     }
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpenState] = useState<boolean>(false);
+  // Which gesture opened the reply composer — read by EmailComposer's
+  // COMPOSER_OPENED on mount. Set right before setComposerOpen(true).
+  const composerOpenSourceRef = useRef<'reply_pill' | 'thread_item' | 'keyboard' | 'reopen_draft'>(
+    'reply_pill',
+  );
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('replyAll');
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
@@ -4355,11 +4616,13 @@ export const SupportTicketDetail = ({
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const navigationType = useNavigationType();
   const routerState = location.state as {
     conversationId?: string | null;
     ticketId?: string | null;
     returnToUrl?: string | null;
     shouldNavigateBack?: boolean;
+    trackSource?: string;
   };
   // List navigation supplies stable IDs in router state; direct URL loads and
   // new-tab openings fall back to the :ticketId path parameter below.
@@ -4426,6 +4689,12 @@ export const SupportTicketDetail = ({
       const toastId = toast.loading('Unmerging ticket...');
       try {
         await apiInstance.post(`/tickets/${sourceTicketId}/unmerge`);
+        trackDeskOutcome(
+          'EMAIL_DEMERGED',
+          ticket,
+          { deskType: channelPreference?.deskType ?? null },
+          { kind: 'ticket_unmerge', sourceTicketId },
+        );
         toast.success('Ticket unmerged successfully', {
           id: toastId,
           description: sourceTicketXyneId
@@ -4585,6 +4854,7 @@ export const SupportTicketDetail = ({
     if (!conversationId) return;
     if (draftAutoOpenedConversationRef.current === conversationId) return;
     if (ticketDraft?.draftContent?.trim()) {
+      composerOpenSourceRef.current = 'reopen_draft';
       setComposerOpen(true);
       draftAutoOpenedConversationRef.current = conversationId;
       if (ticketDraft.userId === null) {
@@ -4598,13 +4868,16 @@ export const SupportTicketDetail = ({
       ? { id: ticket.id, lastEmailAt: ticket.lastEmailAt }
       : null;
 
-  const goToTicket = (t: {
-    id: string;
-    xyneId?: string | null;
-    channelId?: string | null;
-    conversationId: string;
-    title: string;
-  }): void => {
+  const goToTicket = (
+    t: {
+      id: string;
+      xyneId?: string | null;
+      channelId?: string | null;
+      conversationId: string;
+      title: string;
+    },
+    trackSource: 'adjacent_nav' | 'keyboard' = 'adjacent_nav',
+  ): void => {
     if (!t.xyneId) return;
     const nextChannelId = t.channelId || channelIdParam;
     if (!nextChannelId) return;
@@ -4615,6 +4888,7 @@ export const SupportTicketDetail = ({
       state: {
         conversationId: t.conversationId,
         ticketId: t.id,
+        trackSource,
         ...(routerState?.shouldNavigateBack ? { shouldNavigateBack: true } : {}),
         ...(routerState?.returnToUrl ? { returnToUrl: routerState.returnToUrl } : {}),
       },
@@ -4693,10 +4967,13 @@ export const SupportTicketDetail = ({
     supportBase,
   ]);
 
-  const navigateAdjacent = async (dir: 'forward' | 'backward'): Promise<void> => {
+  const navigateAdjacent = async (
+    dir: 'forward' | 'backward',
+    trackSource: 'adjacent_nav' | 'keyboard' = 'adjacent_nav',
+  ): Promise<void> => {
     const windowTarget = dir === 'forward' ? windowNext : windowPrev;
     if (windowTarget) {
-      goToTicket(windowTarget);
+      goToTicket(windowTarget, trackSource);
       return;
     }
     if (!cursorStart || !channelId) return;
@@ -4721,7 +4998,7 @@ export const SupportTicketDetail = ({
         title: string;
       }>;
       const target = result?.[0];
-      if (target) goToTicket(target);
+      if (target) goToTicket(target, trackSource);
     } catch (err) {
       logger.error(Event.ZERO_RUN_ERROR, {
         source: 'SupportTicketDetail.navigateAdjacent',
@@ -4753,6 +5030,13 @@ export const SupportTicketDetail = ({
       ).then(ok => {
         setIsArchivingTicket(false);
         if (ok) {
+          // The desk archive bypasses TicketDetails, so the shared outcome is
+          // emitted here; CONFIRM_ARCHIVE_TICKET stays as the click.
+          trackTicketOutcome('TICKET_ARCHIVED', ticket, {
+            surface: 'desk_detail',
+            deskType: channelPreference?.deskType ?? null,
+            hasFirstResponse: !!ticket.firstRespondedAt,
+          });
           toast.success('Ticket archived successfully');
           goBackToTicketList();
         }
@@ -4766,10 +5050,22 @@ export const SupportTicketDetail = ({
   };
 
   // Keyboard shortcuts: j = next, k = previous, e = toggle collapse/expand all.
+  // A shortcut fires no DOM click, so each one reports itself here; the ticket
+  // it lands on reports SUPPORT_TICKET_VIEWED with source 'keyboard'.
+  const trackKeyboardNav = (
+    action: 'next' | 'prev' | 'collapse_all' | 'reply' | 'reply_all',
+  ): void => {
+    globalClickTracker.trackManualEvent('Support', 'KEYBOARD_NAV', undefined, {
+      action,
+      ...(ticket?.id && { ticketId: ticket.id }),
+      host,
+    });
+  };
   useShortcut(
     'j',
     () => {
-      void navigateAdjacent('forward');
+      trackKeyboardNav('next');
+      void navigateAdjacent('forward', 'keyboard');
     },
     {
       scope: 'global',
@@ -4781,7 +5077,8 @@ export const SupportTicketDetail = ({
   useShortcut(
     'k',
     () => {
-      void navigateAdjacent('backward');
+      trackKeyboardNav('prev');
+      void navigateAdjacent('backward', 'keyboard');
     },
     {
       scope: 'global',
@@ -4793,7 +5090,10 @@ export const SupportTicketDetail = ({
   useShortcut(
     'e',
     () => {
-      if (emailCollapseState.canToggleAll) emailCollapseState.toggleAll();
+      if (emailCollapseState.canToggleAll) {
+        trackKeyboardNav('collapse_all');
+        emailCollapseState.toggleAll();
+      }
     },
     {
       scope: 'global',
@@ -4805,6 +5105,8 @@ export const SupportTicketDetail = ({
   useShortcut(
     'r',
     () => {
+      trackKeyboardNav('reply');
+      composerOpenSourceRef.current = 'keyboard';
       setReplyToEmailId(null);
       setReplyMode('reply');
       setComposerOpen(true);
@@ -4819,6 +5121,8 @@ export const SupportTicketDetail = ({
   useShortcut(
     'a',
     () => {
+      trackKeyboardNav('reply_all');
+      composerOpenSourceRef.current = 'keyboard';
       setReplyToEmailId(null);
       setReplyMode('replyAll');
       setComposerOpen(true);
@@ -4882,6 +5186,23 @@ export const SupportTicketDetail = ({
       setEmailSummarySummary('');
       setEmailSummaryError('');
 
+      // Outcome of the summary request. Length bucket only, never the text.
+      const startedAt = Date.now();
+      const summaryOutcome = (
+        name: 'EMAIL_SUMMARY_GENERATED' | 'EMAIL_SUMMARY_FAILED',
+        extra: Record<string, unknown>,
+      ): void => {
+        trackDeskOutcome(
+          name,
+          ticket,
+          { deskType: channelPreference?.deskType ?? null, emailCount },
+          {
+            isRegenerate: regenerate,
+            latencyMs: Date.now() - startedAt,
+            ...extra,
+          },
+        );
+      };
       await summarizeEmailThread(
         conversationId,
         {
@@ -4889,17 +5210,24 @@ export const SupportTicketDetail = ({
             setEmailSummarySummary(data.summary);
             setEmailSummaryPoints(data.keypoints);
             setEmailSummaryState('done');
+            summaryOutcome('EMAIL_SUMMARY_GENERATED', {
+              summaryLengthBucket: lengthBucket(data.summary.length),
+              keyPointsCount: data.keypoints.length,
+            });
           },
           onError: error => {
             setEmailSummaryError(error);
             setEmailSummaryState('error');
+            if (!controller.signal.aborted) {
+              summaryOutcome('EMAIL_SUMMARY_FAILED', { errorKind: 'request' });
+            }
           },
         },
         controller.signal,
         regenerate,
       );
     },
-    [conversationId],
+    [conversationId, ticket, channelPreference?.deskType, emailCount],
   );
 
   const targetMessageId = searchParams.get('messageId');
@@ -4923,6 +5251,42 @@ export const SupportTicketDetail = ({
     }),
     { enabled: !!conversationId },
   );
+
+  // SUPPORT_TICKET_VIEWED: one event per ticket arrival, however the agent got
+  // here (inbox row, kanban card, j/k, search, a chat link, a citation, a new
+  // tab, the back button). Waits for the ticket row and its emails so the
+  // dimensions ride along, then latches on the ticket id so re-renders and
+  // composer toggles don't refire. `source` precedence: host prop (side panel)
+  // → router state (CHANNEL_VIEWED rule, see readTrackSource) → ?src= (new tab,
+  // citation URLs). No label: the subject is user content.
+  const viewedTicketIdRef = useRef<string | null>(null);
+  const emailsLoaded = allConversationIds.length === 0 || allEmails !== undefined;
+  useEffect(() => {
+    if (!ticket?.id || !emailsLoaded) return;
+    if (viewedTicketIdRef.current === ticket.id) return;
+    viewedTicketIdRef.current = ticket.id;
+    markDeskTicketViewed(ticket.id);
+    const stateSource = readTrackSource(location.state, navigationType);
+    const source =
+      trackSourceProp ??
+      (stateSource === 'direct' ? (searchParams.get('src') ?? 'direct') : stateSource);
+    globalClickTracker.trackManualEvent('Support', 'SUPPORT_TICKET_VIEWED', undefined, {
+      ...deskTicketTrackingMetadata(ticket, {
+        deskType: channelPreference?.deskType ?? null,
+        mailbox: mailboxOverlay,
+        draft: ticketDraft,
+        emailCount: emails.length,
+        isMerged: mergedSourceByConversationId.size > 0,
+        labelCount: conversationLabelMappings?.length ?? 0,
+      }),
+      source,
+      host,
+      scrolledToEmail: !!targetMailId,
+      msSinceListViewed: msSinceDeskListViewed(),
+    });
+    // Dimensions are read at fire time; the latch key (ticket.id) is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.id, emailsLoaded]);
   // Subscribe to channel for real-time updates
   useChannelSubscription(channelId, conversationId ? [conversationId] : []);
 
@@ -4972,6 +5336,10 @@ export const SupportTicketDetail = ({
                     aria-label='Back to ticket list'
                     data-track-category='Support'
                     data-track-name='BackToList'
+                    data-track-metadata={JSON.stringify({
+                      ...(ticket?.id && { ticketId: ticket.id }),
+                      host,
+                    })}
                   >
                     <ArrowLeft size={18} />
                   </button>
@@ -5019,6 +5387,10 @@ export const SupportTicketDetail = ({
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
                           data-track-name='PrevTicket'
+                          data-track-metadata={JSON.stringify({
+                            ...(ticket?.id && { ticketId: ticket.id }),
+                            host,
+                          })}
                         >
                           <ChevronUp size={16} />
                         </button>
@@ -5041,6 +5413,10 @@ export const SupportTicketDetail = ({
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                           data-track-category='Support'
                           data-track-name='NextTicket'
+                          data-track-metadata={JSON.stringify({
+                            ...(ticket?.id && { ticketId: ticket.id }),
+                            host,
+                          })}
                         >
                           <ChevronDown size={16} />
                         </button>
@@ -5125,6 +5501,12 @@ export const SupportTicketDetail = ({
                           onSelect={() => setIsRightPanelOpen(true)}
                           data-track-category='Support'
                           data-track-name='OpenThreadPanel'
+                          data-track-metadata={JSON.stringify(
+                            deskTicketTrackingMetadata(ticket, {
+                              deskType: channelPreference?.deskType ?? null,
+                              emailCount,
+                            }),
+                          )}
                         >
                           <PanelRight size={14} className='shrink-0' />
                           Open Thread
@@ -5187,6 +5569,12 @@ export const SupportTicketDetail = ({
                         }}
                         data-track-category='Support'
                         data-track-name='CopyTicketLink'
+                        data-track-metadata={JSON.stringify(
+                          deskTicketTrackingMetadata(ticket, {
+                            deskType: channelPreference?.deskType ?? null,
+                            emailCount,
+                          }),
+                        )}
                       >
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
@@ -5197,13 +5585,27 @@ export const SupportTicketDetail = ({
                           <DropdownMenuItem
                             onSelect={() => {
                               if (!ticket?.id) return;
-                              void zero.mutate(
-                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                              );
+                              void zero
+                                .mutate(
+                                  mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                                )
+                                .client.then(() => {
+                                  trackDeskOutcome(
+                                    'READ_STATE_CHANGED',
+                                    ticket,
+                                    { deskType: channelPreference?.deskType ?? null, emailCount },
+                                    { to: 'unread', trigger: 'manual', bulkCount: 1 },
+                                  );
+                                });
                               goBackToTicketList();
                             }}
                             data-track-category='Support'
                             data-track-name='MarkTicketUnread'
+                            data-track-metadata={JSON.stringify(
+                              deskTicketTrackingMetadata(ticket, {
+                                deskType: channelPreference?.deskType ?? null,
+                              }),
+                            )}
                           >
                             <MailOpen size={14} className='shrink-0' />
                             Mark as unread
@@ -5225,7 +5627,24 @@ export const SupportTicketDetail = ({
                                       timestamp: Date.now(),
                                     }),
                                   )
-                                  .server.catch(() => toast.error('Failed to move mail'));
+                                  .server.then(result => {
+                                    if (result.type === 'error') throw new Error();
+                                    trackDeskOutcome(
+                                      'MAILBOX_STATE_CHANGED',
+                                      ticket,
+                                      {
+                                        deskType: channelPreference?.deskType ?? null,
+                                        mailbox: mailboxOverlay,
+                                        emailCount,
+                                      },
+                                      {
+                                        to: MailboxState.INBOX,
+                                        previous: mailboxOverlay?.state ?? MailboxState.INBOX,
+                                        surface: 'detail',
+                                      },
+                                    );
+                                  })
+                                  .catch(() => toast.error('Failed to move mail'));
                               }}
                               data-track-category='Support'
                               data-track-name='MailboxToInbox'
@@ -5247,7 +5666,24 @@ export const SupportTicketDetail = ({
                                       timestamp: Date.now(),
                                     }),
                                   )
-                                  .server.catch(() => toast.error('Failed to report spam'));
+                                  .server.then(result => {
+                                    if (result.type === 'error') throw new Error();
+                                    trackDeskOutcome(
+                                      'MAILBOX_STATE_CHANGED',
+                                      ticket,
+                                      {
+                                        deskType: channelPreference?.deskType ?? null,
+                                        mailbox: mailboxOverlay,
+                                        emailCount,
+                                      },
+                                      {
+                                        to: MailboxState.SPAM,
+                                        previous: mailboxOverlay?.state ?? MailboxState.INBOX,
+                                        surface: 'detail',
+                                      },
+                                    );
+                                  })
+                                  .catch(() => toast.error('Failed to report spam'));
                               }}
                               data-track-category='Support'
                               data-track-name='MailboxSpam'
@@ -5557,6 +5993,7 @@ export const SupportTicketDetail = ({
                       ticketId={ticket?.id}
                       onReplyToEmail={(emailId, mode) => {
                         clearStoredRecipients(conversationId);
+                        composerOpenSourceRef.current = 'thread_item';
                         setReplyToEmailId(emailId);
                         setReplyMode(mode);
                         setComposerOpen(true);
@@ -5644,6 +6081,8 @@ export const SupportTicketDetail = ({
                         }}
                         onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
                         hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
+                        trackSource={composerOpenSourceRef.current}
+                        ticket={ticket}
                         channelId={channelId}
                         channelPreference={channelPreference}
                         channelPreferenceLoaded={channelPreferenceLoaded}
@@ -5939,12 +6378,15 @@ const EmailThread = ({
   }, [sortedEmails, mergedSourceByConversationId]);
   return (
     <div className='divide-y divide-gray-200 relative'>
-      {sortedEmails.map(email => {
+      {sortedEmails.map((email, emailIndex) => {
         const mergedSource = mergedRootEmailSource.get(email.id);
         return (
           <EmailThreadItem
             key={email.id}
             email={email}
+            emailIndex={emailIndex}
+            emailCount={sortedEmails.length}
+            {...(ticketId && { ticketId })}
             isCollapsed={collapsedIds.has(email.id)}
             canCollapse={email.id !== lastEmailId}
             onToggleCollapse={() => toggleOne(email.id)}
@@ -5970,6 +6412,9 @@ const EmailThread = ({
 
 const EmailThreadItem = ({
   email,
+  emailIndex = 0,
+  emailCount = 1,
+  ticketId,
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
@@ -5982,6 +6427,10 @@ const EmailThreadItem = ({
   onUnmergeSource,
 }: {
   email: Email;
+  /** Position in the sorted thread and thread length — click-metadata dimensions. */
+  emailIndex?: number;
+  emailCount?: number;
+  ticketId?: string | null | undefined;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
@@ -6043,6 +6492,19 @@ const EmailThreadItem = ({
           id: toastId,
           description: `Created new ticket ${response.data.newTicket.xyneId}`,
         });
+        trackDeskOutcome(
+          'EMAIL_DEMERGED',
+          { id: response.data.newTicket.ticketId, channelId: email.channelId },
+          {},
+          {
+            kind: 'email_demerge',
+            emailIndex,
+            // This branch only runs without a merged-source ticket (that case
+            // returned above via the ticket-level unmerge), so there is no id.
+            sourceTicketId: null,
+            sourceConversationId: email.conversationId,
+          },
+        );
 
         if (channelIdParam) {
           // In-place swap like the ticket-level unmerge — the opener stays directly behind.
@@ -6122,6 +6584,7 @@ const EmailThreadItem = ({
         className={cn(headerClickable && 'cursor-pointer', isCollapsed && 'py-3')}
         data-track-category='Support'
         data-track-name={isCollapsed ? 'ExpandEmail' : 'CollapseEmail'}
+        data-track-metadata={JSON.stringify({ ticketId: ticketId ?? null, emailIndex, emailCount })}
         onClick={headerClickable ? onToggleCollapse : undefined}
         role={headerClickable ? 'button' : undefined}
         tabIndex={headerClickable ? 0 : undefined}
@@ -6174,6 +6637,7 @@ const EmailThreadItem = ({
                 conversationId={email.conversationId}
                 channelId={email.channelId}
                 body={email.body}
+                trackContext={{ ticketId: ticketId ?? null, emailIndex, emailCount }}
               />
             )}
             {onReply && (

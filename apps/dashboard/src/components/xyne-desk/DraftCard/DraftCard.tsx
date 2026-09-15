@@ -128,6 +128,8 @@ export const DraftCard = ({
       refineCount: snapshot.refineCount,
       runKind: snapshot.kind,
       isStreaming,
+      ...(snapshot.composerSessionId && { composerSessionId: snapshot.composerSessionId }),
+      ...(snapshot.ticketId && { ticketId: snapshot.ticketId }),
       ...extra,
     });
   };

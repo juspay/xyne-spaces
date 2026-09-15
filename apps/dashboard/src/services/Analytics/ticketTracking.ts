@@ -82,7 +82,9 @@ export type TicketChangeSurface =
   | 'kanban_card'
   | 'list_inline'
   | 'table_inline'
-  | 'bulk';
+  | 'bulk'
+  /** SupportTicketDetail — the desk archive path bypasses TicketDetails. */
+  | 'desk_detail';
 
 /**
  * Outcome event after a ticket mutation resolved. Fire on success only — the
