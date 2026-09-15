@@ -629,7 +629,8 @@ model WorkflowCredential {
   workspaceId String // denormalized tenant key (stamped on insert)
   id          String @id @default(cuid())
   name        String
-  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  credType    String // the connector's credential type, e.g. BUILTIN_BEARER
+  authType    String // stored value shape: bearer | basic | custom_header | oauth2_client_credentials | secret
   data        String // ENCRYPTED JSON — auth values
   status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
   createdAt   DateTime
