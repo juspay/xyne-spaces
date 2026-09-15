@@ -1,3 +1,10 @@
+## [1.319.1](https://github.com/juspay/xyne-spaces/compare/v1.319.0...v1.319.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* scope SDLC reads to the hub ([#1838](https://github.com/juspay/xyne-spaces/issues/1838)) ([c02830b](https://github.com/juspay/xyne-spaces/commit/c02830bfebebbcceed340eb116e2367b96177d29))
+
 ## [1.319.0](https://github.com/juspay/xyne-spaces/compare/v1.318.0...v1.319.0) (2026-09-15)
 
 
