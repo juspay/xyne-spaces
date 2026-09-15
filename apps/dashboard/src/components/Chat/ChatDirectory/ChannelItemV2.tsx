@@ -51,6 +51,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
 import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -176,13 +177,14 @@ const ChannelItemV2 = memo(
         className=''
         draggable={false}
         to={`/chat/dir/${channel.id}`}
+        state={{ trackSource: isDM ? 'sidebar_dm' : 'sidebar_channel' }}
         onClick={handleChannelClick}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
         data-track-metadata={JSON.stringify({
-          channelId: channel.id,
-          channelName: displayName,
+          ...channelTrackingMetadata(channel),
           isDM,
+          source: isDM ? 'sidebar_dm' : 'sidebar_channel',
         })}
       >
         <div

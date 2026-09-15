@@ -27,6 +27,10 @@ import type {
 const WORD_LIMIT = 30;
 
 interface SearchResultMessageCardProps {
+  /** 0-based rank of this card in the result list; the search-quality signal. */
+  resultIndex?: number;
+  /** Total results the query returned, so click rank can be normalised. */
+  resultCount?: number;
   channelId: string;
   conversationId: string;
   matchedMessageId: string | null;
@@ -51,6 +55,8 @@ interface SearchResultMessageCardProps {
 }
 
 export const SearchResultMessageCard = memo(function SearchResultMessageCard({
+  resultIndex,
+  resultCount,
   channelId,
   conversationId,
   matchedMessageId,
@@ -295,6 +301,12 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       )}
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
+      data-track-metadata={JSON.stringify({
+        ...(resultIndex !== undefined && { resultIndex }),
+        ...(resultCount !== undefined && { resultCount }),
+        channelId,
+        source: 'search_result',
+      })}
     >
       <div className='relative py-1'>
         <button
@@ -308,6 +320,12 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'
           data-track-name='JUMP_TO_MESSAGE'
+          data-track-metadata={JSON.stringify({
+            ...(resultIndex !== undefined && { resultIndex }),
+            ...(resultCount !== undefined && { resultCount }),
+            channelId,
+            source: 'search_result',
+          })}
         >
           <Home size={14} />
         </button>

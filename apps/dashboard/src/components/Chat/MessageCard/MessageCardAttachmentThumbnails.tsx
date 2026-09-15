@@ -244,6 +244,11 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View attachment ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_IMAGE'
+              data-track-metadata={JSON.stringify({
+                attachmentId: att.id,
+                mimeType: att.mimetype,
+                sizeBytes: att.size,
+              })}
             >
               <PanelAuthImageThumb
                 attachmentId={att.id}
@@ -264,6 +269,11 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View video ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_VIDEO'
+              data-track-metadata={JSON.stringify({
+                attachmentId: att.id,
+                mimeType: att.mimetype,
+                sizeBytes: att.size,
+              })}
             >
               {att.thumbnailUrl ? (
                 <PanelAuthImageThumb
@@ -289,6 +299,11 @@ export function MessageCardAttachmentThumbnails({
             aria-label={`View file ${att.originalFilename}`}
             data-track-category={trackCategory}
             data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_FILE'
+            data-track-metadata={JSON.stringify({
+              attachmentId: att.id,
+              mimeType: att.mimetype,
+              sizeBytes: att.size,
+            })}
           >
             {iconSrc ? (
               <span className='h-5 w-5 shrink-0'>

@@ -41,13 +41,17 @@ export const MentionText: React.FC<MentionTextProps> = props => {
 
   if (props.type === 'channel') {
     const handleChannelClick = (): void => {
-      void navigate(`/chat/dir/${props.channelId}`);
+      void navigate(`/chat/dir/${props.channelId}`, {
+        state: { trackSource: 'mention' },
+      });
     };
 
     const handleKeyDown = (event: React.KeyboardEvent): void => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        void navigate(`/chat/dir/${props.channelId}`);
+        void navigate(`/chat/dir/${props.channelId}`, {
+          state: { trackSource: 'mention' },
+        });
       }
     };
 
@@ -133,6 +137,11 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           onClick={handleChannelClick}
           data-track-category='MENTION'
           data-track-name='OPEN_CHANNEL_FROM_MENTION'
+          data-track-metadata={JSON.stringify({
+            channelId: props.channelId,
+            isPrivate: !!props.isPrivate,
+            source: 'mention',
+          })}
           onKeyDown={handleKeyDown}
           className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
         >
