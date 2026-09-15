@@ -38,7 +38,10 @@
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh",
-    "test:raw-sql": "bash scripts/validate-no-raw-sql.sh"
+    "test:raw-sql": "bash scripts/validate-no-raw-sql.sh",
+    "perf:validate": "node --test performance/tests/*.test.mjs",
+    "perf:run": "node performance/scripts/run.mjs",
+    "perf:smoke": "node performance/scripts/run.mjs --profile smoke --scenario smoke"
   },
   "devDependencies": {
     "@clack/prompts": "^1.7.0",

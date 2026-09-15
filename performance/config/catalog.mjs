@@ -6,7 +6,20 @@ export const ENVIRONMENTS = Object.freeze({
 });
 
 export const PROFILES = new Set(['smoke', 'release', 'load', 'stress', 'soak']);
-export const SCENARIOS = new Set(['smoke', 'messaging']);
+// `zero-query-transform` exercises the query-transform step of POST /api/zero/query:
+// auth, rate limit, ACL, tenant scoping and AST compilation. It does not execute SQL and
+// is not a Zero-sync test. `rest-messaging` exercises POST /api/conversations/:id/messages,
+// which bots, the Claw MCP route and attachment uploads use rather than the chat UI.
+// The names are deliberately narrow so a report is never read as broader than it is.
+export const SCENARIOS = new Set(['smoke', 'zero-query-transform', 'rest-messaging']);
+const SANDBOX_PROFILES = new Set(['smoke', 'release']);
+
+// Scenarios that insert rows. Each `rest-messaging` iteration writes a message, which also
+// enqueues a Vespa index job and side-effect fan-out; a soak is roughly 360,000 of them.
+// No teardown exists yet (performance/README.md, "Cleanup"), so running one leaves a
+// workspace that has to be cleaned by hand and skews search relevance meanwhile. Gated
+// behind an explicit opt-in until a reset is implemented.
+export const WRITE_SCENARIOS = new Set(['rest-messaging']);
 
 const DURATION_PATTERN = /^(\d+)(s|m|h)$/;
 
@@ -41,7 +54,7 @@ function parseOptionalDuration(value, maximumSeconds) {
 export function resolveRunConfig(input = {}) {
   const environment = input.environment ?? 'sandbox';
   const profile = input.profile ?? 'smoke';
-  const scenario = input.scenario ?? (profile === 'smoke' ? 'smoke' : 'messaging');
+  const scenario = input.scenario ?? (profile === 'smoke' ? 'smoke' : 'zero-query-transform');
   const environmentConfig = ENVIRONMENTS[environment];
 
   if (!environmentConfig) {
@@ -50,8 +63,18 @@ export function resolveRunConfig(input = {}) {
   if (!PROFILES.has(profile)) {
     throw new Error(`Unknown profile: ${profile}`);
   }
+  if (environment === 'sandbox' && !SANDBOX_PROFILES.has(profile)) {
+    throw new Error(`${profile} is allowed only in preprod`);
+  }
   if (!SCENARIOS.has(scenario)) {
     throw new Error(`Unknown scenario: ${scenario}`);
+  }
+  if (WRITE_SCENARIOS.has(scenario) && input.allowWriteScenarios !== true) {
+    throw new Error(
+      `${scenario} writes rows and no reset is implemented for the messages it creates. `
+      + 'Set PERF_ALLOW_WRITE_SCENARIOS=true to run it anyway, and clean the workspace '
+      + 'afterwards by the PERF-<run-id> marker.',
+    );
   }
 
   const vusOverride = parseOptionalPositiveInteger(input.vusOverride, 'VUs');
