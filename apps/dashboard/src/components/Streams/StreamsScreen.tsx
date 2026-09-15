@@ -1420,10 +1420,69 @@ const StreamsScreen = (): ReactElement => {
    * padding changes to match — so the lead is read from the same condition the
    * style uses rather than being restated as a constant.
    */
+  const [stripWidth, setStripWidth] = useState(0);
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return undefined;
+    const measure = (): void => setStripWidth(strip.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    return (): void => observer.disconnect();
+  }, []);
+
+  /**
+   * A focus-mode page, in pixels.
+   *
+   * Focus columns are sized by CSS — `calc(100% - peek)` against the strip's
+   * content box — so their width is not `column.width` and cannot be read from
+   * state directly. It can be *derived*, and it has to be derived rather than
+   * measured once: a cached number goes stale the moment anything changes the
+   * viewport, and things do. Arc and Dia slide a sidebar in and out, the nav
+   * rail animates, windows resize. `stripWidth` is backed by a `ResizeObserver`
+   * on the strip itself, so every one of those updates this on the same frame
+   * the layout changes.
+   *
+   * `100%` resolves against the content box, so the strip's own padding comes
+   * off first. Verified against the DOM: 1856 client − 4 padding − 0 peek =
+   * 1852, which is what the column measures.
+   */
+  const focusPageWidth = useMemo(() => {
+    const padX = (pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET) + RING_GUTTER;
+    const peek = dev.focusPeek ? FOCUS_PEEK : 0;
+    return Math.max(0, stripWidth - padX - peek);
+  }, [stripWidth, pinned.length, dev.focusPeek]);
+
+  /**
+   * What one column occupies along the strip, including the handle after it.
+   *
+   * A pair is one page split between two columns, so the two halves plus the
+   * seam between them come to exactly what a lone column comes to — which is
+   * why paging lands the same either way.
+   */
+  const strideFor = useCallback(
+    (column: Column): number => {
+      if (!focusMode) return widthFor(column) + HANDLE_PX;
+      const partner =
+        column.attachedTo !== undefined
+          ? columns.find(candidate => candidate.id === column.attachedTo)
+          : attachmentOf(columns, column.id);
+      if (!partner) return focusPageWidth + HANDLE_PX;
+      const total = widthFor(column) + widthFor(partner);
+      const share = total > 0 ? widthFor(column) / total : 1;
+      return (focusPageWidth - HANDLE_PX) * share + HANDLE_PX;
+    },
+    [focusMode, focusPageWidth, widthFor, columns],
+  );
+
   const stripLead = pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET;
   const scrollingStrides = useMemo(
-    () => columnStrides(scrolling.map(widthFor), stripLead),
-    [scrolling, widthFor, stripLead],
+    () =>
+      columnStrides(
+        scrolling.map(column => strideFor(column) - HANDLE_PX),
+        stripLead,
+      ),
+    [scrolling, strideFor, stripLead],
   );
 
   const scrollingIndexOf = useMemo(() => {
@@ -1460,7 +1519,18 @@ const StreamsScreen = (): ReactElement => {
       };
       const strip = stripRef.current;
       const at = scrollingIndexOf.get(id);
-      if (strip === null || at === undefined || focusMode) return measure();
+      // Measured only where the strides cannot answer: a pinned column, which
+      // lives outside the scroller and is not in them, and a focus transition,
+      // where the strides already hold the destination while the DOM is still
+      // on its way there.
+      //
+      // Focus mode itself is computed like anything else now that it is
+      // windowed. It used to measure, which was correct while every page was
+      // mounted and became the reason the navigator died the moment it was
+      // not: a jump asks where a column is *because it cannot see it*, and an
+      // unmounted page has no node to measure, so `columnBox` returned null and
+      // the jump gave up without moving.
+      if (strip === null || at === undefined || widthMs > 0) return measure();
       const band = columnBand(strip, RING_GUTTER);
       return {
         left: toClientX(scrollingStrides.left[at] ?? 0, strip, stripLead),
@@ -1469,7 +1539,7 @@ const StreamsScreen = (): ReactElement => {
         height: band.height,
       };
     },
-    [scrollingIndexOf, scrollingStrides, stripLead, focusMode],
+    [scrollingIndexOf, scrollingStrides, stripLead, widthMs],
   );
 
   const columnAtCentre = useCallback((): number => {
@@ -1501,10 +1571,27 @@ const StreamsScreen = (): ReactElement => {
     (columnId: string): void => {
       const index = columnOrder.indexOf(columnId);
       if (index >= 0) setFocus(index);
-      // Claimed in both modes, so the centring effect below sees this trip as
-      // already handled. Without it, focus mode fired `trackFocusedColumn` on
-      // top of this one — and that pins `scrollLeft` every frame with
-      // `scroll-behavior: auto`, which is precisely a snap.
+
+      // Focus mode hands the trip to the centring effect rather than making it
+      // here, and the reason is ordering. That mode is a snap carousel, so a
+      // page can only be landed on if it has a snap point — which means it has
+      // to be *mounted*. Now that focus mode is windowed, the page being jumped
+      // to usually is not: the range only admits it once focus has changed, and
+      // focus changes when React commits, which has not happened yet on this
+      // line. Scrolling here therefore aimed at a position with no snap target
+      // and the browser pulled it straight back to the nearest mounted page —
+      // the navigator moving for one column in six, depending on whether the
+      // target happened to already be in the window.
+      //
+      // The centring layout effect runs after that commit, with the page in the
+      // document and its snap point with it. Deliberately not claiming
+      // `centredOnRef` here is what lets it fire.
+      if (focusMode) return;
+
+      // Claimed so the centring effect sees this trip as already handled.
+      // Without it, that effect fired `trackFocusedColumn` on top of this one —
+      // and that pins `scrollLeft` every frame with `scroll-behavior: auto`,
+      // which is precisely a snap.
       centredOnRef.current = columnId;
       const strip = stripRef.current;
       if (!strip) return;
@@ -1589,17 +1676,26 @@ const StreamsScreen = (): ReactElement => {
   });
 
   /**
-   * Whether the strip is currently windowed.
+   * The strip's own width, measured, because focus mode needs it in pixels.
    *
-   * Off in focus mode, where a column's width is a percentage of the strip
-   * rather than `column.width` — the virtualiser would be sizing its pages from
-   * numbers that do not describe them. Off through a focus transition too, and
-   * `widthMs` rather than `transitioningRef` because a ref does not re-render:
-   * leaving focus flips `focusMode` back in the same commit that starts the
-   * widths animating home, so virtualising on that frame would measure against
-   * the destination while the DOM is still at the origin.
+   * Everything about a focused page is expressed as a percentage in CSS, which
+   * is right — it tracks the window without a single re-render. But `scroll-
+   * margin` takes lengths only, no percentages, so extending a pair's snap area
+   * over its pane needs the one number CSS will not hand back.
    */
-  const virtualizeDeck = !focusMode && widthMs === 0;
+
+  /**
+   * Whether the strip is windowed. Both modes; only a transition turns it off.
+   *
+   * `widthMs` rather than `transitioningRef`, because a ref does not re-render:
+   * a focus flip rewrites every width over `dev.focusMs`, and for that span the
+   * sizes below describe the destination while the DOM is still travelling
+   * there. Windowing against numbers the layout has not reached yet puts every
+   * column at the wrong offset, so for those few hundred milliseconds the strip
+   * renders whole — which costs nothing, because surfaces are gated separately
+   * and the shells are skeletons.
+   */
+  const virtualize = widthMs === 0;
 
   /**
    * Indexes that stay mounted whatever the scroll position says.
@@ -1670,7 +1766,7 @@ const StreamsScreen = (): ReactElement => {
     getScrollElement: () => stripRef.current,
     estimateSize: (index: number): number => {
       const column = scrolling[index];
-      return column ? widthFor(column) + HANDLE_PX : 0;
+      return column ? strideFor(column) : 0;
     },
     getItemKey: (index: number): string => scrolling[index]?.id ?? String(index),
     // Shells, not surfaces — which is why this number is small and no longer
@@ -1707,7 +1803,7 @@ const StreamsScreen = (): ReactElement => {
    * including the ones already on screen with their messages in them.
    */
   const windowScrolling =
-    (virtualizeDeck && columnWindow.isScrolling) ||
+    (virtualize && columnWindow.isScrolling) ||
     // A focus flip is the other moment nothing may be built. Virtualisation is
     // off in focus mode, so crossing into it mounts every column the window was
     // holding back — thirteen surfaces in one commit, landing on the frames the
@@ -1741,7 +1837,7 @@ const StreamsScreen = (): ReactElement => {
     // fully loaded. Focus mode changes widths; it has no business changing
     // identities. One shape, all the time, and the only thing that varies is
     // which columns are in it and how much space stands in for the rest.
-    if (!virtualizeDeck) {
+    if (!virtualize) {
       return {
         items: scrolling.map(column => ({ key: column.id, gap: 0, column })),
         tail: 0,
@@ -1756,7 +1852,7 @@ const StreamsScreen = (): ReactElement => {
       cursor = item.end;
     }
     return { items, tail: Math.max(0, columnWindow.getTotalSize() - cursor) };
-  }, [virtualizeDeck, virtualColumns, scrolling, columnWindow]);
+  }, [virtualize, virtualColumns, scrolling, columnWindow]);
 
   /**
    * Hold the arithmetic to the document's account, while both still answer.
@@ -1834,24 +1930,6 @@ const StreamsScreen = (): ReactElement => {
    * Returns viewport coordinates, not layout ones, so it works mid-animation
    * while the widths are still changing.
    */
-  /**
-   * The strip's own width, measured, because focus mode needs it in pixels.
-   *
-   * Everything about a focused page is expressed as a percentage in CSS, which
-   * is right — it tracks the window without a single re-render. But `scroll-
-   * margin` takes lengths only, no percentages, so extending a pair's snap area
-   * over its pane needs the one number CSS will not hand back.
-   */
-  const [stripWidth, setStripWidth] = useState(0);
-  useEffect(() => {
-    const strip = stripRef.current;
-    if (!strip) return undefined;
-    const measure = (): void => setStripWidth(strip.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(strip);
-    return (): void => observer.disconnect();
-  }, []);
 
   /**
    * Is the strip moving sideways right now.
@@ -1923,6 +2001,15 @@ const StreamsScreen = (): ReactElement => {
         const stripRect = strip.getBoundingClientRect();
         const delta = box.left + box.width / 2 - (stripRect.left + stripRect.width / 2);
         strip.scrollLeft = Math.max(0, strip.scrollLeft + delta);
+        // Where the strip is *meant* to be, recorded as it travels. The pin
+        // that stops a mounting surface dragging the strip restores to this
+        // value, and a page arriving is precisely what happens at the end of a
+        // jump — so without this the guard would find the pre-jump position
+        // still written here and haul the stream back to it. Measured: a jump
+        // reached 31,618px, the destination's surface mounted, and the pin
+        // returned it to 1,858. The tracker is the only thing that knows where
+        // this trip is going, so it is the thing that has to say.
+        stripScrollRef.current = strip.scrollLeft;
       }
       if (performance.now() - start < durationRef.current + 32) {
         requestAnimationFrame(step);
@@ -2561,18 +2648,23 @@ const StreamsScreen = (): ReactElement => {
           // both, because it is the destination and arriving at a skeleton
           // reads as the jump having failed.
           //
-          // The second reason is what ends the drift. A column in the overscan
-          // is loaded but *off screen*, and a chat panel brings its newest
-          // message into view as it loads — which, for an element outside the
-          // viewport, scrolls the strip sideways to reveal it. No JS assigns
-          // that scroll and no focus event fires, so there is nothing to
-          // intercept: every guard against it was a bet on timing that belongs
-          // to whenever the channel's data happens to resolve, which is why it
-          // failed at random. Not building a surface that is off screen removes
-          // the thing that scrolls rather than racing it — by the time a column
-          // builds, it is already where it wants to be seen.
+          // The second is what ends the drift, and it is the same rule in both
+          // modes now that both are windowed. A column outside the viewport is
+          // mounted but not visible, and a chat panel brings its newest message
+          // into view as it loads — which, for an element off screen, scrolls
+          // the strip sideways to reach it. No JS assigns that scroll and no
+          // focus event fires, so there is nothing to intercept: every guard
+          // against it was a bet on when a channel's data would resolve, which
+          // is why it failed at random. Not building a surface that is off
+          // screen removes the thing that scrolls rather than racing it.
+          //
+          // Focus mode is where this bit hardest. A page there is 1,852px wide
+          // against a 48,000px scroller, so one surface loading twelve pages
+          // away dragged the viewport twenty thousand pixels to reach itself —
+          // the same cause as the deck's 1,700px nudge, an order of magnitude
+          // further.
           scrolling={
-            (windowScrolling || (virtualizeDeck && offScreen)) &&
+            (windowScrolling || offScreen) &&
             hostFor(columns, columns[stream.focus]?.id ?? '')?.id !==
               hostFor(columns, column.id)?.id
           }

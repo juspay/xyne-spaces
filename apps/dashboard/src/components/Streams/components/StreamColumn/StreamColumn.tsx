@@ -93,11 +93,11 @@ const SKELETON_ROWS = [
   { avatar: true, lines: ['w-1/3', 'w-3/4'] },
 ] as const;
 
+// Instant, for the same reason the surface is: a placeholder that fades in
+// leaves the column blank for the frames it takes to arrive, which is the thing
+// it exists to prevent.
 const ColumnSkeleton = (): ReactElement => (
-  <div
-    className='flex h-full flex-col gap-5 px-3 pt-4 duration-150 animate-in fade-in-0 motion-reduce:animate-none'
-    aria-hidden
-  >
+  <div className='flex h-full flex-col gap-5 px-3 pt-4' aria-hidden>
     {SKELETON_ROWS.map((row, index) => (
       <div key={index} className='flex gap-2'>
         {row.avatar && <Skeleton className='size-7 shrink-0 rounded-full opacity-60' />}
@@ -403,9 +403,15 @@ const StreamColumn = ({
    * `children` element on every render re-renders everything below the scope,
    * which is the whole subtree this exists to protect.
    */
+  // No fade on arrival, and it is the skeleton that removes the need for one.
+  // Fading in made sense while a column's body went from genuinely empty to
+  // full — it read as the surface arriving. Against a skeleton it reads as a
+  // flicker instead: the placeholder leaves in the same commit the surface
+  // enters, and the surface enters at zero opacity, so the frame between them
+  // is neither. One empty frame is exactly what a blink is.
   const mounted = useMemo(
     () => (
-      <div className='h-full duration-150 animate-in fade-in-0 motion-reduce:animate-none'>
+      <div className='h-full'>
         {surface.needsRouterScope ? (
           <StreamRouterScope
             initialPath={surface.scopePath(column.source, workspaceId)}
@@ -585,6 +591,14 @@ const StreamColumn = ({
         // and a sliver of the neighbours shows on both sides, which is what says
         // the stream continues in both directions.
         snap && 'snap-center',
+        // One page per gesture, and this is what makes a windowed carousel
+        // safe. Mandatory snap still lets momentum carry across several pages,
+        // and the strip only holds a few either side of you — so a hard flick
+        // could land where nothing is mounted, which is the documented way
+        // scroll-snap and virtualisation break each other. Stopping at the next
+        // page bounds the travel to something the window always covers. The
+        // file viewer's carousel already does this for the same reason.
+        snap && '[scroll-snap-stop:always]',
         // The focused column is marked, the rest are left alone. Dimming them was
         // tried and dropped: in a view whose entire purpose is watching several
         // things at once, fading all but one of them fights the feature.
