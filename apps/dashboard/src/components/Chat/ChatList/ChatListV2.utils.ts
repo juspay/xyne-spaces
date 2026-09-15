@@ -178,8 +178,11 @@ export function estimateMessageHeight(
   // ── Private system notice header ("Only visible to you") ──
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
+  // Ephemeral cards render the same header (see MessageBubble), so the
+  // virtualizer has to allocate the same extra height or the row is mis-sized.
+  const isEphemeralNotice = metadata?.['ephemeral'] === true;
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
-  if (isPrivateSystemNotice) height += PRIVATE_NOTICE_HEADER;
+  if (isPrivateSystemNotice || isEphemeralNotice) height += PRIVATE_NOTICE_HEADER;
 
   // ── Avatar header row (sender name + timestamp) ──
   if (showAvatar) height += AVATAR_HEADER_HEIGHT;

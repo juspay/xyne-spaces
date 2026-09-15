@@ -209,7 +209,7 @@ export function useEphemeralChannelConversations(channelId: string): Conversatio
           createdAt: timestamp,
           visibleTo: m.visibleTo ?? userId,
           isSent: true,
-          ...(m.metadata && { metadata: m.metadata }),
+          metadata: { ...(m.metadata ?? {}), ephemeral: true },
         }),
         parent_message_md: null,
         doNotPostToChannel: null,
@@ -252,7 +252,7 @@ export function useEphemeralThreadMessages(conversationId: string | undefined): 
       childConversationId: null,
       visibleTo: m.visibleTo ?? userId,
       createdAt: toTimestamp(m.createdAt),
-      metadata: m.metadata ?? null,
+      metadata: { ...(m.metadata ?? {}), ephemeral: true },
       attachments: [],
       nudgeCounts: [],
     }));
