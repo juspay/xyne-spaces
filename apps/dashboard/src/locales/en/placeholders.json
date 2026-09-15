@@ -846,5 +846,36 @@
     "slackChannelId": "C0…",
     "destinationChannel": "Destination channel",
     "startDatePlaceholder": "From the beginning"
+  },
+  "routes": {
+    "appsScreen": {
+      "searchPlaceholder": "Search apps by name, description or created by..."
+    },
+    "authScreen": {
+      "newWorkspaceNamePlaceholder": "Workspace name",
+      "orgNameExamplePlaceholder": "Juspay Inc",
+      "createOrgWorkspaceNamePlaceholder": "Engineering",
+      "fullNamePlaceholder": "Full name",
+      "emailPlaceholder": "Email address",
+      "passwordRequirementsPlaceholder": "Password (min 8 chars, 1 uppercase, 1 number, 1 special)",
+      "confirmPasswordPlaceholder": "Confirm password",
+      "sixDigitCodePlaceholder": "6-digit code",
+      "newPasswordPlaceholder": "New password (min 8 chars)",
+      "confirmNewPasswordPlaceholder": "Confirm new password",
+      "passwordPlaceholder": "Password"
+    },
+    "browserTabsScreen": {
+      "urlBarPlaceholder": "Enter a URL or search...",
+      "findInPagePlaceholder": "Find in page..."
+    },
+    "callDetailScreen": {
+      "detailedSummaryPlaceholder": "Detailed summary content...",
+      "prdPlaceholder": "PRD content..."
+    },
+    "callHistoryScreen": {
+      "searchByUserName": "Search by user name",
+      "searchByUserChannelGroup": "Search by user, channel, or group name",
+      "searchParticipantsPlaceholder": "Search participants..."
+    }
   }
 }

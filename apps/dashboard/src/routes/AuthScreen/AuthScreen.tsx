@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
@@ -42,6 +43,7 @@ interface CommunityWorkspaceOrganization {
  * - Smooth transitions and hover states
  */
 const AuthScreen = (): ReactElement | null => {
+  const { t } = useTranslation('placeholders');
   const {
     isAuthenticated,
     isLoading,
@@ -781,7 +783,7 @@ const AuthScreen = (): ReactElement | null => {
                         type='text'
                         value={newEnterpriseWorkspaceName}
                         onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
-                        placeholder='Workspace name'
+                        placeholder={t('routes.authScreen.newWorkspaceNamePlaceholder')}
                         className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                         data-track-category='Auth'
                         data-track-name='NewEnterpriseWorkspaceNameInput'
@@ -878,7 +880,7 @@ const AuthScreen = (): ReactElement | null => {
                             clearError();
                           }
                         }}
-                        placeholder='Juspay Inc'
+                        placeholder={t('routes.authScreen.orgNameExamplePlaceholder')}
                         className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
                           isOrganizationNameTakenError
                             ? 'border-amber-400 focus:ring-amber-500'
@@ -907,7 +909,7 @@ const AuthScreen = (): ReactElement | null => {
                         type='text'
                         value={workspaceName}
                         onChange={e => setWorkspaceName(e.target.value)}
-                        placeholder='Engineering'
+                        placeholder={t('routes.authScreen.createOrgWorkspaceNamePlaceholder')}
                         className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
                         required
                         data-track-category='Auth'
@@ -1049,7 +1051,7 @@ const AuthScreen = (): ReactElement | null => {
                                   setRegName(v);
                                   setRegNameError(validateRegName(v));
                                 }}
-                                placeholder='Full name'
+                                placeholder={t('routes.authScreen.fullNamePlaceholder')}
                                 required
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regNameError
@@ -1070,7 +1072,7 @@ const AuthScreen = (): ReactElement | null => {
                                   setRegEmail(v);
                                   setRegEmailError(validateRegEmail(v));
                                 }}
-                                placeholder='Email address'
+                                placeholder={t('routes.authScreen.emailPlaceholder')}
                                 required
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regEmailError
@@ -1095,7 +1097,7 @@ const AuthScreen = (): ReactElement | null => {
                                       validateRegConfirmPassword(regConfirmPassword),
                                     );
                                 }}
-                                placeholder='Password (min 8 chars, 1 uppercase, 1 number, 1 special)'
+                                placeholder={t('routes.authScreen.passwordRequirementsPlaceholder')}
                                 required
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regPasswordError
@@ -1116,7 +1118,7 @@ const AuthScreen = (): ReactElement | null => {
                                   setRegConfirmPassword(v);
                                   setRegConfirmPasswordError(validateRegConfirmPassword(v));
                                 }}
-                                placeholder='Confirm password'
+                                placeholder={t('routes.authScreen.confirmPasswordPlaceholder')}
                                 required
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regConfirmPasswordError
@@ -1161,7 +1163,7 @@ const AuthScreen = (): ReactElement | null => {
                                 onChange={e =>
                                   setRegCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                                 }
-                                placeholder='6-digit code'
+                                placeholder={t('routes.authScreen.sixDigitCodePlaceholder')}
                                 maxLength={6}
                                 pattern='[0-9]{6}'
                                 inputMode='numeric'
@@ -1226,7 +1228,7 @@ const AuthScreen = (): ReactElement | null => {
                                 type='email'
                                 value={fpEmail}
                                 onChange={e => setFpEmail(e.target.value)}
-                                placeholder='Email address'
+                                placeholder={t('routes.authScreen.emailPlaceholder')}
                                 required
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
@@ -1263,7 +1265,7 @@ const AuthScreen = (): ReactElement | null => {
                                 onChange={e =>
                                   setFpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                                 }
-                                placeholder='6-digit code'
+                                placeholder={t('routes.authScreen.sixDigitCodePlaceholder')}
                                 maxLength={6}
                                 pattern='[0-9]{6}'
                                 inputMode='numeric'
@@ -1276,7 +1278,7 @@ const AuthScreen = (): ReactElement | null => {
                                 type='password'
                                 value={fpNewPassword}
                                 onChange={e => setFpNewPassword(e.target.value)}
-                                placeholder='New password (min 8 chars)'
+                                placeholder={t('routes.authScreen.newPasswordPlaceholder')}
                                 required
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
@@ -1286,7 +1288,7 @@ const AuthScreen = (): ReactElement | null => {
                                 type='password'
                                 value={fpConfirmPassword}
                                 onChange={e => setFpConfirmPassword(e.target.value)}
-                                placeholder='Confirm new password'
+                                placeholder={t('routes.authScreen.confirmNewPasswordPlaceholder')}
                                 required
                                 className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
@@ -1346,7 +1348,7 @@ const AuthScreen = (): ReactElement | null => {
                             type='email'
                             value={email}
                             onChange={e => setEmail(e.target.value)}
-                            placeholder='Email address'
+                            placeholder={t('routes.authScreen.emailPlaceholder')}
                             required
                             className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
@@ -1356,7 +1358,7 @@ const AuthScreen = (): ReactElement | null => {
                             type='password'
                             value={password}
                             onChange={e => setPassword(e.target.value)}
-                            placeholder='Password'
+                            placeholder={t('routes.authScreen.passwordPlaceholder')}
                             required
                             className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
