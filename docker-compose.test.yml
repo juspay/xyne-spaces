@@ -21,6 +21,14 @@ services:
       context: .
       dockerfile: apps/backend/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
+    # docker/livekit.yaml posts webhooks to host.docker.internal:3001 (the dev stack's
+    # host-run backend). Here the backend is this container, so answer to that name —
+    # without it participant_joined never lands, no call row/message is created, and a
+    # second member never sees the join button.
+    networks:
+      default:
+        aliases:
+          - host.docker.internal
     ports:
       - "${BACKEND_BIND_PORT:-0}:3001"
     env_file:
@@ -76,8 +84,8 @@ services:
   #     - DATABASE_URL=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
   #     - REDIS_URL=redis://redis:6379
   #     - LIVEKIT_URL=ws://livekit:7880
-  #     - LIVEKIT_API_KEY=devkey
-  #     - LIVEKIT_API_SECRET=devsecret
+  #     - LIVEKIT_API_KEY=localdevkey
+  #     - LIVEKIT_API_SECRET=localdevsecret
   #     - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
   #     - YSWEET_URL=http://ysweet:8085
   #     - ZERO_CACHE_URL=http://zero-cache:4848
@@ -140,6 +148,15 @@ services:
       - BACKEND_URL=http://backend:3001
       - DASHBOARD_URL=http://dashboard:5173
       - BROWSER=chromium
+      # Use the pre-baked image deps as-is: make pnpm non-interactive and stop it
+      # re-verifying/reinstalling (a reinstall re-blocks @getgauge/cli's build script).
+      - CI=true
+      - NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
+      - NPM_CONFIG_CONFIRM_MODULES_PURGE=false
+      # Container-scoped log-noise suppression for the test run.
+      - NPM_CONFIG_LOGLEVEL=error
+      - NODE_NO_WARNINGS=1
+      - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
     depends_on:
       backend:
         condition: service_healthy
