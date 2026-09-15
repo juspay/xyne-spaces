@@ -1,3 +1,10 @@
+## [1.320.0](https://github.com/juspay/xyne-spaces/compare/v1.319.1...v1.320.0) (2026-09-15)
+
+
+### Features
+
+* added admin or owner gating for desk metrics ([#1811](https://github.com/juspay/xyne-spaces/issues/1811)) ([f1b330e](https://github.com/juspay/xyne-spaces/commit/f1b330e3c8f0753f5a19ac60e05d04ac5a0a1ffe))
+
 ## [1.319.1](https://github.com/juspay/xyne-spaces/compare/v1.319.0...v1.319.1) (2026-09-15)
 
 
