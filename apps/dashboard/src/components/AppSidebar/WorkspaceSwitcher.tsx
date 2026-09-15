@@ -46,6 +46,7 @@ interface CreateWorkspaceResponse {
 
 export const WorkspaceSwitcher: React.FC = () => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const canCreateWorkspace = useCanCreateWorkspace();
 
@@ -219,7 +220,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       // Navigate to new workspace
       window.location.href = `/${targetWorkspaceId}/chat/dir`;
     } catch (err) {
-      setError('Failed to switch workspace. Please try again.');
+      setError(tc('appSidebar.workspaceSwitcher.switchFailed'));
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'migrated_console_error',
         message: String('[WorkspaceSwitcher] Switch failed:'),
@@ -255,9 +256,9 @@ export const WorkspaceSwitcher: React.FC = () => {
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const msg = (err.response?.data as { message?: string } | undefined)?.message;
-        setError(msg ?? 'Failed to create workspace.');
+        setError(msg ?? tc('appSidebar.workspaceSwitcher.createFailed'));
       } else {
-        setError('Failed to create workspace.');
+        setError(tc('appSidebar.workspaceSwitcher.createFailed'));
       }
     } finally {
       setCreating(false);
@@ -290,7 +291,7 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   // Show only the active workspace's unread count on the switcher trigger.
   const totalUnread = workspaceId ? (activityCounts.get(workspaceId) ?? 0) : 0;
-  const createLabel = 'Create enterprise workspace';
+  const createLabel = tc('appSidebar.workspaceSwitcher.createEnterpriseWorkspace');
 
   return (
     <div className='relative'>
@@ -300,11 +301,11 @@ export const WorkspaceSwitcher: React.FC = () => {
         onClick={() => setIsOpen(prev => !prev)}
         className='size-8 rounded-lg flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-85 transition-opacity relative'
         style={{ backgroundColor: bgColor }}
-        aria-label='Switch workspace'
+        aria-label={tc('appSidebar.workspaceSwitcher.switchWorkspaceAriaLabel')}
         data-testid='workspace-switcher-trigger'
         data-track-category='Workspace_Switcher'
         data-track-name='Open_Switcher'
-        title={displayName || 'Workspace'}
+        title={displayName || tc('appSidebar.workspaceSwitcher.workspaceFallback')}
       >
         {initial}
         {totalUnread > 0 && (
@@ -322,7 +323,7 @@ export const WorkspaceSwitcher: React.FC = () => {
           {/* Header */}
           <div className='px-3 pt-3 pb-1'>
             <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-              Workspaces
+              {tc('appSidebar.workspaceSwitcher.workspacesHeading')}
             </p>
           </div>
 
@@ -333,7 +334,9 @@ export const WorkspaceSwitcher: React.FC = () => {
                 <Loader2 size={16} className='animate-spin text-muted-foreground' />
               </div>
             ) : workspaces.length === 0 ? (
-              <p className='text-xs text-muted-foreground px-3 py-2'>No workspaces found.</p>
+              <p className='text-xs text-muted-foreground px-3 py-2'>
+                {tc('appSidebar.workspaceSwitcher.noWorkspacesFound')}
+              </p>
             ) : (
               workspaces.map(ws => {
                 const isActive = ws.id === workspaceId;
@@ -384,7 +387,7 @@ export const WorkspaceSwitcher: React.FC = () => {
           {canCreateWorkspace && (
             <div className='py-1'>
               <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-                Add a workspace
+                {tc('appSidebar.workspaceSwitcher.addWorkspace')}
               </p>
 
               {/* Sign in to another workspace — expands list of user's workspaces */}
@@ -397,7 +400,9 @@ export const WorkspaceSwitcher: React.FC = () => {
                 <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
                   <LogIn size={14} className='text-foreground' />
                 </div>
-                <span className='text-sm text-foreground flex-1'>Sign in to another workspace</span>
+                <span className='text-sm text-foreground flex-1'>
+                  {tc('appSidebar.workspaceSwitcher.signInToAnother')}
+                </span>
                 {showSignInList ? (
                   <ChevronDown size={14} className='text-muted-foreground shrink-0' />
                 ) : (
@@ -413,7 +418,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                     </div>
                   ) : workspaces.length === 0 ? (
                     <p className='text-xs text-muted-foreground px-2 py-2'>
-                      No other workspaces found.
+                      {tc('appSidebar.workspaceSwitcher.noOtherWorkspacesFound')}
                     </p>
                   ) : (
                     workspaces.map(ws => {
@@ -490,7 +495,9 @@ export const WorkspaceSwitcher: React.FC = () => {
                       data-track-name='Create_Workspace'
                       className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
                     >
-                      {creating ? 'Creating…' : 'Create'}
+                      {creating
+                        ? tc('appSidebar.workspaceSwitcher.creating')
+                        : tc('appSidebar.workspaceSwitcher.create')}
                     </button>
                     <button
                       type='button'
@@ -503,7 +510,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                       data-track-name='Cancel_Create_Workspace'
                       className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
                     >
-                      Cancel
+                      {tc('appSidebar.workspaceSwitcher.cancel')}
                     </button>
                   </div>
                 </form>
@@ -521,7 +528,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                     <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
                       <Plus size={14} className='text-foreground' />
                     </div>
-                    <span className='text-sm text-foreground'>Create enterprise workspace</span>
+                    <span className='text-sm text-foreground'>{createLabel}</span>
                   </button>
                 </div>
               )}

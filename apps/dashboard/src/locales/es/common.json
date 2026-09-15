@@ -473,5 +473,119 @@
       "regenerateResponse": "Regenerar respuesta",
       "debugThisResponse": "Depurar esta respuesta"
     }
+  },
+  "appSidebar": {
+    "supportRail": {
+      "navAriaLabel": "Soporte",
+      "backToMenu": "Volver al menú",
+      "inbox": "Bandeja de entrada",
+      "activity": "Actividad",
+      "calls": "Llamadas",
+      "aiAgent": "Agente de IA",
+      "automations": "Automatizaciones",
+      "dashboards": "Paneles",
+      "helpCenter": "Centro de ayuda"
+    },
+    "avatarPopover": {
+      "clearStatus": "Borrar estado",
+      "updateYourStatus": "Actualiza tu estado"
+    },
+    "chatQuickMenu": {
+      "heading": "Chat",
+      "newMessage": "Nuevo mensaje",
+      "threads": "Hilos",
+      "unreads": "No leídos",
+      "bookmarks": "Marcadores",
+      "draftsAndSent": "Borradores y enviados",
+      "recap": "Resumen",
+      "radar": "Radar"
+    },
+    "updateAssignmentStatusModal": {
+      "thirtyMinutes": "30 minutos",
+      "oneHour": "1 hora",
+      "fourHours": "4 horas",
+      "today": "Hoy",
+      "thisWeek": "Esta semana",
+      "custom": "Personalizado",
+      "userNotFound": "Usuario no encontrado",
+      "invalidTime": "Selecciona una hora válida",
+      "updateFailed": "No se pudo actualizar la disponibilidad de asignación",
+      "heading": "Disponibilidad de asignación de tickets",
+      "availableAfter": "Disponible después de",
+      "reassignLabel": "Reasignar mis tickets abiertos existentes",
+      "reassignHint": "Si no lo marcas, seguirás excluido de la asignación automática nueva mientras estés en pausa. Los tickets existentes permanecerán contigo.",
+      "cancel": "Cancelar",
+      "saving": "Guardando...",
+      "save": "Guardar"
+    },
+    "updateStatusModal": {
+      "heading": "Establecer un estado",
+      "recentLabel": "Reciente",
+      "forJuspayLabel": "Para Juspay",
+      "clearStatusLabel": "(Borrar estado)",
+      "removeStatusAfter": "Quitar estado después de",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "suggestions": {
+        "inAMeeting": "En una reunión",
+        "commuting": "En camino",
+        "outSick": "De baja por enfermedad",
+        "vacationing": "De vacaciones",
+        "workingRemotely": "Trabajando de forma remota"
+      }
+    },
+    "workspaceInvite": {
+      "title": "Invitar personas al espacio de trabajo",
+      "description": "Invita personas por correo electrónico o copia un enlace del espacio de trabajo.",
+      "closeAriaLabel": "Cerrar diálogo de invitación",
+      "inviteViaEmail": "Invitar por correo electrónico",
+      "inviting": "Invitando...",
+      "invite": "Invitar",
+      "inviteViaLink": "Invitar por enlace",
+      "linkCopiedAriaLabel": "Enlace del espacio de trabajo copiado",
+      "copyLinkAriaLabel": "Copiar enlace del espacio de trabajo",
+      "noWorkspaceSelected": "No hay espacio de trabajo seleccionado",
+      "linkCopied": "Enlace del espacio de trabajo copiado al portapapeles",
+      "copyFailed": "No se pudo copiar el enlace del espacio de trabajo",
+      "enterEmail": "Introduce una dirección de correo electrónico",
+      "invalidEmail": "Dirección de correo electrónico no válida: {{email}}",
+      "failedToSend": "No se pudo enviar la invitación",
+      "invitationSentTo": "Invitación enviada a {{email}}",
+      "invitationsSentCount": "{{count}} invitaciones enviadas",
+      "invitationsFailedCount": "{{count}} invitaciones fallidas",
+      "emailColonError": "{{email}}: {{error}}"
+    },
+    "workspaceSwitcher": {
+      "switchFailed": "No se pudo cambiar de espacio de trabajo. Inténtalo de nuevo.",
+      "createFailed": "No se pudo crear el espacio de trabajo.",
+      "createEnterpriseWorkspace": "Crear espacio de trabajo empresarial",
+      "switchWorkspaceAriaLabel": "Cambiar de espacio de trabajo",
+      "workspaceFallback": "Espacio de trabajo",
+      "workspacesHeading": "Espacios de trabajo",
+      "noWorkspacesFound": "No se encontraron espacios de trabajo.",
+      "addWorkspace": "Agregar un espacio de trabajo",
+      "signInToAnother": "Iniciar sesión en otro espacio de trabajo",
+      "noOtherWorkspacesFound": "No se encontraron otros espacios de trabajo.",
+      "creating": "Creando…",
+      "create": "Crear",
+      "cancel": "Cancelar"
+    }
+  },
+  "statusUtils": {
+    "expired": "Expirado",
+    "untilTime": "Hasta {{time}}",
+    "untilTomorrow": "Hasta mañana, {{time}}",
+    "tomorrowTime": "Mañana, {{time}}",
+    "untilDateTime": "Hasta {{date}}, {{time}}",
+    "dateTime": "{{date}}, {{time}}",
+    "expiryOptions": {
+      "dontClear": "No borrar",
+      "thirtyMinutes": "30 minutos",
+      "oneHour": "1 hora",
+      "fourHours": "4 horas",
+      "today": "Hoy",
+      "thisWeek": "Esta semana",
+      "custom": "Personalizado"
+    }
   }
 }

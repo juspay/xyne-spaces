@@ -473,5 +473,119 @@
       "regenerateResponse": "Regenerate response",
       "debugThisResponse": "Debug this response"
     }
+  },
+  "appSidebar": {
+    "supportRail": {
+      "navAriaLabel": "Support",
+      "backToMenu": "Back to menu",
+      "inbox": "Inbox",
+      "activity": "Activity",
+      "calls": "Calls",
+      "aiAgent": "AI Agent",
+      "automations": "Automations",
+      "dashboards": "Dashboards",
+      "helpCenter": "Help Center"
+    },
+    "avatarPopover": {
+      "clearStatus": "Clear status",
+      "updateYourStatus": "Update your status"
+    },
+    "chatQuickMenu": {
+      "heading": "Chat",
+      "newMessage": "New Message",
+      "threads": "Threads",
+      "unreads": "Unreads",
+      "bookmarks": "Bookmarks",
+      "draftsAndSent": "Drafts & Sent",
+      "recap": "Recap",
+      "radar": "Radar"
+    },
+    "updateAssignmentStatusModal": {
+      "thirtyMinutes": "30 minutes",
+      "oneHour": "1 hour",
+      "fourHours": "4 hours",
+      "today": "Today",
+      "thisWeek": "This week",
+      "custom": "Custom",
+      "userNotFound": "User not found",
+      "invalidTime": "Please select a valid time",
+      "updateFailed": "Failed to update assignment availability",
+      "heading": "Ticket Assignment Availability",
+      "availableAfter": "Available after",
+      "reassignLabel": "Reassign my existing open tickets",
+      "reassignHint": "If unchecked, you will still be excluded from new auto-assignment while paused. Existing tickets will stay with you.",
+      "cancel": "Cancel",
+      "saving": "Saving...",
+      "save": "Save"
+    },
+    "updateStatusModal": {
+      "heading": "Set a status",
+      "recentLabel": "Recent",
+      "forJuspayLabel": "For Juspay",
+      "clearStatusLabel": "(Clear status)",
+      "removeStatusAfter": "Remove status after",
+      "cancel": "Cancel",
+      "save": "Save",
+      "suggestions": {
+        "inAMeeting": "In a meeting",
+        "commuting": "Commuting",
+        "outSick": "Out Sick",
+        "vacationing": "Vacationing",
+        "workingRemotely": "Working remotely"
+      }
+    },
+    "workspaceInvite": {
+      "title": "Invite people to Workspace",
+      "description": "Invite people by email or copy a workspace link.",
+      "closeAriaLabel": "Close invite dialog",
+      "inviteViaEmail": "Invite via Email",
+      "inviting": "Inviting...",
+      "invite": "Invite",
+      "inviteViaLink": "Invite via Link",
+      "linkCopiedAriaLabel": "Workspace link copied",
+      "copyLinkAriaLabel": "Copy workspace link",
+      "noWorkspaceSelected": "No workspace selected",
+      "linkCopied": "Workspace link copied to clipboard",
+      "copyFailed": "Failed to copy workspace link",
+      "enterEmail": "Please enter an email address",
+      "invalidEmail": "Invalid email address: {{email}}",
+      "failedToSend": "Failed to send invitation",
+      "invitationSentTo": "Invitation sent to {{email}}",
+      "invitationsSentCount": "{{count}} invitations sent",
+      "invitationsFailedCount": "{{count}} invitations failed",
+      "emailColonError": "{{email}}: {{error}}"
+    },
+    "workspaceSwitcher": {
+      "switchFailed": "Failed to switch workspace. Please try again.",
+      "createFailed": "Failed to create workspace.",
+      "createEnterpriseWorkspace": "Create enterprise workspace",
+      "switchWorkspaceAriaLabel": "Switch workspace",
+      "workspaceFallback": "Workspace",
+      "workspacesHeading": "Workspaces",
+      "noWorkspacesFound": "No workspaces found.",
+      "addWorkspace": "Add a workspace",
+      "signInToAnother": "Sign in to another workspace",
+      "noOtherWorkspacesFound": "No other workspaces found.",
+      "creating": "Creating…",
+      "create": "Create",
+      "cancel": "Cancel"
+    }
+  },
+  "statusUtils": {
+    "expired": "Expired",
+    "untilTime": "Until {{time}}",
+    "untilTomorrow": "Until tomorrow, {{time}}",
+    "tomorrowTime": "Tomorrow, {{time}}",
+    "untilDateTime": "Until {{date}}, {{time}}",
+    "dateTime": "{{date}}, {{time}}",
+    "expiryOptions": {
+      "dontClear": "Don't clear",
+      "thirtyMinutes": "30 minutes",
+      "oneHour": "1 hour",
+      "fourHours": "4 hours",
+      "today": "Today",
+      "thisWeek": "This week",
+      "custom": "Custom"
+    }
   }
 }

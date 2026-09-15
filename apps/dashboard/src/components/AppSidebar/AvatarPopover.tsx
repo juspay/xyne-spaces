@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Popover from '@radix-ui/react-popover';
 import { Pencil, X, Smile } from 'lucide-react';
 import Avatar from '../ui/Avatar/Avatar';
@@ -14,6 +15,7 @@ interface AvatarPopoverProps {
 }
 
 export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
+  const { t } = useTranslation('common');
   const user = useUser(userId);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -110,7 +112,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     size='sm'
                     onClick={handleClearStatus}
                     className='flex-shrink-0 p-1 h-auto'
-                    title='Clear status'
+                    title={t('appSidebar.avatarPopover.clearStatus')}
                     data-track-category='App_Sidebar_Avatar_Popover'
                     data-track-name='Clear_Status'
                     data-track-metadata={JSON.stringify({ statusContent })}
@@ -133,7 +135,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 <div className='flex items-center gap-2'>
                   <Smile className='size-5 text-muted-foreground' />
                   <span className='text-sm text-muted-foreground' data-testid='set-status-btn'>
-                    Update your status
+                    {t('appSidebar.avatarPopover.updateYourStatus')}
                   </span>
                 </div>
               </div>

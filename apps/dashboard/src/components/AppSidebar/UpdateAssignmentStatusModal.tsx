@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as Select from '@radix-ui/react-select';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
@@ -14,12 +15,12 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Assignment-specific expiry options
 const ASSIGNMENT_EXPIRY_OPTIONS = [
-  { label: '30 minutes', value: '30min' },
-  { label: '1 hour', value: '1hour' },
-  { label: '4 hours', value: '4hours' },
-  { label: 'Today', value: 'today' },
-  { label: 'This week', value: 'week' },
-  { label: 'Custom', value: 'custom' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.thirtyMinutes', value: '30min' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.oneHour', value: '1hour' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.fourHours', value: '4hours' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.today', value: 'today' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.thisWeek', value: 'week' },
+  { labelKey: 'appSidebar.updateAssignmentStatusModal.custom', value: 'custom' },
 ];
 
 interface UpdateAssignmentStatusModalProps {
@@ -31,6 +32,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
   isOpen,
   onClose,
 }) => {
+  const { t } = useTranslation('common');
   const { user } = useAuth();
   const zero = useZero();
   const modalContentRef = React.useRef<HTMLDivElement>(null);
@@ -64,7 +66,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
 
   const handleSave = async (): Promise<void> => {
     if (!user) {
-      setError('User not found');
+      setError(t('appSidebar.updateAssignmentStatusModal.userNotFound'));
       return;
     }
 
@@ -85,7 +87,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
       const unavailableUntilTimestamp = calculateExpiryTime(expiryOption, customDateTime);
 
       if (!unavailableUntilTimestamp) {
-        setError('Please select a valid time');
+        setError(t('appSidebar.updateAssignmentStatusModal.invalidTime'));
         setIsLoading(false);
         return;
       }
@@ -109,7 +111,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
       onClose();
     } catch (err) {
       const errorMessage =
-        err instanceof Error ? err.message : 'Failed to update assignment availability';
+        err instanceof Error
+          ? err.message
+          : t('appSidebar.updateAssignmentStatusModal.updateFailed');
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -120,7 +124,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
     <Dialog open={isOpen} onOpenChange={onClose} className='max-w-lg rounded-2xl'>
       <div ref={modalContentRef} className='p-6 space-y-4'>
         <div className='flex items-center justify-between'>
-          <h2 className='text-lg font-semibold'>Ticket Assignment Availability</h2>
+          <h2 className='text-lg font-semibold'>
+            {t('appSidebar.updateAssignmentStatusModal.heading')}
+          </h2>
           <Button
             variant='ghost'
             size='sm'
@@ -136,7 +142,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
         {/* Datetime Input */}
         <div className='space-y-4 pt-2'>
           <div className='space-y-2'>
-            <span className='text-sm font-medium text-foreground'>Available after</span>
+            <span className='text-sm font-medium text-foreground'>
+              {t('appSidebar.updateAssignmentStatusModal.availableAfter')}
+            </span>
             <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
               <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
                 <Select.Value />
@@ -160,7 +168,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
                         value={option.value}
                         className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                       >
-                        <Select.ItemText>{option.label}</Select.ItemText>
+                        <Select.ItemText>{t(option.labelKey)}</Select.ItemText>
                         <Select.ItemIndicator className='absolute right-2'>
                           <Check className='size-4' />
                         </Select.ItemIndicator>
@@ -203,11 +211,10 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             <Checkbox
               checked={reassignExistingTickets}
               onChange={setReassignExistingTickets}
-              label='Reassign my existing open tickets'
+              label={t('appSidebar.updateAssignmentStatusModal.reassignLabel')}
             />
             <p className='pl-[26px] text-xs leading-[1.4] text-muted-foreground'>
-              If unchecked, you will still be excluded from new auto-assignment while paused.
-              Existing tickets will stay with you.
+              {t('appSidebar.updateAssignmentStatusModal.reassignHint')}
             </p>
           </div>
 
@@ -227,7 +234,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             data-track-category='App_Sidebar_Update_Assignment_Status_Modal'
             data-track-name='Cancel_Assignment_Availability'
           >
-            Cancel
+            {t('appSidebar.updateAssignmentStatusModal.cancel')}
           </Button>
           <Button
             onClick={() => void handleSave()}
@@ -238,7 +245,9 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
             data-track-name='Save_Assignment_Availability'
             data-track-metadata={JSON.stringify({ expiryOption, reassignExistingTickets })}
           >
-            {isLoading ? 'Saving...' : 'Save'}
+            {isLoading
+              ? t('appSidebar.updateAssignmentStatusModal.saving')
+              : t('appSidebar.updateAssignmentStatusModal.save')}
           </Button>
         </div>
       </div>

@@ -19,11 +19,19 @@ import { usePlatform } from '../../hooks/usePlatform';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
-  { emoji: '📅', text: 'In a meeting', expiry: '1hour' },
-  { emoji: '🚌', text: 'Commuting', expiry: '30min' },
-  { emoji: '🤒', text: 'Out Sick', expiry: 'today' },
-  { emoji: '🌴', text: 'Vacationing', expiry: 'dont-clear' },
-  { emoji: '🏡', text: 'Working remotely', expiry: 'today' },
+  { emoji: '📅', textKey: 'appSidebar.updateStatusModal.suggestions.inAMeeting', expiry: '1hour' },
+  { emoji: '🚌', textKey: 'appSidebar.updateStatusModal.suggestions.commuting', expiry: '30min' },
+  { emoji: '🤒', textKey: 'appSidebar.updateStatusModal.suggestions.outSick', expiry: 'today' },
+  {
+    emoji: '🌴',
+    textKey: 'appSidebar.updateStatusModal.suggestions.vacationing',
+    expiry: 'dont-clear',
+  },
+  {
+    emoji: '🏡',
+    textKey: 'appSidebar.updateStatusModal.suggestions.workingRemotely',
+    expiry: 'today',
+  },
 ];
 
 const RECENT_STATUSES_KEY = 'xyne_recent_statuses';
@@ -78,6 +86,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
   currentStatus,
 }) => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const zero = useZero();
   const { data: customEmojis } = useCustomEmojis();
   const { theme } = useTheme();
@@ -273,7 +282,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
       <div className='p-6 space-y-4'>
         <div className='flex items-center justify-between'>
           <h2 className='text-lg text-foreground font-semibold' data-testid='update-status-title'>
-            Set a status
+            {tc('appSidebar.updateStatusModal.heading')}
           </h2>
           <Button
             variant='ghost'
@@ -345,7 +354,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             {/* Recent statuses */}
             {recentStatuses.length > 0 && (
               <div className='space-y-2'>
-                <p className='text-sm font-medium text-foreground'>Recent</p>
+                <p className='text-sm font-medium text-foreground'>
+                  {tc('appSidebar.updateStatusModal.recentLabel')}
+                </p>
                 <div className='space-y-0.5'>
                   {recentStatuses.map((status, index) => (
                     <button
@@ -365,8 +376,10 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       <span className='text-sm text-foreground'>{status.text}</span>
                       <span className='text-xs text-muted-foreground'>-</span>
                       <span className='text-xs text-muted-foreground'>
-                        {EXPIRY_OPTIONS.find(opt => opt.value === status.expiry)?.label ||
-                          status.expiry}
+                        {(() => {
+                          const opt = EXPIRY_OPTIONS.find(o => o.value === status.expiry);
+                          return opt ? tc(opt.labelKey) : status.expiry;
+                        })()}
                       </span>
                     </button>
                   ))}
@@ -379,32 +392,37 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 
             {/* Hardcoded suggestions */}
             <div className='space-y-2'>
-              <p className='text-sm font-medium text-foreground'>For Juspay</p>
+              <p className='text-sm font-medium text-foreground'>
+                {tc('appSidebar.updateStatusModal.forJuspayLabel')}
+              </p>
               <div className='space-y-0.5'>
-                {STATUS_SUGGESTIONS.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() =>
-                      handleSuggestionClick(suggestion.emoji, suggestion.text, suggestion.expiry)
-                    }
-                    className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
-                    data-track-category='Update_User_Status_Modal'
-                    data-track-name='Select_Status_Suggestion'
-                    data-track-metadata={JSON.stringify({
-                      statusText: suggestion.text,
-                      expiry: suggestion.expiry,
-                    })}
-                    data-testid='status-suggestion'
-                  >
-                    <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
-                    <span className='text-sm text-foreground'>{suggestion.text}</span>
-                    <span className='text-xs text-muted-foreground'>-</span>
-                    <span className='text-xs text-muted-foreground'>
-                      {EXPIRY_OPTIONS.find(opt => opt.value === suggestion.expiry)?.label ||
-                        suggestion.expiry}
-                    </span>
-                  </button>
-                ))}
+                {STATUS_SUGGESTIONS.map((suggestion, index) => {
+                  const suggestionText = tc(suggestion.textKey);
+                  const expiryOpt = EXPIRY_OPTIONS.find(opt => opt.value === suggestion.expiry);
+                  return (
+                    <button
+                      key={index}
+                      onClick={() =>
+                        handleSuggestionClick(suggestion.emoji, suggestionText, suggestion.expiry)
+                      }
+                      className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
+                      data-track-category='Update_User_Status_Modal'
+                      data-track-name='Select_Status_Suggestion'
+                      data-track-metadata={JSON.stringify({
+                        statusText: suggestion.textKey,
+                        expiry: suggestion.expiry,
+                      })}
+                      data-testid='status-suggestion'
+                    >
+                      <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
+                      <span className='text-sm text-foreground'>{suggestionText}</span>
+                      <span className='text-xs text-muted-foreground'>-</span>
+                      <span className='text-xs text-muted-foreground'>
+                        {expiryOpt ? tc(expiryOpt.labelKey) : suggestion.expiry}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -472,7 +490,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >
-                  <span className='text-xs opacity-60'>(Clear status)</span>
+                  <span className='text-xs opacity-60'>
+                    {tc('appSidebar.updateStatusModal.clearStatusLabel')}
+                  </span>
                   <X className='size-4' />
                 </button>
               )}
@@ -480,7 +500,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 
             {/* Remove status after dropdown */}
             <div className='space-y-2'>
-              <span className='text-sm font-medium text-foreground'>Remove status after</span>
+              <span className='text-sm font-medium text-foreground'>
+                {tc('appSidebar.updateStatusModal.removeStatusAfter')}
+              </span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
                 <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'>
                   <Select.Value />
@@ -502,7 +524,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                           value={option.value}
                           className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                         >
-                          <Select.ItemText>{option.label}</Select.ItemText>
+                          <Select.ItemText>{tc(option.labelKey)}</Select.ItemText>
                           <Select.ItemIndicator className='absolute right-2'>
                             <Check className='size-4' />
                           </Select.ItemIndicator>
@@ -548,7 +570,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Cancel_Status_Update'
               >
-                Cancel
+                {tc('appSidebar.updateStatusModal.cancel')}
               </Button>
               <Button
                 onClick={() => {
@@ -562,7 +584,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}
                 data-testid='update-status-save-btn'
               >
-                Save
+                {tc('appSidebar.updateStatusModal.save')}
               </Button>
             </div>
           </div>

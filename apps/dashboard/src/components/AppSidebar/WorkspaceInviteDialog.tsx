@@ -1,5 +1,6 @@
 import { FormEvent, ReactElement, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import axios from 'axios';
 import { CheckTickSingle, CopyDefault } from '@xyne/icons';
 import { WorkspaceRole } from '@xyne/shared';
@@ -31,17 +32,17 @@ const parseEmails = (value: string): string[] =>
     ),
   );
 
-const getInviteErrorMessage = (error: unknown): string => {
+const getInviteErrorMessage = (error: unknown, t: TFunction): string => {
   if (axios.isAxiosError<{ error?: string; message?: string }>(error)) {
     return (
       error.response?.data?.error ??
       error.response?.data?.message ??
       error.message ??
-      'Failed to send invitation'
+      t('appSidebar.workspaceInvite.failedToSend')
     );
   }
 
-  return error instanceof Error ? error.message : 'Failed to send invitation';
+  return error instanceof Error ? error.message : t('appSidebar.workspaceInvite.failedToSend');
 };
 
 interface InviteResult {
@@ -55,6 +56,7 @@ export const WorkspaceInviteDialog = ({
   workspaceId,
 }: WorkspaceInviteDialogProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [emailsInput, setEmailsInput] = useState('');
   const [isInviting, setIsInviting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,17 +68,17 @@ export const WorkspaceInviteDialog = ({
 
   const handleCopyLink = async (): Promise<void> => {
     if (!inviteUrl) {
-      toast.error('No workspace selected');
+      toast.error(tc('appSidebar.workspaceInvite.noWorkspaceSelected'));
       return;
     }
 
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
-      toast.success('Workspace link copied to clipboard');
+      toast.success(tc('appSidebar.workspaceInvite.linkCopied'));
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      toast.error('Failed to copy workspace link');
+      toast.error(tc('appSidebar.workspaceInvite.copyFailed'));
     }
   };
 
@@ -84,20 +86,20 @@ export const WorkspaceInviteDialog = ({
     event?.preventDefault();
 
     if (!workspaceId) {
-      toast.error('No workspace selected');
+      toast.error(tc('appSidebar.workspaceInvite.noWorkspaceSelected'));
       return;
     }
 
     const emails = parseEmails(emailsInput);
 
     if (!emails.length) {
-      toast.error('Please enter an email address');
+      toast.error(tc('appSidebar.workspaceInvite.enterEmail'));
       return;
     }
 
     const invalidEmail = emails.find(email => !EMAIL_PATTERN.test(email));
     if (invalidEmail) {
-      toast.error(`Invalid email address: ${invalidEmail}`);
+      toast.error(tc('appSidebar.workspaceInvite.invalidEmail', { email: invalidEmail }));
       return;
     }
 
@@ -113,7 +115,7 @@ export const WorkspaceInviteDialog = ({
             });
             return { email };
           } catch (error) {
-            return { email, error: getInviteErrorMessage(error) };
+            return { email, error: getInviteErrorMessage(error, tc) };
           }
         }),
       );
@@ -124,8 +126,10 @@ export const WorkspaceInviteDialog = ({
       if (sentCount > 0) {
         toast.success(
           sentCount === 1
-            ? `Invitation sent to ${results.find(result => !result.error)?.email}`
-            : `${sentCount} invitations sent`,
+            ? tc('appSidebar.workspaceInvite.invitationSentTo', {
+                email: results.find(result => !result.error)?.email,
+              })
+            : tc('appSidebar.workspaceInvite.invitationsSentCount', { count: sentCount }),
         );
       }
 
@@ -134,15 +138,20 @@ export const WorkspaceInviteDialog = ({
         setEmailsInput(failed.map(result => result.email).join(', '));
         toast.error(
           failed.length === 1
-            ? (firstFailed?.error ?? 'Failed to send invitation')
-            : `${failed.length} invitations failed`,
+            ? (firstFailed?.error ?? tc('appSidebar.workspaceInvite.failedToSend'))
+            : tc('appSidebar.workspaceInvite.invitationsFailedCount', { count: failed.length }),
           {
             description:
               failed.length === 1
                 ? firstFailed?.email
                 : failed
                     .slice(0, 3)
-                    .map(result => `${result.email}: ${result.error}`)
+                    .map(result =>
+                      tc('appSidebar.workspaceInvite.emailColonError', {
+                        email: result.email,
+                        error: result.error,
+                      }),
+                    )
                     .join('\n'),
           },
         );
@@ -167,19 +176,19 @@ export const WorkspaceInviteDialog = ({
     <Dialog
       open={open}
       onOpenChange={handleOpenChange}
-      title='Invite people to Workspace'
-      description='Invite people by email or copy a workspace link.'
+      title={tc('appSidebar.workspaceInvite.title')}
+      description={tc('appSidebar.workspaceInvite.description')}
       className='max-w-[460px] rounded-[18px] border border-border/70 bg-background p-0 shadow-2xl'
       testId='workspace-invite-dialog'
     >
       <form onSubmit={event => void handleInvite(event)} className='px-5 pb-5 pt-4'>
         <div className='mb-7 flex items-start justify-between gap-4'>
           <h2 className='text-[20px] font-semibold leading-tight tracking-normal text-foreground'>
-            Invite people to Workspace
+            {tc('appSidebar.workspaceInvite.title')}
           </h2>
           <button
             type='button'
-            aria-label='Close invite dialog'
+            aria-label={tc('appSidebar.workspaceInvite.closeAriaLabel')}
             onClick={() => handleOpenChange(false)}
             className='-mr-1 flex size-6 items-center justify-center rounded-md text-[30px] font-light leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
             data-track-category='WorkspaceInviteDialog'
@@ -194,7 +203,7 @@ export const WorkspaceInviteDialog = ({
             htmlFor='workspace-invite-emails'
             className='block text-[15px] font-medium leading-none text-muted-foreground'
           >
-            Invite via Email
+            {tc('appSidebar.workspaceInvite.inviteViaEmail')}
           </label>
           <div className='flex flex-col gap-3 sm:flex-row'>
             <input
@@ -216,7 +225,9 @@ export const WorkspaceInviteDialog = ({
               data-track-category='WorkspaceInviteDialog'
               data-track-name='InviteByEmail'
             >
-              {isInviting ? 'Inviting...' : 'Invite'}
+              {isInviting
+                ? tc('appSidebar.workspaceInvite.inviting')
+                : tc('appSidebar.workspaceInvite.invite')}
             </button>
           </div>
         </div>
@@ -225,7 +236,7 @@ export const WorkspaceInviteDialog = ({
 
         <div className='space-y-3'>
           <p className='text-[15px] font-medium leading-none text-muted-foreground'>
-            Invite via Link
+            {tc('appSidebar.workspaceInvite.inviteViaLink')}
           </p>
           <div className='flex gap-1.5'>
             <div className='flex h-10 min-w-0 flex-1 items-center rounded-[7px] bg-muted px-3.5 text-[15px] font-semibold text-foreground'>
@@ -233,7 +244,11 @@ export const WorkspaceInviteDialog = ({
             </div>
             <button
               type='button'
-              aria-label={copied ? 'Workspace link copied' : 'Copy workspace link'}
+              aria-label={
+                copied
+                  ? tc('appSidebar.workspaceInvite.linkCopiedAriaLabel')
+                  : tc('appSidebar.workspaceInvite.copyLinkAriaLabel')
+              }
               onClick={() => void handleCopyLink()}
               disabled={!inviteUrl}
               className={cn(

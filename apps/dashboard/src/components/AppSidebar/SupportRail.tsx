@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -27,7 +28,7 @@ interface RailContext {
 
 interface SupportRailItem {
   key: string;
-  label: string;
+  labelKey: string;
   icon: PikaIcon;
   path: string;
   gatedPath?: string;
@@ -52,35 +53,35 @@ interface SupportRailProps {
 const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   {
     key: 'inbox',
-    label: 'Inbox',
+    labelKey: 'appSidebar.supportRail.inbox',
     icon: InboxDefault,
     path: '/support/all',
     isActive: ctx => ctx.activeRoute === '/support',
   },
   {
     key: 'activity',
-    label: 'Activity',
+    labelKey: 'appSidebar.supportRail.activity',
     icon: NotificationBellOn,
     path: '/chat/activity',
     isActive: ctx => ctx.activeRoute === '/chat/activity',
   },
   {
     key: 'calls',
-    label: 'Calls',
+    labelKey: 'appSidebar.supportRail.calls',
     icon: PhoneDefault,
     path: '/calls',
     isActive: ctx => ctx.activeRoute === '/calls',
   },
   {
     key: 'ai-agent',
-    label: 'AI Agent',
+    labelKey: 'appSidebar.supportRail.aiAgent',
     icon: SparkleAi01,
     path: '/ai',
     isActive: ctx => ctx.activeRoute === '/ai',
   },
   {
     key: 'automations',
-    label: 'Automations',
+    labelKey: 'appSidebar.supportRail.automations',
     icon: LightningThunderElectricOn,
     path: '/automations',
     gatedPath: '/automations',
@@ -88,7 +89,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   },
   {
     key: 'dashboards',
-    label: 'Dashboards',
+    labelKey: 'appSidebar.supportRail.dashboards',
     icon: BubbleChart,
     path: '/analytics-dashboard',
     gatedPath: '/analytics',
@@ -96,7 +97,7 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
   },
   {
     key: 'help-center',
-    label: 'Help Center',
+    labelKey: 'appSidebar.supportRail.helpCenter',
     icon: Notebook,
     path: '/knowledge-base',
     gatedPath: '/knowledge-base',
@@ -115,6 +116,7 @@ export const SupportRail = ({
   permittedGlobalPaths,
   activeRoute,
 }: SupportRailProps): ReactElement => {
+  const { t } = useTranslation('common');
   const ctx: RailContext = { activeRoute };
   const navigate = useNavigate();
 
@@ -131,7 +133,7 @@ export const SupportRail = ({
     event => {
       const item = items[railItemIndexFromEvent(event)];
       if (!item) return;
-      onNavigationClick(`Support: ${item.label}`);
+      onNavigationClick(`Support: ${item.key}`);
       void navigate(prefixWs(item.path));
     },
     { enabled: railShortcuts },
@@ -139,15 +141,15 @@ export const SupportRail = ({
 
   return (
     <nav
-      aria-label='Support'
+      aria-label={t('appSidebar.supportRail.navAriaLabel')}
       className='flex flex-col items-center gap-3 animate-in fade-in-0 slide-in-from-left-2 duration-300'
     >
       {/* Back to the main app rail */}
-      <Tooltip content='Back to menu' side='right' delayDuration={0}>
+      <Tooltip content={t('appSidebar.supportRail.backToMenu')} side='right' delayDuration={0}>
         <Link
           to={prefixWs('/chat/dir')}
           onClick={handleBack}
-          aria-label='Back to menu'
+          aria-label={t('appSidebar.supportRail.backToMenu')}
           data-testid='support-rail-home'
           data-track-category='App_Sidebar'
           data-track-name='Support_Rail_Back'
@@ -165,17 +167,18 @@ export const SupportRail = ({
         const active = item.isActive(ctx);
         const Icon = item.icon;
         const shortcutIndex = railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
+        const label = t(item.labelKey);
         return (
           <Tooltip
             key={item.key}
             content={
               shortcutIndex ? (
                 <span className='flex items-center gap-2'>
-                  {item.label}
+                  {label}
                   <ShortcutHint keys={`mod+${shortcutIndex}`} />
                 </span>
               ) : (
-                item.label
+                label
               )
             }
             side='right'
@@ -183,13 +186,13 @@ export const SupportRail = ({
           >
             <Link
               to={prefixWs(item.path)}
-              onClick={() => onNavigationClick(`Support: ${item.label}`)}
-              aria-label={item.label}
+              onClick={() => onNavigationClick(`Support: ${item.key}`)}
+              aria-label={label}
               aria-current={active ? 'page' : undefined}
               data-testid={`support-rail-${item.key}`}
               data-track-category='App_Sidebar'
               data-track-name='Support_Rail_Item'
-              data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
+              data-track-metadata={JSON.stringify({ path: item.path, label: item.key })}
               className={cn(
                 'size-8 flex items-center justify-center rounded-lg border border-transparent transition-colors',
                 active

@@ -1,4 +1,5 @@
 import { createElement, useMemo, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import {
   ChatPlus,
@@ -23,24 +24,54 @@ const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElem
 
 const CHAT_NAV_ITEMS: {
   key: string;
-  label: string;
+  labelKey: string;
   to: string;
   icon: PikaIcon;
   replace?: boolean;
 }[] = [
   {
     key: 'new-message',
-    label: 'New Message',
+    labelKey: 'appSidebar.chatQuickMenu.newMessage',
     to: '/chat/search?mode=dm',
     icon: ChatPlus,
     replace: true,
   },
-  { key: 'threads', label: 'Threads', to: '/chat/dir/threads', icon: Subtask },
-  { key: 'unreads', label: 'Unreads', to: '/chat/dir/unreads', icon: ChatTyping },
-  { key: 'bookmarks', label: 'Bookmarks', to: '/chat/bookmarks', icon: BookmarkDefault },
-  { key: 'drafts-sent', label: 'Drafts & Sent', to: '/chat/drafts-sent', icon: SendPlaneSlant },
-  { key: 'recap', label: 'Recap', to: '/chat/dir/recap', icon: ListAiGenerated },
-  { key: 'radar', label: 'Radar', to: '/chat/dir/radar', icon: RadarNavIcon },
+  {
+    key: 'threads',
+    labelKey: 'appSidebar.chatQuickMenu.threads',
+    to: '/chat/dir/threads',
+    icon: Subtask,
+  },
+  {
+    key: 'unreads',
+    labelKey: 'appSidebar.chatQuickMenu.unreads',
+    to: '/chat/dir/unreads',
+    icon: ChatTyping,
+  },
+  {
+    key: 'bookmarks',
+    labelKey: 'appSidebar.chatQuickMenu.bookmarks',
+    to: '/chat/bookmarks',
+    icon: BookmarkDefault,
+  },
+  {
+    key: 'drafts-sent',
+    labelKey: 'appSidebar.chatQuickMenu.draftsAndSent',
+    to: '/chat/drafts-sent',
+    icon: SendPlaneSlant,
+  },
+  {
+    key: 'recap',
+    labelKey: 'appSidebar.chatQuickMenu.recap',
+    to: '/chat/dir/recap',
+    icon: ListAiGenerated,
+  },
+  {
+    key: 'radar',
+    labelKey: 'appSidebar.chatQuickMenu.radar',
+    to: '/chat/dir/radar',
+    icon: RadarNavIcon,
+  },
 ];
 
 /**
@@ -64,28 +95,31 @@ export const ChatQuickMenu = ({
   prefixWs: (path: string) => string;
   onNavigate?: (label: string) => void;
   onDismiss?: () => void;
-}): ReactElement => (
-  <QuickNavList heading='Chat'>
-    {useChatNavItems().map(item => {
-      const Icon = item.icon;
-      return (
-        <Link
-          key={item.key}
-          to={prefixWs(item.to)}
-          replace={item.replace ?? false}
-          onClick={() => {
-            onNavigate?.(item.label);
-            onDismiss?.();
-          }}
-          className={QUICK_NAV_ROW_CLASS}
-          data-track-category='App_Sidebar'
-          data-track-name='Chat_Quick_Nav'
-          data-track-metadata={JSON.stringify({ path: item.to, label: item.label })}
-        >
-          <Icon size={16} className='shrink-0' aria-hidden />
-          {item.label}
-        </Link>
-      );
-    })}
-  </QuickNavList>
-);
+}): ReactElement => {
+  const { t } = useTranslation('common');
+  return (
+    <QuickNavList heading={t('appSidebar.chatQuickMenu.heading')}>
+      {useChatNavItems().map(item => {
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.key}
+            to={prefixWs(item.to)}
+            replace={item.replace ?? false}
+            onClick={() => {
+              onNavigate?.(item.key);
+              onDismiss?.();
+            }}
+            className={QUICK_NAV_ROW_CLASS}
+            data-track-category='App_Sidebar'
+            data-track-name='Chat_Quick_Nav'
+            data-track-metadata={JSON.stringify({ path: item.to, label: item.key })}
+          >
+            <Icon size={16} className='shrink-0' aria-hidden />
+            {t(item.labelKey)}
+          </Link>
+        );
+      })}
+    </QuickNavList>
+  );
+};

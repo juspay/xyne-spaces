@@ -1,18 +1,20 @@
+import i18next from '@/locales';
+
 export const DEFAULT_STATUS_EMOJI = '💬';
 
 export interface ExpiryOption {
-  label: string;
+  labelKey: string;
   value: string;
 }
 
 export const EXPIRY_OPTIONS: ExpiryOption[] = [
-  { label: "Don't clear", value: 'dont-clear' },
-  { label: '30 minutes', value: '30min' },
-  { label: '1 hour', value: '1hour' },
-  { label: '4 hours', value: '4hours' },
-  { label: 'Today', value: 'today' },
-  { label: 'This week', value: 'week' },
-  { label: 'Custom', value: 'custom' },
+  { labelKey: 'statusUtils.expiryOptions.dontClear', value: 'dont-clear' },
+  { labelKey: 'statusUtils.expiryOptions.thirtyMinutes', value: '30min' },
+  { labelKey: 'statusUtils.expiryOptions.oneHour', value: '1hour' },
+  { labelKey: 'statusUtils.expiryOptions.fourHours', value: '4hours' },
+  { labelKey: 'statusUtils.expiryOptions.today', value: 'today' },
+  { labelKey: 'statusUtils.expiryOptions.thisWeek', value: 'week' },
+  { labelKey: 'statusUtils.expiryOptions.custom', value: 'custom' },
 ];
 
 /**
@@ -66,7 +68,7 @@ export const isStatusExpired = (expiryAt: number | null): boolean => {
  * Format expiry time for display
  */
 export const formatExpiryTime = (expiryAt: number | null, useUntilFormat = false): string => {
-  if (!expiryAt) return "Don't clear";
+  if (!expiryAt) return i18next.t('statusUtils.expiryOptions.dontClear');
 
   const now = new Date();
   const expiry = new Date(expiryAt);
@@ -74,7 +76,7 @@ export const formatExpiryTime = (expiryAt: number | null, useUntilFormat = false
 
   // If expired
   if (diff <= 0) {
-    return useUntilFormat ? 'Expired' : 'Expired';
+    return i18next.t('statusUtils.expired');
   }
 
   // Check if it's today
@@ -91,12 +93,14 @@ export const formatExpiryTime = (expiryAt: number | null, useUntilFormat = false
 
   if (daysDiff === 0) {
     // Same day - show "Until [time]"
-    return useUntilFormat ? `Until ${timeText}` : timeText;
+    return useUntilFormat ? i18next.t('statusUtils.untilTime', { time: timeText }) : timeText;
   }
 
   if (daysDiff === 1) {
     // Tomorrow - show "Until tomorrow, [time]"
-    return useUntilFormat ? `Until tomorrow, ${timeText}` : `Tomorrow, ${timeText}`;
+    return useUntilFormat
+      ? i18next.t('statusUtils.untilTomorrow', { time: timeText })
+      : i18next.t('statusUtils.tomorrowTime', { time: timeText });
   }
 
   // Beyond tomorrow - show "Until [date], [time]"
@@ -104,5 +108,7 @@ export const formatExpiryTime = (expiryAt: number | null, useUntilFormat = false
     month: 'short',
     day: 'numeric',
   });
-  return useUntilFormat ? `Until ${dateText}, ${timeText}` : `${dateText}, ${timeText}`;
+  return useUntilFormat
+    ? i18next.t('statusUtils.untilDateTime', { date: dateText, time: timeText })
+    : i18next.t('statusUtils.dateTime', { date: dateText, time: timeText });
 };

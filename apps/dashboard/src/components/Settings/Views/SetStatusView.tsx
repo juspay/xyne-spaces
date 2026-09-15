@@ -24,11 +24,19 @@ import { usePlatform } from '../../../hooks/usePlatform';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
-  { emoji: '📅', text: 'In a meeting', expiry: '1hour' },
-  { emoji: '🚌', text: 'Commuting', expiry: '30min' },
-  { emoji: '🤒', text: 'Out Sick', expiry: 'today' },
-  { emoji: '🌴', text: 'Vacationing', expiry: 'dont-clear' },
-  { emoji: '🏡', text: 'Working remotely', expiry: 'today' },
+  { emoji: '📅', textKey: 'appSidebar.updateStatusModal.suggestions.inAMeeting', expiry: '1hour' },
+  { emoji: '🚌', textKey: 'appSidebar.updateStatusModal.suggestions.commuting', expiry: '30min' },
+  { emoji: '🤒', textKey: 'appSidebar.updateStatusModal.suggestions.outSick', expiry: 'today' },
+  {
+    emoji: '🌴',
+    textKey: 'appSidebar.updateStatusModal.suggestions.vacationing',
+    expiry: 'dont-clear',
+  },
+  {
+    emoji: '🏡',
+    textKey: 'appSidebar.updateStatusModal.suggestions.workingRemotely',
+    expiry: 'today',
+  },
 ];
 
 const RECENT_STATUSES_KEY = 'xyne_recent_statuses';
@@ -86,6 +94,7 @@ interface StatusEditViewProps extends StatusViewProps {
 // Status Suggestions View - Shows when user hasn't started typing
 export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
   const { data: customEmojis } = useCustomEmojis();
@@ -154,7 +163,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
         >
           <ChevronLeft className='size-4' />
         </Button>
-        <h2 className='text-lg font-semibold'>Set a status</h2>
+        <h2 className='text-lg font-semibold'>{tc('appSidebar.updateStatusModal.heading')}</h2>
       </div>
 
       {/* Input field */}
@@ -211,25 +220,30 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
       {/* Recent statuses */}
       {recentStatuses.length > 0 && (
         <div className='space-y-2'>
-          <p className='text-sm font-medium text-foreground'>Recent</p>
+          <p className='text-sm font-medium text-foreground'>
+            {tc('appSidebar.updateStatusModal.recentLabel')}
+          </p>
           <div className='space-y-0.5'>
-            {recentStatuses.map((status, index) => (
-              <button
-                key={index}
-                onClick={() => handleSuggestionClick(status.emoji, status.text, status.expiry)}
-                className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
-                data-track-category='STATUS'
-                data-track-name='SelectRecentStatus'
-                data-track-metadata={JSON.stringify({ emoji: status.emoji, text: status.text })}
-              >
-                <span className='text-lg'>{renderEmoji(status.emoji)}</span>
-                <span className='text-sm text-foreground'>{status.text}</span>
-                <span className='text-xs text-muted-foreground'>-</span>
-                <span className='text-xs text-muted-foreground'>
-                  {EXPIRY_OPTIONS.find(opt => opt.value === status.expiry)?.label || status.expiry}
-                </span>
-              </button>
-            ))}
+            {recentStatuses.map((status, index) => {
+              const expiryOpt = EXPIRY_OPTIONS.find(opt => opt.value === status.expiry);
+              return (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestionClick(status.emoji, status.text, status.expiry)}
+                  className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
+                  data-track-category='STATUS'
+                  data-track-name='SelectRecentStatus'
+                  data-track-metadata={JSON.stringify({ emoji: status.emoji, text: status.text })}
+                >
+                  <span className='text-lg'>{renderEmoji(status.emoji)}</span>
+                  <span className='text-sm text-foreground'>{status.text}</span>
+                  <span className='text-xs text-muted-foreground'>-</span>
+                  <span className='text-xs text-muted-foreground'>
+                    {expiryOpt ? tc(expiryOpt.labelKey) : status.expiry}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -239,31 +253,36 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
 
       {/* Hardcoded suggestions */}
       <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>For Juspay</p>
+        <p className='text-sm font-medium text-foreground'>
+          {tc('appSidebar.updateStatusModal.forJuspayLabel')}
+        </p>
         <div className='space-y-0.5'>
-          {STATUS_SUGGESTIONS.map((suggestion, index) => (
-            <button
-              key={index}
-              onClick={() =>
-                handleSuggestionClick(suggestion.emoji, suggestion.text, suggestion.expiry)
-              }
-              className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
-              data-track-category='STATUS'
-              data-track-name='SelectStatusSuggestion'
-              data-track-metadata={JSON.stringify({
-                emoji: suggestion.emoji,
-                text: suggestion.text,
-              })}
-            >
-              <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
-              <span className='text-sm text-foreground'>{suggestion.text}</span>
-              <span className='text-xs text-muted-foreground'>-</span>
-              <span className='text-xs text-muted-foreground'>
-                {EXPIRY_OPTIONS.find(opt => opt.value === suggestion.expiry)?.label ||
-                  suggestion.expiry}
-              </span>
-            </button>
-          ))}
+          {STATUS_SUGGESTIONS.map((suggestion, index) => {
+            const suggestionText = tc(suggestion.textKey);
+            const expiryOpt = EXPIRY_OPTIONS.find(opt => opt.value === suggestion.expiry);
+            return (
+              <button
+                key={index}
+                onClick={() =>
+                  handleSuggestionClick(suggestion.emoji, suggestionText, suggestion.expiry)
+                }
+                className='w-full flex items-center gap-3 px-2 py-0.5 rounded-md hover:bg-muted transition-colors text-left'
+                data-track-category='STATUS'
+                data-track-name='SelectStatusSuggestion'
+                data-track-metadata={JSON.stringify({
+                  emoji: suggestion.emoji,
+                  text: suggestion.textKey,
+                })}
+              >
+                <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
+                <span className='text-sm text-foreground'>{suggestionText}</span>
+                <span className='text-xs text-muted-foreground'>-</span>
+                <span className='text-xs text-muted-foreground'>
+                  {expiryOpt ? tc(expiryOpt.labelKey) : suggestion.expiry}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -273,6 +292,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
 // Status Edit View - Shows when user is editing status
 export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initialData }) => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const zero = useZero();
   const user = useSelf();
   const [statusText, setStatusText] = useState('');
@@ -426,7 +446,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
   return (
     <div className='space-y-4 p-6'>
       <div className='flex items-center justify-between'>
-        <h2 className='text-lg font-semibold'>Set a status</h2>
+        <h2 className='text-lg font-semibold'>{tc('appSidebar.updateStatusModal.heading')}</h2>
         <Button
           variant='ghost'
           size='sm'
@@ -508,7 +528,9 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
 
       {/* Remove status after dropdown */}
       <div className='space-y-2'>
-        <span className='text-sm font-medium text-foreground'>Remove status after</span>
+        <span className='text-sm font-medium text-foreground'>
+          {tc('appSidebar.updateStatusModal.removeStatusAfter')}
+        </span>
         <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
           <Select.Trigger
             className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
@@ -530,7 +552,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
                     value={option.value}
                     className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                   >
-                    <Select.ItemText>{option.label}</Select.ItemText>
+                    <Select.ItemText>{tc(option.labelKey)}</Select.ItemText>
                     <Select.ItemIndicator className='absolute right-2'>
                       <Check className='size-4' />
                     </Select.ItemIndicator>
@@ -576,7 +598,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           data-track-name='CANCEL_SET_STATUS'
           className='text-foreground hover:bg-muted'
         >
-          Cancel
+          {tc('appSidebar.updateStatusModal.cancel')}
         </Button>
         <Button
           onClick={() => {
@@ -589,7 +611,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
           style={{ backgroundColor: '#6276BE' }}
         >
-          Save
+          {tc('appSidebar.updateStatusModal.save')}
         </Button>
       </div>
     </div>
