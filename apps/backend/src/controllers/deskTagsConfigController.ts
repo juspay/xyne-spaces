@@ -9,10 +9,12 @@ import { db } from '@/database/client';
 import { TagServiceError } from '@/tags/service';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
+import { syncTicketTagsFromEmail } from '@/tags/deskTicket';
 
 /**
  * Epoch-ms query param as a Date, or null when it is missing or unusable. The
@@ -276,12 +278,18 @@ export class DeskTagsConfigController {
    * Tag values per conversation for this channel in the given date range. Tags
    * live in the `non_zero` schema, which Zero does not mirror, so this is the
    * only read path for grouping tickets by tag category.
-   * ACL: channel member.
+   * ACL: desk owner or channel admin (topics explorer feed — desk insights).
    */
   getGeneratedTagsByConversation = async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = await this.assertAccess(req, res, channelId);
     if (!userId) return;
+
+    const ownerUserId = (await this.classificationRepo.findRawPreferenceByChannelId(channelId))?.ownerUserId;
+    if (!(await isDeskOwnerOrChannelAdmin(channelId, userId, ownerUserId))) {
+      res.status(403).json({ error: 'Only the desk owner or a channel admin can view generated tags for this desk' });
+      return;
+    }
 
     const start = epochMsToDate(req.query['startMs']);
     const end = epochMsToDate(req.query['endMs']);
@@ -451,6 +459,9 @@ export class DeskTagsConfigController {
           },
         });
       });
+
+      // Sync ticket tags outside the transaction — raw tx bypasses tagService hooks.
+      void syncTicketTagsFromEmail(emailId);
 
       res.status(201).json({ success: true });
     } catch (error: any) {

@@ -2,10 +2,10 @@ import type { Transaction } from '@rocicorp/zero';
 import { MessageType, Schema } from '@xyne/shared';
 import { zql } from '../../queries';
 import {
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '@xyne/shared';
-import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
+import type { ParentMessageSummary } from '@xyne/shared';
 import { BaseMutationSyncHandler } from '../base-handler';
 
 export class ConversationsMutationSyncHandler extends BaseMutationSyncHandler {
@@ -14,47 +14,6 @@ export class ConversationsMutationSyncHandler extends BaseMutationSyncHandler {
   }
 }
 
-function buildInitialMessageSummary(
-  message: {
-    messageId: string;
-    conversationId: string;
-    senderId: string;
-    content: string;
-    msgType: MessageType;
-    hasAttachment: boolean;
-    edited: boolean;
-    isDeleted: boolean;
-    showInChannel: boolean;
-    visibleTo: string | null;
-    createdAt: number;
-    metadata: unknown;
-    nudgeCount: number | null;
-    isSent: boolean;
-    reactions_md: string | null;
-    link_preview_md: string | null;
-    childConversationId: string | null;
-  },
-): InitialMessageSummary {
-  return {
-    messageId: message.messageId,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    content: message.content,
-    msgType: message.msgType,
-    hasAttachment: message.hasAttachment,
-    edited: message.edited,
-    isDeleted: message.isDeleted,
-    showInChannel: message.showInChannel,
-    visibleTo: message.visibleTo,
-    createdAt: message.createdAt,
-    metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-    nudgeCount: message.nudgeCount,
-    isSent: message.isSent,
-    reactions_md: message.reactions_md,
-    link_preview_md: message.link_preview_md,
-    childConversationId: message.childConversationId,
-  };
-}
 
 function buildParentMessageSummary(
   message: {
@@ -104,7 +63,7 @@ async function handleConversationInsert(
     if (message) {
       await tx.mutate.conversations.update({
         conversationId,
-        initial_message_md: serializeInitialMessageMd(buildInitialMessageSummary(message)),
+        initial_message_md: buildInitialMessageMd(message),
       });
     }
   }

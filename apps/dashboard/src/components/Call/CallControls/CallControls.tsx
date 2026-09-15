@@ -37,14 +37,16 @@ import {
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
-import { InvitationResponse, type RecordingType } from '@xyne/shared';
+import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
 import {
+  buildCallInviteText,
   getAiButtonColorClass,
   getAiButtonDisabled,
   getAiButtonTitle,
   handleAiButtonClick,
 } from '../../../utils/callControls';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,11 +58,20 @@ import { ShortcutHint } from '../../ui/ShortcutHint';
 
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
-interface ActiveCallForControls {
-  externalId: string;
-  createdByUserId?: string;
-  participants?: Array<{ response?: string | null }>;
-}
+type ActiveCallForControls = Pick<
+  Call,
+  | 'externalId'
+  | 'createdByUserId'
+  | 'title'
+  | 'status'
+  | 'startsAt'
+  | 'endsAt'
+  | 'startedAt'
+  | 'endedAt'
+  | 'timezone'
+> & {
+  participants?: Array<{ userId: string; displayName?: string | null; response?: string | null }>;
+};
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -188,6 +199,12 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+
+  const hostName = useMemo(() => {
+    const hostId = currentCall?.createdByUserId;
+    if (!hostId) return null;
+    return currentCall?.participants?.find(p => p.userId === hostId)?.displayName ?? null;
+  }, [currentCall?.createdByUserId, currentCall?.participants]);
   // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
     return (
@@ -325,7 +342,18 @@ export function CallControls({
 
   const handleCopyInviteLink = (): void => {
     if (!roomLink) return;
-    void navigator.clipboard.writeText(roomLink).then(() => {
+    const text = buildCallInviteText({
+      title: currentCall?.title,
+      hostName,
+      roomLink,
+      status: currentCall?.status,
+      startsAt: currentCall?.startsAt,
+      endsAt: currentCall?.endsAt,
+      startedAt: currentCall?.startedAt,
+      endedAt: currentCall?.endedAt,
+      timezone: currentCall?.timezone,
+    });
+    void copyTextToClipboard(text).then(() => {
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
     });
@@ -867,11 +895,11 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={
             roomLink
-              ? 'Copy invite link — works for teammates and guests'
+              ? 'Copy invite message — works for teammates and guests'
               : 'Preparing invite link…'
           }
           aria-label={
-            roomLink ? 'Copy invite link for teammates and guests' : 'Preparing invite link'
+            roomLink ? 'Copy invite message for teammates and guests' : 'Preparing invite link'
           }
           data-track-category='CALLS'
           data-track-name='SHARE_CALL_LINK'
@@ -885,7 +913,7 @@ export function CallControls({
           />
           {showCopied && (
             <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-              Copied!
+              Invite copied!
             </span>
           )}
         </button>

@@ -60,13 +60,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Both sync directions check this rather than the viewport alone: leaving /sdlc
- * updates the location and clears the viewport in separate effects, so there is a
- * render where the new non-SDLC path is visible while the viewport still looks
- * active — enough to push the frame onto /chat and lose its state.
+ * Paths the main bundle shows through the lane's frame: SDLC and Workflows.
+ *
+ * Both sync directions check this rather than the viewport alone: leaving a framed
+ * route updates the location and clears the viewport in separate effects, so there
+ * is a render where the new path is visible while the viewport still looks active —
+ * enough to push the frame onto /chat and lose its state.
  */
 export function isSdlcPath(pathname: string): boolean {
-  return /^\/[^/]+\/sdlc(\/|$)/.test(pathname);
+  return /^\/[^/]+\/(sdlc|workflows)(\/|$)/.test(pathname);
 }
 
 /** Narrows the shape only — callers must also check `event.origin`. */

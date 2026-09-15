@@ -119,6 +119,7 @@ export enum AttachmentEntityType {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
   DESK_REPORT = 'DESK_REPORT',
+  RECORDING = 'RECORDING',
 }
 
 // @ts-ignore TS1294
@@ -1063,6 +1064,7 @@ export enum AppPermissionStatus {
 export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
+  DELETE = 'DELETE',
 }
 
 // @ts-ignore TS1294

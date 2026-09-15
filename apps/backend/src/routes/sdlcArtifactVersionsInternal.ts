@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
+import { sdlcRepoIdsSchema } from '@xyne/shared/sdlc';
 import { AppError } from '@/middleware/errorHandler';
 import { SdlcArtifactVersionStore } from '@/sdlc/SdlcArtifactVersionStore';
 
@@ -18,21 +19,12 @@ const selectorSchema = z.discriminatedUnion('type', [
   }).strict(),
 ]);
 
-// Two callers, two scopes: the hub-scoped claw sends channelId (+ optional
-// repoIds to narrow), the repository-scoped one sends a single repoId.
-const bindingSchema = z
-  .object({
-    repoId: z.string().trim().min(1).optional(),
-    channelId: z.string().trim().min(1).optional(),
-    repoIds: z.array(z.string().trim().min(1)).max(50).optional(),
-    workspaceId: z.string().trim().min(1),
-    actorUserId: z.string().trim().min(1),
-  })
-  .passthrough()
-  .refine(value => Boolean(value.repoId || value.channelId), {
-    message: 'Required',
-    path: ['channelId'],
-  });
+const bindingSchema = z.object({
+  repoIds: sdlcRepoIdsSchema,
+  workspaceId: z.string().trim().min(1),
+  actorUserId: z.string().trim().min(1),
+  channelId: z.string().trim().min(1).optional(),
+}).passthrough();
 
 function route(
   handler: (req: Request, res: Response) => Promise<void>
@@ -59,12 +51,14 @@ function binding(req: Request) {
   if (!actingUserId || actingUserId !== parsed.actorUserId) {
     throw new AppError('SDLC artifact history binding mismatch', 403);
   }
+  if (!parsed.channelId && !parsed.repoIds?.length) {
+    throw new AppError('channelId is required', 400);
+  }
   return {
-    ...(parsed.repoId ? { repoId: parsed.repoId } : {}),
-    ...(parsed.channelId ? { channelId: parsed.channelId } : {}),
     ...(parsed.repoIds ? { repoIds: parsed.repoIds } : {}),
     workspaceId: parsed.workspaceId,
     userId: parsed.actorUserId,
+    ...(parsed.channelId ? { channelId: parsed.channelId } : {}),
   };
 }
 

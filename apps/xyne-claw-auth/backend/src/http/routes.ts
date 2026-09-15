@@ -58,6 +58,7 @@ import { dailyBriefRouter } from "../routes/daily-brief.js";
 import { pendingQuestionsRouter } from "../routes/pending-questions.js";
 import { ttsRouter } from "../routes/tts.js";
 import { settingsRouter } from "../routes/settings.js";
+import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-harness.js";
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
 import { memoryRouter } from "../routes/memory.js";
@@ -71,6 +72,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
+import { apiLimiter } from "../middleware/rate-limiters.js";
 
 const BASE = "/claw/api/v1";
 
@@ -105,6 +107,8 @@ function mountRequestContext(app: Express): void {
   app.get("/claw/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
   });
+
+  app.use(BASE, apiLimiter);
 }
 
 function mountCoreApi(app: Express): void {
@@ -256,6 +260,10 @@ function mountRunAndWebhooks(app: Express): void {
 
 function mountWorkspace(app: Express): void {
   app.use(`${BASE}/settings`, requireAuth, requireNoAccessToken, settingsRouter);
+  // Local harness: device management is user-authed; the bridge router is
+  // device-token authed inside (requireDevice) and rate-limited per device.
+  app.use(`${BASE}/local-harness`, requireUserAuth, localHarnessRouter);
+  app.use(`${BASE}/local-harness-bridge`, localHarnessBridgeRouter);
   // allowReadAccessToken (NOT the hard barrier): CLI tokens carry runs:read so
   // the CLI can list/search/fetch its own runs (GET /runs/light, /runs/search,
   // /runs/:id). Reads pass with the scope; token writes are still rejected.

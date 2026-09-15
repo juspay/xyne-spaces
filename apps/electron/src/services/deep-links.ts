@@ -7,7 +7,12 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import ElectronEvent from './logger/electron-events';
-import { isHexToken } from '../utils/validation';
+import {
+  isHexToken,
+  sanitizeAskAiText,
+  normalizeAskAiUrl,
+  normalizeAskAiDomain,
+} from '../utils/validation';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -51,8 +56,11 @@ function isSafeDeepLinkPath(pathStr: string): boolean {
     if (/[\u0000-\u001F\u007F]/.test(c)) return false;     // control chars
     if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
   }
-  // Conservative in-app route charset (path + query only).
-  if (!/^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr)) return false;
+  // Conservative in-app route charset (path + query + hash fragment).
+  // '#' is allowed so shared thread links keep their anchor
+  // (e.g. #origin=…&messageId=…&createdAt=…); the guards above still reject
+  // traversal, protocol-relative '//', backslashes and embedded schemes.
+  if (!/^\/[A-Za-z0-9\-._~/?=&%#]*$/.test(pathStr)) return false;
   return isAllowedDeepLinkRoute(pathStr);
 }
 
@@ -188,10 +196,29 @@ async function handleDeepLink(url: string): Promise<void> {
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://ask-ai`)) {
     try {
       const urlObj = new URL(url);
-      const text = urlObj.searchParams.get('text') || '';
-      const sourceUrl = urlObj.searchParams.get('url') || '';
-      const domain = urlObj.searchParams.get('domain') || '';
-      const title = urlObj.searchParams.get('title') || '';
+
+      // PY-JP-019: ask-ai params are attacker-controllable (any web page can invoke
+      // this protocol) and are forwarded verbatim to the privileged renderer, where
+      // they land in an AI prompt / DOM. Validate & sanitize every param against its
+      // expected format before forwarding; log and drop anything that fails.
+      const rawText = urlObj.searchParams.get('text') || '';
+      const rawUrl = urlObj.searchParams.get('url') || '';
+      const rawDomain = urlObj.searchParams.get('domain') || '';
+      const rawTitle = urlObj.searchParams.get('title') || '';
+
+      const text = sanitizeAskAiText(rawText, 8000);
+      const sourceUrl = normalizeAskAiUrl(rawUrl);
+      const domain = normalizeAskAiDomain(rawDomain);
+      const title = sanitizeAskAiText(rawTitle, 512);
+
+      if (rawUrl && !sourceUrl) {
+        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'url', value: rawUrl.slice(0, 128) });
+        log.warn('[DeepLinks] Rejected invalid ask-ai url param');
+      }
+      if (rawDomain && !domain) {
+        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'domain', value: rawDomain.slice(0, 128) });
+        log.warn('[DeepLinks] Rejected invalid ask-ai domain param');
+      }
 
       log.info('[DeepLinks] Ask AI context received:', { text: text.slice(0, 50), domain, title });
 

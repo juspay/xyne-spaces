@@ -59,6 +59,9 @@ model User {
   digitalTwinPipelineEvents            DigitalTwinPipelineEvent[]
   agentMemoryFiles                     AgentMemoryFile[]
   twinBehaviorSignals                  TwinBehaviorSignal[]
+  localHarnessDevices                  LocalHarnessDevice[]
+  localHarnessRuns                     LocalHarnessRun[]
+  localHarnessDefaultProvider          String?
 
   /// Daily Brief opt-in (morning digest). When true, the leader-locked daily
   /// cron enqueues a brief-generation job for this user; when false the cron
@@ -803,6 +806,52 @@ model UserProviderCredentials {
   @@map("user_provider_credentials")
 }
 
+model LocalHarnessDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId      String
+  deviceName String
+  platform   String
+  tokenHash  String   @unique
+  installations Json  @default("[]")
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  runs       LocalHarnessRun[]
+
+  @@index([userId, revokedAt])
+  @@map("local_harness_devices")
+}
+
+model LocalHarnessRun {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId         String
+  agentSlug     String
+  provider      String
+  model         String?
+  deviceId      String?
+  device        LocalHarnessDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  status        String   @default("queued")
+  envelope      Json
+  progressUrl   String   @db.Text
+  callbackUrl   String   @db.Text
+  error         String?  @db.Text
+  claimedAt     DateTime?
+  finishedAt    DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([status, expiresAt])
+  @@map("local_harness_runs")
+}
+
 model UserSubagentConfig {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1198,6 +1247,12 @@ model ArtifactApp {
   headVersionId      String?
   title              String
   description        String?
+  /// Xyne icon id (kebab-case, e.g. "kanban-board") shown in the sidebar and
+  /// library. Seeded from the agent's pick on the first build; the owner can
+  /// change it, and once set it is never overwritten by a later build — the
+  /// icon belongs to the APP, not to any version, so it lives here rather
+  /// than on the manifest.
+  icon               String?
   /// "PRIVATE" | "WORKSPACE". Follows the Spaces `Canvas.visibility` convention
   /// of a plain string column rather than a Postgres enum.
   visibility         String    @default("PRIVATE")
@@ -1505,6 +1560,8 @@ enum AgentAuditEvent {
   SUBAGENT_CREATED
   SUBAGENT_UPDATED
   MCP_SERVER_CREATED
+  SUBAGENT_MCP_UPDATED
+  SUBAGENT_MCP_DELETED
 }
 
 model AgentAuditLog {
@@ -1691,6 +1748,7 @@ model McpServer {
   agentConnections     AgentMcpConnection[]
   globalCredentials    GlobalMcpCredentials[]
   editRequests         McpConnectorEditRequest[]
+  subagentConnections  SubagentMcpConnection[]
 
   @@unique([type])
   @@index([enabled])
@@ -1922,6 +1980,7 @@ model SubagentDefinition {
   org              Organization    @relation(fields: [orgId], references: [id], onDelete: Restrict)
   skills           SubagentSkill[]
   shares           SubagentShare[]
+  mcpConnections   SubagentMcpConnection[]
 
   @@unique([orgId, name])
   @@index([orgId])
@@ -1955,6 +2014,28 @@ model SubagentSkill {
 
   @@unique([subagentDefinitionId, skillId])
   @@map("subagent_skills")
+}
+
+// workspace-check:ignore — tenant scope inherited via subagentDefinitionId -> SubagentDefinition.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model SubagentMcpConnection {
+  id                   String             @id @default(cuid())
+  subagentDefinitionId String
+  subagent             SubagentDefinition @relation(fields: [subagentDefinitionId], references: [id], onDelete: Cascade)
+  mcpServerId          String
+  mcpServer            McpServer          @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  slug                 String             @default("default")
+  displayName          String?
+  nonOverridable       Boolean            @default(true)
+  encryptedCreds       String
+  iv                   String
+  authTag              String
+  createdByUserId      String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([subagentDefinitionId, mcpServerId, slug])
+  @@index([subagentDefinitionId])
+  @@map("subagent_mcp_connections")
 }
 
 model PendingMemoryReview {

@@ -131,6 +131,8 @@ import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
+import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
@@ -496,6 +498,11 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  const xyneAIWorkflowDismissed = useSelector(
+    xyneAIActor,
+    state => state.context.workflowDismissed,
+  );
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -511,9 +518,10 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
-  // must not also render one (that would double it).
-  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
+  // the host must not also render one (that would double it).
+  const isSdlcRoute =
+    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -775,6 +783,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -884,6 +894,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -963,6 +975,8 @@ const AppRoot = (): ReactElement => {
                           ) : (
                             <RecordingOverlay />
                           )}
+                          <RecordingCameraBubble />
+                          <ScreenPickerHost />
                           <GlobalUploadProgress />
                           <NotificationHandler />
                           <ElectronBadgeSync />
@@ -1012,6 +1026,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1046,6 +1062,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1090,6 +1108,10 @@ const SdlcRouteElement = (): ReactElement =>
 /** A ticket page, but still inside the hub's frame so its history stays in one router. */
 const SdlcTicketRouteElement = (): ReactElement =>
   isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
+
+/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
+const WorkflowsRouteElement = (): ReactElement =>
+  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1462,7 +1484,7 @@ export const router = createBrowserRouter(
                   path: 'workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowScreen />
+                      <WorkflowsRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },

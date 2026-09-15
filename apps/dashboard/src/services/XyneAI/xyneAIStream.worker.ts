@@ -50,6 +50,11 @@ export interface WorkerStartStreamMessage {
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
+      workflowContext?: {
+        workflowId?: string | null;
+        executionId?: string | null;
+        stepId?: string | null;
+      };
       messageAttachmentIds?: string[];
       attachments?: Array<{
         data: string;
@@ -204,6 +209,7 @@ async function executeStream(
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,
         }),
+        ...(requestBody.workflowContext && { workflowContext: requestBody.workflowContext }),
         ...(requestBody.messageAttachmentIds &&
           requestBody.messageAttachmentIds.length > 0 && {
             message_attachment_ids: requestBody.messageAttachmentIds,

@@ -445,6 +445,12 @@ const DmsPage = (): ReactElement => {
                 onClick={() => void handleDmSelect(channel.id)}
                 data-track-category='DM'
                 data-track-name='SELECT_DM_SEARCH_RESULT'
+                data-track-label='Select DM search result'
+                data-track-metadata={JSON.stringify({
+                  channelId: channel.id,
+                  resultCount: filteredDirectMessages.length,
+                  queryLength: dmSearchQuery.length,
+                })}
               >
                 <DmSearchResultItem channel={channel} isSelected={isSelected} />
               </button>
@@ -558,6 +564,10 @@ const DmsPage = (): ReactElement => {
               data-track-event='blur'
               data-track-category='DM'
               data-track-name='SEARCH_DMS_INPUT'
+              data-track-metadata={JSON.stringify({
+                resultCount: filteredDirectMessages.length,
+                queryLength: dmSearchQuery.length,
+              })}
             />
             {dmSearchQuery && (
               <Button
@@ -568,6 +578,10 @@ const DmsPage = (): ReactElement => {
                 }}
                 data-track-category='DM'
                 data-track-name='CLEAR_DM_SEARCH'
+                data-track-metadata={JSON.stringify({
+                  hadResults: filteredDirectMessages.length > 0,
+                  resultCount: filteredDirectMessages.length,
+                })}
                 aria-label='Clear search'
                 variant='link'
                 size='icon'
@@ -637,6 +651,7 @@ const DmsPage = (): ReactElement => {
           data-testid='create-new-message-btn'
           data-track-category='DM'
           data-track-name='CREATE_DM'
+          data-track-metadata={JSON.stringify({ source: 'dms_page_mobile' })}
         >
           <PenBox className='size-5 text-action-primary-foreground' />
         </button>
@@ -709,6 +724,7 @@ const DmsPage = (): ReactElement => {
                       data-testid='create-new-message-btn'
                       data-track-category='DM'
                       data-track-name='CREATE_DM_DESKTOP'
+                      data-track-metadata={JSON.stringify({ source: 'dms_page_desktop' })}
                     >
                       <PencilEditBox size={16} />
                     </button>
@@ -885,8 +901,17 @@ const DmsPage = (): ReactElement => {
           <div className='flex-1 flex flex-col bg-background relative h-full rounded-2xl'>
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
-                <div className='max-w-full max-h-full flex items-center justify-center'>
-                  <DirectMessagesIcon />
+                <div className='flex flex-col items-center justify-center p-8 text-center'>
+                  <DirectMessagesIcon className='mb-6' />
+                  <h3
+                    className='text-xl font-medium text-foreground mb-2'
+                    data-testid='select-conversation-heading'
+                  >
+                    Select a conversation
+                  </h3>
+                  <p className='text-muted-foreground max-w-md'>
+                    Choose a direct message from the list to read it here
+                  </p>
                 </div>
               ) : (
                 <div className='w-full h-full'>

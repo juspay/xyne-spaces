@@ -29,6 +29,10 @@ import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPla
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
 import type { MarkedMoment } from '../../../stores/recordingStore';
 import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './markedItems';
+import { isVideoRecordingType } from '../../../utils/recordingMedia';
+import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { useRecordingVideo } from '../useRecordingVideo';
+import { InlineRecordingVideo, RecordingVideoDialog, RecordingVideoToggle } from './RecordingVideo';
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
 
@@ -385,12 +389,23 @@ const RecordedTimelineBar = ({
       ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
       : null);
 
+  const title = recording.title ?? 'Recording';
+  const streamAttachmentId = onLoadAudio ? (recording.attachmentId ?? null) : null;
+
   const playback = useAudioPlayback({
     onLoad: onLoadAudio ?? EMPTY_AUDIO_LOADER,
+    src: streamAttachmentId ? getAttachmentStreamUrl(streamAttachmentId) : undefined,
     initialDurationSec: fallbackDurationMs ? fallbackDurationMs / 1000 : undefined,
     showToastOnError: true,
   });
   const shouldReduceMotion = useReducedMotion();
+  const video = useRecordingVideo({
+    isAvailable: !!onLoadAudio && isVideoRecordingType(recording.recordingType),
+    title,
+    attachmentId: streamAttachmentId,
+    onLoad: onLoadAudio,
+    playback,
+  });
 
   // Prefer the media's own duration once it has loaded — the call's wall-clock span
   // can differ from the recorded audio by a second or two. It can also be unknown for
@@ -408,17 +423,19 @@ const RecordedTimelineBar = ({
   // load, the recording simply has no playable audio (e.g. older recordings) — show
   // an alert-triangle instead of a spinner that would otherwise never resolve.
   const showAudioUnavailable = !onLoadAudio && !isStitching && isAudioUnavailable;
-  const audioControlLabel = isStitching
-    ? 'Preparing audio'
-    : showAudioUnavailable
-      ? 'Recording is not available for playback.'
-      : !onLoadAudio
-        ? 'Audio is unavailable for this recording'
-        : playback.state === 'loading'
-          ? 'Loading audio'
-          : isPlaying
-            ? 'Pause recording'
-            : 'Play recording';
+  const audioControlLabel = video.isOpen
+    ? 'Playing in the video player'
+    : isStitching
+      ? 'Preparing audio'
+      : showAudioUnavailable
+        ? 'Recording is not available for playback.'
+        : !onLoadAudio
+          ? 'Audio is unavailable for this recording'
+          : playback.state === 'loading'
+            ? 'Loading audio'
+            : isPlaying
+              ? 'Pause recording'
+              : 'Play recording';
   const audioIconKey = isAudioBusy
     ? 'loading'
     : showAudioUnavailable
@@ -428,9 +445,11 @@ const RecordedTimelineBar = ({
         : 'play';
 
   const selectMarker =
-    playback.canSeek || onMarkerSelect
+    playback.canSeek || onMarkerSelect || video.isOpen
       ? (item: MarkedItem): void => {
-          if (playback.canSeek) playback.seek(item.timestampSeconds);
+          if (!video.seek(item.timestampSeconds) && playback.canSeek) {
+            playback.seek(item.timestampSeconds);
+          }
           onMarkerSelect?.(item);
         }
       : null;
@@ -449,7 +468,7 @@ const RecordedTimelineBar = ({
         variant='outline'
         size='icon'
         onClick={() => void playback.toggle()}
-        disabled={!onLoadAudio || playback.state === 'loading'}
+        disabled={!onLoadAudio || playback.state === 'loading' || video.isOpen}
         aria-busy={isAudioBusy}
         className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
         aria-label={audioControlLabel}
@@ -483,6 +502,16 @@ const RecordedTimelineBar = ({
 
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
+      {video.isOpen && (
+        <InlineRecordingVideo
+          ref={video.inlineRef}
+          video={video.source}
+          title={title}
+          initialTime={video.inlineStartSec}
+          onExpand={video.openDialog}
+        />
+      )}
+
       <div className='flex min-h-11 items-center gap-4'>
         {showAudioUnavailable ? (
           <Tooltip content='Recording is not available for playback.'>{playButton}</Tooltip>
@@ -554,12 +583,25 @@ const RecordedTimelineBar = ({
           {formatElapsedTime(durationMs)}
         </span>
 
+        {video.isAvailable && (
+          <RecordingVideoToggle isOpen={video.isOpen} onToggle={video.toggle} />
+        )}
+
         <RecordingVisualizer
           isAnimated={false}
           className='h-7 w-14 justify-center rounded-lg border border-border px-2'
           {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
         />
       </div>
+
+      {video.dialogStartSec !== null && video.source.status === 'ready' && (
+        <RecordingVideoDialog
+          title={title}
+          video={video.source}
+          initialTime={video.dialogStartSec}
+          onClose={video.closeDialog}
+        />
+      )}
 
       {/* Legend only when there's something to explain; speed only once audio can load. */}
       {(markedTypes.size > 0 || onLoadAudio) && (

@@ -843,9 +843,22 @@ const MODEL_CONTEXT_WINDOWS: ReadonlyMap<string, number> = (() => {
   return map;
 })();
 
+const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
+  ["claude-opus-4-8", 1_000_000],
+  ["claude-opus-5", 1_000_000],
+  ["claude-sonnet-5", 1_000_000],
+  ["claude-fable-5", 1_000_000],
+  ["claude-fable-5-1", 1_000_000],
+  ["gpt-5.6-luna", 272_000],
+  ["gpt-5.6-sol", 272_000],
+  ["gpt-5.6-terra", 272_000],
+  ["gpt-6-astra", 272_000],
+]);
+
 export function contextWindowFor(modelId: string | undefined): number {
   const id = (modelId ?? "").toLowerCase();
-  return MODEL_CONTEXT_WINDOWS.get(id)
+  return MODEL_CONTEXT_WINDOW_OVERRIDES.get(id)
+    ?? MODEL_CONTEXT_WINDOWS.get(id)
     ?? Number(process.env["XYNE_CLAW_DEFAULT_CONTEXT_WINDOW"] ?? 128_000);
 }
 

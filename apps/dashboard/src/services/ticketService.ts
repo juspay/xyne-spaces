@@ -15,7 +15,7 @@ export interface CreateTicketRequest {
   boardId?: string;
   sourceConversationId?: string;
   sourceMessageId?: string;
-  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string };
+  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string };
 }
 
 export interface CreateTicketResponse {

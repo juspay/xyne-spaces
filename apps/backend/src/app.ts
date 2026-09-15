@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -202,6 +202,7 @@ import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
@@ -351,6 +352,7 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
+    this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
@@ -373,8 +375,6 @@ export class App {
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
-
-    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
 
     // Claw MCP route (user + app auth) — must be before /api/query
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
@@ -489,6 +489,7 @@ export class App {
       aclMiddleware.checkAccess,
       workflowRoutes
     );
+    this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
     this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     this.app.use(
@@ -624,6 +625,7 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
@@ -1194,6 +1196,9 @@ export class App {
 
       // Close tag generation pipeline queue
       await tagGenerationPipeline.close();
+
+      const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
+      await shutdownWorkflows();
 
       // Shutdown notification service
       await notificationService.shutdown();

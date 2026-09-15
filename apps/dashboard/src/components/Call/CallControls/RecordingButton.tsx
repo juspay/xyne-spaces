@@ -91,7 +91,13 @@ export function RecordingButton({
         data-track-event='BUTTON_CLICK'
         data-track-category='CALLS'
         data-track-name='TOGGLE_RECORDING'
-        data-track-metadata={JSON.stringify({ callId, isRecording })}
+        data-track-metadata={JSON.stringify({
+          callId,
+          isRecording,
+          // One button serves both actions: when not recording this click only
+          // opens the mode picker, so the mode lands on the picker buttons below.
+          intent: isRecording ? 'stop' : 'open_mode_picker',
+        })}
       >
         {isRecording ? (
           <CircleStop
@@ -125,6 +131,10 @@ export function RecordingButton({
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-only'
+            data-track-metadata={JSON.stringify({
+              callId,
+              recordingType: RecordingType.AUDIO_ONLY,
+            })}
           >
             <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
             <div>
@@ -138,6 +148,10 @@ export function RecordingButton({
             className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-screen'
+            data-track-metadata={JSON.stringify({
+              callId,
+              recordingType: RecordingType.AUDIO_SCREEN,
+            })}
           >
             <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />
             <div>

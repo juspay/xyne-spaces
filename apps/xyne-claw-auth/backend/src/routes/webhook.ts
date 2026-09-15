@@ -38,6 +38,7 @@ import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
+import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { type RunDispatchResult } from "../lib/dispatch-run.js";
 import { startRun } from "../lib/start-run.js";
@@ -152,6 +153,8 @@ import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
 import { availabilityForServerIds } from "../lib/connector-availability.js";
+import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
 const clog = createLogger("webhook");
 const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
@@ -1704,6 +1707,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       providerConfigs,
       subagentProviders,
       subagentProviderMode,
+      rawPersonalProvider,
     } = await resolveProvidersForDispatch({
       targetUserId,
       agent,
@@ -1804,14 +1808,15 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasUserToken=${!!userSpacesToken} hasSessionId=${!!userSpacesSessionId}`,
         );
 
-        const sources: Array<{ label: string; url: string; headers?: Record<string, string> }> = [];
+        const safeAttachmentId = safePathSegment(att.attachmentId);
+        const sources: Array<{ label: string; url: string; headers?: Record<string, string>; external?: boolean }> = [];
         if (att.fileUrl && /^https?:\/\//i.test(att.fileUrl)) {
-          sources.push({ label: "fileUrl", url: att.fileUrl });
+          sources.push({ label: "fileUrl", url: att.fileUrl, external: true });
         }
-        if (userSpacesToken) {
+        if (userSpacesToken && safeAttachmentId) {
           sources.push({
             label: "user-token",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
             headers: {
               Authorization: `Bearer ${userSpacesToken}`,
               ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
@@ -1819,21 +1824,24 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             },
           });
         }
-        sources.push({
-          label: "apps-route",
-          url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${att.attachmentId}/download`,
-          headers: { Authorization: `Bearer ${agent.appToken}` },
-        });
-        sources.push({
-          label: "user-route",
-          url: `${CONFIG.spacesInternalUrl}/api/attachments/${att.attachmentId}/download`,
-          headers: { Authorization: `Bearer ${agent.appToken}` },
-        });
+        if (safeAttachmentId) {
+          sources.push({
+            label: "apps-route",
+            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
+            headers: { Authorization: `Bearer ${agent.appToken}` },
+          });
+          sources.push({
+            label: "user-route",
+            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
+            headers: { Authorization: `Bearer ${agent.appToken}` },
+          });
+        }
 
         const failures: string[] = [];
         let downloaded = false;
         for (const src of sources) {
           try {
+            if (src.external) await assertSafeOutboundUrl(src.url);
             const dlRes = await fetch(src.url, {
               signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
               ...(src.headers ? { headers: src.headers } : {}),
@@ -1955,6 +1963,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
       appToken: agent.appToken,
       spacesAppId: agent.spacesAppId,
@@ -2014,32 +2023,81 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
+    // Local-harness routing: only mention-driven runs are eligible. If the user
+    // has an online authenticated local device for a preferred provider, the run
+    // is dispatched there; otherwise we fall through to the server run below.
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          orgId: agent.orgId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: rawPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+
     let body: RunDispatchResult;
-    try {
-      const started = await startRun(
-        {
-          body: dispatchPayload as unknown as Record<string, unknown>,
-          isInternalRun: true,
-          isInternalS2SCaller: true,
-          wantsSse: false,
-        },
-        {},
-      );
-      body = started.ok
-        ? {
-            success: true,
-            sessionId: started.sessionId,
-            status: 200,
-            ...(started.queued ? { queued: true } : {}),
-            ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
-          }
-        : { success: false, error: started.error, status: started.status };
-    } catch (err) {
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
       }
-      throw err;
+      body = { success: true, sessionId: dispatched.sessionId, status: 200 };
+    } else {
+      try {
+        const started = await startRun(
+          {
+            body: dispatchPayload as unknown as Record<string, unknown>,
+            isInternalRun: true,
+            isInternalS2SCaller: true,
+            wantsSse: false,
+          },
+          {},
+        );
+        body = started.ok
+          ? {
+              success: true,
+              sessionId: started.sessionId,
+              status: 200,
+              ...(started.queued ? { queued: true } : {}),
+              ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
+            }
+          : { success: false, error: started.error, status: started.status };
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
     }
 
     if (globalTwinSlotToken !== null) {
@@ -2070,6 +2128,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
+              agentName: agent.name,
               userId: agent.spacesAppUserId,
               toolLabel: initialProgressLabel,
               status: "working",
@@ -2309,22 +2368,10 @@ interface StopReconcileSummary {
   hadRunningRows: boolean;
 }
 
-// Reconcile the whole conversation for Spaces /stop. Enumerates every running
-// AgentRun row, POSTs the runtime's per-session cancel, and treats
-// status="not_running" as the existing stale-row janitor signal.
-async function reconcileStoppedRuns(conversationId: string, fallbackAgentSlug: string): Promise<StopReconcileSummary> {
-  const runningRuns = await agentRunRepository.listRunningByConversation(conversationId);
-  const agentSlugs = new Set<string>([fallbackAgentSlug, ...runningRuns.map((run) => run.agentSlug)]);
-  // DROP queued messages BEFORE cancelling. The cancelled run's failure result
-  // drains the queue in the same breath as the cancel, so a queued message
-  // would instantly re-start the work the user just stopped — /queue clear can
-  // never win that race (2026-07-16: customer-support resumed its stopped plan
-  // one second after 🛑 from a queued "\help"). /stop means halt everything in
-  // the thread; the user can resend a message to continue.
-  let queued = 0;
-  for (const agentSlug of agentSlugs) {
-    queued += await clearQueue(conversationId, agentSlug);
-  }
+async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: string): Promise<StopReconcileSummary> {
+  const runningRuns = (await agentRunRepository.listRunningByConversation(conversationId))
+    .filter((run) => run.agentSlug === targetAgentSlug);
+  const queued = await clearQueue(conversationId, targetAgentSlug);
 
   const summary: StopReconcileSummary = {
     stopped: 0,
@@ -2511,6 +2558,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       conversationId: msg.conversationId,
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
+      agentName: queuedContext.agentName,
       spacesAppUserId: agentRow.spacesAppUserId ?? "",
       appToken,
       toolLabel: "Picked up your new message — continuing from the summary above…",
@@ -2852,6 +2900,7 @@ export async function handleAutomationWebhook(
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken,
       spacesAppId: agent.spacesAppId!,
@@ -3186,6 +3235,7 @@ export async function handleAutomationWebhook(
       conversationId: payload.conversationId ?? "",
       task: task!,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken: decryptStoredField(agent.spacesAppToken!),
       spacesAppId: agent.spacesAppId!,
@@ -3580,6 +3630,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    localHarness?: {
+      provider: string;
+      harnessName: string;
+      label: string;
+      ownerName: string;
+      deviceName?: string;
+    };
+    localHarnessUnreachable?: boolean;
+    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -4328,9 +4387,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const notice = isQuota
-        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
+      const notice = payload.localHarnessUnreachable
+        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        : isQuota
+          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
         {
@@ -4476,6 +4538,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
       agentSlug: ctx.agentSlug,
+      agentName: ctx.agentName,
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
@@ -4804,6 +4867,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
+            agentName: ctx.agentName,
             spacesAppUserId: ctx.spacesAppUserId,
             appToken: ctx.appToken,
             toolLabel: "Starting the plan…",
@@ -5528,8 +5592,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
+    const runOriginMeta: Record<string, unknown> = payload.localHarness
+      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
+      : {};
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown" };
+      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -5895,6 +5963,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
+        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,
@@ -6048,7 +6117,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             mimeType: a.mimeType,
             sizeBytes: typeof a.data === "string"
               // base64 → bytes: ceil(len * 3/4), minus padding "="s
-              ? Math.max(0, Math.floor(a.data.length * 3 / 4) - (a.data.match(/=+$/)?.[0]?.length ?? 0))
+              ? Math.max(0, Math.floor(a.data.length * 3 / 4) - countTrailingBase64Padding(a.data))
               : 0,
           }));
           const decision = await recordTurnAndDecide({
@@ -7130,6 +7199,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
+        agentName: ctx.agentName,
         userId: ctx.spacesAppUserId,
         toolLabel,
         status: "working",

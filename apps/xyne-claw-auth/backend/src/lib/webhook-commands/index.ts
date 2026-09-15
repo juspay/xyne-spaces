@@ -48,7 +48,7 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "debug") {
-    await handleDebug(ctx);
+    await handleDebug(ctx, slash.scope ?? "latest");
     return { kind: "handled" };
   }
 

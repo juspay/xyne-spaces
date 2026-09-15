@@ -31,10 +31,11 @@ import {
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
+import { getMandatorySummarySectionState } from './summaryTemplateSections';
 import {
   DEFAULT_RECORDING_SUMMARY_TEMPLATE,
   DEFAULT_RECORDING_SUMMARY_FIELDS,
-  RECORDING_DETAILED_SUMMARY_PROMPT,
+  buildRecordingDetailedSummaryPrompt,
 } from './recordingSummaryTemplates';
 import {
   extractMarkedItemsFromRecordingSummary,
@@ -1052,13 +1053,16 @@ export class CallDocumentService {
       return null;
     }
 
+    // A Scribe admin may have switched off Decisions / Action Items on this template;
+    // the prompt must then stop asking for those sections and their annotations.
+    const mandatorySections = getMandatorySummarySectionState(template.sections);
     const rawSummary = await this.generateDetailedSummary(
       transcript,
       callId,
       template.autoTriggerPrompt ?? undefined,
       formatSummaryTemplateSections(template.sections),
       template.systemPrompt,
-      RECORDING_DETAILED_SUMMARY_PROMPT,
+      buildRecordingDetailedSummaryPrompt(mandatorySections),
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
         ? accumulated => onDelta(
@@ -1073,9 +1077,13 @@ export class CallDocumentService {
     if (!rawSummary) return null;
 
     const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
-    const markedItems = citationSegments
-      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
-      : [];
+    const markedItems = (
+      citationSegments
+        ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
+        : []
+    ).filter((item) =>
+      item.type === 'decision' ? mandatorySections.decisions : mandatorySections.actionItems,
+    );
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
