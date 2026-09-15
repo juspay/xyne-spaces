@@ -528,6 +528,17 @@ export class TicketAssignmentService {
       }
     }
 
+    // Full-role path syncs the non-primary roles inside assignFullRolesToTicket,
+    // but the primary assignee (ticket.assignedTo) was never synced, leaving its
+    // user_workload_mappings row stale (XYNE-55777). Sync it here as well.
+    if (usedFullRole) {
+      try {
+        await syncUserWorkload(assignedUserId, groupId, ticket.boardId, actorId);
+      } catch (workloadError) {
+        logger.error('[AUTO-ASSIGN] Error syncing workload for primary assignee:', workloadError);
+      }
+    }
+
     logger.info(
       `[AUTO-ASSIGN] Assigned member ${assignedUserId} from group ${groupId} to ticket ${ticketId}`,
     );
