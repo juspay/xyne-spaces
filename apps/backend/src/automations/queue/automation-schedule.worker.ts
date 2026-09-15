@@ -8,6 +8,7 @@ import {
   automationScheduleQueue,
   type AutomationScheduleJobData,
 } from './automation-schedule.queue';
+import { registerAutomationQueueMetrics } from '@/services/otel/automationMetrics';
 
 class AutomationScheduleWorker {
   private isInitialized = false;
@@ -30,6 +31,9 @@ class AutomationScheduleWorker {
         return this.processJob(job);
       });
 
+    registerAutomationQueueMetrics('automations-schedule', () =>
+      automationScheduleQueue.getQueue().getJobCounts(),
+    );
     this.isInitialized = true;
     logger.info('[AUTOMATION-SCHEDULE-WORKER] Started');
   }
