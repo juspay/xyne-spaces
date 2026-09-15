@@ -1,3 +1,10 @@
+## [1.317.6](https://github.com/juspay/xyne-spaces/compare/v1.317.5...v1.317.6) (2026-09-15)
+
+
+### Bug Fixes
+
+* Implement chat tracking events ([#1853](https://github.com/juspay/xyne-spaces/issues/1853)) ([3b00658](https://github.com/juspay/xyne-spaces/commit/3b0065828ae02511de272b2ea0ec3142afcd5ab0))
+
 ## [1.317.5](https://github.com/juspay/xyne-spaces/compare/v1.317.4...v1.317.5) (2026-09-15)
 
 
