@@ -424,5 +424,54 @@
       "filesAttachedSuccess": "{{count}} archivos adjuntados correctamente",
       "errorReadingFiles": "Error al leer los archivos. Inténtalo de nuevo."
     }
+  },
+  "aiChatThread": {
+    "openSidebarAriaLabel": "Abrir barra lateral",
+    "expandSidebarLabel": "Expandir barra lateral",
+    "collapseSidebarLabel": "Contraer barra lateral",
+    "chatMessagesAriaLabel": "Mensajes del chat",
+    "jumpToLatest": "Ir al último",
+    "newChat": "Nuevo chat",
+    "dropFilesTitle": "Suelta los archivos para adjuntarlos",
+    "dropFilesSubtitle": "Imágenes, PDF, texto, documentos de oficina o archivos de datos",
+    "reasoning": {
+      "phaseThinking": "Pensando",
+      "phaseWeighingItUp": "Evaluando",
+      "phaseReasoning": "Razonando",
+      "thoughtFor": "Pensó durante {{duration}}",
+      "toolCount_one": "{{count}} herramienta",
+      "toolCount_other": "{{count}} herramientas",
+      "thoughtProcess": "Proceso de pensamiento",
+      "showReasoningAriaLabel": "Mostrar razonamiento",
+      "reasoningHeading": "Razonamiento",
+      "toolCallsHeading": "Llamadas a herramientas"
+    },
+    "citations": {
+      "citation": "Cita",
+      "ticketInChannel": "Ticket {{ticketId}} en #{{channelName}}",
+      "ticket": "Ticket {{ticketId}}",
+      "threadInChannel": "Hilo en #{{channelName}}",
+      "spacesThread": "Hilo de Spaces",
+      "canvasWithLabel": "Canvas — {{label}}",
+      "canvas": "Canvas",
+      "recordingWithLabel": "Grabación — {{label}}",
+      "recording": "Grabación",
+      "externalLink": "Enlace externo",
+      "kbWithChunk": "BC · {{name}} (fragmento {{chunk}})",
+      "kb": "BC · {{name}}",
+      "knowledgeBaseFile": "Archivo de la base de conocimiento",
+      "openInDebugger": "{{tooltip}} — abrir en el depurador",
+      "keyPoints": "Puntos clave",
+      "citationsHeading": "Citas"
+    },
+    "message": {
+      "editMessage": "Editar mensaje",
+      "cancel": "Cancelar",
+      "copy": "Copiar",
+      "helpful": "Útil",
+      "notHelpful": "No útil",
+      "regenerateResponse": "Regenerar respuesta",
+      "debugThisResponse": "Depurar esta respuesta"
+    }
   }
 }

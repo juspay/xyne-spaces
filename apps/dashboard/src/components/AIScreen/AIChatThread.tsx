@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
@@ -229,6 +230,7 @@ function ChatTopbar({
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
 }): ReactElement {
+  const { t } = useTranslation('common');
   return (
     <header
       className={`ai-chat-topbar flex h-[53px] shrink-0 items-center gap-1 border-b border-sidebar-border-muted bg-transparent px-3 backdrop-blur-md sm:px-4`}
@@ -236,7 +238,7 @@ function ChatTopbar({
       <button
         type='button'
         onClick={onOpenSidebar}
-        aria-label='Open sidebar'
+        aria-label={t('aiChatThread.openSidebarAriaLabel')}
         aria-controls='ai-sidebar'
         className='grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:hidden'
         data-track-category='XyneAI'
@@ -248,9 +250,17 @@ function ChatTopbar({
         <button
           type='button'
           onClick={onToggleSidebar}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={
+            sidebarCollapsed
+              ? t('aiChatThread.expandSidebarLabel')
+              : t('aiChatThread.collapseSidebarLabel')
+          }
           aria-controls='ai-sidebar'
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={
+            sidebarCollapsed
+              ? t('aiChatThread.expandSidebarLabel')
+              : t('aiChatThread.collapseSidebarLabel')
+          }
           className='hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:grid'
           data-track-category='XyneAI'
           data-track-name='TOGGLE_DESKTOP_SIDEBAR'
@@ -276,12 +286,10 @@ function ChatTopbar({
 // cycle through a small list of human-sounding phases driven by how much
 // reasoning has arrived. Matches the "Thinking → Weighing it up → Reasoning"
 // feel of the xyne-search /ai chip without faking tool-specific labels.
-const STREAMING_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
-
-function phaseLabelFor(reasoningLength: number): string {
-  if (reasoningLength === 0) return STREAMING_PHASES[0];
-  if (reasoningLength < 240) return STREAMING_PHASES[1];
-  return STREAMING_PHASES[2];
+function phaseLabelFor(reasoningLength: number, t: TFunction): string {
+  if (reasoningLength === 0) return t('aiChatThread.reasoning.phaseThinking');
+  if (reasoningLength < 240) return t('aiChatThread.reasoning.phaseWeighingItUp');
+  return t('aiChatThread.reasoning.phaseReasoning');
 }
 
 // Top + bottom fade mask for the expanded panel — mirrors the sidebar's
@@ -305,6 +313,7 @@ function ReasoningSection({
   toolInvocations?: ToolInvocationType[] | undefined;
   messageAborted?: boolean | undefined;
 }): ReactElement {
+  const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState(false);
   const hasReasoning = reasoning.trim().length > 0;
   const hasTools = !!toolInvocations && toolInvocations.length > 0;
@@ -315,7 +324,7 @@ function ReasoningSection({
   const shouldShow = !!isStreaming || hasReasoning || hasTools;
 
   // Throttled so the chip doesn't strobe through phases.
-  const stablePhase = useStableLabel(phaseLabelFor(reasoning.length));
+  const stablePhase = useStableLabel(phaseLabelFor(reasoning.length, t));
   const elapsedMs = useElapsedMs(!!isStreaming);
   const completedToolCount = (toolInvocations ?? []).filter(t => !t.parentToolCallId).length;
   const toolDurationSumMs = (toolInvocations ?? []).reduce((a, t) => a + (t.durationMs || 0), 0);
@@ -326,10 +335,12 @@ function ReasoningSection({
   // Done label mirrors the sidebar: "Thought for Ns · N tools".
   const doneLabel =
     displayedDurationMs > 0
-      ? `Thought for ${formatDuration(displayedDurationMs)}${hasTools ? ` · ${smoothTools} tool${smoothTools === 1 ? '' : 's'}` : ''}`
+      ? `${t('aiChatThread.reasoning.thoughtFor', { duration: formatDuration(displayedDurationMs) })}${
+          hasTools ? ` · ${t('aiChatThread.reasoning.toolCount', { count: smoothTools })}` : ''
+        }`
       : hasReasoning
-        ? 'Thought process'
-        : 'Reasoning';
+        ? t('aiChatThread.reasoning.thoughtProcess')
+        : t('aiChatThread.reasoning.phaseReasoning');
   const liveText = isStreaming ? `${stablePhase}…` : doneLabel;
   // Streaming right-side metadata: live char counter + elapsed (tweened digits).
   const streamingBits = isStreaming
@@ -361,7 +372,7 @@ function ReasoningSection({
             }}
             disabled={!canExpand}
             aria-expanded={expanded}
-            aria-label={isStreaming ? liveText : 'Show reasoning'}
+            aria-label={isStreaming ? liveText : t('aiChatThread.reasoning.showReasoningAriaLabel')}
             className={cn(
               '-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
               canExpand ? 'hover:bg-secondary/70 hover:text-foreground' : 'cursor-default',
@@ -431,7 +442,7 @@ function ReasoningSection({
                   {hasReasoning && (
                     <div>
                       <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                        Reasoning
+                        {t('aiChatThread.reasoning.reasoningHeading')}
                       </div>
                       <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
                         {reasoning}
@@ -443,7 +454,7 @@ function ReasoningSection({
                     <div>
                       {hasReasoning && (
                         <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                          Tool calls
+                          {t('aiChatThread.reasoning.toolCallsHeading')}
                         </div>
                       )}
                       <ToolInvocationList
@@ -466,30 +477,40 @@ function ReasoningSection({
 // Citation Chip + Inline Citations (ported from XyneAISidebar/MessageItem)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
-  if (!citation) return 'Citation';
+const buildClawCitationTooltip = (citation: ClawCitation | null, t: TFunction): string => {
+  if (!citation) return t('aiChatThread.citations.citation');
   if (citation.kind === 'ticket' && citation.ticketId) {
     return citation.channelName
-      ? `Ticket ${citation.ticketId} in #${citation.channelName}`
-      : `Ticket ${citation.ticketId}`;
+      ? t('aiChatThread.citations.ticketInChannel', {
+          ticketId: citation.ticketId,
+          channelName: citation.channelName,
+        })
+      : t('aiChatThread.citations.ticket', { ticketId: citation.ticketId });
   }
   if (citation.kind === 'thread') {
-    return citation.channelName ? `Thread in #${citation.channelName}` : 'Spaces thread';
+    return citation.channelName
+      ? t('aiChatThread.citations.threadInChannel', { channelName: citation.channelName })
+      : t('aiChatThread.citations.spacesThread');
   }
   if (citation.kind === 'canvas') {
-    return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
+    return citation.label
+      ? t('aiChatThread.citations.canvasWithLabel', { label: citation.label })
+      : t('aiChatThread.citations.canvas');
   }
   if (citation.kind === 'recording') {
-    return citation.label ? `Recording — ${citation.label}` : 'Recording';
+    return citation.label
+      ? t('aiChatThread.citations.recordingWithLabel', { label: citation.label })
+      : t('aiChatThread.citations.recording');
   }
   if (citation.kind === 'external') {
-    return citation.label || citation.url || 'External link';
+    return citation.label || citation.url || t('aiChatThread.citations.externalLink');
   }
   if (citation.kind === 'collection-item') {
-    const name = citation.fileName || citation.label || 'Knowledge base file';
+    const name =
+      citation.fileName || citation.label || t('aiChatThread.citations.knowledgeBaseFile');
     return typeof citation.chunkIndex === 'number'
-      ? `KB · ${name} (chunk ${citation.chunkIndex})`
-      : `KB · ${name}`;
+      ? t('aiChatThread.citations.kbWithChunk', { name, chunk: citation.chunkIndex })
+      : t('aiChatThread.citations.kb', { name });
   }
   return getClawCitationLabel(citation);
 };
@@ -509,6 +530,7 @@ function ClawCitationChip({
    *  call in the debug panel instead. Absent for normal (linkable) citations. */
   onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
 }): ReactElement {
+  const { t } = useTranslation('common');
   // Prefer the conversation-wide pool (cross-turn lookup); fall back to the
   // per-message prop so the chip still resolves if the provider is absent.
   const conversationTools = useContext(ConversationToolInvocationsContext);
@@ -530,7 +552,7 @@ function ClawCitationChip({
   // Show the citation's header (title) instead of the bare number — easier to
   // read at a glance. Falls back to the number if the citation didn't resolve.
   const label = citation ? getClawCitationLabel(citation) : `${toolNumber}.${chunkIndex}`;
-  const tooltip = buildClawCitationTooltip(citation);
+  const tooltip = buildClawCitationTooltip(citation, t);
   // Fixed-height pill, capped width; the label truncates with an ellipsis and
   // the full text shows on hover (tooltip).
   const chipClass =
@@ -579,7 +601,7 @@ function ClawCitationChip({
     <button
       type='button'
       className={chipClass}
-      aria-label={`${tooltip} — open in debugger`}
+      aria-label={t('aiChatThread.citations.openInDebugger', { tooltip })}
       onClick={() => onOpenToolDebug(toolCallId)}
       data-track-category='XyneAI'
       data-track-name='DEBUG_CITATION_OPEN'
@@ -600,12 +622,15 @@ function ClawCitationChip({
 }
 
 function InlineCitations({ citations }: { citations: InlineCitation[] }): ReactElement | null {
+  const { t } = useTranslation('common');
   if (citations.length === 0) return null;
   const hasPoints = citations.some(c => c.point);
   return (
     <div className='mt-4 space-y-3'>
       <h3 className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-        {hasPoints ? 'Key Points' : 'Citations'}
+        {hasPoints
+          ? t('aiChatThread.citations.keyPoints')
+          : t('aiChatThread.citations.citationsHeading')}
       </h3>
       <ol className='space-y-3'>
         {citations.map((citation, idx) => (
@@ -752,6 +777,7 @@ function ChatMessageBubble({
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
 }): ReactElement {
+  const { t } = useTranslation('common');
   const isUser = message.type === 'user';
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
@@ -1102,7 +1128,7 @@ function ChatMessageBubble({
                   setTimeout(() => editTextareaRef.current?.focus(), 0);
                 }}
                 className='mt-2 flex-shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100'
-                title='Edit message'
+                title={t('aiChatThread.message.editMessage')}
                 data-track-category='XyneAI'
                 data-track-name='EDIT_MESSAGE'
               >
@@ -1146,7 +1172,7 @@ function ChatMessageBubble({
                       data-track-category='XyneAI'
                       data-track-name='EDIT_CANCEL'
                     >
-                      Cancel
+                      {t('aiChatThread.message.cancel')}
                     </button>
                     <button
                       data-ph-capture-attribute-track-id='ai_chat_edit_submit'
@@ -1162,7 +1188,7 @@ function ChatMessageBubble({
                       data-track-category='XyneAI'
                       data-track-name='EDIT_SUBMIT'
                     >
-                      Send
+                      {t('aiComposer.sendLabel')}
                     </button>
                   </div>
                 </div>
@@ -1285,11 +1311,11 @@ function ChatMessageBubble({
               type='button'
               onClick={onDebug}
               className='mt-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              title='Debug this response'
+              title={t('aiChatThread.message.debugThisResponse')}
               data-track-category='XyneAI'
               data-track-name='DEBUG_RESPONSE'
             >
-              <Bug size={12} /> Debug this response
+              <Bug size={12} /> {t('aiChatThread.message.debugThisResponse')}
             </button>
           )}
 
@@ -1299,7 +1325,7 @@ function ChatMessageBubble({
               <button
                 type='button'
                 onClick={onCopy}
-                title='Copy'
+                title={t('aiChatThread.message.copy')}
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
@@ -1320,7 +1346,7 @@ function ChatMessageBubble({
                   <button
                     type='button'
                     onClick={(): void => onFeedback?.(message.id, 'LIKE')}
-                    title='Helpful'
+                    title={t('aiChatThread.message.helpful')}
                     className={cn(
                       'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
                       feedbackValue === 'LIKE' ? 'text-foreground' : 'text-muted-foreground',
@@ -1339,7 +1365,7 @@ function ChatMessageBubble({
                   <button
                     type='button'
                     onClick={(): void => onFeedback?.(message.id, 'DISLIKE')}
-                    title='Not helpful'
+                    title={t('aiChatThread.message.notHelpful')}
                     className={cn(
                       'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-secondary hover:text-foreground',
                       feedbackValue === 'DISLIKE' ? 'text-foreground' : 'text-muted-foreground',
@@ -1364,7 +1390,7 @@ function ChatMessageBubble({
                   data-ph-capture-attribute-track-id='ai_chat_regenerate'
                   type='button'
                   onClick={onRegenerate}
-                  title='Regenerate response'
+                  title={t('aiChatThread.message.regenerateResponse')}
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                   data-track-category='XyneAI'
                   data-track-name='REGENERATE_MESSAGE'
@@ -1410,6 +1436,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   ref,
 ): ReactElement {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const composerRef = useRef<AIComposerHandle | null>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
@@ -2265,8 +2292,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
   const title =
     messages.length > 0
-      ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
-      : 'New chat';
+      ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? tc('aiChatThread.newChat'))
+      : tc('aiChatThread.newChat');
 
   return (
     <div className='flex h-full min-w-0 flex-1'>
@@ -2278,9 +2305,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                 <Upload className='h-8 w-8 text-primary' />
               </div>
               <div className='text-center'>
-                <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                <p className='text-lg font-medium text-foreground'>
+                  {tc('aiChatThread.dropFilesTitle')}
+                </p>
                 <p className='text-sm text-muted-foreground'>
-                  Images, PDF, text, office documents, or data files
+                  {tc('aiChatThread.dropFilesSubtitle')}
                 </p>
               </div>
             </div>
@@ -2315,7 +2344,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4 md:px-10'
             role='log'
             aria-live='polite'
-            aria-label='Chat messages'
+            aria-label={tc('aiChatThread.chatMessagesAriaLabel')}
           >
             <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
               <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
@@ -2422,14 +2451,14 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <button
               type='button'
               onClick={jumpToLatest}
-              aria-label='Jump to latest'
+              aria-label={tc('aiChatThread.jumpToLatest')}
               className='absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full pb-2'
               data-track-category='XyneAI'
               data-track-name='JUMP_TO_LATEST'
             >
               <span className='inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-[11.5px] font-medium text-foreground shadow-md transition hover:bg-secondary'>
                 <ArrowDown className='h-3 w-3' aria-hidden strokeWidth={2} />
-                Jump to latest
+                {tc('aiChatThread.jumpToLatest')}
               </span>
             </button>
           )}

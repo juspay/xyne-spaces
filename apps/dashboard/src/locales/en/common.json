@@ -424,5 +424,54 @@
       "filesAttachedSuccess": "{{count}} files attached successfully",
       "errorReadingFiles": "Error reading files. Please try again."
     }
+  },
+  "aiChatThread": {
+    "openSidebarAriaLabel": "Open sidebar",
+    "expandSidebarLabel": "Expand sidebar",
+    "collapseSidebarLabel": "Collapse sidebar",
+    "chatMessagesAriaLabel": "Chat messages",
+    "jumpToLatest": "Jump to latest",
+    "newChat": "New chat",
+    "dropFilesTitle": "Drop files to attach",
+    "dropFilesSubtitle": "Images, PDF, text, office documents, or data files",
+    "reasoning": {
+      "phaseThinking": "Thinking",
+      "phaseWeighingItUp": "Weighing it up",
+      "phaseReasoning": "Reasoning",
+      "thoughtFor": "Thought for {{duration}}",
+      "toolCount_one": "{{count}} tool",
+      "toolCount_other": "{{count}} tools",
+      "thoughtProcess": "Thought process",
+      "showReasoningAriaLabel": "Show reasoning",
+      "reasoningHeading": "Reasoning",
+      "toolCallsHeading": "Tool calls"
+    },
+    "citations": {
+      "citation": "Citation",
+      "ticketInChannel": "Ticket {{ticketId}} in #{{channelName}}",
+      "ticket": "Ticket {{ticketId}}",
+      "threadInChannel": "Thread in #{{channelName}}",
+      "spacesThread": "Spaces thread",
+      "canvasWithLabel": "Canvas — {{label}}",
+      "canvas": "Canvas",
+      "recordingWithLabel": "Recording — {{label}}",
+      "recording": "Recording",
+      "externalLink": "External link",
+      "kbWithChunk": "KB · {{name}} (chunk {{chunk}})",
+      "kb": "KB · {{name}}",
+      "knowledgeBaseFile": "Knowledge base file",
+      "openInDebugger": "{{tooltip}} — open in debugger",
+      "keyPoints": "Key Points",
+      "citationsHeading": "Citations"
+    },
+    "message": {
+      "editMessage": "Edit message",
+      "cancel": "Cancel",
+      "copy": "Copy",
+      "helpful": "Helpful",
+      "notHelpful": "Not helpful",
+      "regenerateResponse": "Regenerate response",
+      "debugThisResponse": "Debug this response"
+    }
   }
 }
