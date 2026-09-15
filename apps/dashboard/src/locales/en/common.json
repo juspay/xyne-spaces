@@ -587,5 +587,23 @@
       "thisWeek": "This week",
       "custom": "Custom"
     }
+  },
+  "auth": {
+    "enrollmentSteps": {
+      "logoAlt": "Xyne Logo",
+      "heading": "Device Enrollment Steps",
+      "signInTitle": "Sign In",
+      "signInDescription": "Sign in with your Juspay Google account.",
+      "deviceEnrollmentTitle": "Device Enrollment",
+      "deviceEnrollmentDescription": "Enrollment starts automatically.",
+      "accessPortalTitle": "Access Portal",
+      "accessPortalDescription": "Log in to Xyne Space.",
+      "accessPortalContent": "Log in to Xyne Space. Select your certificate when prompted to sign in and return to the app.",
+      "pleaseReferTo": "Please refer to",
+      "thisDocument": "this document",
+      "forMoreDetails": "for more details.",
+      "reportIssuePrefix": "If it still doesn't work, please report it in the",
+      "reportIssueSuffix": "Slack channel."
+    }
   }
 }

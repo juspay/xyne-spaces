@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react';
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../utils/classNames';
 
 interface ElectronEnrollmentStepsProps {
@@ -14,26 +15,26 @@ export function ElectronEnrollmentSteps({
   currentStep = 2,
   enrollmentComponent,
 }: ElectronEnrollmentStepsProps): ReactElement {
+  const { t } = useTranslation('common');
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const activeStep = currentStep;
 
   const steps = [
     {
-      title: 'Sign In',
-      description: 'Sign in with your Juspay Google account.',
+      title: t('auth.enrollmentSteps.signInTitle'),
+      description: t('auth.enrollmentSteps.signInDescription'),
     },
     {
-      title: 'Device Enrollment',
-      description: 'Enrollment starts automatically.',
+      title: t('auth.enrollmentSteps.deviceEnrollmentTitle'),
+      description: t('auth.enrollmentSteps.deviceEnrollmentDescription'),
     },
     {
-      title: 'Access Portal',
-      description: 'Log in to Xyne Space.',
+      title: t('auth.enrollmentSteps.accessPortalTitle'),
+      description: t('auth.enrollmentSteps.accessPortalDescription'),
       content: (
         <div className='space-y-3'>
           <p className='text-sm text-muted-foreground leading-relaxed'>
-            Log in to Xyne Space. Select your certificate when prompted to sign in and return to the
-            app.
+            {t('auth.enrollmentSteps.accessPortalContent')}
           </p>
           {enrollmentComponent}
         </div>
@@ -45,10 +46,12 @@ export function ElectronEnrollmentSteps({
     <div className='flex flex-col'>
       {/* Logo and Branding */}
       <div className='mb-4'>
-        <img src='/svgs/xyne.svg' alt='Xyne Logo' />
+        <img src='/svgs/xyne.svg' alt={t('auth.enrollmentSteps.logoAlt')} />
       </div>
 
-      <h2 className='text-lg font-semibold text-foreground mb-6'>Device Enrollment Steps</h2>
+      <h2 className='text-lg font-semibold text-foreground mb-6'>
+        {t('auth.enrollmentSteps.heading')}
+      </h2>
       <div className='space-y-0'>
         {steps.map((step, index) => {
           const isActive = index === activeStep;
@@ -107,20 +110,20 @@ export function ElectronEnrollmentSteps({
       <div className='mt-16 text-sm text-muted-foreground space-y-2 pl-2'>
         {isElectron && (
           <p>
-            Please refer to{' '}
+            {t('auth.enrollmentSteps.pleaseReferTo')}{' '}
             <a
               href='https://docs.google.com/document/d/1dad4KPVMjGWE7nC3OxhXGvrL-g7AlqUprxqKklgAZcc/edit?usp=sharing'
               target='_blank'
               rel='noopener noreferrer'
               className='underline text-primary hover:text-primary/80'
             >
-              this document
+              {t('auth.enrollmentSteps.thisDocument')}
             </a>{' '}
-            for more details.
+            {t('auth.enrollmentSteps.forMoreDetails')}
           </p>
         )}
         <p>
-          If it still doesn&apos;t work, please report it in the{' '}
+          {t('auth.enrollmentSteps.reportIssuePrefix')}{' '}
           <a
             target='_blank'
             rel='noreferrer'
@@ -129,7 +132,7 @@ export function ElectronEnrollmentSteps({
           >
             #xyne-spaces-troubleshooting
           </a>{' '}
-          Slack channel.
+          {t('auth.enrollmentSteps.reportIssueSuffix')}
         </p>
       </div>
     </div>
