@@ -79,6 +79,7 @@ import {
   STRIP_PAD,
   STREAM_PRESS_ROW,
 } from './components/Streams/Streams.types';
+import { assertStridesMatchDom, columnStrides } from './components/Streams/Streams.geometry';
 import { streamsActor } from '../../machines/streamsMachine';
 import { questionFor, type StreamItem } from './components/StreamsDnd/StreamsDnd';
 import type {
@@ -1475,6 +1476,57 @@ const StreamsScreen = (): ReactElement => {
     normalizeSlot,
     rootRef: panelRef,
   });
+
+  /**
+   * Where the scrolling columns sit, computed rather than measured.
+   *
+   * The pinned run owns the left edge when it exists, and the scroller's own
+   * padding changes to match — so the lead is read from the same condition the
+   * style uses rather than being restated as a constant.
+   */
+  const stripLead = pinned.length > 0 ? RING_GUTTER : STREAM_LEFT_INSET;
+  const scrollingStrides = useMemo(
+    () => columnStrides(scrolling.map(widthFor), stripLead),
+    [scrolling, widthFor, stripLead],
+  );
+
+  /**
+   * Hold the arithmetic to the document's account, while both still answer.
+   *
+   * Every column is mounted today, so the DOM can be asked the same question
+   * `scrollingStrides` computes and the two must agree. That check is only
+   * available until the strip virtualises — afterwards there is no second
+   * opinion for the columns that matter most, the ones off screen — so it earns
+   * its place now, catching a systematic error while it is still cheap to find.
+   *
+   * Only at rest, and every guard here is a case where the two disagree for a
+   * reason that is not a bug: focus mode sizes columns from CSS rather than from
+   * `width`, a drag carries a transform, and an open, close or focus flip is a
+   * width mid-tween against a state value that already holds the end of it.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    if (focusMode || transitioningRef.current) return undefined;
+    if (drag !== null || widthMs > 0) return undefined;
+    if (opening.size > 0 || closing.size > 0) return undefined;
+    const strip = stripRef.current;
+    if (!strip) return undefined;
+    // After the commit that changed them, not during it.
+    let cancelCheck: (() => void) | null = null;
+    const frame = requestAnimationFrame(() => {
+      cancelCheck = assertStridesMatchDom(
+        strip,
+        scrolling.map(column => column.id),
+        scrollingStrides,
+        stripLead,
+        'deck',
+      );
+    });
+    return (): void => {
+      cancelAnimationFrame(frame);
+      cancelCheck?.();
+    };
+  }, [scrolling, scrollingStrides, stripLead, focusMode, drag, widthMs, opening, closing]);
 
   // Entering or leaving focus mode changes the focused column's width without
   // changing which column is focused, and the effect below short-circuits on
