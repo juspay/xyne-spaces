@@ -25,6 +25,7 @@ import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookContro
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { activityService } from '@/services/activity/activityService';
+import { userActivityStatusService } from '@/services/userActivityStatusService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -278,6 +279,8 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
+
+        void userActivityStatusService.clearInCallForEndedCall(result.call.id);
 
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
@@ -705,6 +708,8 @@ class LiveKitWebhookController {
           }
         }
       }
+      void userActivityStatusService.markInCall(participant.identity);
+
       // Notify all connected clients that participants changed
       if (roomName) {
         await callHostControlService.applyHostControlsToParticipant(
@@ -809,6 +814,8 @@ class LiveKitWebhookController {
       }
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
+
+      void userActivityStatusService.clearInCall(participant.identity);
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);

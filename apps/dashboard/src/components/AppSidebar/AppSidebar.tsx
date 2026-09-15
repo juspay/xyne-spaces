@@ -36,7 +36,7 @@ import SettingsContent from '../Settings/Settings';
 import ProfileModal from '../ProfileSidebar/ProfileModal';
 import Preferences, { type PreferenceSection } from '../Settings/Preferences';
 import { useSelf } from '../../hooks/useUsers';
-import { isStatusExpired } from '../../utils/statusUtils';
+import { isStatusExpired, resolveUserStatus } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
@@ -279,6 +279,8 @@ const AppSidebar = (): ReactElement => {
   const hasValidStatus =
     currentUser?.statusEmoji &&
     (!currentUser?.statusExpiryAt || !isStatusExpired(currentUser.statusExpiryAt));
+
+  const hasDisplayStatus = resolveUserStatus(currentUser).hasStatus;
 
   const handleStatusClick = (): void => {
     setIsSettingsPopoverOpen(false);
@@ -655,7 +657,7 @@ const AppSidebar = (): ReactElement => {
 
           <Popover
             trigger={
-              hasValidStatus ? (
+              hasDisplayStatus ? (
                 <div
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
@@ -668,6 +670,7 @@ const AppSidebar = (): ReactElement => {
                       statusEmoji={currentUser?.statusEmoji}
                       statusContent={currentUser?.statusContent}
                       statusExpiryAt={currentUser?.statusExpiryAt}
+                      activityStatus={currentUser?.activityStatus}
                       size='lg'
                       showOnHover={true}
                     />

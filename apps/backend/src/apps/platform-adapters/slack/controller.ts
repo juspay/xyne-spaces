@@ -716,6 +716,7 @@ export class SlackController {
 				statusEmoji: user.statusEmoji,
 				statusContent: user.statusContent,
 				statusExpiryAt: user.statusExpiryAt,
+				activityStatus: user.activityStatus,
 			}),
 		);
 	});

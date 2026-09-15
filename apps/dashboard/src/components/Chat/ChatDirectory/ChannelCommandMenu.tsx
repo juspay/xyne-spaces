@@ -180,7 +180,8 @@ export const ChannelCommandItem = ({
     ? (parseDMParticipantIds(channel).find(id => id !== currentUserID) ?? '')
     : '';
   const targetUser = useUser(otherUserId);
-  const hasStatus = targetUser && (targetUser.statusEmoji || targetUser.statusContent);
+  const hasStatus =
+    targetUser && (targetUser.activityStatus || targetUser.statusEmoji || targetUser.statusContent);
 
   return (
     <Command.Item
@@ -206,6 +207,7 @@ export const ChannelCommandItem = ({
             statusEmoji={targetUser.statusEmoji}
             statusContent={targetUser.statusContent}
             statusExpiryAt={targetUser.statusExpiryAt}
+            activityStatus={targetUser.activityStatus}
             size='sm'
           />
         )}
