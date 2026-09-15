@@ -225,6 +225,29 @@
       "selectedLabel": "Seleccionado",
       "noCollections": "Sin colecciones",
       "noCollectionsFound": "No se encontraron colecciones"
+    },
+    "sidebar": {
+      "navKnowledge": "Conocimiento",
+      "navAgentHub": "Centro de agentes",
+      "navDigitalTwin": "Gemelo digital",
+      "navOrganization": "Organización",
+      "navMetrics": "Métricas",
+      "navSettings": "Configuración",
+      "navAdmin": "Administración",
+      "navMorningBrief": "Resumen matutino",
+      "newChatLabel": "Nuevo chat",
+      "noChatsYet": "Aún no hay chats",
+      "startNewChatHint": "Inicia un nuevo chat arriba para verlo aquí.",
+      "chatOptionsAriaLabel": "Opciones del chat",
+      "deleteButton": "Eliminar",
+      "deleteChatTitle": "¿Eliminar chat?",
+      "deleteChatDescription": "¿Eliminar el chat \"{{title}}\"? Esto no se puede deshacer.",
+      "untitledLabel": "Sin título",
+      "closeAriaLabel": "Cerrar",
+      "deleteChatBody": "{{title}} se eliminará de forma permanente. Esto no se puede deshacer.",
+      "cancelButton": "Cancelar",
+      "recentsLabel": "Recientes",
+      "newChatTooltip": "Nuevo chat"
     }
   }
 }

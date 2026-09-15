@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { PencilEditBox } from '@xyne/icons';
 import { useClawAdminAccessQuery } from '@/hooks/useClawAdminAccess';
@@ -16,6 +17,7 @@ export const XyneAIQuickMenu = ({
   onNavigate?: (label: string) => void;
   onDismiss?: () => void;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const { user } = useAuth();
   const { isAdmin } = useClawAdminAccessQuery(user?.id);
   const { canManage: canManageOrg } = useClawOrgManageAccess();
@@ -33,13 +35,13 @@ export const XyneAIQuickMenu = ({
     <QuickNavList heading='Xyne AI'>
       <Link
         to={prefixWs('/ai/chat/new')}
-        onClick={() => handleClick('New chat')}
+        onClick={() => handleClick('new-chat')}
         className={QUICK_NAV_ROW_CLASS}
         data-track-category='App_Sidebar'
         data-track-name='XyneAI_Quick_New_Chat'
       >
         <PencilEditBox size={16} className='shrink-0' aria-hidden />
-        New chat
+        {t('aiScreen.sidebar.newChatTooltip')}
       </Link>
 
       {items.map(item => {
@@ -48,14 +50,14 @@ export const XyneAIQuickMenu = ({
           <Link
             key={item.key}
             to={prefixWs(item.to)}
-            onClick={() => handleClick(item.label)}
+            onClick={() => handleClick(item.key)}
             className={QUICK_NAV_ROW_CLASS}
             data-track-category='App_Sidebar'
             data-track-name='XyneAI_Quick_Nav'
-            data-track-metadata={JSON.stringify({ path: item.to, label: item.label })}
+            data-track-metadata={JSON.stringify({ path: item.to, label: item.key })}
           >
             <Icon size={16} className='shrink-0' aria-hidden />
-            {item.label}
+            {t(item.labelKey)}
           </Link>
         );
       })}

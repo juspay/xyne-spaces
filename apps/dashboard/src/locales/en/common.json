@@ -225,6 +225,29 @@
       "selectedLabel": "Selected",
       "noCollections": "No collections",
       "noCollectionsFound": "No collections found"
+    },
+    "sidebar": {
+      "navKnowledge": "Knowledge",
+      "navAgentHub": "Agent Hub",
+      "navDigitalTwin": "Digital twin",
+      "navOrganization": "Organization",
+      "navMetrics": "Metrics",
+      "navSettings": "Settings",
+      "navAdmin": "Admin",
+      "navMorningBrief": "Morning Brief",
+      "newChatLabel": "New Chat",
+      "noChatsYet": "No chats yet",
+      "startNewChatHint": "Start a new chat above to see it here.",
+      "chatOptionsAriaLabel": "Chat options",
+      "deleteButton": "Delete",
+      "deleteChatTitle": "Delete chat?",
+      "deleteChatDescription": "Delete the chat \"{{title}}\"? This can't be undone.",
+      "untitledLabel": "Untitled",
+      "closeAriaLabel": "Close",
+      "deleteChatBody": "{{title}} will be deleted for good. This can't be undone.",
+      "cancelButton": "Cancel",
+      "recentsLabel": "Recents",
+      "newChatTooltip": "New chat"
     }
   }
 }
