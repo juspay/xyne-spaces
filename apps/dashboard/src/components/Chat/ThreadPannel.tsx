@@ -1,6 +1,7 @@
 import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
+import { useEphemeralThreadMessages } from '../../hooks/useEphemeralMessages';
 import {
   useParams,
   useNavigate,
@@ -314,11 +315,19 @@ export const ThreadMessages = ({
   );
   const queryDetails = conversationDetails;
 
+  // Ephemeral cards (chat.postEphemeral) posted into this thread. They are real
+  // messages to render but have no Zero row behind them and never will — nothing
+  // is stored, so they disappear on reload.
+  const ephemeralThreadMessages = useEphemeralThreadMessages(derivedConversationId);
+
   // Use pre-fetched messages if provided, otherwise use queried
-  const messages = useMemo(
-    () => propThreadMessages ?? queriedMessages ?? [],
-    [propThreadMessages, queriedMessages],
-  );
+  const messages = useMemo(() => {
+    const base = propThreadMessages ?? queriedMessages ?? [];
+    if (ephemeralThreadMessages.length === 0) return base;
+    // Appended, not merged by timestamp: they arrive live, so they are always the
+    // newest thing in the thread at the moment they show up.
+    return [...base, ...(ephemeralThreadMessages as typeof base)];
+  }, [propThreadMessages, queriedMessages, ephemeralThreadMessages]);
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
 

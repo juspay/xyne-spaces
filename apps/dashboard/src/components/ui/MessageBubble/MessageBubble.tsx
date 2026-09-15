@@ -609,6 +609,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
@@ -825,6 +826,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           svgBgColor='hsl(var(--muted))'
           icon='visibility'
           text='Only Visible to you'
+          backgroundColor='bg-muted'
+          textColor='text-foreground'
+        />
+      )}
+
+      {isEphemeralNotice && !isPrivateSystemNotice && (
+        <MessageHeader
+          svgBgColor='hsl(var(--muted))'
+          icon='visibility'
+          text='Only visible to you · disappears on reload'
           backgroundColor='bg-muted'
           textColor='text-foreground'
         />

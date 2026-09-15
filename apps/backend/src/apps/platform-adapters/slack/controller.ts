@@ -26,16 +26,19 @@ import {
 	uploadFiles,
 } from "@/services/fileUploadService";
 import { redisService } from "@/services/redisService";
+import { deliverEphemeralMessage } from "@/apps/core/ephemeralDelivery";
 import { wrapSlackHandler } from "./error-transformer";
 import {
 	getResolvedChannelId,
 	getSlackAuthContext,
 	resolveSlackChannel,
+	resolveSlackUserId,
 } from "./middleware";
 import {
 	transformDelete,
 	transformPostMessage,
 	transformUpdate,
+	transformPostEphemeral,
 } from "./request-transformers/chat";
 import {
 	transformHistory,
@@ -52,6 +55,7 @@ import {
 	transformDeleteResponse,
 	transformPostMessageResponse,
 	transformUpdateResponse,
+	transformPostEphemeralResponse,
 } from "./response-transformers/chat";
 import {
 	transformHistoryResponse,
@@ -129,6 +133,29 @@ async function resolveSlackThreadConversationId(
 const PostMessageSchema = z
 	.object({
 		channel: z.string().min(1, "channel is required"),
+		text: z.string().optional(),
+		blocks: SlackArraySchema,
+		attachments: SlackArraySchema,
+		thread_ts: SlackOptionalStringSchema,
+		mrkdwn: SlackBooleanSchema.default(true),
+		metadata: SlackRecordSchema,
+		username: SlackOptionalStringSchema,
+	})
+	.refine(
+		(data) =>
+			!!data.text ||
+			(data.blocks && data.blocks.length > 0) ||
+			(data.attachments && data.attachments.length > 0),
+		{
+			message: "Either text, blocks, or attachments is required",
+			path: ["text"],
+		},
+	);
+
+const PostEphemeralSchema = z
+	.object({
+		channel: z.string().min(1, "channel is required"),
+		user: z.string().min(1, "user is required"),
 		text: z.string().optional(),
 		blocks: SlackArraySchema,
 		attachments: SlackArraySchema,
@@ -415,6 +442,74 @@ export class SlackController {
 				}
 			})();
 		}
+	});
+
+
+	chatPostEphemeral = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = PostEphemeralSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+
+		const recipientId = await resolveSlackUserId(
+			parsed.data.user,
+			context.workspaceId ?? "",
+		);
+		if (!recipientId) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		const threadResolution = await resolveSlackThreadConversationId(
+			parsed.data.thread_ts,
+			channelId,
+		);
+		if (threadResolution.error) {
+			res.status(200).json({ ok: false, error: threadResolution.error });
+			return;
+		}
+
+		const args = await transformPostEphemeral(
+			{ ...parsed.data, channel: channelId, recipientId },
+			context,
+		);
+
+		const sender = await repositories.users.findById(context.userId);
+
+		const result = await deliverEphemeralMessage({
+			channelId,
+			conversationId: threadResolution.conversationId,
+			recipientId: args.recipientId,
+			senderId: context.userId,
+			senderName: sender?.name,
+			messageDelivery: "EPHEMERAL",
+			...(args.flow && { appId: context.appId, flow: args.flow }),
+			content: args.content,
+			isMarkdown: args.isMarkdown,
+			metadata: args.metadata,
+		});
+
+		if (!result.ok) {
+			res.status(200).json({
+				ok: false,
+				error:
+					result.reason === "not_in_channel"
+						? "user_not_in_channel"
+						: "invalid_arguments",
+			});
+			return;
+		}
+
+		res.status(200).json(transformPostEphemeralResponse(result.messageId));
 	});
 
 	chatUpdate = wrapSlackHandler(async (req: Request, res: Response) => {
