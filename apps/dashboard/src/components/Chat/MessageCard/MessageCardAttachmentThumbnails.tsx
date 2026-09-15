@@ -244,6 +244,7 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View attachment ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_IMAGE'
+              data-track-label='Open image attachment'
               data-track-metadata={JSON.stringify({
                 attachmentId: att.id,
                 mimeType: att.mimetype,
@@ -269,6 +270,7 @@ export function MessageCardAttachmentThumbnails({
               aria-label={`View video ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_VIDEO'
+              data-track-label='Open video attachment'
               data-track-metadata={JSON.stringify({
                 attachmentId: att.id,
                 mimeType: att.mimetype,
@@ -299,6 +301,7 @@ export function MessageCardAttachmentThumbnails({
             aria-label={`View file ${att.originalFilename}`}
             data-track-category={trackCategory}
             data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_FILE'
+            data-track-label='Open file attachment'
             data-track-metadata={JSON.stringify({
               attachmentId: att.id,
               mimeType: att.mimetype,

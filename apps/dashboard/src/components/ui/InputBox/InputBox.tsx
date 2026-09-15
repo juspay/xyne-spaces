@@ -116,6 +116,7 @@ import { channelTrackingMetadata } from '../../../services/Analytics/channelTrac
 type SendTrigger =
   | 'keyboard_enter'
   | 'keyboard_mod_enter'
+  | 'keyboard_shift_enter'
   | 'send_button'
   | 'send_menu'
   | 'mobile_editor'
@@ -853,11 +854,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               event.preventDefault();
               // Keyboard sends are invisible to autocapture (click/change/submit
               // only); emit it explicitly so keyboard vs button sends are visible.
+              // This branch serves BOTH Cmd/Ctrl+Enter and Shift+Enter, so the
+              // trigger has to mirror the keyCombo rather than assume mod.
               posthogService.capture('message_send', {
                 trigger: 'keyboard',
                 keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
               });
-              void handleSend('keyboard_mod_enter');
+              void handleSend(event.metaKey ? 'keyboard_mod_enter' : 'keyboard_shift_enter');
               return true;
             }
             event.preventDefault();

@@ -301,6 +301,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       )}
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
+      data-track-label='Open search result'
       data-track-metadata={JSON.stringify({
         ...(resultIndex !== undefined && { resultIndex }),
         ...(resultCount !== undefined && { resultCount }),

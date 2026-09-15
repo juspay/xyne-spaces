@@ -137,6 +137,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           onClick={handleChannelClick}
           data-track-category='MENTION'
           data-track-name='OPEN_CHANNEL_FROM_MENTION'
+          data-track-label='Open channel from mention'
           data-track-metadata={JSON.stringify({
             channelId: props.channelId,
             isPrivate: !!props.isPrivate,

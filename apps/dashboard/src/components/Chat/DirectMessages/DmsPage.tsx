@@ -445,6 +445,7 @@ const DmsPage = (): ReactElement => {
                 onClick={() => void handleDmSelect(channel.id)}
                 data-track-category='DM'
                 data-track-name='SELECT_DM_SEARCH_RESULT'
+                data-track-label='Select DM search result'
                 data-track-metadata={JSON.stringify({
                   channelId: channel.id,
                   resultCount: filteredDirectMessages.length,

@@ -440,6 +440,7 @@ const RecapPanel = (): ReactElement => {
                 title={`Go to #${card.channelName}`}
                 data-track-category='RECAP_PANEL'
                 data-track-name='OPEN_CHANNEL_FROM_RECAP'
+                data-track-label='Open channel from recap'
                 data-track-metadata={JSON.stringify({
                   channelId: card.channelId,
                   source: 'recap',

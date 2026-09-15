@@ -160,7 +160,14 @@ const ChannelItemV2 = memo(
     const handleChannelClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
       e.preventDefault();
       e.stopPropagation();
-      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, { event: e });
+      // `state` must ride THIS call, not the <Link>: preventDefault above means
+      // the Link's own navigation (and its state) never runs. standaloneNavigate
+      // spreads everything but `event` into navigate(), so state reaches
+      // location.state and CHANNEL_VIEWED can attribute the open.
+      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, {
+        event: e,
+        state: { trackSource: isDM ? 'sidebar_dm' : 'sidebar_channel' },
+      });
     };
 
     const draftTooltipContent = (
@@ -177,10 +184,10 @@ const ChannelItemV2 = memo(
         className=''
         draggable={false}
         to={`/chat/dir/${channel.id}`}
-        state={{ trackSource: isDM ? 'sidebar_dm' : 'sidebar_channel' }}
         onClick={handleChannelClick}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
+        data-track-label='Open channel'
         data-track-metadata={JSON.stringify({
           ...channelTrackingMetadata(channel),
           isDM,
@@ -322,9 +329,9 @@ const ChannelItemV2 = memo(
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
+              data-track-label='Close DM channel'
               data-track-metadata={JSON.stringify({
-                channelId: channel.id,
-                channelName: displayName,
+                ...channelTrackingMetadata(channel),
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />
