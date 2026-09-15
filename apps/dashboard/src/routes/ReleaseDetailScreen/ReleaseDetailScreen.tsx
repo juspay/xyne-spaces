@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { Fragment, ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -260,6 +261,7 @@ const isTabValue = (value: unknown): value is TabValue =>
 
 // ─── ReleaseDetailScreen ──────────────────────────────────────────────────────
 const ReleaseDetailScreen = (): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { projectId, releaseTicketId } = useParams<{
     projectId: string;
     releaseTicketId: string;
@@ -1227,7 +1229,7 @@ const ReleaseDetailScreen = (): ReactElement => {
       >
         <div className='space-y-4 p-4'>
           <Textarea
-            placeholder='Describe why this ticket failed QA / testing...'
+            placeholder={t('routes.releaseDetailScreen.failureReasonPlaceholder')}
             value={failureDialog.state.failureReason}
             onChange={e => failureDialog.setFailureReason(e.target.value)}
             rows={4}

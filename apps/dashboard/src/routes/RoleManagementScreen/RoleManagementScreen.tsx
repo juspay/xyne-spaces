@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import { Plus, Check, X, Users, Search, UserPlus } from 'lucide-react';
@@ -71,6 +72,7 @@ const CreateRoleDialog = ({
   onOpenChange,
   onCreated,
 }: CreateRoleDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
@@ -147,7 +149,7 @@ const CreateRoleDialog = ({
             if (e.key === 'Enter' && canSubmit) void handleCreate();
           }}
           maxLength={40}
-          placeholder='e.g. XYNE_PM'
+          placeholder={t('routes.roleManagementScreen.roleNameExamplePlaceholder')}
           autoFocus
         />
         <p className='text-xs text-muted-foreground mt-1.5'>
@@ -166,7 +168,7 @@ const CreateRoleDialog = ({
           value={description}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
           maxLength={80}
-          placeholder='What is this role for?'
+          placeholder={t('routes.roleManagementScreen.roleDescriptionPlaceholder')}
         />
 
         <div className='flex justify-end gap-2 mt-5'>
@@ -267,6 +269,7 @@ const AddMembersDialog = ({
   memberUserIds,
   workspaceUsers,
 }: AddMembersDialogProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
@@ -361,7 +364,7 @@ const AddMembersDialog = ({
             ref={searchRef}
             value={query}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-            placeholder='Search users by name or email'
+            placeholder={t('routes.roleManagementScreen.searchUsersPlaceholder')}
             className='pl-8 h-8 text-sm'
           />
         </div>

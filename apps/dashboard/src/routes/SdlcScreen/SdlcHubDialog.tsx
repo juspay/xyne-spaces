@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { FolderKanban, GitBranch, Lock, Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -54,6 +55,7 @@ export function SdlcHubDialog({
   hub,
   onSaved,
 }: SdlcHubDialogProps): ReactElement {
+  const { t } = useTranslation('placeholders');
   const editing = hub !== undefined;
   const [name, setName] = useState('');
   const [repoIds, setRepoIds] = useState<string[]>([]);
@@ -185,12 +187,12 @@ export function SdlcHubDialog({
                 }}
                 placeholder={
                   projectRows === undefined
-                    ? 'Loading projects…'
+                    ? t('routes.sdlcHubDialog.loadingProjectsPlaceholder')
                     : projectOptions.length === 0
-                      ? 'No projects available'
-                      : 'Select a project'
+                      ? t('routes.sdlcHubDialog.noProjectsAvailablePlaceholder')
+                      : t('routes.sdlcHubDialog.selectProjectPlaceholder')
                 }
-                searchPlaceholder='Search projects...'
+                searchPlaceholder={t('routes.sdlcHubDialog.searchProjectsPlaceholder')}
                 width='100%'
                 matchTriggerWidth
               />
@@ -208,7 +210,7 @@ export function SdlcHubDialog({
                 value={name}
                 onChange={event => setName(event.target.value)}
                 className='mt-2 h-10'
-                placeholder='e.g. Payments platform'
+                placeholder={t('routes.sdlcHubDialog.hubNameExamplePlaceholder')}
               />
             </div>
           )}
@@ -223,12 +225,12 @@ export function SdlcHubDialog({
               isLoading={repositoriesLoading}
               placeholder={
                 !activeProjectId
-                  ? 'Choose a project first'
+                  ? t('routes.sdlcHubDialog.chooseProjectFirstPlaceholder')
                   : repositoryOptions.length === 0
-                    ? 'This project has no repositories'
-                    : 'Select repositories'
+                    ? t('routes.sdlcHubDialog.noRepositoriesPlaceholder')
+                    : t('routes.sdlcHubDialog.selectRepositoriesPlaceholder')
               }
-              searchPlaceholder='Search repositories...'
+              searchPlaceholder={t('routes.sdlcHubDialog.searchRepositoriesPlaceholder')}
               width='100%'
               matchTriggerWidth
               collapseSelectedAfter={2}

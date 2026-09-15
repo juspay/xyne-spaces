@@ -1020,6 +1020,32 @@
       "peoplePlaceholder": "People",
       "searchPeoplePlaceholder": "Search people...",
       "searchRecordingsPeopleLabelsPlaceholder": "Search recordings, people or labels..."
+    },
+    "releaseDetailScreen": {
+      "failureReasonPlaceholder": "Describe why this ticket failed QA / testing..."
+    },
+    "resourceAccessScreen": {
+      "searchUsersPlaceholder": "Search users by name or email..."
+    },
+    "roleManagementScreen": {
+      "roleNameExamplePlaceholder": "e.g. XYNE_PM",
+      "roleDescriptionPlaceholder": "What is this role for?",
+      "searchUsersPlaceholder": "Search users by name or email"
+    },
+    "sdlcHubDialog": {
+      "loadingProjectsPlaceholder": "Loading projects…",
+      "noProjectsAvailablePlaceholder": "No projects available",
+      "selectProjectPlaceholder": "Select a project",
+      "searchProjectsPlaceholder": "Search projects...",
+      "hubNameExamplePlaceholder": "e.g. Payments platform",
+      "chooseProjectFirstPlaceholder": "Choose a project first",
+      "noRepositoriesPlaceholder": "This project has no repositories",
+      "selectRepositoriesPlaceholder": "Select repositories",
+      "searchRepositoriesPlaceholder": "Search repositories..."
+    },
+    "sdlcHubSidebar": {
+      "selectHubPlaceholder": "Select hub",
+      "searchHubsAndRepositoriesPlaceholder": "Search hubs and repositories..."
     }
   }
 }
