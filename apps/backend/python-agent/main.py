@@ -340,7 +340,55 @@ async def entrypoint(ctx: JobContext):
             if payload.get("type") == "ai_voice_toggle":
                 new_state = payload.get("enabled", False)
                 ai_manager.handle_voice_toggle(new_state, participant_id, participant_name)
-            
+
+            elif payload.get("type") == "transcription_toggle":
+                # Host kill-switch. SECURITY: only the call host (createdBy in room
+                # metadata) may toggle, verified against the authenticated sender
+                # identity — never the payload. FAIL CLOSED: if the host id is
+                # unavailable (older room metadata) or the sender is not the host,
+                # reject rather than trusting client-side gating.
+                #
+                # The AGENT is authoritative: it always broadcasts `transcription_state`
+                # with its ACTUAL state so clients never show "off" unless the agent
+                # really stopped. On apply we confirm only AFTER the teardown completes;
+                # on reject we confirm the (unchanged) current state so the UI reverts.
+                def _publish_transcription_state(enabled_now: bool):
+                    try:
+                        state = json.dumps(
+                            {"type": "transcription_state", "enabled": enabled_now}
+                        ).encode("utf-8")
+                        asyncio.create_task(
+                            ctx.room.local_participant.publish_data(
+                                state, reliable=True, topic="ai-actions"
+                            )
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"publish transcription_state failed: {e}")
+
+                host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
+                if not host_id:
+                    logger.warning(
+                        "transcription_toggle rejected: host id unavailable in room metadata (fail-closed)"
+                    )
+                    _publish_transcription_state(multi_user_transcriber.is_enabled())
+                elif participant_id != host_id:
+                    logger.warning(
+                        f"transcription_toggle rejected: sender={participant_id} is not host={host_id}"
+                    )
+                    _publish_transcription_state(multi_user_transcriber.is_enabled())
+                else:
+                    requested = bool(payload.get("enabled", True))
+                    logger.info(
+                        f"transcription_toggle received | enabled={requested}, "
+                        f"by={participant_name} ({participant_id})"
+                    )
+
+                    async def _apply_and_confirm(target: bool):
+                        await multi_user_transcriber.set_transcription_enabled(target)
+                        _publish_transcription_state(multi_user_transcriber.is_enabled())
+
+                    asyncio.create_task(_apply_and_confirm(requested))
+
             elif payload.get("type") == "ai_control_request":
                 # SECURITY: Use authenticated participant identity from data_packet, not from payload
                 # This prevents identity spoofing attacks
@@ -572,8 +620,15 @@ if __name__ == "__main__":
     start_health_server_background()
 
     # Run the LiveKit agent (blocks until shutdown)
+    # agent_name switches this worker from automatic dispatch (joins every room) to
+    # explicit dispatch — the backend must now request it by name via
+    # AgentDispatchClient.createDispatch. This is what makes zero-downtime, canary-tested
+    # agent rollouts possible: a new pod runs under a new agent_name and is invisible to
+    # real traffic until the backend (via this pod's own self-report, or a human fallback)
+    # rolls it into the 'stable' or 'test' slot.
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
+        agent_name=config.transcription_agent_name,
         shutdown_process_timeout=60.0,
         job_memory_warn_mb=4096,
     ))

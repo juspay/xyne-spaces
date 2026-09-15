@@ -17,7 +17,7 @@ export class MettleTeamMembersController {
 
   getTeamMembers = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { teamId } = req.query;
+      const { teamId, page: pageRaw, limit: limitRaw } = req.query;
 
       if (!teamId || typeof teamId !== 'string' || teamId.trim().length === 0) {
         res.status(400).json({
@@ -31,8 +31,19 @@ export class MettleTeamMembersController {
       logger.info(`Fetching team members for teamId: ${trimmedTeamId}`);
 
       const teamMembers = await mettleTeamMembersService.fetchTeamMembersFromMettle(trimmedTeamId);
+      const page = Math.max(1, Number.parseInt(String(pageRaw ?? '1'), 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(String(limitRaw ?? '12'), 10) || 12));
+      const allMembers = teamMembers.employee_list ?? [];
+      const total = allMembers.length;
+      const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+      const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+      const start = (safePage - 1) * limit;
 
-      res.status(200).json(teamMembers);
+      res.status(200).json({
+        ...teamMembers,
+        employee_list: allMembers.slice(start, start + limit),
+        pagination: { page: safePage, limit, total, totalPages },
+      });
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const upstreamStatus = error.response?.status;

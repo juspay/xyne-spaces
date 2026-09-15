@@ -1,0 +1,14 @@
+# Error-only log instance fed by Fluent Bit (docker/fluent-bit/). Requires
+# the victoriametrics-logs-datasource plugin (installed via GF_INSTALL_PLUGINS
+# on the grafana service in docker-compose.dev.yml).
+
+apiVersion: 1
+
+datasources:
+  - name: VictoriaLogs-Errors
+    uid: victorialogs-errors
+    type: victoriametrics-logs-datasource
+    access: proxy
+    url: http://victorialogs-errors:9428
+    isDefault: false
+    editable: true

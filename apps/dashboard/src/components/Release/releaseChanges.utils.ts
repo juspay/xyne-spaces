@@ -5,7 +5,7 @@
 import { type ChangeSectionsGroup, type RenderableFileGroup } from './ChangeCards';
 import { extractEnvVarsFromBag } from './envVars';
 import type { ReleaseStageOption } from './ReleaseStagePicker';
-import type { TicketStatusV2 } from '@xyne/shared';
+import type { TicketStatusV2, VCSProviderType } from '@xyne/shared';
 
 // ─── Minimal input shapes (structural) ───────────────────────────────────────
 // We use minimal structural types so callers don't need to import Zero generics.
@@ -93,12 +93,15 @@ export function buildValuesByChangeId(
  */
 export function buildGroupedByApp(
   releaseChanges: ReleaseChangeInput[] | null | undefined,
+  // repoUrl → stored vcsProvider, for the repo header badge.
+  vcsProviderByRepoUrl?: Map<string, VCSProviderType | null>,
 ): ChangeSectionsGroup[] {
   const apps = new Map<
     string,
     {
       appName: string;
       repoUrl: string | null;
+      vcsProvider: VCSProviderType | null;
       files: Map<string, RenderableFileGroup>;
       earliestAt: number;
     }
@@ -106,19 +109,22 @@ export function buildGroupedByApp(
 
   for (const c of releaseChanges ?? []) {
     const appName = c.application?.name ?? '—';
+    const repoUrl = c.application?.repoUrl ?? null;
+    const groupKey = `${repoUrl ?? ''}|${appName}`;
     const filePath = c.filePath ?? '—';
     const fileKey = `${filePath}|${c.changeType}`;
     const createdAt = c.createdAt ?? 0;
 
-    let app = apps.get(appName);
+    let app = apps.get(groupKey);
     if (!app) {
       app = {
         appName,
-        repoUrl: c.application?.repoUrl ?? null,
+        repoUrl,
+        vcsProvider: vcsProviderByRepoUrl?.get(repoUrl ?? '') ?? null,
         files: new Map(),
         earliestAt: createdAt,
       };
-      apps.set(appName, app);
+      apps.set(groupKey, app);
     } else {
       app.earliestAt = Math.min(app.earliestAt, createdAt);
     }
@@ -152,6 +158,7 @@ export function buildGroupedByApp(
     .map(a => ({
       appName: a.appName,
       repoUrl: a.repoUrl,
+      vcsProvider: a.vcsProvider,
       files: Array.from(a.files.values())
         .map(f => ({ ...f, changes: [...f.changes].sort((x, y) => x.createdAt - y.createdAt) }))
         .sort((x, y) => x.earliestAt - y.earliestAt),

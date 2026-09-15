@@ -1,5 +1,6 @@
 import { db } from '../database/client';
 import { logger } from './logger';
+import { RecapEntityType } from '@xyne/shared';
 
 /**
  * Calculate unread recap count for a user
@@ -60,7 +61,7 @@ export async function calculateUnreadCount(userId: string): Promise<number> {
     // Check if there are any recaps for yesterday - use exact date match since recapDate is normalized to midnight IST
     const recaps = await db.recap.findMany({
       where: {
-        entityType: 'CHANNEL',
+        entityType: RecapEntityType.CHANNEL,
         entityId: { in: channelIds },
         recapDate: yesterday,
       },

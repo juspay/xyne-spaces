@@ -13,6 +13,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
 import { enqueueBriefJob } from "../queue/daily-brief-queue.js";
@@ -34,7 +35,7 @@ async function runEnqueue(): Promise<void> {
       await enqueueBriefJob(u.id, dateBucket);
       enqueued++;
     } catch (err) {
-      log.warn(`[daily-brief-cron] failed to enqueue ${u.id}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[daily-brief-cron] failed to enqueue ${u.id}: ${errMsg(err)}`);
     }
   }
   log.info(`[daily-brief-cron] enqueued ${enqueued}/${users.length} brief job(s)`);
@@ -61,7 +62,7 @@ function scheduleNextRun(): void {
         log.info("[daily-brief-cron] skipped — another replica is enqueuing today");
       }
     } catch (err) {
-      log.error(`[daily-brief-cron] unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[daily-brief-cron] unhandled error: ${errMsg(err)}`);
     } finally {
       scheduleNextRun();
     }

@@ -86,6 +86,7 @@ export class EntityAccessRepository {
     entityUserAccess: string;
   }): Promise<EntityAccess> {
     const { workspaceId, shareableEntityType, entityId, userId, ...values } = params;
+    const updatedAt = new Date();
     return this.db.entityAccess.upsert({
       where: {
         workspaceId_shareableEntityType_entityId_userId: {
@@ -95,9 +96,10 @@ export class EntityAccessRepository {
           userId,
         },
       },
-      create: params,
+      create: { ...params, updatedAt },
       update: {
         entityUserAccess: values.entityUserAccess,
+        updatedAt,
       },
     });
   }
@@ -106,7 +108,10 @@ export class EntityAccessRepository {
     id: string,
     data: Pick<Prisma.EntityAccessUpdateInput, 'entityUserAccess'>
   ): Promise<EntityAccess> {
-    return this.db.entityAccess.update({ where: { id }, data });
+    return this.db.entityAccess.update({
+      where: { id },
+      data: { ...data, updatedAt: new Date() },
+    });
   }
 
   deleteForResource(shareableEntityType: string, entityId: string): Promise<Prisma.BatchPayload> {

@@ -33,9 +33,8 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { TicketPriorityIcon } from '../../assets/icons/TicketPriorityIcon';
 import { cn } from '../../utils/classNames';
 import {
-  ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY,
-  PENDING_COMMUNITY_WORKSPACE_ID_KEY,
-  PENDING_COMMUNITY_WORKSPACE_NAME_KEY,
+  PENDING_WORKSPACE_ID_KEY,
+  PENDING_WORKSPACE_NAME_KEY,
   type CommunityJoinRequestContext,
 } from '../../machines/authMachine';
 
@@ -77,7 +76,6 @@ const REF_TEXT_40 = 'rgba(35,34,41,0.4)';
 const REF_LINE = 'rgba(35,34,41,0.1)';
 const REF_RED = '#fd6b6b';
 const REF_JOIN_BORDER = '#e1e7ef';
-const REF_STACK_COLORS = ['#6277fc', '#70c462', '#fbbe39', '#d673ff'] as const;
 
 const GRID = '#e9e9ec';
 const MUTED = '#98a0ad'; // timestamp gray
@@ -106,44 +104,6 @@ const AVATAR_SQUARE_COLORS = [
 
 const getAvatarSquareColor = (index: number, name: string): string =>
   AVATAR_SQUARE_COLORS[(index + hashHue(name)) % AVATAR_SQUARE_COLORS.length] ?? '#4f7df9';
-
-/** Deterministic mock member count like "220K", "140K", "4K". */
-const formatMockMemberCount = (seed: string): string => {
-  const n = (hashHue(seed) % 240) + 2;
-  return n >= 100 ? `${n}K` : `${n}K`;
-};
-
-interface CommunityMemberPreview {
-  letter: string;
-  color: string;
-}
-
-/** Builds the 5-member colourful avatar stack for each community card. */
-const buildMemberPreview = (workspaceName: string): CommunityMemberPreview[] => {
-  const letters = workspaceName
-    .replace(/[^a-zA-Z]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(word => word.charAt(0).toUpperCase());
-
-  const fallbackLetters = ['A', 'P', 'K', 'U', 'M'];
-  const picked = (letters.length >= 5 ? letters.slice(0, 5) : fallbackLetters).map(
-    (letter, index) => ({
-      letter,
-      color:
-        REF_STACK_COLORS[(index + hashHue(workspaceName)) % REF_STACK_COLORS.length] ?? '#6277fc',
-    }),
-  );
-
-  return picked;
-};
-
-/** Master-disable for every community row while a join-request status is active. */
-const isAnyJoinRequestActive = (
-  communityJoinRequest: CommunityJoinRequestContext | null,
-): boolean =>
-  communityJoinRequest?.status === CommunityJoinResultStatus.REQUEST_PENDING ||
-  communityJoinRequest?.status === CommunityJoinResultStatus.REQUEST_REJECTED;
 
 /* ------------------------------------------------------------------ */
 /* Left column — white marketing/auth panel.                           */
@@ -295,9 +255,6 @@ const LeftPanel = ({
           >
             Continue with work email
           </button>
-          <p className='text-[12px] font-medium tracking-[-0.24px]' style={{ color: REF_TEXT_60 }}>
-            Used by 12,000+ teams
-          </p>
         </div>
       </div>
 
@@ -370,8 +327,7 @@ const LeftPanel = ({
                   communityJoinRequest.status === CommunityJoinResultStatus.REQUEST_REJECTED;
                 const isRequestToJoin =
                   workspace.joinPolicy === WorkspaceJoinPolicy.REQUEST_TO_JOIN;
-                const disabled = isAnyJoinRequestActive(communityJoinRequest);
-                const members = buildMemberPreview(workspace.name);
+                const disabled = isRequested || isRejected;
 
                 return (
                   <button
@@ -423,44 +379,8 @@ const LeftPanel = ({
                       </span>
                     </span>
 
-                    {/* Avatars + count + Join */}
-                    <span className='flex shrink-0 items-center gap-[20px]'>
-                      <span className='flex items-center gap-[4px]'>
-                        <span className='flex items-center'>
-                          {members.map((member, memberIndex) => (
-                            <span
-                              key={`${member.letter}-${memberIndex}`}
-                              className={cn(
-                                'flex h-5 w-5 items-center justify-center rounded-[6px] text-[11px] font-bold',
-                                memberIndex !== 0 && 'mr-[-4px]',
-                              )}
-                              style={{
-                                background: member.color,
-                                border: '2px solid white',
-                              }}
-                            >
-                              <span
-                                style={{
-                                  color: 'transparent',
-                                  backgroundImage:
-                                    'linear-gradient(to bottom, rgba(255,255,255,1), rgba(255,255,255,0.75))',
-                                  backgroundClip: 'text',
-                                  WebkitBackgroundClip: 'text',
-                                }}
-                              >
-                                {member.letter}
-                              </span>
-                            </span>
-                          ))}
-                        </span>
-                        <span
-                          className='text-[12px] font-medium tracking-[-0.24px]'
-                          style={{ color: REF_TEXT_60, width: 30 }}
-                        >
-                          {formatMockMemberCount(workspace.id)}
-                        </span>
-                      </span>
-
+                    {/* Join / Request button */}
+                    <span className='flex shrink-0 items-center'>
                       <span
                         className={cn(
                           'flex items-center justify-center gap-1.5 rounded-[8px] bg-white px-[12px] py-[6px] text-[15px] font-medium leading-[1.2] transition',
@@ -478,6 +398,8 @@ const LeftPanel = ({
                             Pending
                             <Clock3 className='h-3.5 w-3.5' />
                           </>
+                        ) : isRequestToJoin ? (
+                          'Request to Join'
                         ) : (
                           'Join'
                         )}
@@ -875,8 +797,8 @@ const MockChat = (): ReactElement => (
 
       <MockMessage
         avatar='#c2410c'
-        initial='D'
-        name='Devesh Prakash'
+        initial='P'
+        name='Piyush Kesharwani'
         text='oh yeah i noticed that too, only on smaller screens'
       />
     </div>
@@ -1205,9 +1127,8 @@ export const CommunityWorkspaceScreen = ({
 
   const handleJoinCommunityWorkspace = (workspace: CommunityWorkspace): void => {
     clearError();
-    localStorage.removeItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY);
-    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY, workspace.id);
-    localStorage.setItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY, workspace.name);
+    localStorage.setItem(PENDING_WORKSPACE_ID_KEY, workspace.id);
+    localStorage.setItem(PENDING_WORKSPACE_NAME_KEY, workspace.name);
 
     if (pendingUserData || Cookies.get('user_session_id')) {
       joinCommunityWorkspace(workspace.id);
@@ -1220,9 +1141,8 @@ export const CommunityWorkspaceScreen = ({
   const handleContinueWithWorkEmail = (): void => {
     clearError();
     startEnterpriseLogin();
-    localStorage.setItem(ENTERPRISE_WORKSPACE_LOGIN_INTENT_KEY, 'true');
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_ID_KEY);
-    localStorage.removeItem(PENDING_COMMUNITY_WORKSPACE_NAME_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
+    localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
     onContinueToAuth();
   };
 

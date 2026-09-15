@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Pencil } from 'lucide-react';
 import {
@@ -194,7 +195,11 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
         setForm(prev => (prev ? { ...prev, tags: merged } : prev));
       }
     } catch (err) {
-      console.error('[TagGenerationConfig] Failed to fetch historical tag values:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[TagGenerationConfig] Failed to fetch historical tag values:'),
+        error: err,
+      });
     }
   };
 
@@ -380,7 +385,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   </button>
                   <button
                     type='button'
-                    className='text-desk-muted hover:text-destructive'
+                    data-ph-capture-attribute-track-id='delete_tag_category'
+                    className='size-auto p-0 text-desk-muted hover:bg-transparent hover:text-destructive'
                     onClick={() => void handleDelete(name)}
                     disabled={editingName !== null || isSaving}
                     data-track-category='DeskSettings'
@@ -603,7 +609,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
             <div className='flex items-center gap-2'>
               <button
                 type='button'
-                className='rounded-[10px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50'
+                data-ph-capture-attribute-track-id='save_tag_category'
+                className='h-auto rounded-[10px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-desk-accent disabled:opacity-50'
                 onClick={() => void handleSave()}
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'

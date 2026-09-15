@@ -4,6 +4,7 @@ import { X, ChevronLeft } from 'lucide-react';
 import { FlowRenderer } from './FlowRenderer';
 import type { FlowDefinition, AppActionResponse, FlowState } from '@xyne/shared';
 import { toast } from 'sonner';
+import type { FlowMessageContext } from './FlowContext';
 
 interface FlowScreenManagerProps {
   /** Initial screen — rendered inline inside the message bubble */
@@ -12,6 +13,7 @@ interface FlowScreenManagerProps {
   conversationId: string;
   /** Called when the flow is fully closed (close_screen with empty stack) */
   onClose?: (finalMessage?: string) => void;
+  messageContext?: FlowMessageContext;
 }
 
 /**
@@ -31,6 +33,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
   messageId,
   conversationId,
   onClose,
+  messageContext,
 }) => {
   const [screenStack, setScreenStack] = useState<FlowDefinition[]>([flow]);
 
@@ -103,6 +106,9 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
         }
 
         case 'ack':
+          // `ack` carries an optional message; only show a toast when one is set,
+          // so a handler can acknowledge silently.
+          if (response.message) toast.success(response.message);
           break;
 
         case 'error':
@@ -144,6 +150,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
         flow={inlineScreen}
         messageId={messageId}
         conversationId={conversationId}
+        {...(messageContext && { messageContext })}
         onAppAction={handleAppAction}
         compact={false}
       />
@@ -207,6 +214,7 @@ export const FlowScreenManager: React.FC<FlowScreenManagerProps> = ({
                     flow={popupScreen}
                     messageId={messageId}
                     conversationId={conversationId}
+                    {...(messageContext && { messageContext })}
                     onAppAction={handleAppAction}
                     onStateChange={handlePopupStateChange}
                     compact={true}

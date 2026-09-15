@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { createTicketWithConversation } from '../core/ticketutils';
-import { TicketPriority, TicketStatusV2, MessageDirection, ExternalEntityType, Prisma, EmailType, DeskType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
@@ -12,7 +11,18 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
-import { resolveParentOption } from '@xyne/shared';
+import {
+  resolveParentOption,
+  TicketPriority,
+  TicketStatusV2,
+  MessageDirection,
+  ExternalEntityType,
+  EmailType,
+  DeskType,
+  isDeskChannelType,
+  parseTicketEtaManagement,
+  mergeTicketEtaManagement,
+} from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
 import { AppEventType, AdditionalFormFieldUpdatedPayload, BaseAppEvent } from '../types';
@@ -22,7 +32,9 @@ import { config } from '@/config/env';
 import { buildEmailTicketAcknowledgmentBody } from '../core/emailUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 
@@ -49,8 +61,21 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
+import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
+import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
+import {
+  resolveStepEstimate,
+  loadBoardEtaContext,
+  evaluateEta,
+  buildEtaActivityIntents,
+  isTerminalStatus,
+  dispatchEtaNotifications,
+  etaSignalsFromResult,
+  writeEtaActivitiesPrisma,
+} from '@/services/etaManagement';
 
 const externalSourceRepo = new ExternalSourceRepository();
+const externalMessageRepo = new ExternalMessageRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
@@ -338,7 +363,28 @@ const transferTicketToBoard = async (params: {
   const { ticketId, targetBoardId, updatedBy } = params;
   const now = new Date();
 
-  await prismaClient.$transaction(async tx => {
+  const currentTicket = await prismaClient.ticket.findUnique({
+    where: { id: ticketId },
+    select: {
+      workspaceId: true,
+      channelId: true,
+      statusV2: true,
+      assignedTo: true,
+      createdBy: true,
+      userGroupId: true,
+      eta: true,
+      metadata: true,
+    },
+  });
+  if (!currentTicket) {
+    throw new Error(`Ticket ${ticketId} not found`);
+  }
+
+  // Resolved outside the transaction: a stable bot-user lookup, not part of the
+  // transactional state, and best kept off the held connection.
+  const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
+
+  const txResult = await prismaClient.$transaction(async tx => {
     const newBoardStages = await tx.stage.findMany({
       where: { boardId: targetBoardId },
       orderBy: { sequenceNumber: 'asc' },
@@ -349,8 +395,6 @@ const transferTicketToBoard = async (params: {
     }
 
     const firstStage = newBoardStages[0];
-    const totalEtaHours = newBoardStages.reduce((sum, stage) => sum + (stage.eta || 0), 0);
-    const ticketEta = totalEtaHours > 0 ? calculateETADeadline(now, totalEtaHours) : null;
 
     const firstTicketInStage = await tx.ticket.findFirst({
       where: {
@@ -369,13 +413,16 @@ const transferTicketToBoard = async (params: {
       kanbanPosition = generateKeyBetween(null, null);
     }
 
-    const updatedTicket = await tx.ticket.update({
+    // `eta` is deliberately left out of this base update - an automatic due date is only
+    // ever set by the domain-service evaluation below, and only when the target board has
+    // opted into automatic ETA management (never a blind stage-eta sum, and never a write
+    // that can shorten the ticket's existing due date).
+    await tx.ticket.update({
       where: { id: ticketId },
       data: {
         boardId: targetBoardId,
         stageName: firstStage.name,
         statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
-        eta: ticketEta,
         kanbanPosition,
         updatedAt: now,
         updatedBy,
@@ -384,22 +431,122 @@ const transferTicketToBoard = async (params: {
 
     await tx.ticketStageEta.deleteMany({ where: { ticketId } });
 
+    let newStageEtaEntryId: string | null = null;
+    let stageEtaDeadline: Date | null = null;
     if (firstStage.eta !== null && firstStage.eta > 0) {
-      await tx.ticketStageEta.create({
+      stageEtaDeadline = calculateETADeadline(now, firstStage.eta);
+      const newStageEtaEntry = await tx.ticketStageEta.create({
         data: {
           ticketId,
           stageId: firstStage.id,
           stageEnteredAt: now,
           stageLeftAt: null,
-          stageEta: calculateETADeadline(now, firstStage.eta),
+          stageEta: stageEtaDeadline,
           updatedBy,
-          workspaceId: updatedTicket.workspaceId,
+          workspaceId: currentTicket.workspaceId,
         },
+        select: { id: true },
       });
+      newStageEtaEntryId = newStageEtaEntry.id;
     }
 
+    await syncStageOverdueFlag(tx, ticketId, now);
+    // ETA domain-service evaluation: forecast (extend-only) + planning-risk state, mirroring
+    // the pattern already used by TicketRepository.updateTicketStage and the Zero
+    // ticket.update board-transfer branch.
+    const effectiveStatusV2 = (firstStage.defaultTicketStatusV2 ?? currentTicket.statusV2) as TicketStatusV2;
+    // metadata AND eta were both read before this transaction opened, so a concurrent write
+    // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
+    // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
+    // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
+    // against - and then overwrite - a due date someone else just moved.
+    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
+      SELECT "metadata", "eta"
+      FROM "tickets"
+      WHERE "id" = ${ticketId}
+      FOR UPDATE
+    `;
+    const lockedEta = lockedTicket?.eta ?? null;
+    const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
+    const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
+    const stepEstimate = resolveStepEstimate(
+      { id: firstStage.id, eta: firstStage.eta },
+      null,
+      { requireExplicitTransition: false },
+    );
+
+    const etaResult = evaluateEta({
+      ticketId,
+      ticketStatus: effectiveStatusV2,
+      isTerminal: isTerminalStatus(effectiveStatusV2),
+      currentTicketEta: lockedEta,
+      currentTicketEtaManagement,
+      boardType: boardEtaCtx.boardType,
+      boardEtaManagement: boardEtaCtx.boardEtaManagement,
+      currentStageId: firstStage.id,
+      stages: boardEtaCtx.stages,
+      transitions: boardEtaCtx.transitions,
+      activeVisit: {
+        stageVisitId: newStageEtaEntryId,
+        transitionId: null,
+        deadline: stageEtaDeadline,
+        deadlineTracked: newStageEtaEntryId !== null,
+        estimateSource: stepEstimate.source,
+        estimateHours: stepEstimate.incomplete ? null : stepEstimate.hours,
+      },
+      trigger: 'STAGE_TRANSITION',
+      now,
+    });
+
+    const mergedMetadata = mergeTicketEtaManagement(
+      lockedTicket?.metadata,
+      etaResult.ticketEtaManagementPatch,
+    );
+
+    const updatedTicket = await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
+          ? { eta: etaResult.etaDecision.newEta }
+          : {}),
+        metadata: mergedMetadata as Prisma.InputJsonValue,
+      },
+    });
+
+    const activityIntents = buildEtaActivityIntents(etaResult, {
+      currentStageId: firstStage.id,
+      oldEta: lockedEta ? lockedEta.getTime() : null,
+      trigger: 'STAGE_TRANSITION',
+      systemReason: `Automatic recalculation after moving ticket to board "${targetBoardId}"`,
+      previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+    });
+    await writeEtaActivitiesPrisma(tx, activityIntents, {
+      ticketId,
+      workspaceId: currentTicket.workspaceId,
+      channelId: currentTicket.channelId,
+      timestamp: now.getTime(),
+      systemActorId,
+    });
+
     await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
+
+    return { updatedTicket, etaResult };
   });
+
+  // Post-commit notification dispatch - best-effort, must never affect the already-
+  // committed response. Suppressed while the ticket is paused.
+  if (txResult.updatedTicket.statusV2 !== TicketStatusV2.PAUSED) {
+    void dispatchEtaNotifications(etaSignalsFromResult(txResult.etaResult), {
+      ticketId,
+      createdBy: currentTicket.createdBy,
+      assignedTo: currentTicket.assignedTo,
+      ticketUserGroupId: currentTicket.userGroupId,
+      boardId: targetBoardId,
+      actorId: updatedBy,
+    }).catch(error => {
+      logger.error('[TicketController] Failed to dispatch ETA notifications', { ticketId, error });
+    });
+  }
 };
 
 export class TicketController {
@@ -555,14 +702,6 @@ export class TicketController {
         });
         return;
       }
-      if (board.projectId !== projectId) {
-        res.status(400).json({
-          error: `Board does not belong to the specified project`,
-          code: 'BOARD_PROJECT_MISMATCH',
-        });
-        return;
-      }
-
       let resolvedStageName: string | undefined;
       if (requestedStageName) {
         const stage = await prismaClient.stage.findFirst({
@@ -614,13 +753,6 @@ export class TicketController {
         res.status(404).json({
           error: `Channel with ID ${resolvedChannelId} not found`,
           code: 'CHANNEL_NOT_FOUND',
-        });
-        return;
-      }
-      if (channel.projectId !== projectId) {
-        res.status(400).json({
-          error: `Channel does not belong to the specified project`,
-          code: 'CHANNEL_PROJECT_MISMATCH',
         });
         return;
       }
@@ -844,13 +976,6 @@ export class TicketController {
           res.status(404).json({
             error: `Board with ID ${boardId} not found`,
             code: 'BOARD_NOT_FOUND',
-          });
-          return;
-        }
-        if (board.projectId !== ticket.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the ticket project',
-            code: 'BOARD_PROJECT_MISMATCH',
           });
           return;
         }
@@ -1226,11 +1351,11 @@ export class TicketController {
       let conversationIdsBySender: string[] | undefined;
       const emailWhere: Prisma.EmailWhereInput = {
         type: EmailType.DEFAULT,
-         // Narrow the sender lookup by channel, else by workspace (the ticket query is the
-        // real isolation boundary). Include null-workspace emails — legacy rows aren't backfilled.
+        // Narrow the sender lookup by channel, else by workspace (the ticket query is the
+        // real isolation boundary). workspaceId is now non-nullable, so scope directly to it.
         ...(channelIds.length > 0
           ? { channelId: { in: channelIds } }
-          : { OR: [{ workspaceId }, { workspaceId: null }] }),
+          : { workspaceId }),
       };
 
       if (senderEmail) {
@@ -1693,6 +1818,13 @@ export class TicketController {
     try {
       const { ticketId, fieldName, fieldValue, channelId, channelName, conversationId, sessionId: _sessionId } = req.body;
 
+      const workspaceId = req.user?.workspaceId;
+      const userId = req.user?.id;
+      if (!workspaceId || !userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
       // Validate required fields
       if (!ticketId || typeof ticketId !== 'string') {
         res.status(400).json({ error: 'ticketId is required', code: 'VALIDATION_ERROR' });
@@ -1713,15 +1845,39 @@ export class TicketController {
 
       logger.info(`[TicketController] Updating form field: ${fieldName} on ticket ${ticketId}`);
 
-      // Fetch ticket to get board context and conversation
-      const ticket = await prismaClient.ticket.findUnique({
-        where: { id: ticketId },
+      // Fetch ticket to get board context and conversation.
+      // Scope the lookup to the caller's workspace.
+      const ticket = await prismaClient.ticket.findFirst({
+        where: { id: ticketId, workspaceId },
         select: { id: true, boardId: true, conversationId: true, workspaceId: true, channelId: true, projectId: true, createdBy: true },
       });
 
       if (!ticket) {
         res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
         return;
+      }
+
+      // Authorize against the TARGET ticket's own channel, not the channel supplied in the
+      // request body, so the authorized object equals the mutated object. PUBLIC channel = any
+      // workspace member; PRIVATE = participant only.
+      const ticketChannelId =
+        ticket.channelId ??
+        (ticket.conversationId
+          ? (await repositories.conversations.findById(ticket.conversationId))?.channelId ?? null
+          : null);
+      if (ticketChannelId) {
+        const ticketChannel = await repositories.channels.findById(ticketChannelId);
+        if (!ticketChannel || ticketChannel.workspaceId !== workspaceId) {
+          res.status(404).json({ error: `Ticket ${ticketId} not found`, code: 'TICKET_NOT_FOUND' });
+          return;
+        }
+        if (ticketChannel.visibility === 'PRIVATE') {
+          const isParticipant = await repositories.channelParticipants.isParticipant(ticketChannelId, userId);
+          if (!isParticipant) {
+            res.status(403).json({ error: 'Access denied - not a channel participant', code: 'FORBIDDEN' });
+            return;
+          }
+        }
       }
 
       // Get form mapping for this board
@@ -1851,7 +2007,7 @@ export class TicketController {
             fieldValue: stringValue,
             previousValue: existing?.fieldValue || undefined,
             updatedBy: req.user!.id,
-            workspaceId: ticket.workspaceId,
+            workspaceId,
           };
 
           const event: BaseAppEvent = {
@@ -1860,8 +2016,8 @@ export class TicketController {
             timestamp: new Date().toISOString(),
           };
 
-          // Fire and forget - don't block the response
-          void emitEventToWorkspaceApps(ticket.workspaceId, event);
+          // Fire and forget - don't block the response.
+          void emitEventToWorkspaceApps(workspaceId, event);
           
           logger.info(`[TicketController] Emitted ADDITIONAL_FORM_FIELD_UPDATED for field "${fieldName}" on ticket ${ticketId}`);
         }
@@ -2058,16 +2214,9 @@ export class TicketController {
           });
           return;
         }
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({
-            error: 'Board does not belong to the channel project',
-            code: 'BOARD_PROJECT_MISMATCH',
-          });
-          return;
-        }
         await emailChannelPreferenceRepo.upsert({
           channelId,
-          deskType: channelPref?.deskType ?? DeskType.EMAIL,
+          deskType: (channelPref?.deskType ?? DeskType.EMAIL) as DeskType,
           boardId: boardIdToConfigure,
         });
       }
@@ -2086,7 +2235,9 @@ export class TicketController {
       //   1. EmailChannelPreference.sendAsEmail — admin-configured alias (highest priority)
       //   2. ExternalSource.displayName — connected mailbox from OAuth integration
       //   3. Desk owner's user email — last-resort fallback
-      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      const externalSource = await externalSourceRepo.findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft'],
+      });
       const ownerUser = channelPref?.ownerUserId
         ? await repositories.users.findById(channelPref.ownerUserId)
         : null;
@@ -2275,22 +2426,7 @@ export class TicketController {
         );
       }
 
-      // Check for duplicate tickets and persist references
-      if (ticket?.id) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: ticket.id,
-          ticketCreatedBy: userId,
-          title: subject,
-          description: body,
-          projectId: ticket.projectId,
-          userId,
-        }).catch(error => {
-          logger.error('[Apps Email Ticket Creation] Failed to persist duplicate references for ticket', {
-            ticketId: ticket.id,
-            error,
-          });
-        });
-      }
+      // Duplicate detection runs inside emailService.createConversationWithEmail.
 
       // Apply optional fields to the created ticket
       if (priority !== undefined || resolvedAssignedTo !== undefined || userGroupId !== undefined || stageName !== undefined || ticketType !== undefined) {
@@ -2446,16 +2582,21 @@ export class TicketController {
 
       const channelPref = await prismaClient.emailChannelPreference.findUnique({
         where: { channelId },
-        select: { sendAsEmail: true, ownerUserId: true, boardId: true, deskType: true },
+        select: { sendAsEmail: true, ownerUserId: true, boardId: true },
       });
-      if (!channelPref || channelPref.deskType !== DeskType.APP) {
-        res.status(400).json({ error: 'Channel is not an APP desk', code: 'NOT_APP_DESK' });
+      if (!channelPref || !isDeskChannelType(channel.type)) {
+        res.status(400).json({ error: 'Channel is not a desk channel', code: 'NOT_DESK_CHANNEL' });
         return;
       }
 
-      const externalSource = await externalSourceRepo.findByChannelId(channelId);
+      const installedAppId = (req as any).auth?.installedAppId as string | undefined;
+      if (!installedAppId) {
+        res.status(403).json({ error: 'App identity not established', code: 'APP_NOT_CONNECTED' });
+        return;
+      }
+      const externalSource = await externalSourceRepo.findChannelAppSource(channelId, installedAppId);
       if (!externalSource) {
-        res.status(503).json({ error: 'App desk source is not configured', code: 'MISCONFIGURED' });
+        res.status(403).json({ error: 'App is not connected to this channel', code: 'APP_NOT_CONNECTED' });
         return;
       }
       if (!externalSource.isActive) {
@@ -2464,7 +2605,16 @@ export class TicketController {
       }
 
       const externalThreadId = threadId;
-      const externalMessageId = bodyExternalId || randomUUID();
+      const appExternalId = bodyExternalId || randomUUID();
+      // Source-namespaced, and written to BOTH Email.externalMessageId and
+      // ExternalMessage.externalId. Those two columns are the same identifier
+      // throughout this repo (core.ts writes normalizedData.externalId to both,
+      // emailService.ts:2517 copies one into the other), and joins rely on that —
+      // so the namespace has to be applied on both sides or not at all. Applying it
+      // is what stops two apps on one channel from colliding on a shared id, since
+      // Email's unique is (externalMessageId, channelId) and the id is app-chosen.
+      const externalMessageId = scopeExternalMessageIdToSource(externalSource.id, appExternalId);
+
       let customFieldValues: CustomFieldWritePayload | undefined;
       let emailFrom =
         (senderName && senderEmail && `${senderName} <${senderEmail}>`) ||
@@ -2480,15 +2630,23 @@ export class TicketController {
       const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
 
       const ownerUser = channelPref.ownerUserId ? await repositories.users.findById(channelPref.ownerUserId) : null;
+      // The desk's own address comes from its mailbox source, never from the app
+      // binding — an app-desk displayName is the app's name and holds no address, so
+      // reading it here would skip a perfectly good mailbox for the owner's personal
+      // address on any EMAIL desk without sendAsEmail.
+      const mailboxSource = await externalSourceRepo.findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft', 'zoho'],
+      });
       const recipientEmail =
         channelPref.sendAsEmail ||
-        extractEmailAddress(externalSource.displayName ?? '') ||
+        extractEmailAddress(mailboxSource?.displayName ?? '') ||
         ownerUser?.email ||
         `desk-${channelId}@apps.xyne.ai`;
 
       logger.info('[AppDeskInbound] received', {
         channelId,
         threadId: externalThreadId,
+        externalId: appExternalId,
         externalMessageId,
         externalIdProvided: !!bodyExternalId,
         from: emailFrom,
@@ -2498,7 +2656,41 @@ export class TicketController {
         appUserId: userId,
       });
 
-      const threadEmail = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+      // Thread continuation is source-scoped via the app's ExternalMessage link; the
+      // channel-scoped fallback only covers pre-existing threads with a missing link
+      // (self-healed by the externalSourceLink write below). Do not remove the fallback.
+      const linkedMessage = await externalMessageRepo.findByThreadId(externalSource.id, externalThreadId, ExternalEntityType.EMAIL);
+      let threadEmail = linkedMessage?.entityId ? await repositories.emails.findById(linkedMessage.entityId) : null;
+      if (!threadEmail) {
+        const candidate = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+        if (candidate) {
+          // The candidate matched on (threadId, channelId) alone, which says nothing
+          // about who owns it. On a shared desk another app — or the mailbox — can
+          // already own that thread, and adopting it would file this app's message
+          // into someone else's ticket. Only adopt a thread no other source claims.
+          const conversationEmails = await repositories.emails.findByConversationId(candidate.conversationId);
+          const foreignLink = await externalMessageRepo.findForeignLinkByEmailIds(
+            conversationEmails.map(e => e.id),
+            externalSource.id,
+          );
+          if (foreignLink) {
+            logger.info('[AppDeskInbound] thread id collides with another source on this channel — starting a new ticket', {
+              channelId,
+              threadId: externalThreadId,
+              externalSourceId: externalSource.id,
+              ownedByExternalSourceId: foreignLink.externalSourceId,
+            });
+          } else {
+            threadEmail = candidate;
+            logger.warn('[AppDeskInbound] legacy channel-scoped thread fallback used (ExternalMessage link missing)', {
+              channelId,
+              threadId: externalThreadId,
+              externalSourceId: externalSource.id,
+            });
+          }
+        }
+      }
+
       if (threadEmail) {
         const { email } = await emailService.addEmailToConversation({
           conversationId: threadEmail.conversationId,
@@ -2506,13 +2698,13 @@ export class TicketController {
           emailBody,
           emailTo: [recipientEmail],
           emailFrom,
+          externalSourceId: externalSource.id,
           externalThreadId,
           externalMessageId,
           emailType: EmailType.DEFAULT,
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
           receivedAt: new Date(),
         });
-        await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, email.id);
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
           select: { id: true, xyneId: true, boardId: true },
@@ -2584,15 +2776,21 @@ export class TicketController {
         emailBody,
         emailFrom,
         emailTo: [recipientEmail],
+        externalSourceId: externalSource.id,
         externalThreadId,
         externalMessageId,
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
-        ...(senderEmail && {
-          ticketMetadata: {
+        ticketMetadata: {
+          deskSource: {
+            type: 'app',
+            installedAppId,
+            appName: externalSource.displayName ?? installedAppId,
+          },
+          ...(senderEmail && {
             reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase(),
             fromEmailAddress: senderEmail,
-          },
-        }),
+          }),
+        },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
       });
@@ -2611,8 +2809,6 @@ export class TicketController {
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
       }
-
-      await this.recordIncomingAppMessage(externalSource.id, externalMessageId, externalThreadId, initialEmail.id);
 
       logger.info('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
@@ -2640,29 +2836,4 @@ export class TicketController {
     }
   };
 
-  private async recordIncomingAppMessage(
-    externalSourceId: string,
-    externalMessageId: string,
-    externalThreadId: string,
-    emailId: string,
-  ): Promise<void> {
-    try {
-      const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'externalSource', { id: externalSourceId });
-      await prismaClient.externalMessage.create({
-        data: {
-          externalSourceId,
-          externalId: externalMessageId,
-          externalThreadId,
-          messageId: emailId,
-          entityId: emailId,
-          direction: MessageDirection.INCOMING,
-          entityType: ExternalEntityType.EMAIL,
-          workspaceId,
-        },
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return;
-      throw error;
-    }
-  }
 }

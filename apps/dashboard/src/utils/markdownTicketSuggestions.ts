@@ -7,11 +7,12 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
+import { TicketPriority } from '@xyne/shared';
 
 export interface TicketSuggestion {
   suggestionId: string; // Unique UUID for this suggestion
   title: string;
-  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  priority: TicketPriority;
   description: string;
   suggestedAssignee: string;
 }
@@ -103,7 +104,7 @@ export function parseMarkdownWithTicketSuggestions(
         priority:
           typeof suggestion['priority'] === 'string'
             ? (suggestion['priority'] as TicketSuggestion['priority'])
-            : ('MEDIUM' as const),
+            : TicketPriority.MEDIUM,
         description: typeof suggestion['description'] === 'string' ? suggestion['description'] : '',
         suggestedAssignee: typeof suggestion['assignee'] === 'string' ? suggestion['assignee'] : '',
       };

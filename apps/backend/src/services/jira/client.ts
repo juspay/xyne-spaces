@@ -1,6 +1,7 @@
 import { config } from '@/config/env';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
+import { ChannelScopeType } from '@xyne/shared';
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const JIRA_MAX_RETRY_ATTEMPTS = 5;
@@ -566,7 +567,7 @@ export class JiraMigrationClient {
         jiraAttachmentId: attachment.id,
         importedAt: new Date().toISOString(),
       },
-      scopeType: 'TICKET',
+      scopeType: ChannelScopeType.TICKET,
       scopeId: issueKey,
     });
 

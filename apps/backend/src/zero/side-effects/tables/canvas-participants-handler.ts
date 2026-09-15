@@ -1,10 +1,10 @@
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import type { CanvasParticipantPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { enqueueCanvasPermissionRefresh } from '@/services/canvasPermissionSync';
 
@@ -17,8 +17,9 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
     if (participant.userId) return [participant.userId];
 
     if (participant.userGroupId) {
+      const userGroupId = participant.userGroupId;
       const mappings = await db.userGroupMapping.findMany({
-        where: { userGroupId: participant.userGroupId },
+        where: { userGroupId },
         select: { userId: true },
       });
       return Array.from(new Set(mappings.map(m => m.userId).filter(Boolean)));

@@ -1,4 +1,5 @@
 import { fcmPushService, type FcmNotificationPayload } from '@/services/fcmService';
+import { CallType } from '@xyne/shared';
 
 // Reaches the private serializer on the real singleton. `private` is a
 // compile-time-only marker in TS, so the method exists at runtime.
@@ -119,7 +120,7 @@ describe('fcmService.buildDataPayload — 4KB FCM data limit', () => {
       metadata: {
         callId: 'call-1',
         callerName: 'Krishan Kumar Saini',
-        callType: 'AUDIO',
+        callType: CallType.AUDIO,
         channelId: 'chan-3',
         roomLink: 'https://livekit.example.com/room/abc',
         serverUrl: 'wss://livekit.example.com',

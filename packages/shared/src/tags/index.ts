@@ -51,3 +51,8 @@ export const findDuplicateTags = (list: string[] | undefined): DuplicateTag[] =>
   });
   return duplicates;
 };
+
+// Controlled classification vocabulary (thread types).
+export * from './vocabularies';
+// The applied-tag record and the one parser/serializer for the stored columns.
+export * from './appliedTags';

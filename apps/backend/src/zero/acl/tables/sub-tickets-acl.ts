@@ -34,6 +34,13 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
     if (this.ctx.role === 'GUEST') {
       await this.verifyGuestScope(args.id, tx);
+      // verifyGuestScope only covers the CURRENT mapping - re-pointing needs the new target.
+      if (args.mappedTicketId) {
+        const target = await tx.run(zql.tickets.where('id', args.mappedTicketId as string).one());
+        if (!target || !(await hasGuestTicketAccess(this.ctx, tx, target))) {
+          throw new MutationACLError('Sub-ticket not accessible for guest users', 'sub_tickets');
+        }
+      }
       return;
     }
 
@@ -41,6 +48,45 @@ export class SubTicketsACL extends BaseACL<'sub_tickets'> {
     const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
     if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
+    }
+
+    // When mappedTicketId is being changed, verify the caller can access the new
+    // target's channel and that it is in the same workspace.
+    if (args.mappedTicketId) {
+      const accessibleNewMapped = await tx.run(zql.tickets
+        .where('id', args.mappedTicketId as string)
+        .where('workspaceId', this.ctx.workspaceId)
+        .whereExists('conversation', (conversation) => {
+          return conversation.whereExists('channel', (channel) => {
+            return channel.where(({ cmp, or, exists, and }) => {
+              return or(
+                and(
+                  cmp('visibility', ChannelVisibility.PRIVATE),
+                  exists('participants', (participants) => {
+                    return participants.where('userId', this.ctx.userID);
+                  })
+                ),
+                and(
+                  cmp('visibility', ChannelVisibility.PUBLIC),
+                  exists('project', (project) => {
+                    return project.whereExists('channels', (channelQuery) => {
+                      return channelQuery
+                        .where('visibility', ChannelVisibility.PUBLIC)
+                        .whereExists('participants', (participants) => {
+                          return participants.where('userId', this.ctx.userID);
+                        });
+                    });
+                  })
+                )
+              );
+            });
+          });
+        })
+        .one());
+
+      if (!accessibleNewMapped) {
+        throw new MutationACLError('Sub-ticket update failed: you do not have access to the target mapped ticket\'s channel', 'sub_tickets');
+      }
     }
 
     if (!subTicket.mappedTicketId) {

@@ -1,12 +1,13 @@
 import { UserRepository } from '../../../../database/repositories/users';
+import { AuthProvider, ChannelScopeType } from '@xyne/shared';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
 import { config } from '../../../../config/env';
-import { AuthProvider } from '@prisma/client';
 
 import { logger } from '../../../../utils/logger';
 import { getAllBotTokens } from '../../../../migration/slack/slackMigrationBotConfig';
+import { slackOfflineReference } from './slackOfflineReference';
 import { WebClient } from '@slack/web-api';
 
 /**
@@ -161,6 +162,8 @@ export async function fetchSlackUserInfo(
   slackUserId: string,
   botOauthToken: string
 ): Promise<SlackUserInfo | null> {
+  const offline = slackOfflineReference();
+  if (offline) return (offline.users.get(slackUserId) as SlackUserInfo) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
   let bestResult: SlackUserInfo | null = null;
 
@@ -222,6 +225,8 @@ async function fetchSlackChannelInfo(
   channelId: string,
   botOauthToken: string
 ): Promise<{ id: string; name: string; isPrivate: boolean } | null> {
+  const offline = slackOfflineReference();
+  if (offline) return offline.channels.get(channelId) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
 
   for (let i = 0; i < tokens.length; i++) {
@@ -273,6 +278,8 @@ async function requestSlackGroupInfo(slackGroupId: string, botOauthToken: string
  * first token that resolves the group with members; otherwise the best result.
  */
 async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string): Promise<SlackGroupInfo | null> {
+  const offline = slackOfflineReference();
+  if (offline) return (offline.groups.get(slackGroupId) as SlackGroupInfo) ?? null;
   const tokens = buildTokenFallbackList(botOauthToken);
   let bestResult: SlackGroupInfo | null = null;
 
@@ -309,11 +316,26 @@ async function resolveApiUser(
     undefined;
 
   if (!slackUser?.profile?.email) {
+    // Offline migration: an author with no email (deactivated / external / missing scope) still has
+    // a name in the dump — create a best-effort placeholder so the message keeps its sender instead
+    // of being silently dropped. The live path (no offline ref) is unchanged.
+    const offline = slackOfflineReference();
+    if (offline?.createUser) {
+      const name = displayName || `Slack user ${slackUserId}`;
+      const dbUserId = await offline.createUser(`slack-${slackUserId}@migrated.invalid`, name, !!slackUser?.deleted);
+      if (dbUserId) return { dbUserId, displayName: name };
+    }
     return { displayName };
   }
   const userRepo = new UserRepository();
   const user = await userRepo.findByEmail(slackUser.profile.email, workspaceId);
-  return { dbUserId: user?.id, displayName };
+  if (user) return { dbUserId: user.id, displayName };
+  const offline = slackOfflineReference();
+  if (offline?.createUser) {
+    const dbUserId = await offline.createUser(slackUser.profile.email, displayName || slackUser.profile.email, !!slackUser.deleted);
+    return { dbUserId, displayName };
+  }
+  return { displayName };
 }
 
 /**
@@ -410,24 +432,32 @@ export async function resolveApiGroup(slackGroupId: string, botOauthToken: strin
     try {
       let orgMember = await dbClient.orgMember.findUnique({
         where: { email },
-        select: { memberId: true },
+        select: { memberId: true, orgId: true },
       });
+      const workspace = await dbClient.workspace.findUnique({
+        where: { id: resolvedWorkspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace) {
+        logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
+        return undefined;
+      }
+      // Never pull a Slack member who already belongs to a DIFFERENT org into this
+      // workspace: buildTokenFallbackList tries every configured bot token, so a fallback
+      // token can resolve an identity that belongs elsewhere. New members of THIS org are
+      // still auto-created; existing members of THIS org are still linked by email.
+      if (orgMember && orgMember.orgId !== workspace.orgId) {
+        logger.warn('[resolveApiGroup] Skipping cross-org Slack member (email belongs to another org)', { email });
+        return undefined;
+      }
       if (!orgMember) {
-        const workspace = await dbClient.workspace.findUnique({
-          where: { id: resolvedWorkspaceId },
-          select: { orgId: true },
-        });
-        if (!workspace) {
-          logger.warn('[resolveApiGroup] Workspace not found', { workspaceId: resolvedWorkspaceId });
-          return undefined;
-        }
         orgMember = await dbClient.orgMember.create({
           data: {
             orgId: workspace.orgId,
             email,
             role: 'MEMBER',
           },
-          select: { memberId: true },
+          select: { memberId: true, orgId: true },
         });
         logger.info('[resolveApiGroup] OrgMember created for group member', { email });
       }
@@ -582,7 +612,7 @@ function buildChannelMentionSpan(
   channel: { id: string; name: string; visibility?: string | null; scopeType?: string | null },
   quote: string,
 ): string {
-  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === 'DM' || channel.scopeType === 'GROUP_DM';
+  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
   const channelName = channel.name || channel.id;
   return `<span data-channel-mention=${quote}${quote} data-channel-id=${quote}${escapeHtml(channel.id)}${quote} data-channel-name=${quote}${escapeHtml(channelName)}${quote} data-is-private=${quote}${String(isPrivate)}${quote} class=${quote}chat-input-channel-mention${quote}>#${escapeHtml(channelName)}</span>`;
 }

@@ -3,14 +3,37 @@ import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
-import { CanvasVisibility, ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
+import {
+  CanvasVisibility,
+  ChannelScopeType,
+  ChannelVisibility,
+  TicketStatus,
+  TicketStatusV2,
+  type Schema,
+  AttachmentEntityType,
+  VespaOperationType as VespaOpType,
+} from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
+import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Channel, Message, Project, Ticket, Email, User, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call, CollectionItem, Apps } from '@prisma/client';
+import {
+  Channel,
+  Message,
+  Project,
+  Ticket,
+  Email,
+  User,
+  Canvas,
+  Call,
+  CollectionItem,
+  Apps,
+} from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
+import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -63,6 +86,9 @@ const loadTicketFormFields = async (ticketId: string) => {
 };
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
+// One-hot of the doc's channel, matched against user-doc channelWeights by the `personalized` rank profile.
+const channelWeightedSetFor = (channelId: string | null | undefined) =>
+  channelId ? { [`channel:${channelId}`]: 1 } : undefined;
 
 /**
  * Convert timestamp to number (Unix timestamp in milliseconds)
@@ -421,10 +447,26 @@ export const mapMessage = async (
     }),
   ])
 
+  // Bot messages carry FlowJSON, whose text lives in the component tree — the
+  // HTML only holds a fallback label ("Flow JSON"), so html-to-text would index
+  // that instead of the message. Reuses the same extraction the notification
+  // path uses; plain HTML content falls through unchanged.
   const messageContent =
-    extractPlainTextFromHtml(args.content || '') || ''
+    getFlowJsonContentForNotification(args.content || '') ||
+    extractPlainTextFromHtml(args.content || '') || '';
+
+  const messageLinks = extractLinksFromContent(args.content || '');
 
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
+
+  // Tag names, denormalized onto the doc so search can filter on them. Everything on the
+  // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
+  // minus anything removed.
+  //
+  // messageActs holds the thread types this message is the EVIDENCE for: the classifier
+  // cites a message per type, and that citation is stored on both sides.
+  const messageActs = indexableTagNames(parseAppliedTags(args.messageActs));
+  const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
@@ -447,6 +489,9 @@ export const mapMessage = async (
     docId: args.messageId,
     docType: VespaDocType.MESSAGE,
     text: messageContent,
+    chunks: chunkPlainText(messageContent),
+    links: messageLinks,
+    hasLinks: messageLinks.length > 0,
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",
@@ -458,6 +503,13 @@ export const mapMessage = async (
     channelRef: getRef(channelSchema, conversation.channelId),
     threadId: args.conversationId,
     isRootMessage: args.messageId === conversation.initialMessageId,
+    messageActs,
+    // Only the root message carries the thread's types — one doc to refeed when they
+    // change rather than the whole thread. Free-form tags are indexed alongside the
+    // built-in vocabulary, so both are searchable.
+    ...(args.messageId === conversation.initialMessageId && threadType.length > 0
+      ? { threadType }
+      : {}),
     channelWeightedSet: {
       [`channel:${conversation.channelId}`]: 1
     },
@@ -575,7 +627,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     }),
     db.project.findUnique({
       where: { id: args.projectId },
-      select: { name: true }
+      select: { name: true, code: true }
     }),
     db.user.findUnique({
       where: { id: args.createdBy },
@@ -639,6 +691,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     convId: args.conversationId,
     userGroupId: args.userGroupId,
     channelRef: getRef(channelSchema, conversation?.channelId || ""),// if there is no channelId we can refer it with projectRef
+    channelWeightedSet: channelWeightedSetFor(conversation?.channelId),
     projectRef: getRef(projectSchema, args.projectId),
     threadId: args.conversationId,
     status: (args.statusV2 || mapStatusToStatusV2(args.status as TicketStatus)) as TicketStatusV2,
@@ -649,6 +702,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     title: args.title,
     workflowType: "",// later we should populate workflow type
     description: args.description,
+    chunks: chunkPlainText(extractPlainTextFromHtml(args.description || '')),
     ticketType: "", // later we should populate ticket type
     priority: args.priority,
     stage: args.stageName,
@@ -672,6 +726,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedToName: assignedToUser?.name || '',
     closedByName: closedByUser?.name || '',
     projectName: project?.name || '',
+    projectCode: project?.code || '',
     ticketMentions: descriptionMentions?.map(v => v.username) || [],
     threadMentions: threadMentions,
     threadSenders: threadSenders,
@@ -704,7 +759,7 @@ export const mapCollection = async (
 
   const attachment = collectionItem
     ? await db.messageAttachment.findFirst({
-        where: { entityId: collectionItem.id, entityType: 'COLLECTION' },
+        where: { entityId: collectionItem.id, entityType: AttachmentEntityType.COLLECTION },
       })
     : null;
 
@@ -821,6 +876,7 @@ export const mapCollection = async (
     clFd: collectionItem.collectionId,
     projectId,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(rootCollection.scopeType === 'CHANNEL' ? rootCollection.scopeId : undefined),
     workspaceId,
     orgId,
   };
@@ -927,6 +983,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId: undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
@@ -1027,6 +1084,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
     mimeType: 'text/plain',
     subApp: SubApp.TRANSCRIPT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId,
     callType: args.callType,
     workspaceId: effectiveWorkspaceId,
@@ -1337,6 +1395,7 @@ export const mapFile = async (
     mimeType: args.mimetype,
     subApp: args.entityType === 'TICKET' ? SubApp.TICKET_ATTACHMENT : SubApp.CHAT_ATTACHMENT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(channelId),
     conversationId,
     messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
     ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
@@ -1349,7 +1408,7 @@ export const mapFile = async (
  * Chunk a plain-text string into segments of at most `maxLen` characters,
  * splitting on word boundaries so search snippets are coherent.
  */
-const chunkPlainText = (text: string, maxLen = 2000): string[] => {
+const chunkPlainText = (text: string, maxLen = 1500): string[] => {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks: string[] = [];
   let current = '';
@@ -1385,7 +1444,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 
   const ticket = await db.ticket.findFirst({
     where: { conversationId: email.conversationId },
-    select: { id: true, xyneId: true },
+    select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
@@ -1446,6 +1505,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
+    projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,
@@ -1456,6 +1516,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     /** entity = "support_desk"; future: "personal" for Gmail */
     entity: 'support_desk',
     channelRef: getRef(channelSchema, channelId),
+    channelWeightedSet: channelWeightedSetFor(channelId),
     from: email.from,
     to: email.to,
     cc: email.cc.length > 0 ? email.cc : undefined,
@@ -1673,7 +1734,7 @@ export const fetchAndMapBySchema = async (
 
 
 export const VespaOperationType: Record<VespaJobType, VespaOpType> = {
-  feed: 'INSERT',
-  update: 'UPDATE',
-  delete: 'DELETE',
+  feed: VespaOpType.INSERT,
+  update: VespaOpType.UPDATE,
+  delete: VespaOpType.DELETE,
 }

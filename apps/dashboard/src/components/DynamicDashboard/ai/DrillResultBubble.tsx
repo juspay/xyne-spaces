@@ -50,6 +50,7 @@ export const DrillResultBubble = ({
       <button
         type='button'
         disabled={added || adding}
+        data-ph-capture-attribute-track-id='add_drill_to_dashboard'
         onClick={() => {
           setAdding(true);
           void onAdd({ title, visualType, queryPlan })

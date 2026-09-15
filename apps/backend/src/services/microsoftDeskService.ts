@@ -5,6 +5,7 @@
  */
 
 import crypto from 'crypto';
+import { EmailMergeMode, DeskType, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
@@ -12,7 +13,6 @@ import { decrypt, encrypt } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
-import { EmailMergeMode, DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 import { CHANNEL_EMAIL_SOURCE_TYPES } from './channelEmailAliasService';
@@ -293,14 +293,14 @@ export class MicrosoftDeskService {
     const channelId = await db.$transaction(async (tx) => {
       const channel = await tx.channel.create({
         data: {
-          scopeType: 'DEFAULT',
+          scopeType: ChannelScopeType.DEFAULT,
           name: channelData.name,
           description: channelData.description,
           visibility: channelData.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
           createdBy: channelData.userId,
           workspaceId: channelData.workspaceId,
           projectId: channelData.projectId,
-          type: 'EMAIL',
+          type: ChannelType.EMAIL,
         },
       });
 
@@ -321,7 +321,7 @@ export class MicrosoftDeskService {
         data: {
           channelId: channel.id,
           userId: channelData.userId,
-          role: 'ADMIN',
+          role: ChannelRole.ADMIN,
           workspaceId: channelData.workspaceId,
         },
       });
@@ -346,12 +346,33 @@ export class MicrosoftDeskService {
         },
       });
 
-      // Reuse the project's default board (same pattern as Google) — no per-connection
-      // board/stages creation. If the project has no boards yet, boardId stays null.
-      const board = await tx.board.findFirst({
+      // Reuse the project's boards (same pattern as Google) — no per-connection
+      // board/stages creation. If the project has no boards yet, the mapping list is empty.
+      const boards = await tx.board.findMany({
         where: { projectId: channelData.projectId },
         orderBy: { createdAt: 'asc' },
+        select: { id: true },
       });
+      const board = boards[0] ?? null;
+
+      // Populate ChannelBoardMapping so downstream consumers can resolve
+      // channel→boards without going through channel.projectId.
+      // Default: explicit channelData.boardId if provided, else the first (oldest) board.
+      if (boards.length > 0) {
+        const defaultBoardId = channelData.boardId ?? boards[0].id;
+        await tx.channelBoardMapping.createMany({
+          data: boards.map(b => ({
+            channelId: channel.id,
+            boardId: b.id,
+            workspaceId: channelData.workspaceId,
+            isDefault: b.id === defaultBoardId,
+            createdBy: channelData.userId,
+            createdAt: now,
+            updatedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
 
       await tx.externalSource.create({
         data: {

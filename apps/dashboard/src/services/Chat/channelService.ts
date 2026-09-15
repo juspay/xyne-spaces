@@ -1,4 +1,10 @@
 import { apiInstance } from '../clients/apiClient';
+import { DeskType, ChannelScopeType } from '@xyne/shared';
+import type {
+  AddGroupDmParticipantsRequest,
+  AddGroupDmParticipantsResponse,
+  HistoryPreviewResponse,
+} from '@xyne/shared';
 
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
@@ -18,7 +24,7 @@ export interface CreateChannelFormData {
 
 export interface CreateChannelRequest {
   name: string;
-  scopeType: 'DEFAULT';
+  scopeType: ChannelScopeType.DEFAULT;
   scopeId?: string;
   description?: string;
   topicTags?: string[];
@@ -35,11 +41,11 @@ export interface CreateChannelRequest {
 }
 
 export type EmailDeskOpts =
-  | { deskType: 'EMAIL' }
-  | { deskType: 'DL'; dlEmail: string }
-  | { deskType: 'SLACK'; slackChannelId: string }
-  | { deskType: 'APP'; installedAppId: string }
-  | { deskType: 'CALL' };
+  | { deskType: DeskType.EMAIL }
+  | { deskType: DeskType.DL; dlEmail: string }
+  | { deskType: DeskType.SLACK; slackChannelId: string }
+  | { deskType: DeskType.APP; installedAppId: string }
+  | { deskType: DeskType.CALL };
 
 export interface CreateChannelResponse {
   success: boolean;
@@ -82,18 +88,12 @@ export interface CreateDmResponse {
   isExisting: boolean;
 }
 
-export interface AddGroupDmParticipantsRequest {
-  userIds: string[];
-  includeHistory: boolean;
-}
-
-export interface AddGroupDmParticipantsResponse {
-  channelId: string;
-  isExisting: boolean;
-  participantsAdded: number;
-  conversationsMigrated?: number;
-  message: string;
-}
+export type {
+  AddGroupDmParticipantsRequest,
+  AddGroupDmParticipantsResponse,
+  HistoryPreviewEntry,
+  HistoryPreviewResponse,
+} from '@xyne/shared';
 
 export interface PromoteGroupDmRequest {
   name: string;
@@ -109,13 +109,10 @@ export interface ChannelMember {
 }
 
 export class ChannelService {
-  async checkDuplicateChannel(
-    title: string,
-    orgName: string,
-  ): Promise<CheckDuplicateChannelResponse> {
+  async checkDuplicateChannel(title: string): Promise<CheckDuplicateChannelResponse> {
     const response = await apiInstance.post<CheckDuplicateChannelResponse>(
       '/channels/check-duplicate',
-      { name: title, projectId: orgName || 'default' },
+      { name: title },
     );
     return response.data;
   }
@@ -127,7 +124,7 @@ export class ChannelService {
   ): Promise<CreateChannelResponse> {
     const requestData: CreateChannelRequest = {
       name: formData.name,
-      scopeType: 'DEFAULT',
+      scopeType: ChannelScopeType.DEFAULT,
       description: formData.description || '',
       visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
       projectId: formData.projectId,
@@ -137,21 +134,21 @@ export class ChannelService {
       ...(channelType === 'EMAIL' &&
         emailDeskOpts && {
           deskType: emailDeskOpts.deskType,
-          ...(emailDeskOpts.deskType === 'DL' && { dlEmail: emailDeskOpts.dlEmail }),
+          ...(emailDeskOpts.deskType === DeskType.DL && { dlEmail: emailDeskOpts.dlEmail }),
         }),
       ...(channelType === 'SLACK' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'SLACK' && {
+        emailDeskOpts.deskType === DeskType.SLACK && {
           slackChannelId: emailDeskOpts.slackChannelId,
         }),
       ...(channelType === 'APP' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'APP' && {
+        emailDeskOpts.deskType === DeskType.APP && {
           installedAppId: emailDeskOpts.installedAppId,
         }),
       ...(channelType === 'CALL' &&
         emailDeskOpts &&
-        emailDeskOpts.deskType === 'CALL' && {
+        emailDeskOpts.deskType === DeskType.CALL && {
           deskType: emailDeskOpts.deskType,
         }),
     };
@@ -162,6 +159,17 @@ export class ChannelService {
 
   async createDm(data: CreateDmRequest): Promise<CreateDmResponse> {
     const response = await apiInstance.post<CreateDmResponse>('/users/me/dms', data);
+    return response.data;
+  }
+
+  async getDmHistoryPreview(
+    channelId: string,
+    params: { since: number | null; limit?: number },
+  ): Promise<HistoryPreviewResponse> {
+    const response = await apiInstance.get<HistoryPreviewResponse>(
+      `/users/me/dms/${channelId}/history-preview`,
+      { params: { ...(params.since !== null && { since: params.since }), limit: params.limit } },
+    );
     return response.data;
   }
 

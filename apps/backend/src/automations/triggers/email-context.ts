@@ -1,8 +1,10 @@
-import { EmailType } from '@prisma/client';
 import { db } from '@/database/client';
+import { EmailType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { logger } from '@/utils/logger';
 import { buildTicketContext } from './ticket-context';
 import type { EmailEventPayload } from '../types/automation-events';
+import type { TicketLike } from './ticket-context';
 
 export function extractEmailAddress(raw: string): string {
   if (!raw) return '';
@@ -22,6 +24,22 @@ export function extractDisplayName(raw: string): string {
 export function extractDomain(addr: string): string {
   const email = extractEmailAddress(addr);
   return email.split('@')[1] ?? '';
+}
+
+/** Build a link to a specific email in a desk ticket. */
+function buildEmailUrl(params: {
+  ticketUrl: string | null | undefined;
+  conversationId: string | null | undefined;
+  ticketId: string | null | undefined;
+  emailId: string;
+}): string | null {
+  const { ticketUrl, conversationId, ticketId, emailId } = params;
+  if (!ticketUrl || !conversationId || !emailId) return null;
+
+  const query = new URLSearchParams({ conversationId });
+  if (ticketId) query.set('ticketId', ticketId);
+  query.set('mail', emailId);
+  return `${ticketUrl}?${query.toString()}`;
 }
 
 function uniqueAddresses(addrs: readonly string[]): string[] {
@@ -56,6 +74,7 @@ interface EmailRow {
   externalThreadId: string;
   externalMessageId: string;
   createdAt: Date;
+  hasAttachments?: boolean;
 }
 
 async function loadTicketContextForEmail(
@@ -65,7 +84,7 @@ async function loadTicketContextForEmail(
   if (!ticketStub) return null;
   const ticket = await repositories.tickets.getTicketById(ticketStub.id);
   if (!ticket) return null;
-  return buildTicketContext(ticket);
+  return buildTicketContext(ticket as TicketLike);
 }
 
 /** Derived address / domain fields shared by both email triggers. */
@@ -112,6 +131,7 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     externalThreadId: email.externalThreadId,
     externalMessageId: email.externalMessageId,
     createdAt: email.createdAt,
+    hasAttachments: email.hasAttachments,
   };
 }
 
@@ -130,17 +150,32 @@ export async function hydrateEmailReceivedPayload(
   }
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const hasAttachments = await repositories.messageAttachments
+    .hasEmailAttachment(email.id)
+    .catch(error => {
+      logger.warn(
+        `[automations] failed to hydrate attachment state for email=${email.id}`,
+        error,
+      );
+      return false;
+    });
+  const emailUrl = buildEmailUrl({
+    ticketUrl: ticketContext?.ticket.url,
+    conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
+    ticketId: ticketContext?.ticket.id,
+    emailId: email.id,
+  });
 
   return {
     ...payload,
-    email: emailRowToOutput(email),
+    email: { ...emailRowToOutput({ ...email, hasAttachments } as EmailRow), url: emailUrl },
     ...(ticketContext ?? {}),
     requester: {
       email: extractEmailAddress(email.from),
       name: extractDisplayName(email.from),
     },
     fromDomain: extractDomain(email.from),
-    ...deriveAddressFields(email),
+    ...deriveAddressFields(email as EmailRow),
     isReply,
   };
 }
@@ -152,6 +187,12 @@ export async function hydrateEmailSentPayload(
   if (!email) return { ...payload };
 
   const ticketContext = await loadTicketContextForEmail(email.conversationId);
+  const emailUrl = buildEmailUrl({
+    ticketUrl: ticketContext?.ticket.url,
+    conversationId: ticketContext?.ticket.conversationId ?? email.conversationId,
+    ticketId: ticketContext?.ticket.id,
+    emailId: email.id,
+  });
 
   const priorReply = await db.email
     .findFirst({
@@ -168,14 +209,14 @@ export async function hydrateEmailSentPayload(
 
   return {
     ...payload,
-    email: emailRowToOutput(email),
+    email: { ...emailRowToOutput(email as EmailRow), url: emailUrl },
     ...(ticketContext ?? {}),
     sender: {
       email: extractEmailAddress(email.from),
       name: extractDisplayName(email.from),
     },
     senderDomain: extractDomain(email.from),
-    ...deriveAddressFields(email),
+    ...deriveAddressFields(email as EmailRow),
     isFirstReply,
   };
 }

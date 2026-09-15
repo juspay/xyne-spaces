@@ -1,12 +1,13 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { getContextOrNull } from './context';
+import { currentWorkspaceId, runAsSystem } from './context';
 import { logger } from '@/utils/logger';
 
 /**
- * Returns the workspaceId from the currently-open tenant context, if any.
+ * The workspaceId actually being enforced, or undefined when nothing is. Delegates to
+ * `currentWorkspaceId()` so this agrees with the stamper and the ACL extension.
  */
 export function getCurrentWorkspaceId(): string | undefined {
-  return getContextOrNull()?.workspaceId;
+  return currentWorkspaceId() ?? undefined;
 }
 
 /**
@@ -25,11 +26,17 @@ export async function resolveWorkspaceIdFromModel(
     throw new Error(`Unknown Prisma model: ${String(model)}`);
   }
 
-  const row = await delegate.findUnique({ where, select: { workspaceId: true } });
+  // Resolve under a system context so the tenant read-filter does NOT scope this
+  // internal lookup to the ambient workspace. Without this, resolving a row that
+  // legitimately belongs to a different workspace than the caller's current
+  // context (e.g. a multi-workspace user row, or a cross-workspace parent FK)
+  // would be filtered to null and this would spuriously throw below.
+  const row = await runAsSystem(() =>
+    delegate.findUnique({ where, select: { workspaceId: true } }),
+  );
   if (!row?.workspaceId) {
-    // Nullable-deploy signal: the parent row exists but carries no workspaceId (e.g. an
-    // un-backfilled row), or the row wasn't found at all. Surface it before throwing so it's
-    // visible even if a caller swallows the error.
+    // Signal an un-backfilled/missing parent before throwing, so it's visible even if a
+    // caller swallows the error.
     logger.warn('resolveWorkspaceIdFromModel: could not resolve workspaceId', {
       model: String(model),
       where,

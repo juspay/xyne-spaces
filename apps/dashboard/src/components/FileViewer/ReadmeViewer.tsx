@@ -1,11 +1,14 @@
-import React, { useEffect, useState, useMemo, memo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeSlug from 'rehype-slug';
 import type { Components } from 'react-markdown';
 import { BaseViewerProps } from './utils';
+import { TableOfContents } from '../Canvas/TableOfContents';
+import type { TocHeading } from '../Canvas/TableOfContents';
 
 // Sanitize schema for file-provided markdown. Starts from rehype-sanitize's
 // safe defaults (scripts / event handlers stripped; img `src` and anchor
@@ -44,6 +47,8 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [markdownContent, setMarkdownContent] = useState<string>('');
+  const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // ----- Stable key (always runs) -----
   const sourceKey = useMemo(() => {
@@ -97,6 +102,38 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     };
   }, [sourceKey, source]);
 
+  // ----- Table of contents (always runs) -----
+  // Read headings back from the rendered DOM rather than re-parsing the
+  // markdown: rehype-slug already assigned each h1-h3 a real `id` (surfaced
+  // to us via the id prop wired into the heading components below), so this
+  // guarantees the TOC always matches exactly what's actually scrollable —
+  // no separate parser to drift out of sync with rehype-sanitize's
+  // clobber-prefixing or slug de-duplication. Mirrors Canvas's TOC, which
+  // reads live BlockNote blocks instead of a parallel source of truth.
+  useEffect(() => {
+    if (loading || error || !markdownContent) {
+      setTocHeadings([]);
+      return;
+    }
+    const container = contentRef.current;
+    if (!container) return;
+    const headings = Array.from(container.querySelectorAll<HTMLHeadingElement>('h1, h2, h3'))
+      .map(el => ({
+        id: el.id,
+        text: el.textContent?.trim() ?? '',
+        level: Number(el.tagName.charAt(1)),
+      }))
+      .filter(h => h.id && h.text);
+    setTocHeadings(headings);
+  }, [loading, error, markdownContent]);
+
+  const handleHeadingClick = useCallback((id: string) => {
+    contentRef.current?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, []);
+
   // ----- Markdown components (always runs) -----
   // NOTE: Colors here use CSS-variable design tokens (text-foreground,
   // text-muted-foreground, border-border, bg-muted). These flip with the
@@ -108,27 +145,41 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // ambient color.
   const markdownComponents: Components = useMemo(
     () => ({
-      h1: ({ children }) => (
-        <h1 className='text-4xl font-bold text-foreground mb-6 pb-2 border-b border-border'>
+      h1: ({ id, children }) => (
+        <h1
+          id={id}
+          className='text-4xl font-bold text-foreground mb-6 pb-2 border-b border-border scroll-mt-10'
+        >
           {children}
         </h1>
       ),
-      h2: ({ children }) => (
-        <h2 className='text-3xl font-semibold text-foreground mb-5 mt-8 pb-2 border-b border-border'>
+      h2: ({ id, children }) => (
+        <h2
+          id={id}
+          className='text-3xl font-semibold text-foreground mb-5 mt-8 pb-2 border-b border-border scroll-mt-10'
+        >
           {children}
         </h2>
       ),
-      h3: ({ children }) => (
-        <h3 className='text-2xl font-semibold text-foreground mb-4 mt-6'>{children}</h3>
+      h3: ({ id, children }) => (
+        <h3 id={id} className='text-2xl font-semibold text-foreground mb-4 mt-6 scroll-mt-10'>
+          {children}
+        </h3>
       ),
-      h4: ({ children }) => (
-        <h4 className='text-xl font-semibold text-foreground mb-3 mt-5'>{children}</h4>
+      h4: ({ id, children }) => (
+        <h4 id={id} className='text-xl font-semibold text-foreground mb-3 mt-5'>
+          {children}
+        </h4>
       ),
-      h5: ({ children }) => (
-        <h5 className='text-lg font-semibold text-foreground mb-2 mt-4'>{children}</h5>
+      h5: ({ id, children }) => (
+        <h5 id={id} className='text-lg font-semibold text-foreground mb-2 mt-4'>
+          {children}
+        </h5>
       ),
-      h6: ({ children }) => (
-        <h6 className='text-base font-semibold text-muted-foreground mb-2 mt-4'>{children}</h6>
+      h6: ({ id, children }) => (
+        <h6 id={id} className='text-base font-semibold text-muted-foreground mb-2 mt-4'>
+          {children}
+        </h6>
       ),
       p: ({ children }) => <p className='text-foreground leading-relaxed mb-4'>{children}</p>,
       a: ({ href, children }) => (
@@ -204,23 +255,42 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   // ----- Rendering (safe conditional) -----
   // `text-foreground` on the root guarantees a theme-correct base color for any
   // element the component map does not explicitly cover.
+  //
+  // The root is a BOUNDED, non-scrolling box (`h-full`, no overflow of its
+  // own) — it's the containing block the TOC is positioned against. Scrolling
+  // happens one level down, on `contentRef`. Nesting the TOC inside the
+  // scrolling div (like the markdown content) would make it a normal-flow
+  // sibling of the scrolled content, so its `top: 50%` would resolve against
+  // the full document height and drift with scroll instead of staying pinned
+  // to the viewport — mirrors Canvas's `containerRef` (non-scrolling) vs. its
+  // inner `overflow-auto` editor pane in CollaborativeCanvasEditor.
   return (
-    <div className='relative min-h-full bg-background text-foreground font-sans'>
+    <div className='relative h-full bg-background text-foreground font-sans'>
       {loading && <LoadingSpinner />}
       {error && !loading && <ErrorDisplay error={error} />}
 
       {!loading && !error && markdownContent && (
-        <div className='min-h-screen px-10 py-10 md:px-15 lg:px-20'>
-          <div className='max-w-4xl mx-auto'>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeHighlight]}
-              components={markdownComponents}
-            >
-              {markdownContent}
-            </ReactMarkdown>
+        <>
+          <TableOfContents headings={tocHeadings} onHeadingClick={handleHeadingClick} />
+          <div className='h-full overflow-y-auto' ref={contentRef}>
+            <div className='px-10 py-10 md:px-15 lg:px-20'>
+              <div className='max-w-4xl mx-auto'>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[
+                    rehypeRaw,
+                    rehypeSlug,
+                    [rehypeSanitize, markdownSanitizeSchema],
+                    rehypeHighlight,
+                  ]}
+                  components={markdownComponents}
+                >
+                  {markdownContent}
+                </ReactMarkdown>
+              </div>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

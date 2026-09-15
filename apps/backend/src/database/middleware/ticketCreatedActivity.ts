@@ -1,4 +1,5 @@
-import { ActivityType, PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { ActivityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 export function setupTicketCreatedActivity(prisma: PrismaClient): void {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Activity, ActivityClassification } from '@prisma/client';
+import { Activity } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { extractAllMentions } from '@/utils/mentionParser';
@@ -13,7 +13,7 @@ import {
 import { config as envConfig } from '@/config/env';
 import { LLMClient, createUserMessage } from 'agentic-framework';
 import type { LLMClientConfig } from 'agentic-framework';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, ActivityClassification } from '@xyne/shared';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 
 const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
@@ -226,7 +226,7 @@ export class ActivityClassificationService {
         ActivityClassification.PENDING,
         ActivityClassification.PROCESSING,
       ]);
-      if (!pendingStates.has(activity.classification)) {
+      if (!pendingStates.has(activity.classification as ActivityClassification)) {
         logger.debug('[ActivityClassification] Activity already classified, skipping', {
           activityId,
           classification: activity.classification,
@@ -234,7 +234,7 @@ export class ActivityClassificationService {
         return {
           status: 'skipped',
           reason: 'already_classified',
-          classification: activity.classification,
+          classification: activity.classification as ActivityClassification,
         };
       }
     }

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from './logger';
 /**
  * Clipboard utilities for copying HTML content with proper formatting preservation
  */
@@ -87,7 +88,11 @@ export const markdownToHtml = async (markdown: string): Promise<string> => {
 
     return String(file);
   } catch (error) {
-    console.error('Failed to process markdown:', error);
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('Failed to process markdown:'),
+      error: error,
+    });
     // Fallback to original markdown if processing fails
     return markdown;
   }

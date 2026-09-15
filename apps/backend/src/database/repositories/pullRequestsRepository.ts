@@ -1,4 +1,5 @@
-import { PrismaClient, PullRequests, PRStatus } from '@prisma/client';
+import { PrismaClient, PullRequests } from '@prisma/client';
+import { PRStatus } from '@xyne/shared';
 import { db } from '../client';
 import {logger} from '@/utils/logger';
 
@@ -21,6 +22,11 @@ interface PRInsertProps extends BasePRProps {
 interface PRCrudProps extends BasePRProps {
   numberOfComments: number;
 }
+
+type PRStatusUpdateProps = Pick<
+  PRCrudProps,
+  'prId' | 'repoUrl' | 'prUrl' | 'numberOfComments'
+> & Partial<Pick<PRCrudProps, 'repoName' | 'destinationBranchName' | 'sourceBranchName'>>;
 
 
 export class PRMetricsRepository {
@@ -75,7 +81,7 @@ export class PRMetricsRepository {
   private async resolvePrWorkspaceId(opts: {
     ticketId?: string | null;
     workflowExecutionId?: string | null;
-  }): Promise<string | null> {
+  }): Promise<string> {
     if (opts.ticketId) {
       const ticket = await this.prisma.ticket.findUnique({
         where: { id: opts.ticketId },
@@ -117,7 +123,7 @@ export class PRMetricsRepository {
         where: { id: existingPr.id },
         data: {
           date: today,
-          status: 'OPEN',
+          status: PRStatus.OPEN,
           repositoryUrl,
           prUrl,
           prId,
@@ -136,7 +142,7 @@ export class PRMetricsRepository {
         date: today,
         sourceBranchName,
         destinationBranchName,
-        status: 'OPEN',
+        status: PRStatus.OPEN,
         prUrl,
         prId: prId,
         repositoryUrl,
@@ -153,7 +159,7 @@ export class PRMetricsRepository {
     repoUrl,
     prUrl,
     numberOfComments
-  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+  }: PRStatusUpdateProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({
@@ -171,7 +177,7 @@ export class PRMetricsRepository {
       await this.prisma.pullRequests.updateMany({
         where: { prId, prUrl },
         data: {
-          status: 'MERGED',
+          status: PRStatus.MERGED,
           numberOfComments,
           repositoryUrl: repoUrl
         }
@@ -210,7 +216,7 @@ export class PRMetricsRepository {
       await this.prisma.pullRequests.updateMany({
         where: { prId, prUrl },
         data: {
-          status: 'OPEN',
+          status: PRStatus.OPEN,
           numberOfComments,
           ...(ticketId ? { ticketId } : {})
         }
@@ -229,7 +235,7 @@ export class PRMetricsRepository {
           destinationBranchName,
           prUrl,
           repoName,
-          status: 'OPEN',
+          status: PRStatus.OPEN,
           prId,
           repositoryUrl: repoUrl,
           numberOfComments,
@@ -246,7 +252,7 @@ export class PRMetricsRepository {
     repoUrl,
     numberOfComments,
     prUrl
-  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+  }: PRStatusUpdateProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({
@@ -264,7 +270,7 @@ export class PRMetricsRepository {
       await this.prisma.pullRequests.updateMany({
         where: { prId, prUrl },
         data: {
-          status: 'DECLINED',
+          status: PRStatus.DECLINED,
           repositoryUrl: repoUrl,
           numberOfComments
         }
@@ -326,7 +332,7 @@ export class PRMetricsRepository {
         ticketId,
         sourceBranchName: sourceBranch,
         destinationBranchName: destBranch,
-        status: 'OPEN',
+        status: PRStatus.OPEN,
         ...(excludePrId !== undefined && { NOT: { prId: excludePrId } })
       }
     });
@@ -433,7 +439,7 @@ export class PRMetricsRepository {
         date: today,
         sourceBranchName,
         destinationBranchName,
-        status: 'OPEN',
+        status: PRStatus.OPEN,
         prUrl,
         prId,
         repositoryUrl,

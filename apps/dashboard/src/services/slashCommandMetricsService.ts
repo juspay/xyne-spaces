@@ -61,6 +61,7 @@ class SlashCommandMetricsService {
     terminal: boolean;
     targetType?: 'user' | 'channel';
     destination?: string;
+    source?: 'slash' | 'actions_menu';
   }): void {
     const event: SlashCommandClickEvent = {
       slash_session_id: params.slashSessionId,
@@ -72,6 +73,7 @@ class SlashCommandMetricsService {
       // exactOptionalPropertyTypes: only attach the optional keys when present.
       ...(params.targetType && { target_type: params.targetType }),
       ...(params.destination && { destination: params.destination }),
+      ...(params.source && { source: params.source }),
     };
     logger.info(Event.SLASH_COMMAND_CLICK, event as unknown as Record<string, unknown>);
   }

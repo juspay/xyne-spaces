@@ -13,9 +13,9 @@
  */
 
 import { google, calendar_v3 } from 'googleapis';
+import { AuthProvider } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
 import { logger } from '@/utils/logger';
-import { AuthProvider } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
 import { parseCalendarCredentials } from '@/database/repositories/externalSourceRepository';

@@ -55,7 +55,10 @@ import { CONFIG } from "../../config.js";
 import { buildYqlFromParams, buildFederatedYqlFromParams, type StructuredQueryParams } from "./vespa-search-areas.js";
 import { convertDateLiteralsToMs, defaultNativeInputs, callVespa, transformHit, type SearchResult } from "./vespa-direct.js";
 
-const TYPE_TO_AREA: Record<string, string> = {
+// Exported for the rank-profiles route (vespa-schema-profiles.ts +
+// routes/search-evals/rank-profiles.ts) to map a UI entity type to the
+// SearchArea whose .sd schema it should list live rank-profiles from.
+export const TYPE_TO_AREA: Record<string, string> = {
   messages: "message",
   files: "file",
   tickets: "ticket",
@@ -63,7 +66,7 @@ const TYPE_TO_AREA: Record<string, string> = {
   emails: "mail",
 };
 
-const ALL_AREAS = Object.values(TYPE_TO_AREA);
+export const ALL_AREAS = Object.values(TYPE_TO_AREA);
 
 // Mirrors vespa-direct.ts's (unexported) IST_OFFSET_MS — kept in lockstep so
 // the literal this produces round-trips through convertDateLiteralsToMs back
@@ -95,10 +98,13 @@ export interface SearchEvalVespaParams {
   type?: string;
   /** datetime-local string ("YYYY-MM-DDTHH:MM") — results must be at/before this. */
   before?: string;
-  /** Explicit rank profile ("default_native" | "unranked"), validated per-area
-   *  via rankProfilesForArea(). Undefined/"" → buildYqlFromParams auto-picks
-   *  (default_native for scored text). Only these two are safe across every
-   *  area — no SEARCH_AREA declares a wider allowedRankProfiles list. */
+  /** Explicit rank profile name, applied to the built query as-is (see the
+   *  searchEvalVespa comment above) rather than through buildYqlFromParams'
+   *  allow-list, since the eval UI's dropdown sources valid names live from
+   *  vespa-schema-profiles.ts, or a free-typed "Custom…" name — either way a
+   *  name that doesn't exist on the queried schema just fails at Vespa.
+   *  Undefined/"" → buildYqlFromParams auto-picks (default_native for scored
+   *  text). */
   rankProfile?: string;
   workspaceId: string;
   limit?: number;
@@ -156,11 +162,24 @@ export async function searchEvalVespa(
   const areas = requestedTypes.length > 0 ? requestedTypes.map(t => TYPE_TO_AREA[t]!) : ALL_AREAS;
   const limit = params.limit ?? 10;
 
+  // buildYqlFromParams/buildFederatedYqlFromParams (vespa-search-areas.ts) allow-list
+  // params.rankProfile against a hardcoded per-area list — deliberately NOT bypassed
+  // here (that validation also guards the production agent-facing search MCP tool,
+  // xyne-spaces-tools.ts, which shares these builders). Instead: only forward
+  // rankProfile through when it's "unranked" — always allow-listed everywhere, and
+  // the one value buildAreaClauses' `scored` flag treats specially (it decides
+  // whether to add the nearestNeighbor/embedding clause off `rankProfile !==
+  // "unranked"`, read from `params`, so an actually-unranked custom profile needs to
+  // reach that check as literally "unranked" to skip the vector clause correctly).
+  // Any OTHER custom/live-discovered name is withheld from the builder call — it
+  // auto-picks its own default_native/unranked (always allow-listed, and `scored`
+  // still resolves correctly since "not unranked" holds either way) — and is applied
+  // to the built query's `rankProfile` field directly below, post-validation.
   const commonParams: Omit<StructuredQueryParams, "searchArea"> = {
     query: params.q,
     hits: limit,
     ...(params.before ? { filters: { createdDate: { lte: toDateLiteral(params.before) } } } : {}),
-    ...(params.rankProfile ? { rankProfile: params.rankProfile } : {}),
+    ...(params.rankProfile === "unranked" ? { rankProfile: "unranked" as const } : {}),
   };
 
   const built =
@@ -171,6 +190,12 @@ export async function searchEvalVespa(
       : params.permissionMode === "with"
         ? buildFederatedYqlFromParams(areas, commonParams, params.userId!, params.workspaceId)
         : buildFederatedYqlFromParams(areas, commonParams, "search-eval-public-only", params.workspaceId, { publicOnly: true });
+
+  // The actual rank profile to send to Vespa is always the eval caller's raw choice
+  // when one was given (not allow-listed — see the comment above); a name that
+  // doesn't exist on the queried schema just fails at Vespa (400), surfaced
+  // per-query in the eval UI.
+  if (params.rankProfile) built.rankProfile = params.rankProfile;
 
   const datedYql = convertDateLiteralsToMs(built.yql);
   const stageLabel = areas.length === 1 ? areas[0]! : `federated (${areas.join(", ")})`;

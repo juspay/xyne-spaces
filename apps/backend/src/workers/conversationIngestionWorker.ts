@@ -1,10 +1,10 @@
 import Bull from 'bull';
+import { SessionRecordingProcessStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { conversationIngestQueue, type ConversationIngestJobData } from '@/queues/conversationIngestQueue';
 import { conversationAnalysisService } from '@/services/conversationAnalysisService';
 import { vespaKnowledgeIngestionService } from '@/services/vespaKnowledgeIngestionService';
 import { createAdapter } from '@/services/conversationIngestion/adapterFactory';
-import { SessionRecordingProcessStatus } from '@prisma/client';
 import { db } from '@/database/client';
 
 function extractSessionId(_source: string, sourceId: string): string | null {

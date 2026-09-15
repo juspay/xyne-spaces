@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { ChannelRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
@@ -77,7 +78,7 @@ export class TestFixturesController {
       }
 
       for (const user of users) {
-        await this.channelParticipantRepository.addParticipant(channelId, user.id, 'MEMBER');
+        await this.channelParticipantRepository.addParticipant(channelId, user.id, ChannelRole.MEMBER);
       }
 
       logger.info(

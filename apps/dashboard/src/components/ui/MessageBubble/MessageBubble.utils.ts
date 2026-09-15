@@ -54,6 +54,13 @@ export interface MessageMetadata {
   // is the de-duplicated iconKey→data:URI map (registered via registerClawIcons).
   clawCitations?: Array<{ toolCallId: string; citations: unknown[] }>;
   clawCitationIcons?: Record<string, string>;
+  clawRunOrigin?: {
+    kind?: string;
+    provider?: string;
+    harnessName?: string;
+    label?: string;
+    ownerName?: string;
+  };
   // Forwarded message fields
   originalMessageId?: string;
   optionalText?: string;

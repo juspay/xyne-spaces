@@ -2,13 +2,14 @@ import { type ReactElement, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import DraftsPanel from '../../components/Chat/DraftsPanel/DraftsPanel';
+import TwinDraftsPanel from '../../components/Chat/DraftsPanel/TwinDraftsPanel';
 import SentPanel from '../../components/Chat/SentPanel/SentPanel';
 import DelayedMessagesPanel from '../../components/Chat/DelayedMessagesPanel/DelayedMessagesPanel';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../hooks/useUserDelayedMessages';
 import { cn } from '../../utils/classNames';
 
-type TabValue = 'drafts' | 'scheduled' | 'sent';
+type TabValue = 'drafts' | 'twin' | 'scheduled' | 'sent';
 
 const DraftsAndSentPage = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,10 +23,12 @@ const DraftsAndSentPage = (): ReactElement => {
   );
 
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
+  const twinDraftsCount = useSelector(stateMachineActor, state => state.context.twinDrafts.length);
   const pendingScheduledCount = usePendingDelayedMessagesCount();
 
   const tabOptions = [
     { value: 'drafts' as TabValue, label: 'Drafts', count: draftsCount },
+    { value: 'twin' as TabValue, label: 'Twin drafts', count: twinDraftsCount },
     { value: 'scheduled' as TabValue, label: 'Scheduled', count: pendingScheduledCount },
     { value: 'sent' as TabValue, label: 'Sent' },
   ];
@@ -68,6 +71,7 @@ const DraftsAndSentPage = (): ReactElement => {
 
       <div className='flex-1 min-h-0 overflow-hidden'>
         {activeTab === 'drafts' && <DraftsPanel />}
+        {activeTab === 'twin' && <TwinDraftsPanel />}
         {activeTab === 'scheduled' && <DelayedMessagesPanel />}
         {activeTab === 'sent' && <SentPanel />}
       </div>

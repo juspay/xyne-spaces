@@ -1,7 +1,7 @@
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 // Channel API Response Types
 // These types define the structure of API responses from the channel controller
 
-import { ChannelScopeType, ChannelVisibility } from '@prisma/client';
 
 // Base user info interface for API responses
 export interface ApiUserInfo {
@@ -77,7 +77,8 @@ export interface CreateChannelResponse {
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
   name: string;
-  projectId: string;
+  /** Echoed back when provided by the client. The check itself is workspace-scoped. */
+  projectId?: string;
 }
 
 // GET /channels

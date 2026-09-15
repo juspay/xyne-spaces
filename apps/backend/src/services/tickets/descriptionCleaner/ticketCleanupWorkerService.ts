@@ -1,4 +1,5 @@
-import { ChannelType, VespaInsertionLogs, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
+import { VespaInsertionLogs } from '@prisma/client';
+import { ChannelType, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';

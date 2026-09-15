@@ -5,6 +5,7 @@
  */
 
 import { google, gmail_v1 } from 'googleapis';
+import { DeskType } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
 import { PubSub } from '@google-cloud/pubsub';
 import { decrypt, encrypt } from './encryptionService';
@@ -19,7 +20,6 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
-import { DeskType } from '@prisma/client';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -44,6 +44,12 @@ interface ServiceAccountCredentials {
 interface WatchResult {
   historyId: string;
   expiration: string;
+}
+
+export interface GmailMessageRef {
+  id: string;
+  threadId: string;
+  labelIds?: string[];
 }
 
 interface SetupExternalSourceParams {
@@ -147,19 +153,19 @@ export class GoogleService {
 
   async getMessageById(messageId: string): Promise<GmailMessageData | null> {
     try {
-      const response = await this.gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
-        format: 'full',
-      });
+      const response = await withGmailRetry(`messages.get ${messageId}`, () =>
+        this.gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'full',
+        }),
+      );
       return response.data as GmailMessageData;
     } catch (error) {
       // 404 = message was deleted/expired between Gmail publishing the event
       // and us fetching it. Surface as null so caller can skip-ack instead of
       // throwing (which would make Pub/Sub retry the dead message for 7 days).
-      const status = (error as { status?: number; code?: number })?.status
-        ?? (error as { status?: number; code?: number })?.code;
-      if (status === 404) {
+      if (getHttpStatus(error) === 404) {
         logger.warn(`${TAG} Message ${messageId} not found (likely deleted) — skipping`);
         return null;
       }
@@ -170,47 +176,64 @@ export class GoogleService {
 
   async getAttachment(messageId: string, attachmentId: string): Promise<string | null> {
     try {
-      const response = await this.gmail.users.messages.attachments.get({
-        userId: 'me',
-        messageId,
-        id: attachmentId,
-      });
+      const response = await withGmailRetry(`attachments.get ${attachmentId}`, () =>
+        this.gmail.users.messages.attachments.get({
+          userId: 'me',
+          messageId,
+          id: attachmentId,
+        }),
+      );
       return response.data.data || null;
     } catch (error) {
       logger.error(`${TAG} Failed to fetch attachment ${attachmentId}`, error);
-      return null;
+      throw Object.assign(
+        new Error(`Failed to fetch Gmail attachment: ${getErrorMessage(error)}`),
+        { status: getHttpStatus(error), cause: error },
+      );
     }
   }
 
-  async listMessagesFromHistory(startHistoryId: string): Promise<string[]> {
-    const { messageIds } = await this.listMessagesFromHistoryWithCursor(startHistoryId);
-    return messageIds;
-  }
-
   /**
-   * Same as listMessagesFromHistory but also returns the latest historyId
+   * Drain `history.list` from `startHistoryId`, returning the message ids added
+   * since, plus the latest historyId
    * reported by Gmail. Callers that persist a sync cursor (manual reload)
    * need this value to advance the watermark.
    */
   async listMessagesFromHistoryWithCursor(
     startHistoryId: string,
   ): Promise<{ messageIds: string[]; historyId: string | null }> {
+    const { messages, historyId } = await this.listMessageRefsFromHistory(startHistoryId);
+    const ingestable = messages.filter(m => !m.labelIds?.includes('DRAFT'));
+    return { messageIds: ingestable.map(m => m.id), historyId };
+  }
+
+  async listMessageRefsFromHistory(
+    startHistoryId: string,
+  ): Promise<{ messages: GmailMessageRef[]; historyId: string | null }> {
     try {
-      const messageIds: string[] = [];
+      const messages: GmailMessageRef[] = [];
       let historyId: string | null = null;
       let pageToken: string | undefined;
 
       do {
-        const response = await this.gmail.users.history.list({
-          userId: 'me',
-          startHistoryId,
-          historyTypes: ['messageAdded'],
-          ...(pageToken && { pageToken }),
-        });
+        const response = await withGmailRetry(`history.list ${startHistoryId}`, () =>
+          this.gmail.users.history.list({
+            userId: 'me',
+            startHistoryId,
+            historyTypes: ['messageAdded'],
+            ...(pageToken && { pageToken }),
+          }),
+        );
 
         for (const record of response.data.history || []) {
           for (const msg of record.messagesAdded || []) {
-            if (msg.message?.id) messageIds.push(msg.message.id);
+            const id = msg.message?.id;
+            if (id)
+              messages.push({
+                id,
+                threadId: msg.message?.threadId ?? id,
+                ...(msg.message?.labelIds && { labelIds: msg.message.labelIds }),
+              });
           }
         }
 
@@ -218,10 +241,14 @@ export class GoogleService {
         pageToken = response.data.nextPageToken ?? undefined;
       } while (pageToken);
 
-      return { messageIds, historyId };
+      return { messages, historyId };
     } catch (error) {
-      logger.error(`${TAG} Failed to fetch history`, error);
-      throw new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`);
+      const status = getHttpStatus(error);
+      logger.error(`${TAG} Failed to fetch Gmail history`, { status, startHistoryId, error });
+      throw Object.assign(
+        new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`),
+        { status },
+      );
     }
   }
 
@@ -257,12 +284,14 @@ export class GoogleService {
 
     try {
       do {
-        const response = await this.gmail.users.messages.list({
-          userId: 'me',
-          q,
-          maxResults: maxMessages === null ? 100 : Math.min(100, maxMessages - messages.length),
-          ...(pageToken && { pageToken }),
-        });
+        const response = await withGmailRetry('messages.list', () =>
+          this.gmail.users.messages.list({
+            userId: 'me',
+            q,
+            maxResults: maxMessages === null ? 100 : Math.min(100, maxMessages - messages.length),
+            ...(pageToken && { pageToken }),
+          }),
+        );
 
         for (const msg of response.data.messages || []) {
           if (msg.id) {
@@ -556,6 +585,7 @@ export class GoogleService {
         channelId,
         boardId: boardId || (existing.boardId ?? undefined), // @deprecated - kept for backward compatibility
         displayName: emailAddress,
+        ...(existing.lastSyncCursor == null && { lastSyncCursor: watchResult.historyId }),
       });
     } else {
       await repo.create({
@@ -565,6 +595,7 @@ export class GoogleService {
         channelId,
         boardId: boardId ?? undefined, // @deprecated - kept for backward compatibility
         displayName: emailAddress,
+        lastSyncCursor: watchResult.historyId,
       });
     }
 
@@ -576,9 +607,6 @@ export class GoogleService {
       ownerUserId: channel?.createdBy,
       boardId: boardId ?? undefined, // Save boardId to EmailChannelPreference (new location)
     });
-    // Cursor intentionally left null — the caller triggers an initial core.reload()
-    // which takes the no-cursor fallback (listRecentMessages) and writes the cursor
-    // via nextCursor, so the first N messages are auto-imported.
 
     logger.info(`${TAG} ExternalSource setup complete`, { sourceName, webhookUrl });
 
@@ -672,6 +700,73 @@ export class GoogleService {
       suffix = 'prod';
     }
     return `${SHARED_SUBSCRIPTION_BASE}-${suffix}-push`;
+  }
+
+  /**
+   * One-shot: plant a starting `lastSyncCursor` on every active Gmail source.
+   *
+   * Run before the cursor-resuming ingestion path ships. Without a cursor a source
+   * falls back to the push's own historyId, and `history.list` returns records *after*
+   * that — so the first push resolves to nothing and skips the mail that triggered it.
+   *
+   * `overwrite` is safe only while nothing reads the column; afterwards it would move a
+   * desk past un-ingested mail. Hence false by default.
+   */
+  static async seedSyncCursors(opts: { dryRun?: boolean; overwrite?: boolean } = {}): Promise<{
+    dryRun: boolean;
+    overwrite: boolean;
+    seeded: Array<{ name: string; from: string | null; to: string }>;
+    skipped: Array<{ name: string; reason: string }>;
+  }> {
+    const dryRun = !!opts.dryRun;
+    const overwrite = !!opts.overwrite;
+    const repo = new ExternalSourceRepository();
+
+    const sources = await repo.findAll({
+      sourceType: ExternalSourcePlatform.GOOGLE,
+      isActive: true,
+    });
+
+    const seeded: Array<{ name: string; from: string | null; to: string }> = [];
+    const skipped: Array<{ name: string; reason: string }> = [];
+
+    for (const source of sources) {
+      if (source.lastSyncCursor && !overwrite) {
+        skipped.push({ name: source.name, reason: 'already has a cursor' });
+        continue;
+      }
+      if (!source.credentials) {
+        skipped.push({ name: source.name, reason: 'no credentials' });
+        continue;
+      }
+
+      try {
+        const historyId = await GoogleService.fromEncryptedCredentials(
+          source.credentials,
+          source.id,
+        ).getCurrentHistoryId();
+
+        if (!historyId) {
+          skipped.push({ name: source.name, reason: 'Gmail returned no historyId' });
+          continue;
+        }
+
+        if (!dryRun) await repo.update(source.id, { lastSyncCursor: historyId });
+        seeded.push({ name: source.name, from: source.lastSyncCursor, to: historyId });
+      } catch (error) {
+        // Collected, not thrown — one dead mailbox shouldn't stop the rest.
+        skipped.push({ name: source.name, reason: getErrorMessage(error) });
+      }
+    }
+
+    logger.info(`${TAG} seedSyncCursors finished`, {
+      dryRun,
+      overwrite,
+      seededCount: seeded.length,
+      skippedCount: skipped.length,
+    });
+
+    return { dryRun, overwrite, seeded, skipped };
   }
 
   /**
@@ -1095,4 +1190,38 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   return 'Unknown error';
+}
+
+export function getHttpStatus(error: unknown): number | undefined {
+  return (error as { status?: number } | null | undefined)?.status;
+}
+
+/**
+ * Gmail rejects bursts with "Too many concurrent requests for user." — a
+ * transient signal Google asks callers to back off on, not a real failure.
+ * Without this a single burst costs a held cursor or a dropped attachment.
+ */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const GMAIL_MAX_ATTEMPTS = 4;
+
+export function isRetryableGmailError(error: unknown): boolean {
+  const status = getHttpStatus(error);
+  if (status !== undefined && RETRYABLE_STATUSES.has(status)) return true;
+  // Some Gmail paths report the per-user concurrency cap as 403.
+  return status === 403 && /rate limit|too many concurrent/i.test(getErrorMessage(error));
+}
+
+async function withGmailRetry<T>(label: string, call: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (attempt >= GMAIL_MAX_ATTEMPTS || !isRetryableGmailError(error)) throw error;
+      const delayMs = 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
+      logger.warn(
+        `${TAG} ${label} throttled — retry ${attempt}/${GMAIL_MAX_ATTEMPTS - 1} in ${delayMs}ms: ${getErrorMessage(error)}`,
+      );
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
 }

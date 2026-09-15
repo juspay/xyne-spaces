@@ -17,6 +17,8 @@ export class UserProfilesACL extends BaseQueryACL<'user_profiles'> {
       );
     }
 
+    // Profiles form a company directory visible to members of the same workspace;
+    // scoped to profiles whose user belongs to the caller's workspace.
     return query.whereExists('user', (u) =>
       u.where('workspaceId', '=', this.ctx.workspaceId)
     );

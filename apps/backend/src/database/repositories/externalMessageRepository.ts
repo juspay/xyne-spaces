@@ -4,7 +4,9 @@
  */
 
 import { DatabaseClient } from '../client';
-import { MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MessageDirection, ExternalEntityType } from '@xyne/shared';
+import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();
@@ -63,6 +65,37 @@ export class ExternalMessageRepository {
   }
 
   /**
+   * Any link on these emails owned by a source OTHER than the given one — i.e.
+   * "does another integration already own this conversation?". Used to stop the
+   * channel-scoped thread fallback from adopting a thread that belongs to a
+   * different app, mailbox, or Slack desk on the same channel.
+   */
+  async findForeignLinkByEmailIds(emailIds: string[], excludeExternalSourceId: string) {
+    if (emailIds.length === 0) return null;
+    return await this.db.externalMessage.findFirst({
+      where: {
+        entityType: ExternalEntityType.EMAIL,
+        entityId: { in: emailIds },
+        externalSourceId: { not: excludeExternalSourceId },
+      },
+      select: { id: true, externalSourceId: true },
+    });
+  }
+
+  /** Find the newest app-desk link for the given email (entity) IDs, scoped to the given app-desk source IDs (ExternalMessage has no FK relation to filter by sourceType). */
+  async findLatestAppDeskLinkByEmailIds(emailIds: string[], externalSourceIds: string[]) {
+    if (emailIds.length === 0 || externalSourceIds.length === 0) return null;
+    return await this.db.externalMessage.findFirst({
+      where: {
+        entityType: ExternalEntityType.EMAIL,
+        entityId: { in: emailIds },
+        externalSourceId: { in: externalSourceIds },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
    * Create external message tracking record
    * entityType is optional (defaults to MESSAGE in schema)
    * entityId is required if entityType is provided
@@ -80,38 +113,12 @@ export class ExternalMessageRepository {
     }
 
     try {
-      // entityId references either a Message (default/MESSAGE) or an Email (EMAIL) row
-      // depending on entityType. Both carry a nullable denormalized workspaceId, so fall
-      // back to a NOT-NULL ancestor (Email -> Channel; Message -> Conversation -> Channel;
-      // Channel.workspaceId is NOT NULL) rather than throwing/leaking for un-backfilled rows.
-      let workspaceId: string;
-      if (data.entityType === ExternalEntityType.EMAIL) {
-        const email = await this.db.email.findUnique({
-          where: { id: data.entityId },
-          select: { workspaceId: true, channel: { select: { workspaceId: true } } },
-        });
-        if (!email) {
-          throw new Error(`workspaceId required: email ${data.entityId} not found`);
-        }
-        workspaceId = email.workspaceId ?? email.channel.workspaceId;
-      } else {
-        const message = await this.db.message.findUnique({
-          where: { messageId: data.entityId },
-          select: {
-            workspaceId: true,
-            conversation: {
-              select: { workspaceId: true, channel: { select: { workspaceId: true } } },
-            },
-          },
-        });
-        if (!message) {
-          throw new Error(`workspaceId required: message ${data.entityId} not found`);
-        }
-        workspaceId =
-          message.workspaceId ??
-          message.conversation.workspaceId ??
-          message.conversation.channel.workspaceId;
-      }
+      // entityId references either a Message (default/MESSAGE) or an Email
+      // (EMAIL) row depending on entityType; both carry a denormalized
+      // workspaceId we can source from.
+      const workspaceId = data.entityType === ExternalEntityType.EMAIL
+        ? await resolveWorkspaceIdFromModel(this.db, 'email', { id: data.entityId })
+        : await resolveWorkspaceIdFromModel(this.db, 'message', { messageId: data.entityId });
 
       return await this.db.externalMessage.create({
         data: {

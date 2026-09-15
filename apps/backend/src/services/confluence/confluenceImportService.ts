@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { AttachmentEntityType, CanvasRole, CanvasVisibility, DocType, ExternalEntityType, MessageDirection } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -12,7 +11,13 @@ import { config } from '@/config/env';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
-import { sanitizeProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode,
+  AttachmentEntityType,
+  CanvasRole,
+  CanvasVisibility,
+  DocType,
+  ExternalEntityType,
+  MessageDirection, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { encrypt } from '@/services/encryptionService';
@@ -983,7 +988,7 @@ export class ConfluenceImportService {
     });
 
     if (existingChannel) {
-      await channelParticipantRepository.addParticipant(existingChannel.id, input.actorUserId, 'ADMIN');
+      await channelParticipantRepository.addParticipant(existingChannel.id, input.actorUserId, ChannelRole.ADMIN);
       return { channelId: existingChannel.id, created: false };
     }
 
@@ -991,14 +996,14 @@ export class ConfluenceImportService {
     const channel = await channelRepository.create({
       name: uniqueName,
       description: `Created for Confluence import`,
-      scopeType: 'DEFAULT',
-      visibility: 'PUBLIC',
+      scopeType: ChannelScopeType.DEFAULT,
+      visibility: ChannelVisibility.PUBLIC,
       createdBy: input.actorUserId,
       projectId: input.projectId,
       workspaceId,
     });
 
-    await channelParticipantRepository.addParticipant(channel.id, input.actorUserId, 'ADMIN');
+    await channelParticipantRepository.addParticipant(channel.id, input.actorUserId, ChannelRole.ADMIN);
     return { channelId: channel.id, created: true };
   }
 
@@ -1290,7 +1295,7 @@ export class ConfluenceImportService {
       }),
     ]);
 
-    await initializeYSweetDoc(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    await initializeYSweetDoc(canvasId, safeContent as unknown as BlockNoteBlock[], actorUserId);
   }
 
   private async updateCanvasRecord(
@@ -1333,7 +1338,7 @@ export class ConfluenceImportService {
       throw new Error('workspaceId required: Confluence import config missing workspaceId');
     }
     await this.ensureCanvasOwners(canvasId, [creatorUserId, lastEditorUserId, actorUserId], ownersWorkspaceId);
-    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[], actorUserId);
   }
 
   private async ensureCanvasOwners(canvasId: string, userIds: string[], workspaceId: string): Promise<void> {
@@ -1416,7 +1421,13 @@ export class ConfluenceImportService {
       },
     });
 
-    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[]);
+    const ownersWorkspaceId = input.workspaceId;
+    if (!ownersWorkspaceId) {
+      throw new Error('workspaceId required: Confluence import config missing workspaceId');
+    }
+    await this.ensureCanvasOwners(canvasId, [lastEditorUserId], ownersWorkspaceId);
+
+    await syncToYSweet(canvasId, safeContent as unknown as BlockNoteBlock[], lastEditorUserId);
   }
 
   private markPageResultPartial(

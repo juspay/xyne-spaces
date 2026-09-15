@@ -13,16 +13,22 @@ import { ChannelScopeType } from '@xyne/shared';
 import type { User, Channel } from '@xyne/shared';
 import { parseSearchCommand, COMMAND_KINDS, getCommand, type SearchCommandKind } from './commands';
 import { useQuickCall } from '../../../../hooks/useQuickCall';
-import { useActiveUserSearch, useUsers } from '../../../../hooks/useUsers';
+import { useUsers } from '../../../../hooks/useUsers';
 import { useChannelSearch, useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { useLastVisitedChannel } from '../../../../hooks/useLastVisitedChannel';
 import { CMDK_USER_LIMIT } from '../../../../hooks/useSearchMetrics';
+import {
+  rankChannelsByAffinity,
+  filterChannelsBySearchableNames,
+} from '../../../../utils/rankingUtils';
+import { useRankedActivePeople } from '../../../../hooks/useRankedPeopleSearch';
+import { useAffinityCallback } from '../../../../hooks/useAffinityCallback';
 import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
 import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { sendRecordingEvent, getRecordingStatus } from '../../../../hooks/useRecordingStore';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
-import { getDMSearchableNames } from '../ChatDirectory.utils';
+import { getDMNames, isOneToOneDMChannel } from '../ChatDirectory.utils';
 import type { CommandTarget } from './QuickDmComposer';
 
 /**
@@ -51,6 +57,8 @@ export interface SlashCommandClickInfo {
   terminal: boolean;
   targetType?: 'user' | 'channel';
   destination?: string;
+  /** How a chat/call target was reached: typing the `/`-prefix vs the ⌥↵ Actions menu. */
+  source?: 'slash' | 'actions_menu';
 }
 
 interface UseSlashCommandsParams {
@@ -66,6 +74,11 @@ interface UseSlashCommandsParams {
   navigate: (path: string) => void;
   /** Metrics: emit a slash-command click (command applied / target picked). Optional. */
   onCommandClick?: (info: SlashCommandClickInfo) => void;
+  /**
+   * User ID → recency index in the 1:1 DM list (0 = most recent). Shared with the main Cmd+K
+   * people ranking so the `/chat`/`/call` user picker uses the same affinity-then-recency order.
+   */
+  dmContactRecency: Map<string, number>;
 }
 
 interface CommandGhost {
@@ -116,11 +129,13 @@ export interface UseSlashCommandsReturn {
   resetCommand: () => void;
   exitCommandMode: () => void;
   clearTarget: () => void;
-  applyCommand: (word: string) => void;
+  applyCommand: (word: string, options?: { silent?: boolean }) => void;
   runActionCommand: (kind: SearchCommandKind) => void;
   runNavSection: (item: NavigationItem) => void;
   runGotoExtra: (extra: GotoExtra) => void;
   runCommandTarget: (target: CommandTarget) => void;
+  /** Run chat/call on a highlighted Cmd+K result (⌥↵ Actions menu), bypassing the `/`-command step. */
+  invokeActionOnTarget: (kind: 'chat' | 'call', target: CommandTarget) => void;
   startChannelCall: (channelId: string, displayName: string) => void;
   isInCommandMode: () => boolean;
   onSetTextReady: (setText: (text: string) => void) => void;
@@ -143,7 +158,11 @@ export function useSlashCommands({
   resetSearchState,
   navigate,
   onCommandClick,
+  dmContactRecency,
 }: UseSlashCommandsParams): UseSlashCommandsReturn {
+  // One shared signal that affinity weights have loaded — reuses the app-wide AffinityService
+  // instance (no extra /users/me/affinity call), and re-ranks the at-rest picker when weights land.
+  const affinityVersion = useAffinityCallback();
   // Raw command text is kept here (NOT fed to the search hook) so Vespa is never queried while a
   // command is active. Once a target is picked, `commandTarget` holds it (a user OR a channel) and
   // drives the composer / call-confirm; the search field keeps its hidden `/<cmd> <query>` text.
@@ -218,44 +237,73 @@ export function useSlashCommands({
 
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
-  const commandUsers = useActiveUserSearch(commandQuery, CMDK_USER_LIMIT);
-  const commandUserResults = useMemo(() => {
-    if (!showUserResults) return [];
-    // `/call` can't call yourself, so keep excluding self there.
-    if (!isComposePicker) return commandUsers.filter(u => u.id !== currentUserID);
-    // `/chat` can message your self-DM. With a query typed, let the search decide (self appears
-    // when its name matches); at rest, pin "You" first so the self-DM is reachable without typing.
-    if (commandQuery.trim()) return commandUsers;
-    const withoutSelf = commandUsers.filter(u => u.id !== currentUserID);
-    const self = usersById.get(currentUserID);
-    return self ? [self, ...withoutSelf] : withoutSelf;
-  }, [showUserResults, isComposePicker, commandQuery, commandUsers, usersById, currentUserID]);
+  // Same recipe as the main Cmd+K people list, via the shared hook: active-user candidates →
+  // relevance tier → MFU affinity → DM recency. Opts reproduce the picker's legacy behavior exactly
+  // (seeding + substring-fallback OFF), so this is a no-op swap of the previous inline logic:
+  //   /call — self can't be a target: exclude it from candidates AND the recovery pool.
+  //   /chat — self-DM is valid: inject self at rest so it stays reachable, ranked (not pinned).
+  const rankedCommandUsers = useRankedActivePeople(
+    commandQuery,
+    CMDK_USER_LIMIT,
+    isComposePicker
+      ? {
+          ensureUserIdAtRest: currentUserID,
+          recoveryPool: allUsers,
+          dmContactRecency,
+          seedDmContactsAtRest: false,
+          substringFallback: false,
+        }
+      : {
+          excludeUserId: currentUserID,
+          recoveryPool: allUsers,
+          dmContactRecency,
+          seedDmContactsAtRest: false,
+          substringFallback: false,
+        },
+  );
+  const commandUserResults = useMemo(
+    () => (showUserResults ? rankedCommandUsers : []),
+    [showUserResults, rankedCommandUsers],
+  );
   // Channel picker candidates: real group channels (DEFAULT scope) the user can access.
   const commandChannels = useChannelSearch(commandQuery, CMDK_USER_LIMIT);
   const visibleChannels = useAllVisibleChannels();
   const commandChannelResults = useMemo(() => {
     if (!showChannelResults) return [];
+    void affinityVersion;
     const visibleIds = new Set(visibleChannels.map(c => c.id));
-    return commandChannels.filter(
+    const filtered = commandChannels.filter(
       c => c.scopeType === ChannelScopeType.DEFAULT && visibleIds.has(c.id),
     );
-  }, [showChannelResults, commandChannels, visibleChannels]);
+    // Empty query → affinity-then-recency (matches the Cmd+K channel browse order). A typed query
+    // keeps the Fuse relevance order from useChannelSearch untouched.
+    return commandQuery.trim() ? filtered : rankChannelsByAffinity(filtered);
+  }, [showChannelResults, commandChannels, visibleChannels, commandQuery, affinityVersion]);
 
   // Group-DM picker candidates: the user's GROUP_DM channels, shown for both `/chat` and `/call`.
   // A group DM's `channel.name` is a comma-joined id list, so channel search can't match it by
   // name — resolve friendly participant labels here and filter on those instead.
   const commandGroupDmResults = useMemo<CommandGroupDm[]>(() => {
     if (!isPickerCommand || !showChannelResults) return [];
-    const query = commandQuery.trim().toLowerCase();
+    void affinityVersion;
     const groups = visibleChannels
       .filter(c => c.scopeType === ChannelScopeType.GROUP_DM)
-      .map(channel => ({
-        channel,
-        label: getDMSearchableNames(channel, currentUserID, usersById).join(', '),
-      }))
+      .map(channel => {
+        const dmNames = getDMNames(channel, currentUserID, usersById);
+        return { channel, label: dmNames.display.join(', '), searchNames: dmNames.search };
+      })
       .filter(g => g.label);
-    const matched = query ? groups.filter(g => g.label.toLowerCase().includes(query)) : groups;
-    return matched.slice(0, CMDK_USER_LIMIT);
+    const labelByChannelId = new Map(groups.map(g => [g.channel.id, g.label]));
+    // Typed query → the same token-AND participant matcher as Cmd+K, so full names match (not just
+    // the nickname label). Empty query → affinity-then-recency, matching the Cmd+K browse order.
+    if (commandQuery.trim()) {
+      return filterChannelsBySearchableNames(groups, commandQuery)
+        .map(g => ({ channel: g.channel, label: labelByChannelId.get(g.channel.id) ?? '' }))
+        .slice(0, CMDK_USER_LIMIT);
+    }
+    return rankChannelsByAffinity(groups.map(g => g.channel))
+      .map(channel => ({ channel, label: labelByChannelId.get(channel.id) ?? '' }))
+      .slice(0, CMDK_USER_LIMIT);
   }, [
     isPickerCommand,
     showChannelResults,
@@ -263,6 +311,7 @@ export function useSlashCommands({
     visibleChannels,
     usersById,
     currentUserID,
+    affinityVersion,
   ]);
 
   // `/goto` candidates: the nav-bar sections the current user can see (permission/electron/claw
@@ -399,7 +448,7 @@ export function useSlashCommands({
 
   // Seed the editor with `/call `/`/chat ` when a command is picked from the `/` list.
   const applyCommand = useCallback(
-    (word: string): void => {
+    (word: string, options?: { silent?: boolean }): void => {
       const text = `/${word} `;
       // Mirror the command text into the ref/state synchronously so isInCommandMode() is correct
       // before Lexical's onChange fires — otherwise the mention-trigger guards briefly treat the
@@ -407,8 +456,10 @@ export function useSlashCommands({
       commandTextRef.current = text;
       setCommandText(text);
       setTextRef.current?.(text);
-      // Metrics: command row applied (not terminal — the picker/target step follows).
-      if ((COMMAND_KINDS as string[]).includes(word)) {
+      // Metrics: command row applied (not terminal — the picker/target step follows). Skipped when
+      // `silent`: the ⌥↵ Actions menu seeds `/chat ` here only to reach the composer — the user
+      // never applied a `/chat` command, so a command-stage click would be a phantom event.
+      if (!options?.silent && (COMMAND_KINDS as string[]).includes(word)) {
         onCommandClick?.({ stage: 'command', command: word as SearchCommandKind, terminal: false });
       }
     },
@@ -484,6 +535,45 @@ export function useSlashCommands({
     [exitCommandMode, onOpenChange, onCommandClick],
   );
 
+  // Fire or confirm a call for the picked target. Shared by `/call` (runCommandTarget) and the
+  // Cmd+K result Actions menu (invokeActionOnTarget) so both take the same guarded path: a 1:1 call
+  // fires instantly; a live channel call is joined; a new channel-wide call asks for confirmation.
+  const dispatchCall = useCallback(
+    (target: CommandTarget): void => {
+      if (target.type === 'user') {
+        // A 1:1 call fires instantly, matching the rest of the app.
+        startCall(target.user.id, getUserDisplayName(target.user));
+      } else if (
+        hasActiveChannelCall(target.channel.id) ||
+        isOneToOneDMChannel(target.channel.scopeType)
+      ) {
+        // Start the call directly (no "Start a call in this channel?" confirm) when either: a call
+        // is already live on the channel (you're joining, not broadcasting), OR it's a 1:1 DM —
+        // structurally a channel but really a direct call to one person (e.g. a starred user). Group
+        // DMs pass their friendly label (channel.name is an id list).
+        startChannelCall(target.channel.id, target.displayName ?? target.channel.name);
+      } else if (ensureRoomIdle()) {
+        // No call yet — confirm before starting a new channel-wide call. The modal renders as a
+        // sibling of the Cmd+K dialog, so closing Cmd+K here doesn't tear it down.
+        setPendingChannelCall({
+          id: target.channel.id,
+          name: target.displayName ?? target.channel.name,
+        });
+      }
+      exitCommandMode();
+      onOpenChange(false);
+    },
+    [
+      startCall,
+      startChannelCall,
+      hasActiveChannelCall,
+      ensureRoomIdle,
+      setPendingChannelCall,
+      exitCommandMode,
+      onOpenChange,
+    ],
+  );
+
   const runCommandTarget = useCallback(
     (target: CommandTarget): void => {
       const def = commandKind ? getCommand(commandKind) : null;
@@ -497,42 +587,43 @@ export function useSlashCommands({
         command: commandKind,
         terminal: def.pickerAction === 'call',
         targetType: target.type,
+        source: 'slash',
       });
       if (def.pickerAction === 'call') {
-        if (target.type === 'user') {
-          // A 1:1 call fires instantly, matching the rest of the app.
-          startCall(target.user.id, getUserDisplayName(target.user));
-        } else if (hasActiveChannelCall(target.channel.id)) {
-          // A call is already live on the channel — join it directly, no "start a call?" confirm
-          // (you're joining an existing call, not starting a new channel-wide one). Group DMs pass
-          // their friendly label (channel.name is an id list).
-          startChannelCall(target.channel.id, target.displayName ?? target.channel.name);
-        } else if (ensureRoomIdle()) {
-          // No call yet — confirm before starting a new channel-wide call. The modal renders as a
-          // sibling of the Cmd+K dialog, so closing Cmd+K here doesn't tear it down.
-          setPendingChannelCall({
-            id: target.channel.id,
-            name: target.displayName ?? target.channel.name,
-          });
-        }
-        exitCommandMode();
-        onOpenChange(false);
+        dispatchCall(target);
         return;
       }
       // `compose` (`/chat`): open the composer for the picked user/channel.
       selectTarget(target);
     },
-    [
-      commandKind,
-      startCall,
-      startChannelCall,
-      hasActiveChannelCall,
-      ensureRoomIdle,
-      exitCommandMode,
-      onOpenChange,
-      selectTarget,
-      onCommandClick,
-    ],
+    [commandKind, dispatchCall, selectTarget, onCommandClick],
+  );
+
+  // Cmd+K result Actions menu (⌥↵): run chat/call on a highlighted user/channel result *without*
+  // first typing `/chat`|`/call`. `commandKind` is derived from the editor text, so we can't set it
+  // and reuse runCommandTarget — instead dispatch the call directly, or (for chat) seed the hidden
+  // `/chat ` text via applyCommand then open the composer with selectTarget. The seeded text is what
+  // the composer's "back" button reads, so this path needs no special-casing there.
+  const invokeActionOnTarget = useCallback(
+    (kind: 'chat' | 'call', target: CommandTarget): void => {
+      // Metrics: target picked. `/call` is terminal; `/chat` opens the composer (invoked on send).
+      onCommandClick?.({
+        stage: 'target',
+        command: kind,
+        terminal: kind === 'call',
+        targetType: target.type,
+        source: 'actions_menu',
+      });
+      if (kind === 'call') {
+        dispatchCall(target);
+        return;
+      }
+      // Seed `/chat ` only to open the composer — silent so it doesn't log a phantom command-apply
+      // click (the `stage:'target'` click above already recorded this pick, with `source`).
+      applyCommand('chat', { silent: true });
+      selectTarget(target);
+    },
+    [dispatchCall, applyCommand, selectTarget, onCommandClick],
   );
 
   // Clear command state whenever the menu closes.
@@ -646,6 +737,7 @@ export function useSlashCommands({
     runNavSection,
     runGotoExtra,
     runCommandTarget,
+    invokeActionOnTarget,
     startChannelCall,
     isInCommandMode,
     onSetTextReady,

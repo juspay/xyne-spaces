@@ -41,7 +41,9 @@ export {
 export {
   resolveBoardAdditionalFields,
   buildLatestEntityWideValueByField,
+  resolveLeftoverFieldValues,
   type ResolvedBoardAdditionalField,
+  type LeftoverFieldValue,
 } from './boardFormEntityValues';
 
 export {
@@ -52,3 +54,11 @@ export {
   createBulkOptionInputHandlers,
   resolveBulkOptions,
 } from './formFieldOptionsUtils';
+
+export {
+  STAGE_STATUS_META,
+  getStageStatusMeta,
+  StageStatusIcon,
+  StageIndicator,
+  type StageIndicatorStage,
+} from './stageStatusIcon';

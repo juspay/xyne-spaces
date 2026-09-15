@@ -18,6 +18,7 @@ import { graphFetchWithRetry } from './graphFetch';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { GraphChangeNotification, GraphMailMessage } from './types';
+import { MessageDirection } from '@xyne/shared';
 
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
@@ -123,7 +124,7 @@ export class MicrosoftFlow extends BaseFlow {
       // Only skip if this message was already ingested as INCOMING.
       // An OUTGOING record means WE sent this reply — other desks sharing
       // the same source may still need to receive it via resolveDlChannels.
-      if (existing.some(e => e.direction === 'INCOMING')) {
+      if (existing.some(e => e.direction === MessageDirection.INCOMING)) {
         logger.info(`Microsoft flow: skipping already-ingested message ${lookupId}`);
         return { __skipIngestion: true, __skipReason: `duplicate-webhook:${lookupId}` };
       }

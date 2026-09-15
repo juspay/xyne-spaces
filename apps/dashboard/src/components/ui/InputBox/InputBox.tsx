@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -29,17 +30,21 @@ import { all, createLowlight } from 'lowlight';
 import { Plus, Loader2, X, Ticket, FileText, Clock } from 'lucide-react';
 import { ArrowUp, AtMark, ChevronBigDown, FontAa, Hashtag, PaperclipSlant } from '@xyne/icons';
 import Tooltip from '../Tooltip/Tooltip';
+import { ShortcutHint } from '../ShortcutHint';
 import Avatar from '../Avatar/Avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../dropdown-menu';
 
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
+import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
@@ -61,6 +66,7 @@ import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.util
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -69,6 +75,8 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
+import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
@@ -78,14 +86,17 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
-import { CanvasVisibility } from '@xyne/shared';
+import { CanvasVisibility, getSlashCommandArtifactDefinition } from '@xyne/shared';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
-import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
+import {
+  getSchedulePresets,
+  ScheduleMessageDialog,
+} from '../ScheduleMessageDialog/ScheduleMessageDialog';
 import { Checkbox } from '../Checkbox/Checkbox';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
@@ -94,6 +105,23 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+
+/**
+ * Which affordance sent the message. Every send path funnels through one
+ * function, so without this the activity row cannot distinguish Enter from the
+ * Send button from the mobile editor.
+ */
+type SendTrigger =
+  | 'keyboard_enter'
+  | 'keyboard_mod_enter'
+  | 'keyboard_shift_enter'
+  | 'send_button'
+  | 'send_menu'
+  | 'mobile_editor'
+  | 'unknown';
+import { useChannel } from '../../../hooks/useChannels';
 
 const lowlight = createLowlight(all);
 
@@ -130,6 +158,67 @@ const MaxListDepthPlugin = Extension.create({
           if (!transaction.docChanged) return true;
           const maxDepth = getMaxListDepth(transaction.doc);
           return maxDepth <= MAX_LIST_DEPTH;
+        },
+      }),
+    ];
+  },
+});
+
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
         },
       }),
     ];
@@ -185,12 +274,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onCreateCanvas,
       onTranscriptSelect,
       onScheduleSend,
+      showSchedulePresets = false,
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
+      hideComposerTools = false,
+      hideVoiceInput = false,
+      compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
+      dockSlot,
+      slashCommandArtifactCommand,
+      slashCommandArtifactChannelLabel,
+      onCancelSlashCommandArtifact,
     },
 
     ref,
@@ -202,6 +300,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       getDroppedFilesForEntity,
     } = useDraftAttachments();
     const { enterSendsMessage } = useEnterSendsMessage();
+    const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
@@ -245,7 +344,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           const map = getDroppedFilesForEntity(channelId, conversationId ?? null);
           setAttachmentsMap(map);
         } catch (error) {
-          console.error('Failed to load attachments:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to load attachments:'),
+            error: error,
+          });
           logger.error(Event.DRAFT_ATTACHMENTS_LOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,
@@ -297,11 +400,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
+    const schedulePresets = React.useMemo(
+      () => (isSendMenuOpen && showSchedulePresets ? getSchedulePresets() : []),
+      [isSendMenuOpen, showSchedulePresets],
+    );
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-    const [showFormatToolbar, setShowFormatToolbar] = useState(false);
+    const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
-    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(false);
+    const [showMobileFormattingToolbar, setShowMobileFormattingToolbar] = useState(
+      defaultFormattingToolbarOpen,
+    );
+
+    useEffect(() => {
+      setShowFormatToolbar(defaultFormattingToolbarOpen);
+      setShowMobileFormattingToolbar(defaultFormattingToolbarOpen);
+    }, [defaultFormattingToolbarOpen]);
 
     const [ticketCreated, setTicketCreated] = useState(false);
 
@@ -323,6 +437,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useScope('composer', isFocused && !disabled && !isSending);
 
+    const isEventFromThisComposer = useCallback(
+      (event: KeyboardEvent): boolean => isEventFromInput(event, id),
+      [id],
+    );
+
     useShortcutById(
       'composer.attach',
       () => {
@@ -331,6 +450,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       {
         enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+        when: isEventFromThisComposer,
       },
     );
 
@@ -347,6 +467,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       document.addEventListener('keydown', onKeyDown, true);
       return () => document.removeEventListener('keydown', onKeyDown, true);
     }, [isVoiceRecording]);
+
+    const artifactComposerDefinition = getSlashCommandArtifactDefinition(
+      slashCommandArtifactCommand,
+    );
+
+    useEffect(() => {
+      if (!artifactComposerDefinition || !onCancelSlashCommandArtifact) return;
+      const onKeyDown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancelSlashCommandArtifact();
+      };
+      document.addEventListener('keydown', onKeyDown, true);
+      return () => document.removeEventListener('keydown', onKeyDown, true);
+    }, [artifactComposerDefinition, onCancelSlashCommandArtifact]);
 
     const handleTyping = onTyping;
 
@@ -379,7 +515,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         try {
           await providerAddDroppedFiles(files, channelId, conversationId);
         } catch (error) {
-          console.error('Failed to upload file:', error);
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('Failed to upload file:'),
+            error: error,
+          });
           logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
             error: error instanceof Error ? error.message : String(error),
             channelId,
@@ -547,7 +687,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
           },
         }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
+          },
+        }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
@@ -577,10 +723,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }).configure({
           lowlight,
           defaultLanguage: 'plaintext',
-          HTMLAttributes: {
-            class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-            style: 'padding: 0.75rem;',
-          },
         }),
         LinkExtension.extend({
           inclusive: false,
@@ -685,10 +827,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const channelMentionState = channelMentionPluginKey.getState(view.state);
               const commandState = commandPluginKey.getState(view.state);
               const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+              if (commandState?.isOpen && commandState.items.length > 0) {
+                event.preventDefault();
+                view.dispatch(
+                  view.state.tr.setMeta(commandPluginKey, {
+                    shouldSelect: true,
+                  }),
+                );
+                return true;
+              }
               if (
                 (mentionState?.isOpen && mentionState.items.length > 0) ||
                 (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-                (commandState?.isOpen && commandState.items.length > 0) ||
                 (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
               ) {
                 return false;
@@ -702,7 +852,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
-              void handleSend();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              // This branch serves BOTH Cmd/Ctrl+Enter and Shift+Enter, so the
+              // trigger has to mirror the keyCombo rather than assume mod.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
+              void handleSend(event.metaKey ? 'keyboard_mod_enter' : 'keyboard_shift_enter');
               return true;
             }
             event.preventDefault();
@@ -733,6 +891,50 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               const listItemPos = $from.before($from.depth);
               if (listItemPos > 0) {
                 return false;
+              }
+            }
+          }
+
+          // Empty-table cleanup. prosemirror-tables refuses to delete a table
+          // via Backspace from inside a cell, so once a user erases all the text
+          // from a pasted table they are left with an empty, undeletable table
+          // box (editor.isEmpty is even true, so the placeholder/empty logic
+          // treats the input as empty while the table node lingers). Detect that
+          // state and remove the whole table on Backspace.
+          if (event.key === 'Backspace' && editor) {
+            const { selection } = view.state;
+            const { $from } = selection;
+
+            // Case A: the cursor/selection sits inside a table whose cells are
+            // all blank -> delete the entire table. Guarded on the whole table
+            // being empty so normal editing of a populated table is untouched.
+            for (let depth = $from.depth; depth > 0; depth--) {
+              const ancestor = $from.node(depth);
+              if (ancestor.type.spec['tableRole'] === 'table') {
+                if (ancestor.textContent.trim() === '') {
+                  event.preventDefault();
+                  editor.chain().focus().deleteTable().run();
+                  return true;
+                }
+                break;
+              }
+            }
+
+            // Case B: the cursor is at the very start of the block immediately
+            // after an empty table (e.g. the trailing paragraph a pasted table
+            // leaves behind) -> remove that empty table.
+            if (selection.empty && $from.parentOffset === 0) {
+              const blockStart = $from.before($from.depth);
+              const nodeBefore = view.state.doc.resolve(blockStart).nodeBefore;
+              if (
+                nodeBefore &&
+                nodeBefore.type.spec['tableRole'] === 'table' &&
+                nodeBefore.textContent.trim() === ''
+              ) {
+                event.preventDefault();
+                const from = blockStart - nodeBefore.nodeSize;
+                editor.chain().focus().deleteRange({ from, to: blockStart }).run();
+                return true;
               }
             }
           }
@@ -768,11 +970,23 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             const commandState = commandPluginKey.getState(view.state);
             const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
 
+            // editorProps.handleKeyDown runs before extension plugins. Select the
+            // highlighted slash command here and consume Enter so it cannot fall
+            // through to the message-send branch.
+            if (commandState?.isOpen && commandState.items.length > 0) {
+              event.preventDefault();
+              view.dispatch(
+                view.state.tr.setMeta(commandPluginKey, {
+                  shouldSelect: true,
+                }),
+              );
+              return true;
+            }
+
             // If any menu is open, let it handle the Enter key
             if (
               (mentionState?.isOpen && mentionState.items.length > 0) ||
               (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-              (commandState?.isOpen && commandState.items.length > 0) ||
               (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
             ) {
               return false;
@@ -800,7 +1014,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
-            void handleSend();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
+            void handleSend('keyboard_enter');
             return true;
           }
 
@@ -981,8 +1201,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               convertedExtension: getFileExtension(fileName),
             });
             void addDraftAttachments([file]);
-            editor?.commands.setContent('');
-            setContent('');
             return true;
           }
           return false;
@@ -1045,6 +1263,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           editor?.commands.insertContent(content);
           editor?.commands.focus();
         },
+        getHtml: (): string => editor?.getHTML() ?? '',
         isSuggestionOpen: (): boolean => {
           if (!editor) return false;
           const state = editor.state;
@@ -1072,102 +1291,147 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
     );
 
-    const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+    const trackedChannel = useChannel(channelId ?? '');
 
-      // If a voice stream is active, finalize it for send first: this strips any
-      // unfinalized interim text and aborts the stream (discarding in-flight results)
-      // BEFORE we read the editor, so only committed text is sent and nothing leaks
-      // into the next message. No-op when no stream is active.
-      voiceInputRef.current?.abortForSend();
+    const submitScheduled = useCallback(
+      (scheduledFor: number): void => {
+        if (!onScheduleSend || !hasSendableContent) return;
+        const html = editor?.getHTML() ?? '';
+        const files = allAttachments.map(a => a.file).filter((f): f is File => f instanceof File);
+        void onScheduleSend(scheduledFor, html, files);
+        editor?.commands.clearContent(true);
+      },
+      [onScheduleSend, hasSendableContent, editor, allAttachments],
+    );
 
-      // The voice "shimmer" highlight is a transient editor-only decoration that
-      // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
-      // the orange highlight (a <span class="voice-shimmer">) into the sent message.
-      if (editor.schema.marks['voiceShimmer']) {
-        editor
-          .chain()
-          .setTextSelection({ from: 0, to: editor.state.doc.content.size })
-          .unsetMark('voiceShimmer')
-          .run();
-      }
-
-      // Flush pending debounced content update before sending so that
-      // onContentChange consumers (e.g. ComposeDmPanel form state) receive
-      // the latest content before handleSubmit reads from the form.
-      if (debouncedUpdateTimer.current) {
-        clearTimeout(debouncedUpdateTimer.current);
-        debouncedUpdateTimer.current = null;
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        lastAppliedValueRef.current = htmlContent;
-        onContentChange?.(htmlContent, editor.getText());
-      }
-
-      const plainText = editor.getText().trim();
-      const htmlContent = editor.getHTML();
-
-      if (!hasSendableContent) return;
-
-      // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
-      // If so, dispatch it to the app instead of sending it as a chat message.
-      const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
-      if (commandMatch && onCommandSelect) {
-        const cmdName = commandMatch[1] ?? '';
-        // Resolve mention spans from the HTML content so @user → <userid:xyneId>
-        // and @group → <groupid:xyneId> instead of bare display names.
-        const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
-        const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd) {
-          editor.commands.setContent('');
-          setContent('');
-          editor.commands.focus();
-          void onCommandSelect(matchedCmd, cmdText);
+    // `trigger` says which affordance sent the message. Every path funnels through
+    // this one function, which is what makes SEND_MESSAGE complete — but it also
+    // means the event cannot tell Enter from the button unless the caller says so.
+    const handleSend = useCallback(
+      async (trigger: SendTrigger = 'unknown') => {
+        if (!editor || isSending) return;
+        if (sendDisabled) {
+          // The button is disabled, but Enter still lands here — say why rather than
+          // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+          // tooltip carrying the same reason never opens.
+          if (sendDisabledReason) toast.warning(sendDisabledReason);
           return;
         }
-      }
 
-      setIsSending(true);
-      try {
-        // Filter to only send actual File objects
-        // UploadedFile metadata-only attachments are already stored and referenced by ID
-        const filesToSend = allAttachments
-          .map(a => a.file)
-          .filter((f): f is File => f instanceof File);
+        // If a voice stream is active, finalize it for send first: this strips any
+        // unfinalized interim text and aborts the stream (discarding in-flight results)
+        // BEFORE we read the editor, so only committed text is sent and nothing leaks
+        // into the next message. No-op when no stream is active.
+        voiceInputRef.current?.abortForSend();
 
-        // Insert canvas link into editor if attached
-        if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
-          // Insert as plain link - platform will unfurl to show preview
-          editor?.commands.insertContent(` ${canvasLink}`);
+        // The voice "shimmer" highlight is a transient editor-only decoration that
+        // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
+        // the orange highlight (a <span class="voice-shimmer">) into the sent message.
+        if (editor.schema.marks['voiceShimmer']) {
+          editor
+            .chain()
+            .setTextSelection({ from: 0, to: editor.state.doc.content.size })
+            .unsetMark('voiceShimmer')
+            .run();
         }
 
-        // Get fresh content after inserting link
-        const finalHtmlContent = editor?.getHTML() || htmlContent;
-        const finalPlainText = editor?.getText().trim() || plainText;
-
-        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-        editor.commands.setContent('');
-        setContent('');
-        setAttachedCanvas(null);
-        if (disableDraftUpload) {
-          setAttachmentsMap(new Map());
+        // Flush pending debounced content update before sending so that
+        // onContentChange consumers (e.g. ComposeDmPanel form state) receive
+        // the latest content before handleSubmit reads from the form.
+        if (debouncedUpdateTimer.current) {
+          clearTimeout(debouncedUpdateTimer.current);
+          debouncedUpdateTimer.current = null;
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          lastAppliedValueRef.current = htmlContent;
+          onContentChange?.(htmlContent, editor.getText());
         }
-        editor.commands.focus();
-      } finally {
-        setIsSending(false);
-      }
-    }, [
-      editor,
-      allAttachments,
-      onSendMessage,
-      isSending,
-      attachedCanvas,
-      hasSendableContent,
-      sendDisabled,
-      commandItems,
-      onCommandSelect,
-      disableDraftUpload,
-    ]);
+
+        const plainText = editor.getText().trim();
+        const htmlContent = editor.getHTML();
+
+        if (!hasSendableContent) return;
+
+        // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
+        // If so, dispatch it to the app instead of sending it as a chat message.
+        const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
+        if (commandMatch && onCommandSelect) {
+          const cmdName = commandMatch[1] ?? '';
+          // Resolve mention spans from the HTML content so @user → <userid:xyneId>
+          // and @group → <groupid:xyneId> instead of bare display names.
+          const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
+          const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
+          if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
+            editor.commands.setContent('');
+            setContent('');
+            editor.commands.focus();
+            void onCommandSelect(matchedCmd, cmdText);
+            return;
+          }
+        }
+
+        setIsSending(true);
+        try {
+          // Filter to only send actual File objects
+          // UploadedFile metadata-only attachments are already stored and referenced by ID
+          const filesToSend = allAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
+
+          // Insert canvas link into editor if attached
+          if (attachedCanvas) {
+            const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
+            // Insert as plain link - platform will unfurl to show preview
+            editor?.commands.insertContent(` ${canvasLink}`);
+          }
+
+          // Get fresh content after inserting link
+          const finalHtmlContent = editor?.getHTML() || htmlContent;
+          const finalPlainText = editor?.getText().trim() || plainText;
+
+          await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
+          // Tracked here, not on the Send button: Enter, the button, the mobile
+          // editor and shortcuts all land in this function, and only a send that
+          // succeeded should count.
+          globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
+            ...channelTrackingMetadata(trackedChannel),
+            ...(conversationId !== null && { conversationId }),
+            isThreadReply: conversationId !== null,
+            hasAttachments: filesToSend.length > 0,
+            trigger,
+            attachmentCount: filesToSend.length,
+            hasCanvasAttached: attachedCanvas !== null,
+            // Length only — never the message body. contextMetadata is unmasked.
+            charLength: finalPlainText.length,
+            mentionCount: (finalHtmlContent.match(/data-mention-id=/g) ?? []).length,
+          });
+
+          editor.commands.setContent('');
+          setContent('');
+          setAttachedCanvas(null);
+          if (disableDraftUpload) {
+            setAttachmentsMap(new Map());
+          }
+          editor.commands.focus();
+        } finally {
+          setIsSending(false);
+        }
+      },
+      [
+        editor,
+        allAttachments,
+        onSendMessage,
+        isSending,
+        attachedCanvas,
+        hasSendableContent,
+        sendDisabled,
+        sendDisabledReason,
+        commandItems,
+        onCommandSelect,
+        disableDraftUpload,
+        trackedChannel,
+      ],
+    );
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1364,6 +1628,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
 
+        {features.richText && <LinkPopover editor={editor} />}
+
         {/* Activity bar — absolutely positioned above the input box so showing/hiding
             never shifts the chat layout. The typing indicator and the agent pill share
             this single (left) slot; when both are active they alternate every 2s (see
@@ -1396,12 +1662,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
           </div>
         </div>
+
+        {dockSlot}
 
         <div
           className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
@@ -1412,17 +1680,45 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             overflow-hidden transition-all flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
-              !isMobile && isFocused
-                ? 'border-chat-composer-border-active'
-                : !isMobile
-                  ? 'border-chat-composer-border'
-                  : ''
+              !isMobile && artifactComposerDefinition
+                ? 'border-orange-500 ring-1 ring-orange-500'
+                : !isMobile && isFocused
+                  ? 'border-chat-composer-border-active'
+                  : !isMobile
+                    ? 'border-chat-composer-border'
+                    : ''
             }
             ${isSending ? 'opacity-60 pointer-events-none' : ''}
           `}
           >
+            {artifactComposerDefinition && (
+              <div className='flex h-11 items-center justify-between border-b border-orange-200 bg-orange-50/80 px-3 text-orange-700 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-300'>
+                <div className='flex min-w-0 items-center gap-2 text-sm font-semibold'>
+                  <span className='rounded bg-orange-500 px-2 py-0.5 text-xs font-bold text-white'>
+                    {artifactComposerDefinition.badge}
+                  </span>
+                  <span className='truncate'>
+                    {artifactComposerDefinition.composerLabel}
+                    {slashCommandArtifactChannelLabel
+                      ? ` in ${slashCommandArtifactChannelLabel}`
+                      : ''}
+                  </span>
+                </div>
+                <button
+                  type='button'
+                  onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
+                  className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
+                  aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
+                >
+                  <span className='hidden sm:inline'>esc to cancel</span>
+                  <X className='size-3.5' />
+                </button>
+              </div>
+            )}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
-            {isMobile && (
+            {isMobile && !hideVoiceInput && (
               <VoiceInput
                 ref={voiceInputRef}
                 headless
@@ -1455,7 +1751,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 disabled={disabled}
                 emojiSizeClass={emojiSizeClass}
                 onAttachClick={handleAttachClick}
-                onSend={() => void handleSend()}
+                onSend={() => void handleSend('mobile_editor')}
                 placeholder={placeholder}
                 showMentions={features.mentions}
                 showFormattingToolbar={showMobileFormattingToolbar}
@@ -1471,7 +1767,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 onEmojiSelect={handleEmojiSelect}
                 hideSendButton={hideSendButton}
                 showAttachButton={!!features.fileAttachments}
-                showVoiceInput={true}
+                showVoiceInput={!hideVoiceInput}
                 isVoiceRecording={isVoiceRecording}
                 isVoiceTranscribing={isVoiceTranscribing}
                 onVoiceToggle={() => voiceInputRef.current?.toggle()}
@@ -1500,7 +1796,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             ) : (
               <div
                 className={`
-                relative pt-1 pb-1 px-3
+                relative ${compact ? 'py-0.5 pl-3 pr-11' : 'px-3 pt-1 pb-1'}
                 ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
               `}
               >
@@ -1520,7 +1816,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   !editor?.isActive('orderedList') &&
                   !editor?.isActive('blockquote') &&
                   (isVoiceRecording ? (
-                    <div className='absolute inset-0 px-3 py-2 pointer-events-none select-none flex items-center gap-3 h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 pointer-events-none select-none flex items-center gap-3 h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       <div className='flex items-end gap-[3px]' style={{ height: 18 }}>
                         {([0, 120, 60, 180, 90] as const).map((delay, i) => (
                           <div
@@ -1536,7 +1836,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <span className='text-[13px] text-muted-foreground'>Listening...</span>
                     </div>
                   ) : (
-                    <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
+                    <div
+                      className={`absolute inset-0 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto ${
+                        compact ? 'py-1 pl-3 pr-11' : 'px-3 py-2'
+                      }`}
+                    >
                       {placeholder}
                     </div>
                   ))}
@@ -1617,38 +1921,58 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             {/* Desktop Footer Actions */}
             {!isMobile && (
-              <div className='flex items-center justify-between gap-2 px-2 pb-2 pt-1'>
+              <div
+                className={`flex items-center justify-between gap-2 ${
+                  compact ? 'absolute right-2 top-1/2 -translate-y-1/2 px-0 py-0' : 'px-2 pb-2 pt-1'
+                }`}
+              >
                 {/* min-w-0 lets this group shrink below its content width so the
                     "Send to channel" label ellipsizes instead of pushing the send
                     controls out of the row. The icon buttons keep their size via
                     min-width:auto (fixed-size svg children). */}
                 <div className='flex min-w-0 items-center gap-1'>
-                  {features.fileAttachments && (
+                  {!hideComposerTools && features.fileAttachments && (
                     <DropdownMenu open={isPlusMenuOpen} onOpenChange={setIsPlusMenuOpen}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type='button'
-                          className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                          aria-label='Add content'
-                          disabled={disabled || isSending}
-                        >
-                          <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
-                        </button>
-                      </DropdownMenuTrigger>
+                      <Tooltip
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Attach files
+                            <ShortcutHint keys='mod+o' />
+                          </span>
+                        }
+                        side='top'
+                        delayDuration={300}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type='button'
+                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            aria-label='Add content'
+                            disabled={disabled || isSending}
+                          >
+                            <PaperclipSlant className='h-4 w-4 text-muted-foreground' />
+                          </button>
+                        </DropdownMenuTrigger>
+                      </Tooltip>
                       <DropdownMenuContent side='top' align='start' className={overlayZIndex}>
                         <DropdownMenuItem
                           onClick={() => {
                             handleAttachClick();
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_FILE'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
+                          <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => {
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1657,6 +1981,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsCanvasAttachmentModalOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_CANVAS'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1688,7 +2014,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   </Dialog>
 
-                  {features.emojiPicker && (
+                  {!hideComposerTools && features.emojiPicker && (
                     // Inside InputBox.tsx -> EmojiPickerButton component
                     <EmojiPickerButton
                       onEmojiSelect={handleEmojiSelect}
@@ -1696,7 +2022,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     />
                   )}
 
-                  {features.mentions && (
+                  {!hideComposerTools && features.mentions && (
                     <Tooltip
                       content='Mention user (@)'
                       side='top'
@@ -1708,6 +2034,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('@').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_USER_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -1718,26 +2046,30 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <Tooltip
-                    content='Mention channel (#)'
-                    side='top'
-                    delayDuration={1000}
-                    skipDelayDuration={1000}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => {
-                        editor?.chain().focus().insertContent('#').run();
-                      }}
-                      className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
-                      aria-label='Mention channel'
-                      disabled={disabled || isSending}
+                  {!hideComposerTools && (
+                    <Tooltip
+                      content='Mention channel (#)'
+                      side='top'
+                      delayDuration={1000}
+                      skipDelayDuration={1000}
                     >
-                      <Hashtag className='h-4 w-4 text-muted-foreground' />
-                    </button>
-                  </Tooltip>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          editor?.chain().focus().insertContent('#').run();
+                        }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_CHANNEL_MENTION'
+                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        aria-label='Mention channel'
+                        disabled={disabled || isSending}
+                      >
+                        <Hashtag className='h-4 w-4 text-muted-foreground' />
+                      </button>
+                    </Tooltip>
+                  )}
 
-                  {features.richText && (
+                  {!hideComposerTools && features.richText && (
                     <Tooltip
                       content={showFormatToolbar ? 'Hide formatting' : 'Show formatting'}
                       side='top'
@@ -1747,6 +2079,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={() => setShowFormatToolbar(prev => !prev)}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='TOGGLE_FORMAT_TOOLBAR'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -1775,7 +2109,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </div>
                   )}
 
-                  {bottomLeftSlot}
+                  {!hideComposerTools && bottomLeftSlot}
                 </div>
 
                 <div className='flex shrink-0 items-center gap-2'>
@@ -1789,7 +2123,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={onCancel}
-                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='CANCEL_EDITING'
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
                         <X className='h-4 w-4' />
@@ -1797,48 +2133,49 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     </Tooltip>
                   )}
 
-                  <VoiceInput
-                    ref={voiceInputRef}
-                    editor={editor}
-                    mentionItems={mentionItems}
-                    voiceMentionItems={voiceMentionItems}
-                    disabled={disabled}
-                    isSending={isSending}
-                    onStateChange={handleVoiceStateChange}
-                  />
+                  {!hideVoiceInput && (
+                    <VoiceInput
+                      ref={voiceInputRef}
+                      editor={editor}
+                      mentionItems={mentionItems}
+                      voiceMentionItems={voiceMentionItems}
+                      disabled={disabled}
+                      isSending={isSending}
+                      onStateChange={handleVoiceStateChange}
+                    />
+                  )}
 
                   {!hideSendButton && (
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
-                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-primary-foreground'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={
                                 disabled || sendDisabled || isSending || !hasSendableContent
                               }
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent && !sendDisabled
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                message: editor?.getText().trim() || '',
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -1848,7 +2185,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${
+                            className={`w-px h-4 self-center ${
                               hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'
                             }`}
                           ></div>
@@ -1857,7 +2194,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <button
                                 type='button'
                                 disabled={disabled || sendDisabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                  hasSendableContent && !sendDisabled
+                                    ? 'cursor-pointer hover:bg-background/10'
+                                    : 'cursor-not-allowed'
+                                }`}
                                 data-testid='send-options-menu'
                               >
                                 <ChevronBigDown className='h-3 w-3' />
@@ -1870,16 +2211,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     onCreateTicket(editor?.getText().trim() || '');
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='CREATE_TICKET_FROM_INPUT'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
                               )}
                               {onScheduleSend && (
                                 <DropdownMenuItem
+                                  disabled={!hasSendableContent}
                                   onClick={() => {
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='OPEN_SCHEDULE_DIALOG'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -1890,31 +2236,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
-                              ? 'bg-primary text-white hover:bg-primary/90'
+                              ? artifactComposerDefinition
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-white'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={disabled || isSending || !hasSendableContent}
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -1924,63 +2270,97 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
+                            className={`w-px h-4 self-center ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
                           ></div>
-                          <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type='button'
-                                disabled={disabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                                data-testid='send-options-menu'
-                              >
-                                <ChevronBigDown className='h-3 w-3' />
-                              </button>
-                            </DropdownMenuTrigger>
+                          <DropdownMenu
+                            open={isSendMenuOpen && hasSendableContent}
+                            onOpenChange={next => setIsSendMenuOpen(next && hasSendableContent)}
+                          >
+                            <Tooltip
+                              content='Schedule for later'
+                              side='top'
+                              delayDuration={1000}
+                              skipDelayDuration={1000}
+                              {...(!showSchedulePresets && { open: false })}
+                            >
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type='button'
+                                  disabled={disabled || isSending || !hasSendableContent}
+                                  className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                    hasSendableContent
+                                      ? 'cursor-pointer hover:bg-background/10'
+                                      : 'cursor-not-allowed'
+                                  }`}
+                                  data-testid='send-options-menu'
+                                >
+                                  <ChevronBigDown className='h-3 w-3' />
+                                </button>
+                              </DropdownMenuTrigger>
+                            </Tooltip>
                             <DropdownMenuContent side='top' align='end'>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  void handleSend();
-                                  setIsSendMenuOpen(false);
-                                }}
-                              >
-                                <ArrowUp className='h-4 w-4' /> Send now
-                              </DropdownMenuItem>
+                              {showSchedulePresets ? (
+                                <>
+                                  <DropdownMenuLabel>Schedule message</DropdownMenuLabel>
+                                  {schedulePresets.map(option => (
+                                    <DropdownMenuItem
+                                      key={option.key}
+                                      onClick={() => {
+                                        setIsSendMenuOpen(false);
+                                        submitScheduled(option.at.getTime());
+                                      }}
+                                      data-track-category='CHAT_INPUT'
+                                      data-track-name={`SCHEDULE_PRESET_${option.trackId}`}
+                                    >
+                                      {option.label}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void handleSend('send_menu');
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='SEND_FROM_MENU'
+                                >
+                                  <ArrowUp className='h-4 w-4' /> Send now
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setIsSendMenuOpen(false);
                                   openScheduleDialog();
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
-                                <Clock className='h-4 w-4' /> Schedule message
+                                <Clock className='h-4 w-4' />{' '}
+                                {showSchedulePresets ? 'Custom time' : 'Schedule message'}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}
                         >
                           <button
                             type='button'
-                            onClick={() => void handleSend()}
+                            onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                             }`}
                             aria-label='Send message'
                             data-testid='send-message-button'
-                            data-track-category='CHAT_INPUT'
-                            data-track-name='SEND_MESSAGE'
-                            data-track-metadata={JSON.stringify({
-                              ...(conversationId !== null ? { conversationId } : { channelId }),
-                              hasAttachments: allAttachments.length > 0,
-                            })}
                           >
                             {isSending ? (
                               <Loader2 className='h-4 w-4 animate-spin' />
@@ -2030,14 +2410,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <ScheduleMessageDialog
             open={isScheduleDialogOpen}
             onOpenChange={setIsScheduleDialogOpen}
-            onConfirm={scheduledFor => {
-              const html = editor?.getHTML() ?? '';
-              const files = allAttachments
-                .map(a => a.file)
-                .filter((f): f is File => f instanceof File);
-              void onScheduleSend(scheduledFor, html, files);
-              editor?.commands.clearContent(true);
-            }}
+            onConfirm={submitScheduled}
           />
         )}
 

@@ -101,7 +101,6 @@ interface MissingMandatoryFieldInput {
   showAssignee: boolean;
   showTodo: boolean;
   showDueDate: boolean;
-  showWorkflows: boolean;
   showLabels: boolean;
   showMerchantId: boolean;
   showTicketType: boolean;
@@ -109,10 +108,11 @@ interface MissingMandatoryFieldInput {
   mandatoryAssignee: boolean;
   mandatoryTodo: boolean;
   mandatoryDueDate: boolean;
-  mandatoryWorkflows: boolean;
   mandatoryLabels: boolean;
   mandatoryMerchantId: boolean;
   mandatoryTicketType: boolean;
+  isRelease?: boolean;
+  releaseOnly?: boolean;
 }
 
 // Returns the tooltip message for the first missing mandatory field on the
@@ -126,7 +126,6 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     showAssignee,
     showTodo,
     showDueDate,
-    showWorkflows,
     showLabels,
     showMerchantId,
     showTicketType,
@@ -134,25 +133,40 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     mandatoryAssignee,
     mandatoryTodo,
     mandatoryDueDate,
-    mandatoryWorkflows,
     mandatoryLabels,
     mandatoryMerchantId,
     mandatoryTicketType,
+    isRelease,
+    releaseOnly,
   } = input;
 
-  if (!formValues?.boardId?.trim()) return 'Select a board first';
-  if (boards && !boards.some(b => b.id === formValues.boardId)) return 'Select a board first';
+  const boardMissingMessage = isRelease ? 'Select at least one repository' : 'Select a board first';
+  if (!formValues?.boardId?.trim()) return boardMissingMessage;
+  if (boards && !boards.some(b => b.id === formValues.boardId)) return boardMissingMessage;
   if (!formValues?.title?.trim()) return 'Title is required';
   if (!formValues?.description?.trim()) return 'Description is required';
-  if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value)
+  // releaseOnly hides assignee/userGroups/dueDate/labels, so the gate must skip them
+  // (matching handleCreateTicket) or submit stays permanently disabled. Todo/merchantId
+  // remain visible, so they stay enforced.
+  if (!releaseOnly && showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value)
     return 'User Group is required';
-  if (!showUserGroupsOnly && showAssignee && mandatoryAssignee && !formValues?.assignee?.value)
+  if (
+    !releaseOnly &&
+    !showUserGroupsOnly &&
+    showAssignee &&
+    mandatoryAssignee &&
+    !formValues?.assignee?.value
+  )
     return 'Assignee is required';
   if (showTodo && mandatoryTodo && !formValues?.status) return 'Status is required';
-  if (showDueDate && mandatoryDueDate && !formValues?.eta) return 'Due Date is required';
-  if (showWorkflows && mandatoryWorkflows && !formValues?.workflowType)
-    return 'Workflow is required';
-  if (showLabels && mandatoryLabels && (!formValues?.tags || formValues.tags.length === 0))
+  if (!releaseOnly && showDueDate && mandatoryDueDate && !formValues?.eta)
+    return 'Due Date is required';
+  if (
+    !releaseOnly &&
+    showLabels &&
+    mandatoryLabels &&
+    (!formValues?.tags || formValues.tags.length === 0)
+  )
     return 'Labels are required';
   if (showMerchantId && mandatoryMerchantId && !formValues?.merchantId?.trim())
     return 'Merchant ID is required';

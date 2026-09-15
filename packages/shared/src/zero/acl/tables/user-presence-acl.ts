@@ -8,7 +8,8 @@ export class UserPresenceACL extends BaseQueryACL<'user_presence'> {
   }
 
   canSelect<TReturn>(query: Query<'user_presence', Schema, TReturn>): Query<'user_presence', Schema, TReturn> {
-    // Users can only see their own presence
-    return query.where('userId', '=', this.ctx.userID);
+    // Presence is a see-everyone feature (teammate online/away/status dots), so
+    // scope only to the workspace — not to the caller's own row.
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

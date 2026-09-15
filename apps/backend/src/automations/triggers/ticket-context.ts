@@ -1,10 +1,63 @@
 import { z } from 'zod';
-import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@prisma/client';
+import { ChannelType, EmailType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+
+const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
+  ChannelType.EMAIL,
+  ChannelType.SLACK,
+  ChannelType.APP,
+  ChannelType.CALL,
+  ChannelType.SOCIAL_MEDIA,
+]);
+
+export interface TicketUrlParams {
+  frontendUrl: string;
+  ticketId: string;
+  workspaceId: string;
+  channelType: string | null | undefined;
+  channelId: string;
+  conversationId: string | null | undefined;
+  xyneId: string | null | undefined;
+}
+
+/** Build the same deep-link a dashboard ticket navigation uses. */
+export function buildTicketUrl(params: TicketUrlParams): string | null {
+  const {
+    frontendUrl,
+    ticketId,
+    workspaceId,
+    channelType,
+    channelId,
+    conversationId,
+    xyneId,
+  } = params;
+  const base = frontendUrl.trim().replace(/\/+$/, '');
+  if (!base || !ticketId || !workspaceId || !channelId) return null;
+
+  const workspacePath = encodeURIComponent(workspaceId);
+  const channelPath = encodeURIComponent(channelId);
+
+  // Desk tickets have a dedicated support route keyed by their human-readable
+  // id. This mirrors the navigation used by the dashboard and notifications.
+  if (channelType && DESK_CHANNEL_TYPES.has(channelType as ChannelType) || !conversationId) {
+    return xyneId
+      ? `${base}/${workspacePath}/support/${channelPath}/${encodeURIComponent(xyneId)}`
+      : `${base}/${workspacePath}/support/${channelPath}`;
+  }
+
+  const query = new URLSearchParams({
+    tab: 'tickets',
+    ticketId,
+    conversationId,
+  });
+  return `${base}/${workspacePath}/chat/dir/${channelPath}?${query.toString()}`;
+}
 
 const TicketSchema = z.object({
   id: z.string(),
+  url: z.string().url().nullable(),
   xyneId: z.string().nullable(),
   title: z.string().nullable(),
   description: z.string().nullable(),
@@ -180,8 +233,19 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
       : Promise.resolve(null),
   ]);
 
+  const ticketUrl = buildTicketUrl({
+    frontendUrl: config.frontendUrl,
+    ticketId: ticket.id,
+    workspaceId: ticket.workspaceId,
+    channelType: channel?.type,
+    channelId: ticket.channelId,
+    conversationId: ticket.conversationId,
+    xyneId: ticket.xyneId,
+  });
+
   const ticketRow: TicketRow = {
     id: ticket.id,
+    url: ticketUrl,
     xyneId: ticket.xyneId ?? null,
     title: ticket.title ?? null,
     description: ticket.description ?? null,
@@ -374,7 +438,7 @@ export async function hydrateTicketBoundPayload<P extends { ticketId: string }>(
     return payload;
   }
 
-  const context = await buildTicketContext(refreshed);
+  const context = await buildTicketContext(refreshed as TicketLike);
   logger.info(
     `[ticket-context] hydrateTicketBoundPayload: resolved ticket ${payload.ticketId} → channelId=${refreshed.channelId ?? '∅'} boardId=${refreshed.boardId ?? '∅'} projectId=${refreshed.projectId ?? '∅'}`,
   );

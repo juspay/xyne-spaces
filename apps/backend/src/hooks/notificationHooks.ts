@@ -1,6 +1,6 @@
 import { notificationService } from '@/services/notificationService';
+import { ActivityClassification } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 

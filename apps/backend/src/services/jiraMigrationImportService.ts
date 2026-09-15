@@ -7,7 +7,13 @@ import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { logger } from '@/utils/logger';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { EntitySequenceService } from '@/services/entitySequenceService';
+import { randomUUID } from 'crypto';
 import {
+  buildInitialMessageMd,
+  serializeTicketMd,
+  type InitialMessageSummary,
+  type TicketCardSummary,
+  BaseTicketType,
   ActivityType,
   AttachmentEntityType,
   ConversationParticipation,
@@ -20,14 +26,6 @@ import {
   TicketPriority,
   TicketReferenceRelation,
   TicketStatusV2,
-} from '@prisma/client';
-import { randomUUID } from 'crypto';
-import {
-  serializeInitialMessageMd,
-  serializeTicketMd,
-  type InitialMessageSummary,
-  type TicketCardSummary,
-  BaseTicketType,
 } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
@@ -746,7 +744,7 @@ export class JiraMigrationImportService {
 
       for (const mapping of existingMappings) {
         if (!mapping.entityId) continue;
-        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType);
+        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType as ExternalEntityType);
       }
     }
   }
@@ -1005,7 +1003,7 @@ export class JiraMigrationImportService {
 
       for (const mapping of existingMappings) {
         if (!mapping.entityId) continue;
-        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType);
+        this.cacheExternalMapping(mapping.externalId, mapping.entityId, mapping.entityType as ExternalEntityType);
       }
     }
   }
@@ -1271,7 +1269,7 @@ export class JiraMigrationImportService {
           id: createdStage.id,
           name: createdStage.name,
           sequenceNumber: createdStage.sequenceNumber,
-          defaultTicketStatusV2: createdStage.defaultTicketStatusV2,
+          defaultTicketStatusV2: createdStage.defaultTicketStatusV2 as TicketStatusV2,
         };
 
         stages.push(createdStageSummary);
@@ -1293,9 +1291,9 @@ export class JiraMigrationImportService {
 
         const stageIndex = stages.findIndex(stage => stage.id === updatedStage.id);
         if (stageIndex !== -1) {
-          stages[stageIndex] = updatedStage;
+          stages[stageIndex] = updatedStage as JiraStageSummary;
         }
-        stageByNormalizedName.set(normalizedStatusName, updatedStage);
+        stageByNormalizedName.set(normalizedStatusName, updatedStage as JiraStageSummary);
       }
     }
 
@@ -1339,7 +1337,7 @@ export class JiraMigrationImportService {
             }),
           ),
         );
-        stages = resequenced;
+        stages = resequenced as JiraStageSummary[];
       }
     }
 
@@ -1619,27 +1617,11 @@ export class JiraMigrationImportService {
 
     await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
     if (initialMessage) {
-      const summaryData: InitialMessageSummary = {
-        messageId: initialMessage.messageId,
-        conversationId: initialMessage.conversationId,
-        senderId: initialMessage.senderId,
-        content: initialMessage.content,
+      const md = buildInitialMessageMd({
+        ...initialMessage,
         msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
-        hasAttachment: initialMessage.hasAttachment,
-        edited: initialMessage.edited,
-        isDeleted: initialMessage.isDeleted,
-        showInChannel: initialMessage.showInChannel,
-        visibleTo: initialMessage.visibleTo,
         createdAt: initialMessage.createdAt.getTime(),
-        metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
-        nudgeCount: initialMessage.nudgeCount,
-        isSent: initialMessage.isSent,
-        reactions_md: initialMessage.reactions_md,
-        link_preview_md: initialMessage.link_preview_md,
-        childConversationId: initialMessage.childConversationId,
-      };
-
-      const md = serializeInitialMessageMd(summaryData);
+      });
       if (md) {
         await db.conversation.update({
           where: { conversationId },
@@ -1850,11 +1832,21 @@ export class JiraMigrationImportService {
         },
       });
 
-      // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
       if (lastCommentAt) {
         await db.conversationParticipant.updateMany({
-          where: { conversationId },
+          where: {
+            conversationId,
+            OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: lastCommentAt } }],
+          },
           data: { lastReplyAt: lastCommentAt },
+        });
+
+        await db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: lastCommentAt } }],
+          },
+          data: { lastReadAt: lastCommentAt },
         });
       }
     }
@@ -3079,7 +3071,7 @@ export class JiraMigrationImportService {
       }
     }
 
-    let stages: JiraStageSummary[] = [...initialStages];
+    let stages: JiraStageSummary[] = [...initialStages] as JiraStageSummary[];
     const fieldMap = new Map<string, { fieldId: string; fieldType: string }>();
     let createdCount = 0;
     let reusedCount = 0;
@@ -3310,7 +3302,7 @@ export class JiraMigrationImportService {
 	                },
 	              });
 	
-	              const initialMessageMd = serializeInitialMessageMd({
+	              const initialMessageMd = buildInitialMessageMd({
 	                messageId: initialMessageId,
 	                conversationId: generatedConversationId,
 	                senderId: initialTicketMessageSenderId,

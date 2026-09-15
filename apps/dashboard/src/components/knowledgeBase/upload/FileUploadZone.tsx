@@ -197,6 +197,8 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                 folderInputRef.current?.click();
               }
             }}
+            data-track-category='knowledge-base'
+            data-track-name='OPEN_FILE_PICKER'
             disabled={disabled}
           >
             <FolderOpen size={16} />

@@ -6,12 +6,10 @@ import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ReleaseTrackingMode,
-  VCSProviderType,
   type ApplicationConfig,
   type Channel,
   type ExistingReleaseConfig,
   type ReleaseTrackingModeValue,
-  type VCSProvider,
   type WizardStep,
 } from './ReleaseConfigWizard.types';
 import { buildApplicationReleaseBoardName, buildMainReleaseBoardName } from './releaseBoardNames';
@@ -44,20 +42,30 @@ interface UseReleaseConfigFormOptions {
   projectId: string;
   existingConfig: ExistingReleaseConfig | undefined;
   onSave: (mainBoard: { id: string; name: string }) => void;
+  /**
+   * "Add service" mode: seed one blank service appended to the existing group
+   * and reveal only it. The whole group stays in state so save submits every
+   * service (the mutator deletes any app missing from the payload).
+   */
+  addServiceMode?: boolean;
 }
 
 export function useReleaseConfigForm({
   projectId,
   existingConfig,
   onSave,
+  addServiceMode = false,
 }: UseReleaseConfigFormOptions) {
   const zero = useZero();
   const isEditing = !!existingConfig;
 
-  const [currentStep, setCurrentStep] = useState<WizardStep>(isEditing ? 2 : 1);
-  const [vcsProvider, setVcsProvider] = useState<VCSProvider | null>(
-    existingConfig?.vcsProvider ?? 'BITBUCKET_SERVER',
+  // The blank service seeded for add mode; its id lets the form filter to that
+  // one row and gate save on it.
+  const [addedService] = useState(() =>
+    addServiceMode ? { id: uuidv4(), boardId: uuidv4() } : null,
   );
+
+  const [currentStep, setCurrentStep] = useState<WizardStep>(2);
   const [releaseTrackingMode, setReleaseTrackingMode] = useState<ReleaseTrackingModeValue>(
     existingConfig?.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE,
   );
@@ -69,21 +77,22 @@ export function useReleaseConfigForm({
     existingConfig?.applications[0]?.repoUrl ?? '',
   );
 
-  const [applications, setApplications] = useState<ApplicationConfig[]>(() =>
-    initApplications(existingConfig),
-  );
+  const [applications, setApplications] = useState<ApplicationConfig[]>(() => {
+    const base = initApplications(existingConfig);
+    return addedService ? [...base, { ...EMPTY_APP, ...addedService }] : base;
+  });
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Once the user edits the form we stop overriding state from Zero re-deliveries.
-  const [userTouched, setUserTouched] = useState(false);
+  // Add mode starts "touched" so the seeded blank row survives re-deliveries.
+  const [userTouched, setUserTouched] = useState(addServiceMode);
 
   const channels = useChannelsByProjectId(projectId) as Channel[] | undefined;
 
   // Sync from existingConfig when Zero delivers the populated rows after initial mount.
   useEffect(() => {
     if (userTouched || !existingConfig) return;
-    if (existingConfig.vcsProvider) setVcsProvider(existingConfig.vcsProvider);
     if (existingConfig.releaseTrackingMode)
       setReleaseTrackingMode(existingConfig.releaseTrackingMode);
     if (existingConfig.applications.length > 0) setApplications(existingConfig.applications);
@@ -113,12 +122,8 @@ export function useReleaseConfigForm({
   // ─── Step navigation ────────────────────────────────────────────────────────
 
   const handleNext = useCallback(() => {
-    if (currentStep === 1 && !vcsProvider) {
-      toast.error('Please select a VCS provider');
-      return;
-    }
     if (currentStep < 2) setCurrentStep(prev => (prev + 1) as WizardStep);
-  }, [currentStep, vcsProvider]);
+  }, [currentStep]);
 
   const handleBack = useCallback(() => {
     if (currentStep > 1) setCurrentStep(prev => (prev - 1) as WizardStep);
@@ -165,10 +170,23 @@ export function useReleaseConfigForm({
   // ─── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
+    const hasNamelessContent = applications.some(
+      app =>
+        !app.name.trim() &&
+        (app.regex.trim() ||
+          app.ownerTeam.trim() ||
+          app.envPaths.trim() ||
+          app.migrationPaths.trim()),
+    );
+    if (hasNamelessContent) {
+      toast.error('Every service needs a name');
+      return;
+    }
+
     const validApps = applications.filter(app => app.name.trim());
 
     if (validApps.length === 0) {
-      toast.error('Please configure at least one application');
+      toast.error('Please configure at least one service');
       return;
     }
     if (!sharedRepoUrl.trim()) {
@@ -176,11 +194,11 @@ export function useReleaseConfigForm({
       return;
     }
     if (!mainBoardName.trim()) {
-      toast.error('Repository name must produce a valid release board name');
+      toast.error('Repository name must produce a valid repository name');
       return;
     }
     if (validApps.some(app => !app.regex.trim())) {
-      toast.error('All applications must have an Application Regex');
+      toast.error('All services must have a Service Regex');
       return;
     }
     // Fall back to the group's stored channel: edit-application mode hides the
@@ -206,7 +224,7 @@ export function useReleaseConfigForm({
         migrationPaths: csvToArray(app.migrationPaths),
       }));
       if (applicationsData.some(app => !app.boardName.trim())) {
-        throw new Error('Repository and application names must produce valid release board names');
+        throw new Error('Repository and service names must produce valid repository names');
       }
 
       const result = zero.mutate(
@@ -214,7 +232,6 @@ export function useReleaseConfigForm({
           projectId,
           mainBoardId,
           mainBoardName: mainBoardName.trim(),
-          vcsProvider: vcsProvider! as VCSProviderType,
           releaseTrackingMode: releaseTrackingMode as ReleaseTrackingMode,
           channelId: channelIdToSave,
           applications: applicationsData,
@@ -240,7 +257,6 @@ export function useReleaseConfigForm({
     projectId,
     mainBoardId,
     mainBoardName,
-    vcsProvider,
     releaseTrackingMode,
     sharedRepoUrl,
     onSave,
@@ -256,9 +272,7 @@ export function useReleaseConfigForm({
     currentStep,
     handleNext,
     handleBack,
-    // VCS and release mode
-    vcsProvider,
-    setVcsProvider,
+    // Release mode
     releaseTrackingMode,
     setReleaseTrackingMode: updateReleaseTrackingMode,
     // Shared repository
@@ -274,6 +288,8 @@ export function useReleaseConfigForm({
     addApplication,
     removeApplication,
     updateApplication,
+    // Add-service mode: id of the blank service row seeded into the group.
+    addedServiceId: addedService?.id ?? null,
     // Channel
     channels,
     selectedChannel,

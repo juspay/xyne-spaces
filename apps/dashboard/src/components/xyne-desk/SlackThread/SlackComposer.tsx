@@ -7,12 +7,13 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AutoDraftStatus } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { useSlackUserAuth, useDisconnectSlackUser } from '../../../hooks/useSlackUserAuth';
 import { useSlackUsers } from '../../../hooks/useSlackUsers';
-import { useEmailDraft, useEmailDraftOperations } from '../../../hooks/useEmailDraft';
+import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
 import Tooltip from '../../ui/Tooltip';
 import { EditorToolbar, EmojiPickerButton } from '../../ui/EditorToolbar';
 import { MentionExtension, mentionPluginKey } from '../../ui/TipTapExtensions';
@@ -25,6 +26,7 @@ const lowlight = createLowlight(all);
 interface SlackComposerProps {
   conversationId: string;
   channelId?: string | null;
+  drafts?: readonly EmailDraftRecord[];
   variant?: 'slack' | 'app';
   recordOnly?: boolean;
 }
@@ -32,6 +34,7 @@ interface SlackComposerProps {
 const SlackComposer = ({
   conversationId,
   channelId,
+  drafts,
   variant = 'slack',
   recordOnly = false,
 }: SlackComposerProps): ReactElement => {
@@ -44,8 +47,11 @@ const SlackComposer = ({
   const { data: slackAuth, isLoading: authLoading } = useSlackUserAuth();
   const disconnectMutation = useDisconnectSlackUser();
   const { filteredUsers, searchUsers } = useSlackUsers();
-  const draft = useEmailDraft(conversationId);
-  const { deleteDraft } = useEmailDraftOperations(conversationId, channelId);
+  const { deleteDraft, latestDraft: draft } = useEmailDraftOperations(
+    conversationId,
+    channelId,
+    drafts,
+  );
   const isAutoDraftGenerating = draft?.autoDraftStatus === AutoDraftStatus.GENERATING;
   const lastLoadedDraftRef = useRef<string>('');
 
@@ -74,10 +80,6 @@ const SlackComposer = ({
       CodeBlockLowlight.configure({
         lowlight,
         defaultLanguage: 'plaintext',
-        HTMLAttributes: {
-          class: 'bg-slate-50 border border-slate-200 rounded-lg overflow-x-auto relative',
-          style: 'padding: 0.75rem;',
-        },
       }),
       LinkExtension.extend({ inclusive: false }).configure({
         openOnClick: false,
@@ -172,8 +174,8 @@ const SlackComposer = ({
       setAttachments([]);
       lastLoadedDraftRef.current = '';
       deleteDraft();
-    } catch {
-      toast.error('Failed to send message');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to send message'));
     } finally {
       setSending(false);
     }
@@ -272,6 +274,7 @@ const SlackComposer = ({
                 className='text-xs text-muted-foreground underline hover:text-foreground cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='disconnect-slack-user'
+                data-ph-capture-attribute-track-id='disconnect_slack_user'
               >
                 Disconnect
               </button>
@@ -286,6 +289,7 @@ const SlackComposer = ({
                 className='text-xs text-primary underline hover:text-primary/80 cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='connect-slack-user'
+                data-ph-capture-attribute-track-id='connect_slack_user'
               >
                 Connect your Slack
               </button>
@@ -413,6 +417,7 @@ const SlackComposer = ({
                 data-track-category='slack-composer'
                 data-track-name='send-reply'
                 aria-label='Send reply'
+                data-ph-capture-attribute-track-id='send_slack_reply'
               >
                 {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
               </button>

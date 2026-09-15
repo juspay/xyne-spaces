@@ -39,6 +39,15 @@ spec:
           # Often /app or /app/xyne-claw-auth/backend — confirm with WORKDIR above.
           workingDir: <BACKEND_WORKDIR_IN_IMAGE>
           command: ["bash", "scripts/phase1-pod-migrate.sh"]
+          # The claw-auth image already runs as a non-root user (USER clawauth),
+          # and the migration only touches the DB — no root/caps/escalation needed.
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           env:
             # Whoever should become the org OWNER. If omitted, no OWNER is set.
             - name: DEFAULT_ADMIN_EMAIL

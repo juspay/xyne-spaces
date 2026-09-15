@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { CallStatus, InvitationResponse } from '@prisma/client';
+import { CallStatus, InvitationResponse } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';

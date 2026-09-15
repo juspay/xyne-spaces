@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Folder } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import type { CanvasChannel, CanvasFolder, CanvasProject } from '../Canvas.types';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Input from '../../ui/Input';
+
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { canvasService } from '../../../services/Canvas/canvasService';
@@ -14,6 +14,7 @@ import type { CanvasListGroupedProps } from './CanvasListGrouped.utils';
 import { getChannelDisplayName, nextFolderName } from './CanvasListGrouped.utils';
 import { useCanvasListGroupedData } from './useCanvasListGroupedData';
 import { CanvasListGroupedContent } from './CanvasListGroupedContent';
+import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   onSelect,
@@ -21,10 +22,14 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
   selectedCanvasId,
   onDelete,
   onDuplicate,
+  onArchiveToggle,
   isPersonalSectionCollapsed,
   onSetPersonalSectionCollapsed,
   excludeCallGeneratedCanvases = true,
+  excludeRecordingGeneratedCanvases = true,
   showStarredOnly = false,
+  includeArchived = false,
+  onlyArchived = false,
   onToggleStar,
   searchQuery = '',
 }) => {
@@ -61,7 +66,10 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
     currentUserId,
     collapsedProjects,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     showStarredOnly,
+    includeArchived,
+    onlyArchived,
     forceExpandProjects: isSearchActive,
   });
 
@@ -537,6 +545,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           adminChannelIds={activeAdminChannelIds}
           isPersonalSectionCollapsed={isPersonalSectionCollapsed}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+          excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
           collapsedProjects={collapsedProjects}
           collapsedChannels={collapsedChannels}
           collapsedFolders={collapsedFolders}
@@ -549,8 +558,11 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
           onToggleFolder={handleToggleFolder}
           onDelete={onDelete}
           onDuplicate={onDuplicate}
+          onArchiveToggle={onArchiveToggle}
           onSetPersonalSectionCollapsed={onSetPersonalSectionCollapsed}
           showStarredOnly={showStarredOnly}
+          includeArchived={includeArchived}
+          onlyArchived={onlyArchived}
           onToggleStar={onToggleStar}
           onCreatePersonalCanvas={handleCreatePersonalCanvas}
           onCreateCanvasInProject={handleCreateCanvasInProject}
@@ -588,6 +600,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
               channelCreateTarget && void handleCreateCanvasInChannel(channelCreateTarget)
             }
             disabled={isCreatingCanvas || !channelCreateTarget || !!channelCreateTarget?.isArchived}
+            data-ph-capture-attribute-track-id='create_canvas_in_channel_root'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_CHANNEL_ROOT'
           >
@@ -605,6 +618,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                     className='w-full flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-foreground hover:bg-accent disabled:opacity-50'
                     onClick={() => handleCreateCanvasInChannelFolder(folder)}
                     disabled={isCreatingCanvas}
+                    data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                     data-track-category='CANVAS'
                     data-track-name='CREATE_CANVAS_IN_CHANNEL_FOLDER'
                   >
@@ -637,6 +651,7 @@ export const CanvasListGrouped: React.FC<CanvasListGroupedProps> = ({
                 className='inline-flex items-center justify-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50'
                 onClick={handleCreateChannelFolder}
                 disabled={!channelCreateTarget || !!channelCreateTarget?.isArchived}
+                data-ph-capture-attribute-track-id='create_channel_canvas_folder'
                 data-track-category='CANVAS'
                 data-track-name='CREATE_CHANNEL_CANVAS_FOLDER'
               >

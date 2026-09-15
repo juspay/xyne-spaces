@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { deliverDelayedServerMessage } from '@/services/messageDeliveryService';
+import { db } from '@/database/client';
 
 export interface DeliverDelayedMessageInput {
   delayedMessageId: string;
@@ -23,6 +24,23 @@ export async function deliverDelayedMessage(
 ): Promise<DeliverDelayedMessageResult> {
   const { channelId, conversationId, senderId, content } = input;
   try {
+    // A scheduled message carries both channelId and conversationId. Authorization is
+    // performed against the channel, so require the conversation to belong to that channel
+    // before delivering. Enforced here because both the send-now and scheduled-worker paths
+    // funnel through this function.
+    if (conversationId) {
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId },
+        select: { channelId: true },
+      });
+      if (!conversation || conversation.channelId !== channelId) {
+        logger.warn(
+          `[DELAYED-MSG-DELIVERY] Refusing delivery: conversation ${conversationId} does not belong to channel ${channelId}`,
+        );
+        return { success: false, error: 'Conversation does not belong to this channel' };
+      }
+    }
+
     if (!conversationId) {
       logger.info(
         `[DELAYED-MSG-DELIVERY] Delivering as new conversation: channelId=${channelId}, senderId=${senderId}`,

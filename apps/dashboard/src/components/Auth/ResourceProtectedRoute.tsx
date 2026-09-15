@@ -4,6 +4,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useUserGroups, useUserGroupsHydrated } from '../../hooks/useUserGroup';
 import AppLoader from '../AppLoader/AppLoader';
+import { AccessType } from '@xyne/shared';
 
 type AccessLevel = 'READ' | 'WRITE' | 'ADMIN';
 
@@ -49,7 +50,7 @@ export const ResourceProtectedRoute = ({
     if (satisfies(p.accessType, minAccess)) return true;
     // Legacy carve-out: USER-GROUPS treats WRITE as eligible even when the
     // route requested ADMIN. New code should pass minAccess explicitly.
-    if (resourceName === 'USER-GROUPS' && p.accessType === 'WRITE') return true;
+    if (resourceName === 'USER-GROUPS' && p.accessType === AccessType.WRITE) return true;
     return false;
   });
 

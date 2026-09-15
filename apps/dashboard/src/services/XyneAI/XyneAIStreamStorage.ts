@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * IndexedDB storage for XyneAI streaming state persistence
  * Allows streams to continue across sidebar open/close cycles
@@ -55,7 +56,10 @@ class XyneAIStreamStorage {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = (): void => {
-        console.error('[XyneAIStreamStorage] Failed to open IndexedDB');
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAIStreamStorage] Failed to open IndexedDB'),
+        });
         reject(new Error('Failed to open IndexedDB'));
       };
 
@@ -126,7 +130,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to create stream record'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to create stream:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to create stream:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -138,7 +146,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for chunk append:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for chunk append:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -159,7 +171,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to append chunk'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to append chunk:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to append chunk:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -171,7 +187,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for thread id update:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for thread id update:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -187,7 +207,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to update stream thread id'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to update stream thread id:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to update stream thread id:'),
+        error: error,
+      });
     }
   }
 
@@ -198,7 +222,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for message update:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for message update:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -214,7 +242,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to update messages'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to update messages:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to update messages:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -226,7 +258,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for completion:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for completion:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -244,7 +280,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to complete stream'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to complete stream:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to complete stream:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -256,7 +296,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for error:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for error:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -274,7 +318,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to error stream'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to mark stream as errored:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to mark stream as errored:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -286,7 +334,11 @@ class XyneAIStreamStorage {
     try {
       const record = await this.getStream(streamId);
       if (!record) {
-        console.warn('[XyneAIStreamStorage] Stream not found for abort:', streamId);
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[XyneAIStreamStorage] Stream not found for abort:'),
+          context: [streamId],
+        });
         return;
       }
 
@@ -303,7 +355,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to abort stream'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to abort stream:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to abort stream:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -328,7 +384,11 @@ class XyneAIStreamStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to get stream:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to get stream:'),
+        error: error,
+      });
       return null;
     }
   }
@@ -368,7 +428,11 @@ class XyneAIStreamStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to get active stream for thread:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to get active stream for thread:'),
+        error: error,
+      });
       return null;
     }
   }
@@ -393,7 +457,11 @@ class XyneAIStreamStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to get active streams:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to get active streams:'),
+        error: error,
+      });
       return [];
     }
   }
@@ -413,7 +481,11 @@ class XyneAIStreamStorage {
         request.onerror = (): void => reject(new Error('Failed to delete stream'));
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to delete stream:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to delete stream:'),
+        error: error,
+      });
       throw error;
     }
   }
@@ -450,7 +522,11 @@ class XyneAIStreamStorage {
         };
       });
     } catch (error) {
-      console.error('[XyneAIStreamStorage] Failed to cleanup old streams:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[XyneAIStreamStorage] Failed to cleanup old streams:'),
+        error: error,
+      });
     }
   }
 }

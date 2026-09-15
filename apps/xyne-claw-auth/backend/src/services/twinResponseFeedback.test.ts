@@ -48,17 +48,29 @@ describe("renderTwinFeedbackRecord", () => {
     expect(r.text).toContain("yep looking now, will ping in 10");
   });
 
-  it("declined → negative signal, tells the twin to avoid this", () => {
+  // The two negative outcomes are the ones that degraded the twin: phrased as
+  // "avoid this sender/topic" they fed the curator's triage facet, which feeds
+  // the respond/ignore gate, so a run of declines trained the twin into silence
+  // instead of into a better voice. These assertions pin the reframing.
+  it("declined → draft-quality feedback, never a reason to stop replying", () => {
     const r = row({ status: "declined", draftMessage: "No worries, I'll handle it." });
     expect(r.text).toContain("DECLINED");
-    expect(r.text).toContain("NOT how they would respond");
     expect(r.text).toContain("No worries, I'll handle it.");
+    expect(r.text).toMatch(/VOICE/);
+    expect(r.text).toContain("sounds more like the user");
+    // The load-bearing part: no suppression instruction, and an explicit
+    // triage opt-out for the curator.
+    expect(r.text).toMatch(/do NOT emit a respond-vs-ignore \(triage\) pattern/i);
+    expect(r.text).not.toMatch(/avoid this kind of response/i);
   });
 
-  it("ignored → weak/negative signal", () => {
+  it("expired approval → weak, and never the word IGNORED", () => {
     const r = row({ status: "ignored" });
-    expect(r.text).toContain("IGNORED");
     expect(r.text.toLowerCase()).toContain("weak");
+    expect(r.text).toMatch(/never emit a respond-vs-ignore \(triage\) pattern/i);
+    // "IGNORED" is the curator's documented cue to mine a real non-response
+    // into a triage pattern. An expired approval DM is not that.
+    expect(r.text).not.toContain("IGNORED");
   });
 
   it("notes an emoji reaction when the delivery included one", () => {

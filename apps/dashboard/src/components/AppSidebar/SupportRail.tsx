@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   NotificationBellOn,
@@ -11,8 +11,15 @@ import {
   LightningThunderElectricOn,
 } from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../ui/ShortcutHint';
 import { cn } from '../../utils/classNames';
+import { useShortcutById } from '../../shortcuts';
 import type { PikaIcon } from './navigationConfig';
+import {
+  RAIL_SHORTCUT_LIMIT,
+  railItemIndexFromEvent,
+  railShortcutsAvailable,
+} from './navigationConfig';
 
 interface RailContext {
   activeRoute: string;
@@ -109,11 +116,25 @@ export const SupportRail = ({
   activeRoute,
 }: SupportRailProps): ReactElement => {
   const ctx: RailContext = { activeRoute };
+  const navigate = useNavigate();
 
   const handleBack = (): void => onNavigationClick('Support: Back');
 
   const items = SUPPORT_RAIL_ITEMS.filter(
     item => !item.gatedPath || permittedGlobalPaths.has(item.gatedPath),
+  );
+
+  const railShortcuts = railShortcutsAvailable();
+
+  useShortcutById(
+    'global.goToRailItem',
+    event => {
+      const item = items[railItemIndexFromEvent(event)];
+      if (!item) return;
+      onNavigationClick(`Support: ${item.label}`);
+      void navigate(prefixWs(item.path));
+    },
+    { enabled: railShortcuts },
   );
 
   return (
@@ -140,11 +161,26 @@ export const SupportRail = ({
       <span aria-hidden='true' className='my-0.5 h-px w-5 bg-sidebar-border' />
 
       {/* Support sub-navigation */}
-      {items.map(item => {
+      {items.map((item, index) => {
         const active = item.isActive(ctx);
         const Icon = item.icon;
+        const shortcutIndex = railShortcuts && index < RAIL_SHORTCUT_LIMIT ? index + 1 : null;
         return (
-          <Tooltip key={item.key} content={item.label} side='right' delayDuration={0}>
+          <Tooltip
+            key={item.key}
+            content={
+              shortcutIndex ? (
+                <span className='flex items-center gap-2'>
+                  {item.label}
+                  <ShortcutHint keys={`mod+${shortcutIndex}`} />
+                </span>
+              ) : (
+                item.label
+              )
+            }
+            side='right'
+            delayDuration={0}
+          >
             <Link
               to={prefixWs(item.path)}
               onClick={() => onNavigationClick(`Support: ${item.label}`)}

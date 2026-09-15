@@ -4,6 +4,7 @@
  */
 
 import { convert } from 'html-to-text';
+import { MessageType } from '@xyne/shared';
 import { BaseTransformer } from '../../core/baseTransformer';
 import { NormalizedData, ParseResult, PostprocessContext } from '../../core/types';
 import { ZohoWebhookPayload, ZohoPayload, ZohoThread, ZohoEventType } from './types';
@@ -611,7 +612,7 @@ export class ZohoTransformer extends BaseTransformer<any, NormalizedData> {
           conversationId: context.conversationId,
           userId: this.getSystemUserId(context.sourceId),
           content: chunk.content,
-          msgType: 'BOT',
+          msgType: MessageType.BOT,
           uploadedFiles: [], // Chunks don't have attachments
           metadata: {
             externalSource: context.sourceId,

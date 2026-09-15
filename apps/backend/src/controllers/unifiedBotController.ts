@@ -6,6 +6,7 @@
  */
 
 import { Request, Response } from 'express';
+import { MessageType } from '@xyne/shared';
 import {
   executionOrchestrator,
   botCatalog,
@@ -14,7 +15,6 @@ import {
 } from '@/bots/unified/index.js';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
-import { MessageType } from '@prisma/client';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 
@@ -130,7 +130,7 @@ export async function chatWithBot(req: Request, res: Response): Promise<void> {
     }
 
     // Get or create DM channel
-    const channel = await unifiedDMService.getOrCreateBotDMByBotId(user.id, botId, user.workspaceId ?? '');
+    const channel = await unifiedDMService.getOrCreateBotDMByBotId(user.id, botId, user.workspaceId);
     if (!channel) {
       res.status(404).json({
         success: false,

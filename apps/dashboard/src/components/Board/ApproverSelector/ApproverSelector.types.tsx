@@ -1,4 +1,4 @@
-export type ApproverType = 'USER' | 'ROLE';
+import type { ApproverType } from '@xyne/shared';
 
 export interface ApproverEntry {
   approverId: string;

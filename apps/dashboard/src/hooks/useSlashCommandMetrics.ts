@@ -28,6 +28,8 @@ interface SlashClickPayload {
   terminal: boolean;
   targetType?: 'user' | 'channel';
   destination?: string;
+  /** How a chat/call target was reached: typing the `/`-prefix vs the ⌥↵ Actions menu. */
+  source?: 'slash' | 'actions_menu';
 }
 
 export interface UseSlashCommandMetricsReturn {
@@ -113,6 +115,7 @@ export function useSlashCommandMetrics({
         terminal: payload.terminal,
         ...(payload.targetType && { targetType: payload.targetType }),
         ...(payload.destination && { destination: payload.destination }),
+        ...(payload.source && { source: payload.source }),
       });
 
       bumpStage(payload.stage);

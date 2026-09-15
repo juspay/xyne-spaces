@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import { apiInstance } from '../services/clients/apiClient';
 import { logger, Event } from '../utils/logger';
 
+export interface GooglePlayAppIntegration {
+  id: string;
+  displayName: string;
+  packageName: string | null;
+  isActive: boolean;
+}
+
 interface ConnectedEmailInfo {
   email: string | null;
   isConnected: boolean;
@@ -9,6 +16,7 @@ interface ConnectedEmailInfo {
   sourceType: string | null;
   connectedLabel: string | null;
   outboundConfigured: boolean;
+  googlePlayApps: GooglePlayAppIntegration[];
 }
 
 const EMPTY: ConnectedEmailInfo = {
@@ -18,6 +26,7 @@ const EMPTY: ConnectedEmailInfo = {
   sourceType: null,
   connectedLabel: null,
   outboundConfigured: true,
+  googlePlayApps: [],
 };
 
 const cache = new Map<string, ConnectedEmailInfo>();
@@ -46,6 +55,7 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
       sourceType?: string | null;
       connectedLabel?: string | null;
       outboundConfigured?: boolean;
+      googlePlayApps?: GooglePlayAppIntegration[];
     }>(`/channels/${channelId}/connected-email`)
     .then(res => {
       const isConnected = res.data?.isConnected ?? res.data?.hasIntegration ?? false;
@@ -56,6 +66,7 @@ const fetchConnectedEmail = (channelId: string): Promise<ConnectedEmailInfo> => 
         sourceType: res.data?.sourceType ?? null,
         connectedLabel: res.data?.connectedLabel ?? res.data?.email ?? null,
         outboundConfigured: res.data?.outboundConfigured ?? true,
+        googlePlayApps: res.data?.googlePlayApps ?? [],
       };
       cache.set(channelId, info);
       return info;

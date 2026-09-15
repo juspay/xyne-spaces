@@ -58,7 +58,6 @@ type MigrationMode = 'all-to-one' | 'per-board';
 type JiraMigrationUseCase =
   | 'issues'
   | 'channel-only'
-  | 'ticket-created-by'
   | 'purge-project'
   | 'move-jira-project-board'
   | 'move-jira-project-channel';
@@ -209,12 +208,6 @@ const JiraMigrationScreen = (): ReactElement => {
   const [channelMoveUpdatedAt, setChannelMoveUpdatedAt] = useState('');
   const [isChannelMoveLoading, setIsChannelMoveLoading] = useState(false);
   const channelMoveChannels = useChannelsByProjectId(channelMoveSourceProjectId || undefined);
-  const [creatorChangeTicketId, setCreatorChangeTicketId] = useState('');
-  const [creatorChangeNewUserId, setCreatorChangeNewUserId] = useState('');
-  const [creatorChangeUpdatedAt, setCreatorChangeUpdatedAt] = useState('');
-  const [creatorChangeCascade, setCreatorChangeCascade] = useState(false);
-  const [isCreatorChangeLoading, setIsCreatorChangeLoading] = useState(false);
-  const [creatorChangeSearch, setCreatorChangeSearch] = useState('');
   const [purgeProjectId, setPurgeProjectId] = useState('');
   const [purgeExternalSourceId, setPurgeExternalSourceId] = useState('');
   const [purgeConfirmText, setPurgeConfirmText] = useState('');
@@ -305,50 +298,6 @@ const JiraMigrationScreen = (): ReactElement => {
     [channels, targetChannelId],
   );
 
-  const creatorChangeOptions = useMemo(() => {
-    const users = (workspaceUsers || []).filter(u => Boolean(u?.id));
-    const query = creatorChangeSearch.trim().toLowerCase();
-
-    const results: Array<{
-      value: string;
-      label: string;
-      subtitle?: string;
-      icon: ReactElement;
-    }> = [];
-
-    if (!query) {
-      for (const user of users) {
-        if (!user?.id) continue;
-        const subtitle = user.email ? user.email : undefined;
-        results.push({
-          value: user.id,
-          label: user.name || user.email || user.id,
-          ...(subtitle ? { subtitle } : {}),
-          icon: <User className='w-4 h-4 text-muted-foreground' />,
-        });
-        if (results.length >= 50) break;
-      }
-      return results;
-    }
-
-    for (const user of users) {
-      if (!user?.id) continue;
-      const email = (user.email || '').toLowerCase();
-      const name = (user.name || '').toLowerCase();
-      if (email.includes(query) || name.includes(query) || user.id.toLowerCase().includes(query)) {
-        const subtitle = user.email ? user.email : undefined;
-        results.push({
-          value: user.id,
-          label: user.name || user.email || user.id,
-          ...(subtitle ? { subtitle } : {}),
-          icon: <User className='w-4 h-4 text-muted-foreground' />,
-        });
-        if (results.length >= 50) break;
-      }
-    }
-    return results;
-  }, [workspaceUsers, creatorChangeSearch]);
-
   const handleMoveChannelProject = async (): Promise<void> => {
     if (!channelMoveSourceProjectId.trim()) {
       toast.error('Select a source project');
@@ -386,38 +335,6 @@ const JiraMigrationScreen = (): ReactElement => {
       toast.error('Channel move failed', { description: message });
     } finally {
       setIsChannelMoveLoading(false);
-    }
-  };
-
-  const handleChangeTicketCreatedBy = async (): Promise<void> => {
-    if (!creatorChangeTicketId.trim()) {
-      toast.error('Enter a ticketId');
-      return;
-    }
-    if (!creatorChangeNewUserId.trim()) {
-      toast.error('Select a new creator');
-      return;
-    }
-
-    setIsCreatorChangeLoading(true);
-    try {
-      const payload = {
-        ticketId: creatorChangeTicketId.trim(),
-        newCreatedByUserId: creatorChangeNewUserId.trim(),
-        ...(creatorChangeUpdatedAt.trim() ? { updatedAt: creatorChangeUpdatedAt.trim() } : {}),
-        ...(creatorChangeCascade ? { cascadeConversationAndMessages: true } : {}),
-      };
-      const result = await jiraMigrationService.changeTicketCreatedBy(payload);
-      toast.success('Ticket updated', {
-        description: result.ticket
-          ? `${result.ticket.xyneId}: ${result.ticket.title}${creatorChangeCascade ? ` • convo:${result.conversationUpdatedCount ?? 0} msgs:${result.messageUpdatedCount ?? 0}` : ''}`
-          : `Updated: ${result.updatedCount}`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to change ticket creator';
-      toast.error('Update failed', { description: message });
-    } finally {
-      setIsCreatorChangeLoading(false);
     }
   };
 
@@ -1591,19 +1508,6 @@ const JiraMigrationScreen = (): ReactElement => {
                 <button
                   type='button'
                   data-track-category='jira_migration'
-                  data-track-name='use_case_ticket_created_by'
-                  onClick={() => setUseCase('ticket-created-by')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                    useCase === 'ticket-created-by'
-                      ? 'bg-foreground text-background'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Change Ticket Creator
-                </button>
-                <button
-                  type='button'
-                  data-track-category='jira_migration'
                   data-track-name='use_case_purge_project'
                   onClick={() => setUseCase('purge-project')}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
@@ -1769,112 +1673,13 @@ const JiraMigrationScreen = (): ReactElement => {
                     <Button
                       className='w-full lg:w-auto'
                       onClick={() => void handleMoveChannelProject()}
+                      data-track-category='jira_migration'
+                      data-track-name='MOVE_CHANNEL_PROJECT'
                       disabled={isChannelMoveLoading}
                     >
                       {isChannelMoveLoading ? 'Moving…' : 'Move Channel'}
                     </Button>
                   </div>
-                </div>
-              </div>
-            </section>
-          ) : useCase === 'ticket-created-by' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
-              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
-                <div className='flex flex-col gap-1'>
-                  <h3 className='text-sm font-semibold text-foreground'>Change Ticket Creator</h3>
-                  <p className='text-xs text-muted-foreground'>
-                    Updates `Ticket.createdBy` (and sets `updatedBy` to you). Does not modify Jira.
-                  </p>
-                </div>
-              </div>
-
-              <div className='p-5'>
-                <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-change-ticket-id'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      Ticket ID
-                    </label>
-                    <Input
-                      id='jira-change-ticket-id'
-                      value={creatorChangeTicketId}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setCreatorChangeTicketId(e.target.value)
-                      }
-                      placeholder='cxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-                    />
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Xyne `Ticket.id` or `Ticket.xyneId` (example: `LP-268`).
-                    </p>
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                      New Creator
-                    </p>
-                    <EntitySelector
-                      options={creatorChangeOptions}
-                      selectedValue={creatorChangeNewUserId || null}
-                      onSelect={value => setCreatorChangeNewUserId(value ?? '')}
-                      onSearchChange={setCreatorChangeSearch}
-                      disableClientFiltering={true}
-                      placeholder='Select user'
-                      searchPlaceholder='Search users...'
-                      width='100%'
-                      testId='jira-change-ticket-creator'
-                    />
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                    <label
-                      htmlFor='jira-change-ticket-updated-at'
-                      className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
-                    >
-                      updatedAt (optional)
-                    </label>
-                    <Input
-                      id='jira-change-ticket-updated-at'
-                      value={creatorChangeUpdatedAt}
-                      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        setCreatorChangeUpdatedAt(e.target.value)
-                      }
-                      placeholder='2026-05-19T13:23:47.000Z'
-                    />
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Leave empty to use current time.
-                    </p>
-                  </div>
-                </div>
-
-                <div className='mt-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
-                  <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
-                    Cascade (optional)
-                  </p>
-                  <label className='flex items-start gap-3 text-sm text-foreground'>
-                    <input
-                      type='checkbox'
-                      className='mt-0.5 h-4 w-4 rounded border-border'
-                      checked={creatorChangeCascade}
-                      onChange={e => setCreatorChangeCascade(e.target.checked)}
-                      data-track-category='jira_migration'
-                      data-track-name='cascade_conversation_messages'
-                    />
-                    <span>
-                      Also update `Conversation.createdBy`, `Message.senderId`, and attachments in
-                      this ticket’s conversation (only where they match old creator).
-                    </span>
-                  </label>
-                </div>
-
-                <div className='mt-4 flex justify-end'>
-                  <Button
-                    onClick={() => void handleChangeTicketCreatedBy()}
-                    disabled={isCreatorChangeLoading}
-                  >
-                    {isCreatorChangeLoading ? 'Updating…' : 'Update Ticket'}
-                  </Button>
                 </div>
               </div>
             </section>
@@ -2021,6 +1826,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={purgeDryRun ? 'outline' : 'default'}
                     onClick={() => void handlePurgeProjectMigration()}
+                    data-track-category='jira_migration'
+                    data-track-name='PURGE_PROJECT_MIGRATION'
                     disabled={isPurgeLoading}
                   >
                     {isPurgeLoading
@@ -2303,6 +2110,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={moveChannelDryRun ? 'outline' : 'default'}
                     onClick={() => void handleMoveJiraProjectChannel()}
+                    data-track-category='jira_migration'
+                    data-track-name='MOVE_JIRA_PROJECT_CHANNEL'
                     disabled={isMoveChannelLoading}
                   >
                     {isMoveChannelLoading
@@ -2556,6 +2365,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   <Button
                     variant={moveDryRun ? 'outline' : 'default'}
                     onClick={() => void handleMoveJiraProjectBoard()}
+                    data-track-category='jira_migration'
+                    data-track-name='MOVE_JIRA_PROJECT_BOARD'
                     disabled={isMoveBoardLoading}
                   >
                     {isMoveBoardLoading ? 'Running…' : moveDryRun ? 'Run Dry Run' : 'Move Tickets'}
@@ -2685,6 +2496,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         variant='outline'
                         className='mt-3 w-full'
                         onClick={() => void handleFetchBoards()}
+                        data-track-category='jira_migration'
+                        data-track-name='FETCH_BOARDS'
                         disabled={isFetchingBoards || !jiraProjectKey.trim()}
                       >
                         {isFetchingBoards ? 'Fetching boards…' : 'Fetch Boards'}
@@ -2957,6 +2770,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               )}
                               <Button
                                 onClick={() => void handlePerBoardImport()}
+                                data-track-category='jira_migration'
+                                data-track-name='START_PER_BOARD_IMPORT'
                                 disabled={
                                   isPerBoardImportLoading ||
                                   normalizedIssueKeys.length > 0 ||
@@ -3260,6 +3075,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           setPageIndex(0);
                           void handlePreview();
                         }}
+                        data-track-category='jira_migration'
+                        data-track-name='RESET_PAGINATION'
                         disabled={isPreviewLoading || isImportLoading || !canPreview}
                       >
                         {isPreviewLoading
@@ -3271,6 +3088,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => setIsHistoryModalOpen(true)}
+                        data-track-category='jira_migration'
+                        data-track-name='OPEN_MIGRATION_HISTORY'
                         disabled={migrationHistory.length === 0}
                       >
                         View Migrated Projects
@@ -3366,6 +3185,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => void handlePreview()}
+                        data-track-category='jira_migration'
+                        data-track-name='PREVIEW_MIGRATION'
                         disabled={isPreviewLoading || isImportLoading}
                       >
                         Refresh Preview
@@ -3481,6 +3302,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           [...preview.jiraStatusSequence].sort((a, b) => a.localeCompare(b)),
                         )
                       }
+                      data-track-category='jira_migration'
+                      data-track-name='APPLY_STATUS_SEQUENCE'
                       disabled={preview.jiraStatusSequence.length === 0}
                     >
                       Sort A→Z
@@ -3641,11 +3464,18 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
 
                 <div className='mt-6 flex flex-wrap items-center gap-3 border-t border-border/60 pt-5'>
-                  <Button variant='outline' onClick={() => setMigrationPhase('setup')}>
+                  <Button
+                    variant='outline'
+                    onClick={() => setMigrationPhase('setup')}
+                    data-track-category='jira_migration'
+                    data-track-name='GO_TO_SETUP_PHASE'
+                  >
                     ← Back to Configure
                   </Button>
                   <Button
                     onClick={() => setMigrationPhase('migrate')}
+                    data-track-category='jira_migration'
+                    data-track-name='GO_TO_MIGRATE_PHASE'
                     disabled={!hasCompleteStatusV2Mappings}
                   >
                     Proceed to Migration →
@@ -3720,6 +3550,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   </Button>
                   <Button
                     onClick={() => void handleImport()}
+                    data-track-category='jira_migration'
+                    data-track-name='START_IMPORT'
                     disabled={isImportLoading || !hasCompleteStatusV2Mappings}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Tickets'}
@@ -3771,6 +3603,8 @@ const JiraMigrationScreen = (): ReactElement => {
                                 return next;
                               });
                             }}
+                            data-track-category='jira_migration'
+                            data-track-name='UPDATE_USER_EMAIL_MAPPINGS'
                           >
                             Clear
                           </Button>
@@ -3808,6 +3642,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       <Button
                         variant='outline'
                         onClick={() => setResolvedUsersPage(p => Math.max(0, p - 1))}
+                        data-track-category='jira_migration'
+                        data-track-name='RESOLVED_USERS_PREV_PAGE'
                         disabled={resolvedUsersPage === 0}
                       >
                         Prev
@@ -3826,6 +3662,8 @@ const JiraMigrationScreen = (): ReactElement => {
                             ),
                           )
                         }
+                        data-track-category='jira_migration'
+                        data-track-name='RESOLVED_USERS_NEXT_PAGE'
                         disabled={
                           resolvedUsersPage >=
                           Math.max(
@@ -4006,15 +3844,30 @@ const JiraMigrationScreen = (): ReactElement => {
                   {migrationProgress.status === 'running' && (
                     <div className='mt-2 flex flex-wrap justify-end gap-2'>
                       {migrationProgress.controlStatus === 'paused' ? (
-                        <Button variant='outline' onClick={() => void handleResumeMigration()}>
+                        <Button
+                          variant='outline'
+                          onClick={() => void handleResumeMigration()}
+                          data-track-category='jira_migration'
+                          data-track-name='RESUME_MIGRATION'
+                        >
                           Resume
                         </Button>
                       ) : (
-                        <Button variant='outline' onClick={() => void handlePauseMigration()}>
+                        <Button
+                          variant='outline'
+                          onClick={() => void handlePauseMigration()}
+                          data-track-category='jira_migration'
+                          data-track-name='PAUSE_MIGRATION'
+                        >
                           Pause
                         </Button>
                       )}
-                      <Button variant='outline' onClick={() => void handleStopMigration()}>
+                      <Button
+                        variant='outline'
+                        onClick={() => void handleStopMigration()}
+                        data-track-category='jira_migration'
+                        data-track-name='STOP_MIGRATION'
+                      >
                         Stop
                       </Button>
                     </div>
@@ -4284,6 +4137,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => setIssueResultPage(page => Math.max(0, page - 1))}
+                      data-track-category='jira_migration'
+                      data-track-name='ISSUE_RESULTS_PREV_PAGE'
                       disabled={issueResultPage === 0}
                     >
                       Previous
@@ -4294,6 +4149,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       onClick={() =>
                         setIssueResultPage(page => Math.min(issueResultPageCount - 1, page + 1))
                       }
+                      data-track-category='jira_migration'
+                      data-track-name='ISSUE_RESULTS_NEXT_PAGE'
                       disabled={issueResultPage >= issueResultPageCount - 1}
                     >
                       Next
@@ -4517,6 +4374,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => void handlePreviousPage()}
+                      data-track-category='jira_migration'
+                      data-track-name='PREVIEW_PREV_PAGE'
                       disabled={isPreviewLoading || pageIndex === 0}
                     >
                       Previous Page
@@ -4525,6 +4384,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       variant='outline'
                       size='sm'
                       onClick={() => void handleNextPage()}
+                      data-track-category='jira_migration'
+                      data-track-name='PREVIEW_NEXT_PAGE'
                       disabled={isPreviewLoading || !preview.pagination.hasNextPage}
                     >
                       Next Page
@@ -4672,6 +4533,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           variant='outline'
                           size='sm'
                           onClick={() => setCustomFieldPage(page => Math.max(0, page - 1))}
+                          data-track-category='jira_migration'
+                          data-track-name='CUSTOM_FIELDS_PREV_PAGE'
                           disabled={customFieldPage === 0}
                         >
                           Previous
@@ -4684,6 +4547,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               Math.min(previewActionCounts.fieldsPageCount - 1, page + 1),
                             )
                           }
+                          data-track-category='jira_migration'
+                          data-track-name='CUSTOM_FIELDS_NEXT_PAGE'
                           disabled={customFieldPage >= previewActionCounts.fieldsPageCount - 1}
                         >
                           Next
@@ -4795,6 +4660,8 @@ const JiraMigrationScreen = (): ReactElement => {
                           variant='outline'
                           size='sm'
                           onClick={() => setIssueSamplePage(page => Math.max(0, page - 1))}
+                          data-track-category='jira_migration'
+                          data-track-name='ISSUE_SAMPLES_PREV_PAGE'
                           disabled={issueSamplePage === 0}
                         >
                           Previous
@@ -4807,6 +4674,8 @@ const JiraMigrationScreen = (): ReactElement => {
                               Math.min(previewActionCounts.issuePageCount - 1, page + 1),
                             )
                           }
+                          data-track-category='jira_migration'
+                          data-track-name='ISSUE_SAMPLES_NEXT_PAGE'
                           disabled={issueSamplePage >= previewActionCounts.issuePageCount - 1}
                         >
                           Next

@@ -5,7 +5,7 @@
  *
  * Deletes (in FK-safe order):
  *   WorkflowExecution → Workflow → Ticket children → Ticket
- *   ExternalMessage, MessageSearch, MessageAttachment, Message
+ *   ExternalMessage, MessageAttachment, Message
  *   Email, EmailDraft, EmailRead
  *   ConversationParticipant → Conversation
  *   ChannelParticipant, ClassificationMapping
@@ -20,6 +20,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { ChannelScopeType, ChannelType } from '@xyne/shared';
 
 if (process.env.NODE_ENV !== 'development') {
   console.error('reset-desk-local is only allowed when NODE_ENV=development');
@@ -86,8 +87,8 @@ async function main(): Promise<void> {
     const emailChannels = await prisma.channel.findMany({
       where: {
         OR: [
-          { type: { in: ['EMAIL', 'SUPPORT', 'SLACK'] } },
-          { scopeType: 'TICKET' },
+          { type: { in: [ChannelType.EMAIL, ChannelType.SUPPORT, ChannelType.SLACK] } },
+          { scopeType: ChannelScopeType.TICKET },
         ],
       },
       select: { id: true },
@@ -231,7 +232,6 @@ async function gatherCounts(
   if (messageIds.length > 0) {
     c['Message'] = messageIds.length;
     c['MessageAttachment'] = await prisma.messageAttachment.count({ where: { conversationId: { in: conversationIds } } });
-    c['MessageSearch'] = await prisma.messageSearch.count({ where: { messageId: { in: messageIds } } });
     c['Reaction'] = await prisma.reaction.count({ where: { messageId: { in: messageIds } } });
     c['ReactionCount'] = await prisma.reactionCount.count({ where: { messageId: { in: messageIds } } });
   }
@@ -343,9 +343,6 @@ async function deleteAll(
     ).map(m => m.messageId);
 
     if (messageIds.length > 0) {
-      r['MessageSearch'] = (await prisma.messageSearch.deleteMany({
-        where: { messageId: { in: messageIds } },
-      })).count;
       r['ReactionCount'] = (await prisma.reactionCount.deleteMany({
         where: { messageId: { in: messageIds } },
       })).count;

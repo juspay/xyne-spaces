@@ -29,6 +29,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join as joinPath, resolve as resolvePath } from "node:path";
+import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -198,11 +199,33 @@ export async function promoteIfOversized(
   // retrieval tools keep their full result inline while bulk/file tools spill at
   // the small cap. Callers may pass an explicit value to override.
   inlineCapBytes?: number,
+  // When true, persist the raw result to a file even when it fits inline, and
+  // hand the model the path — so it can forward the whole file into a sandbox
+  // byte-for-byte (sandbox-copy-in contextPath) instead of retyping it.
+  forceFile = false,
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
   const clean = stripControlChars(rawContent);
   if (clean.length <= cap) {
-    return clean;
+    if (!forceFile) return clean;
+    // Persist the RAW bytes (not the control-stripped inline copy) so a sandbox-copy-in
+    // forward is byte-identical; the random suffix avoids same-millisecond collisions.
+    const safeCat = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${safeCat}-${safeName}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+    const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+    const absPath = joinPath(dir, fileName);
+    const relPath = joinPath("tool-results", fileName);
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(absPath, rawContent, { encoding: "utf8" });
+    } catch (err) {
+      log.warn(`[tool-output] ${safeCat}/${safeName} force-file write failed: ${err instanceof Error ? err.message : String(err)}`);
+      return clean;
+    }
+    metric.count("tool_output_spill", { category: safeCat, tool: safeName });
+    return `${clean}\n\n[Full raw result also saved — forward it into a sandbox with sandbox-copy-in contextPath: "${relPath}" instead of pasting its content.]`;
   }
   // Reflow to line-structured form so the spilled file is readable/greppable by
   // the line-oriented read/grep tools (a minified single-line JSON payload is
@@ -225,7 +248,8 @@ export async function promoteIfOversized(
   // An absolute path is checked as-is by the read gate and matches the (already
   // absolute-resolved) .context read roots.
   const dir = resolvePath(outputBaseDir, ".context", "tool-results");
-  const absPath = joinPath(dir, `${safeCategory}-${safeTool}-${stamp}.json`);
+  const baseName = `${safeCategory}-${safeTool}-${stamp}-${randomUUID().slice(0, 8)}`;
+  const absPath = joinPath(dir, `${baseName}.json`);
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(absPath, lined, { encoding: "utf8" });
@@ -239,6 +263,21 @@ export async function promoteIfOversized(
       truncated,
     ].join("\n");
   }
+  // MCP callers (forceFile) additionally get the UNMODIFIED bytes as a sibling
+  // file: the lined copy above is reflowed for read/grep, so forwarding it into
+  // a sandbox would not be byte-identical to the tool's actual result. Costs a
+  // second write for oversized blobs; best-effort — the lined spill above is
+  // the load-bearing one.
+  let rawRelPath: string | undefined;
+  if (forceFile) {
+    const rawFileName = `${baseName}-raw.json`;
+    try {
+      await writeFile(joinPath(dir, rawFileName), rawContent, { encoding: "utf8" });
+      rawRelPath = joinPath("tool-results", rawFileName);
+    } catch (err) {
+      log.warn(`[tool-output] ${safeCategory}/${safeTool} raw sibling write failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   const preview = lined.slice(0, previewBytes);
   metric.count("tool_output_spill", { category: safeCategory, tool: safeTool });
   metric.observe("tool_output_spill_bytes", clean.length, { category: safeCategory, tool: safeTool });
@@ -246,6 +285,9 @@ export async function promoteIfOversized(
   return [
     `[Tool returned ${clean.length} chars — full result saved to ${absPath}.`,
     `Use the read tool on that absolute path (with offset/limit) or grep on it to inspect.`,
+    ...(rawRelPath
+      ? [`To use the whole result inside a sandbox, forward the byte-identical raw copy with sandbox-copy-in contextPath: "${rawRelPath}" instead of retyping it.`]
+      : []),
     `If you're looking for specific entries, consider re-calling the tool with narrower filters.]`,
     ``,
     `## Preview (first ${previewBytes} chars)`,

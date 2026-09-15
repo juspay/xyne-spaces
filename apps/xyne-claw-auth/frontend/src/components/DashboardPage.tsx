@@ -822,9 +822,14 @@ export function DashboardPage({ userId, isAdmin }: Props) {
         }}
         onSubmit={handleAddConnection}
         onCreateServer={async (payload) => {
-          const created = await createServer(payload, userId);
+          const result = await createServer(payload, userId);
           await loadServers();
-          return created;
+          if (result.kind === "editRequest") {
+            // Shared connector — change queued for admin approval, nothing to
+            // reconnect. Surface the message in the dialog's error banner.
+            throw new Error(result.message);
+          }
+          return result.server;
         }}
         servers={servers}
         credentialFields={credentialFields}

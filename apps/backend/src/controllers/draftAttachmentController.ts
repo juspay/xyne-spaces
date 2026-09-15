@@ -4,7 +4,8 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {
@@ -104,6 +105,30 @@ export class DraftAttachmentController {
           message: 'You do not have permission to upload to this draft'
         });
         return;
+      }
+
+      // The attachmentIds are client-supplied and the upsert below keys on them
+      // (create branch pins `id`, but a colliding existing row falls through to an
+      // update). Reject any id that already resolves to a row the caller does not own
+      // as a DRAFT.
+      if (attachmentIdsArray.length > 0) {
+        const existingAttachments = await this.db.messageAttachment.findMany({
+          where: { id: { in: attachmentIdsArray } },
+          select: { id: true, uploadedByUserId: true, entityType: true },
+        });
+        const foreign = existingAttachments.find(
+          a => a.uploadedByUserId !== userId,
+        );
+        if (foreign) {
+          logger.warn(
+            `Unauthorized draft attachment reuse: user ${userId} referenced attachment ${foreign.id} they do not own`,
+          );
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'One or more attachment ids reference a resource you do not own',
+          });
+          return;
+        }
       }
 
       // Check if draft message already exists for this user+channel+conversation
@@ -206,6 +231,7 @@ export class DraftAttachmentController {
             thumbnailUrl,
             storageProvider: config.fileStorage.provider,
             metadata: completeMetadata,
+            uploadStatus: AttachmentUploadStatus.COMPLETED,
           };
 
           try {
@@ -253,6 +279,7 @@ export class DraftAttachmentController {
           });
         } catch (error) {
           logger.error(`Failed to process draft attachment ${attachmentId}:`, error);
+          await this.markAttachmentsFailed([attachmentId]);
           // Continue with next file even if this one fails
           results.push({
             attachmentId,
@@ -262,20 +289,40 @@ export class DraftAttachmentController {
         }
       }
 
-      res.status(200).json({
-        success: true,
+      const failureCount = results.filter(r => !r.success).length;
+
+      res.status(failureCount > 0 ? 500 : 200).json({
+        success: failureCount === 0,
         uploadedAttachments: results,
         totalCount: results.length,
         successCount: results.filter(r => r.success).length,
-        failureCount: results.filter(r => !r.success).length,
+        failureCount,
       });
 
     } catch (error) {
       logger.error('Error uploading draft attachments:', error);
+      await this.markAttachmentsFailed(attachmentIdsArray);
       res.status(500).json({
         error: 'Failed to upload attachments',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  };
+
+  /**
+   * Best-effort: park rows whose upload never completed in FAILED so the send gate
+   * rejects them and the UI can show the failure. Never throws — the caller is
+   * already on an error path.
+   */
+  private markAttachmentsFailed = async (attachmentIds: string[]): Promise<void> => {
+    if (attachmentIds.length === 0) return;
+    try {
+      await this.db.messageAttachment.updateMany({
+        where: { id: { in: attachmentIds }, url: '' },
+        data: { uploadStatus: AttachmentUploadStatus.FAILED },
+      });
+    } catch (error) {
+      logger.error('Failed to mark attachments as failed:', error);
     }
   };
 }

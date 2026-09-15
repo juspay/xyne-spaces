@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification, NotificationType } from '@prisma/client';
+import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
@@ -9,8 +9,17 @@ import { activityService } from '@/services/activity/activityService';
 import {
   emailFetchQueue,
   type EmailFetchJobData,
+  type SocialMediaFetchJobData,
+  type EmailFetchQueueJobData,
+  type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { socialMediaService } from '@/integrations/social-media/socialMediaService';
+import { getHttpStatus } from '@/services/googleService';
+import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
+import { seedSyncCursor } from '@/services/syncCursorRecovery';
+
+const externalSourceRepo = new ExternalSourceRepository();
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -22,21 +31,97 @@ class EmailFetchWorker {
 
     const queue = emailFetchQueue.getQueue();
 
-    queue.process('refetch', 1, async (job: Bull.Job<EmailFetchJobData>) => {
-      return this.processJob(job);
+    queue.process('refetch', 1, async (job) => {
+      return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+    queue.process('social-media-refetch', 1, async (job) => {
+      return this.processSocialMediaJob(job as Bull.Job<SocialMediaFetchJobData>);
+    });
+
+    queue.process('cursor-catchup', 1, async (job: Bull.Job<EmailFetchQueueJobData>) => {
+      return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
     queue.on('failed', (job, err) => {
+      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
-        `[EMAIL-FETCH-WORKER] Job ${job.id} failed — source ${job.data.sourceId}:`,
+        `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${source}:`,
         err,
       );
 
-      void this.notifyFailure(job.data, err);
+      if ('sourceIds' in job.data) {
+        void this.notifySocialMediaFailure(job.data, err);
+      } else if (job.name === 'refetch') {
+        void this.notifyFailure(job.data as EmailFetchJobData, err);
+      }
     });
 
     this.isInitialized = true;
     logger.info('[EMAIL-FETCH-WORKER] Started, ready to process jobs');
+  }
+
+  private async processCursorCatchup(
+    job: Bull.Job<CursorCatchupJobData>,
+  ): Promise<void> {
+    const { sourceId, watchHistoryId, requesterUserId } = job.data;
+    const source = await externalSourceRepo.findById(sourceId);
+    if (!source || !source.isActive) {
+      logger.warn(`[EMAIL-FETCH-WORKER] Catchup: source ${sourceId} missing or inactive — skipping`);
+      return;
+    }
+
+    const { workspaceId, channelId } = source;
+    if (!workspaceId) {
+      logger.error(`[EMAIL-FETCH-WORKER] Catchup: source has no workspace — skipping`, {
+        sourceId,
+        sourceName: source.name,
+      });
+      return;
+    }
+
+    const cursor = source.lastSyncCursor;
+    if (!cursor) {
+      await seedSyncCursor({
+        source,
+        seedHistoryId: watchHistoryId,
+        reason: 'no-cursor',
+        requesterUserId,
+      });
+      return;
+    }
+
+    const adapter = adapterRegistry.getAdapter(source.name);
+    try {
+      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
+        catchUpFromCursor(source, adapter, cursor),
+      );
+
+      logger.info(
+        `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
+      );
+
+      if (result.newTickets > 0 && requesterUserId && channelId) {
+        await this.notifySuccess(
+          { sourceId, workspaceId, channelId, requesterUserId },
+          result,
+        );
+      }
+    } catch (error) {
+      if (getHttpStatus(error) !== 404) {
+        logger.warn(`[EMAIL-FETCH-WORKER] Catchup failed transiently — retrying`, {
+          sourceId,
+          sourceName: source.name,
+          status: getHttpStatus(error),
+        });
+        throw error;
+      }
+      await seedSyncCursor({
+        source,
+        seedHistoryId: watchHistoryId,
+        reason: 'cursor-expired',
+        requesterUserId,
+      });
+    }
   }
 
   private async processJob(job: Bull.Job<EmailFetchJobData>): Promise<void> {
@@ -75,8 +160,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runWithContext(
-        { userId: 'email-fetch-worker', workspaceId: job.data.workspaceId },
+      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
         () => adapter.refetch!(source, options),
       );
     } catch (error) {
@@ -95,6 +179,35 @@ class EmailFetchWorker {
     if (job.data.isDlMemberSync) {
       await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
     }
+  }
+
+  private async processSocialMediaJob(
+    job: Bull.Job<SocialMediaFetchJobData>,
+  ): Promise<void> {
+    const { sourceIds, channelId, workspaceId } = job.data;
+    logger.info(
+      `[EMAIL-FETCH-WORKER] Processing Google Play job ${job.id} — channel ${channelId}`,
+    );
+
+    const synced = await runAsServiceActor(
+      'social-media-fetch-worker',
+      workspaceId,
+      async () => {
+        let newInteractionCount = 0;
+        for (const sourceId of sourceIds) {
+          const result = await socialMediaService.syncSource(sourceId, {
+            ignoreSyncCursor: true,
+          });
+          newInteractionCount += result.synced;
+        }
+        return newInteractionCount;
+      },
+    );
+
+    logger.info(
+      `[EMAIL-FETCH-WORKER] Google Play job ${job.id} done — new=${synced}`,
+    );
+    await this.notifySocialMediaSuccess(job.data, synced);
   }
 
   private isFinalAttempt(job: Bull.Job<EmailFetchJobData>): boolean {
@@ -208,6 +321,57 @@ class EmailFetchWorker {
       });
     } catch (activityErr) {
       logger.error('[EMAIL-FETCH-WORKER] Failed to write failure activity:', activityErr);
+    }
+  }
+
+  private async notifySocialMediaSuccess(
+    data: SocialMediaFetchJobData,
+    synced: number,
+  ): Promise<void> {
+    try {
+      await notificationService.sendNotification(
+        data.requesterUserId,
+        NotificationType.EMAIL_FETCH_COMPLETED,
+        synced > 0
+          ? `Fetched ${synced} new Google Play interaction${synced === 1 ? '' : 's'}`
+          : 'Google Play reviews are up to date',
+        synced > 0
+          ? `${synced} new review interaction${synced === 1 ? '' : 's'} added to the desk.`
+          : 'No new review interactions were found.',
+        {
+          channelId: data.channelId,
+          sourceCount: data.sourceIds.length,
+          synced,
+        },
+        `/${data.workspaceId}/support/${data.channelId}`,
+      );
+    } catch (error) {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play completion notification', {
+        error,
+      });
+    }
+  }
+
+  private async notifySocialMediaFailure(
+    data: SocialMediaFetchJobData,
+    error: Error,
+  ): Promise<void> {
+    try {
+      await notificationService.sendNotification(
+        data.requesterUserId,
+        NotificationType.EMAIL_FETCH_FAILED,
+        'Google Play review fetch failed',
+        error.message.substring(0, 200),
+        {
+          channelId: data.channelId,
+          sourceCount: data.sourceIds.length,
+        },
+        `/${data.workspaceId}/support/${data.channelId}`,
+      );
+    } catch (notificationError) {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play failure notification', {
+        error: notificationError,
+      });
     }
   }
 

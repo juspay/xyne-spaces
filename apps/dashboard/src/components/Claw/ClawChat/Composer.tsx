@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
+
 import { cn } from '../../../utils/classNames';
 import { MAX_TEXTAREA_HEIGHT_PX } from './clawChat.constants';
 
@@ -83,6 +84,7 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
             onClick={handleSubmit}
             disabled={!canSend}
             aria-label='Send message'
+            data-ph-capture-attribute-track-id='claw_send_message'
             data-track-category='CLAW_CHAT'
             data-track-name='SEND_MESSAGE'
             className={cn(

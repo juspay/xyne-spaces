@@ -12,1010 +12,94 @@ import {
   type Row,
 } from '@rocicorp/zero';
 
-// Define enums
-
-// @ts-ignore TS1294
-export enum TicketCategory {
-  USER_ONBOARDING = 'USER_ONBOARDING',
-  QUERY_WORKFLOW = 'QUERY_WORKFLOW',
-  QUERY = 'QUERY',
-  ISSUE = 'ISSUE',
-  REQUIREMENT_NEW = 'REQUIREMENT_NEW',
-  REQUIREMENT_ENHANCEMENT = 'REQUIREMENT_ENHANCEMENT',
-  FULL_PG_INTEGRATION = 'FULL_PG_INTEGRATION',
-  STAGE_APPROVAL_WORKFLOW = 'STAGE_APPROVAL_WORKFLOW',
-}
-
-// @ts-ignore TS1294
-export enum TicketStatus {
-  NEW = 'NEW',
-  IN_PROGRESS = 'IN_PROGRESS',
-  WAIT_FOR_APPROVAL = 'WAIT_FOR_APPROVAL',
-  REJECTED = 'REJECTED',
-  RESOLVED = 'RESOLVED',
-}
-
-// @ts-ignore TS1294
-export enum TicketStatusV2 {
-  TODO = 'TODO',
-  STARTED = 'STARTED',
-  PAUSED = 'PAUSED',
-  CANCELLED = 'CANCELLED',
-  COMPLETED = 'COMPLETED',
-}
-
-// Gmail-style per-user mailbox location for a ticket (see ticketUserMailboxTable).
-// ARCHIVED = removed from Inbox but still in All Mail. Absence of a row = INBOX.
-// @ts-ignore TS1294
-export enum MailboxState {
-  INBOX = 'INBOX',
-  ARCHIVED = 'ARCHIVED',
-  SPAM = 'SPAM',
-}
-
-// @ts-ignore TS1294
-export enum TicketPriority {
-  LOW = 'LOW',
-  MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL',
-}
-
-// @ts-ignore TS1294
-export enum AutoDraftMode {
-  OFF = 'OFF',
-  DRAFT = 'DRAFT',
-}
-
-// @ts-ignore TS1294
-export enum AutoDraftStatus {
-  GENERATING = 'GENERATING',
-  READY = 'READY',
-}
-
-// @ts-ignore TS1294
-export enum TicketReferenceRelation {
-  LINKED = 'LINKED',
-  DUPLICATE_CONFIRMED = 'DUPLICATE_CONFIRMED',
-  DUPLICATE_POSSIBLE = 'DUPLICATE_POSSIBLE',
-  MERGED_INTO = 'MERGED_INTO',
-}
-
-// @ts-ignore TS1294
-export enum EmailMergeMode {
-  DISABLED = 'DISABLED',
-  ENABLED = 'ENABLED',
-}
-
-// @ts-ignore TS1294
-export enum UserResponsibility {
-  MANAGER = 'MANAGER',
-  TEAM_LEAD = 'TEAM_LEAD',
-  MEMBER = 'MEMBER',
-  PR_REVIEWER = 'PR_REVIEWER',
-  QA = 'QA',
-}
-
-// @ts-ignore TS1294
-export enum RotationInterval {
-  WEEKLY = 'WEEKLY',
-  BIWEEKLY = 'BIWEEKLY',
-  MONTHLY = 'MONTHLY',
-}
-
-// @ts-ignore TS1294
-export enum EntityType {
-  MERCHANT = 'MERCHANT',
-  GATEWAY = 'GATEWAY',
-}
-
-export enum GuestEntity {
-  PROJECT = 'PROJECT',
-  CHANNEL = 'CHANNEL',
-  CANVAS = 'CANVAS',
-}
-
-// @ts-ignore TS1294
-export enum RecapEntityType {
-  CHANNEL = 'CHANNEL',
-  PROJECT = 'PROJECT',
-}
-
-// @ts-ignore TS1294
-export enum AttachmentEntityType {
-  TICKET = 'TICKET',
-  CHAT = 'CHAT',
-  CANVAS = 'CANVAS',
-  DRAFT = 'DRAFT',
-  DELAYED_MESSAGE = 'DELAYED_MESSAGE',
-  EMAIL = 'EMAIL',
-  IMPACT = 'IMPACT',
-  COLLECTION = 'COLLECTION',
-  FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
-}
-
-// @ts-ignore TS1294
-export enum TicketEnvironment {
-  DEVELOPMENT = 'DEVELOPMENT',
-  STAGING = 'STAGING',
-  PRODUCTION = 'PRODUCTION',
-}
-
-// @ts-ignore TS1294
-export enum ReportedBy {
-  MERCHANT = 'MERCHANT',
-  INTERNAL = 'INTERNAL',
-}
-
-// @ts-ignore TS1294
-export enum ChannelScopeType {
-  DEFAULT = 'DEFAULT',
-  DM = 'DM',
-  TICKET = 'TICKET',
-  DOCUMENT = 'DOCUMENT',
-  GROUP_DM = 'GROUP_DM',
-}
-
-// @ts-ignore TS1294
-export enum ChannelRole {
-  ADMIN = 'ADMIN',
-  MEMBER = 'MEMBER',
-}
-
-// @ts-ignore TS1294
-export enum ChannelVisibility {
-  PUBLIC = 'PUBLIC',
-  PRIVATE = 'PRIVATE',
-}
-
-// @ts-ignore TS1294
-export enum CalendarVisibility {
-  PUBLIC = 'PUBLIC',
-  PRIVATE = 'PRIVATE',
-}
-
-// @ts-ignore TS1294
-export enum ChannelAddUserPolicy {
-  EVERYONE = 'EVERYONE',
-  ADMINS_ONLY = 'ADMINS_ONLY',
-}
-
-// @ts-ignore TS1294
-export enum ChannelSortOrder {
-  UNREAD = 'UNREAD',
-  RECENCY = 'RECENCY',
-  ALPHABETICAL = 'ALPHABETICAL',
-}
-
-// @ts-ignore TS1294
-export enum MessageType {
-  USER = 'USER',
-  BOT = 'BOT',
-  SYSTEM = 'SYSTEM',
-  FORWARDED = 'FORWARDED',
-}
-
-// @ts-ignore TS1294
-export enum OrgRole {
-  OWNER = 'OWNER',
-  ADMIN = 'ADMIN',
-  MEMBER = 'MEMBER',
-  VIEWER = 'VIEWER',
-  COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
-  GUEST = 'GUEST',
-}
-
-// @ts-ignore TS1294
-export enum Membertype {
-  ADMIN = 'ADMIN',
-  MEMBER = 'MEMBER',
-}
-
-// @ts-ignore TS1294
-export enum WorkspaceRole {
-  OWNER = 'OWNER',
-  ADMIN = 'ADMIN',
-  MEMBER = 'MEMBER',
-  GUEST = 'GUEST',
-  COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
-}
-
-export const WorkspaceType = {
-  ENTERPRISE: 'ENTERPRISE',
-  COMMUNITY: 'COMMUNITY',
-} as const;
-
-export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
-
-export const WorkspaceJoinPolicy = {
-  INVITE_ONLY: 'INVITE_ONLY',
-  OPEN: 'OPEN',
-  REQUEST_TO_JOIN: 'REQUEST_TO_JOIN',
-} as const;
-
-export type WorkspaceJoinPolicy = typeof WorkspaceJoinPolicy[keyof typeof WorkspaceJoinPolicy];
-
-export const CommunityJoinResultStatus = {
-  JOINED: 'JOINED',
-  REQUEST_PENDING: 'REQUEST_PENDING',
-  REQUEST_REJECTED: 'REQUEST_REJECTED',
-} as const;
-
-export type CommunityJoinResultStatus =
-  typeof CommunityJoinResultStatus[keyof typeof CommunityJoinResultStatus];
-
-export const WorkspaceJoinRequestStatus = {
-  PENDING: 'PENDING',
-  APPROVED: 'APPROVED',
-  REJECTED: 'REJECTED',
-} as const;
-
-export type WorkspaceJoinRequestStatus =
-  typeof WorkspaceJoinRequestStatus[keyof typeof WorkspaceJoinRequestStatus];
-
-export const WorkspaceJoinRequestAction = {
-  APPROVE: 'APPROVE',
-  REJECT: 'REJECT',
-} as const;
-
-export type WorkspaceJoinRequestAction =
-  typeof WorkspaceJoinRequestAction[keyof typeof WorkspaceJoinRequestAction];
-
-export const AIProvisioningSubjectType = {
-  ORG: 'ORG',
-  WORKSPACE: 'WORKSPACE',
-  USER: 'USER',
-} as const;
-
-export type AIProvisioningSubjectType =
-  typeof AIProvisioningSubjectType[keyof typeof AIProvisioningSubjectType];
-
-export const AIProvisioningProvider = {
-  CLAW_LITELLM: 'CLAW_LITELLM',
-} as const;
-
-export type AIProvisioningProvider =
-  typeof AIProvisioningProvider[keyof typeof AIProvisioningProvider];
-
-export const AIProvisioningStatus = {
-  PENDING: 'PENDING',
-  RUNNING: 'RUNNING',
-  SUCCESS: 'SUCCESS',
-  FAILED: 'FAILED',
-} as const;
-
-export type AIProvisioningStatus =
-  typeof AIProvisioningStatus[keyof typeof AIProvisioningStatus];
-
-export const OrgLLMServiceAccountProvider = {
-  LITELLM: 'LITELLM',
-} as const;
-
-export type OrgLLMServiceAccountProvider =
-  typeof OrgLLMServiceAccountProvider[keyof typeof OrgLLMServiceAccountProvider];
-
-export const OrgLLMServiceAccountPurpose = {
-  ASK_AI: 'ASK_AI',
-  CALL_TRANSCRIPT: 'CALL_TRANSCRIPT',
-  ACTIVITY_CLASSIFICATION: 'ACTIVITY_CLASSIFICATION',
-  TICKET_DUPLICATE: 'TICKET_DUPLICATE',
-  TICKET_BOARD: 'TICKET_BOARD',
-  EMAIL_REWRITE: 'EMAIL_REWRITE',
-  SUMMARISER: 'SUMMARISER',
-  WORKFLOW: 'WORKFLOW',
-  DEFAULT: 'DEFAULT',
-  CLAW_ORG_KEY: 'CLAW_ORG_KEY',
-} as const;
-
-export type OrgLLMServiceAccountPurpose =
-  typeof OrgLLMServiceAccountPurpose[keyof typeof OrgLLMServiceAccountPurpose];
-
-export const OrgLLMServiceAccountCredentialStatus = {
-  PENDING: 'PENDING',
-  ACTIVE: 'ACTIVE',
-  FAILED: 'FAILED',
-  REVOKED: 'REVOKED',
-} as const;
-
-export type OrgLLMServiceAccountCredentialStatus =
-  typeof OrgLLMServiceAccountCredentialStatus[keyof typeof OrgLLMServiceAccountCredentialStatus];
-
-export const OrganizationDomainVerificationStatus = {
-  PENDING: 'PENDING',
-  VERIFIED: 'VERIFIED',
-  UNVERIFIED: 'UNVERIFIED',
-  REJECTED: 'REJECTED',
-} as const;
-
-export type OrganizationDomainVerificationStatus =
-  typeof OrganizationDomainVerificationStatus[keyof typeof OrganizationDomainVerificationStatus];
-
-// @ts-ignore TS1294
-export enum Status {
-  ACTIVE = 'ACTIVE',
-  ARCHIVED = 'ARCHIVED',
-  DELETED = 'DELETED',
-}
-
-// @ts-ignore TS1294
-export enum ActivityType {
-  TITLE = 'TITLE',
-  DESCRIPTION = 'DESCRIPTION',
-  STATUS = 'STATUS',
-  ASSIGNED_TO = 'ASSIGNED_TO',
-  TICKET_TYPE = 'TICKET_TYPE',
-  PRIORITY = 'PRIORITY',
-  ETA = 'ETA',
-  STAGE_ETA = 'STAGE_ETA',
-  METADATA = 'METADATA',
-  CLOSED_AT = 'CLOSED_AT',
-  CLOSED_BY = 'CLOSED_BY',
-  REFERENCE_TICKET = 'REFERENCE_TICKET',
-  STAGE_NAME = 'STAGE_NAME',
-  TAGS = 'TAGS',
-  ENTITY = 'ENTITY',
-  SUBTICKET_CREATED = 'SUBTICKET_CREATED',
-  BOARD = 'BOARD',
-  PR = 'PR',
-  USER_GROUP_ID = 'USER_GROUP_ID',
-  PR_REVIEWER = 'PR_REVIEWER',
-  QA = 'QA',
-  STAGE_CHANGE_REQUEST = 'STAGE_CHANGE_REQUEST',
-  STAGE_CHANGE_APPROVED = 'STAGE_CHANGE_APPROVED',
-  STAGE_CHANGE_REJECTED = 'STAGE_CHANGE_REJECTED',
-  IS_ARCHIVED = 'IS_ARCHIVED',
-  MERGED = 'MERGED',
-  UNMERGED = 'UNMERGED',
-  RCA_CREATED = 'RCA_CREATED',
-  RCA_UPDATED = 'RCA_UPDATED',
-  EMAIL_SENT = 'EMAIL_SENT',
-  TICKET_CREATED = 'TICKET_CREATED',
-  CSAT_RECEIVED = 'CSAT_RECEIVED',
-  MOBIUS_RELEASE_UPDATE = 'MOBIUS_RELEASE_UPDATE',
-}
-
-// @ts-ignore TS1294
-export enum ActivityClassification {
-  ACTIONABLE = 'ACTIONABLE',
-  FYI = 'FYI',
-  SKIP = 'SKIP',
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  ERROR = 'ERROR',
-}
-
-// @ts-ignore TS1294
-export enum ActivityClassificationJobType {
-  SINGLE = 'SINGLE',
-  SPECIAL_MENTION_AUDIENCE = 'SPECIAL_MENTION_AUDIENCE',
-}
-
-// @ts-ignore TS1294
-export enum CallType {
-  AUDIO = 'AUDIO',
-  VIDEO = 'VIDEO',
-  HEADLESS = 'HEADLESS'
-}
-
-// @ts-ignore TS1294
-export enum CallOrigin {
-  CHANNEL = 'CHANNEL',
-  CONVERSATION = 'CONVERSATION',
-  GOOGLE_CALENDAR = 'GOOGLE_CALENDAR',
-  MICROSOFT_CALENDAR = 'MICROSOFT_CALENDAR',
-}
-
-// @ts-ignore TS1294
-export enum CallStatus {
-  SCHEDULED = 'SCHEDULED',
-  ACTIVE = 'ACTIVE',
-  IN_PROGRESS = 'IN_PROGRESS',
-  ENDED = 'ENDED',
-  CANCELLED = 'CANCELLED',
-}
-
-// @ts-ignore TS1294
-export enum RecordingType {
-  AUDIO_ONLY = 'AUDIO_ONLY',
-  AUDIO_SCREEN = 'AUDIO_SCREEN',
-  AUDIO_VIDEO = 'AUDIO_VIDEO',
-}
-
-// @ts-ignore TS1294
-export enum RecurringCallSeriesStatus {
-  ACTIVE = 'ACTIVE',
-  ENDED = 'ENDED',
-  CANCELLED = 'CANCELLED',
-}
-
-// @ts-ignore TS1294
-export enum InvitationResponse {
-  INVITED = 'INVITED',
-  REQUESTED = 'REQUESTED',
-  ACCEPTED = 'ACCEPTED',
-  DECLINED = 'DECLINED',
-  LEFT = 'LEFT',
-  MISSED = 'MISSED',
-}
-
-// @ts-ignore TS1294
-export enum MeetingStatus {
-  PENDING = 'PENDING',
-  ACCEPTED = 'ACCEPTED',
-  DECLINED = 'DECLINED',
-  MAYBE = 'MAYBE',
-  HIDDEN = 'HIDDEN',
-}
-
-// @ts-ignore TS1294
-export enum ConversationParticipation {
-  AUTHOR = 'AUTHOR',
-  MENTIONED = 'MENTIONED',
-}
-
-// @ts-ignore TS1294
-export enum AuthProvider {
-  GOOGLE = 'GOOGLE',
-  MICROSOFT = "MICROSOFT",
-  API_KEY = 'API_KEY',
-  EMAIL = 'EMAIL',
-}
-
-// @ts-ignore TS1294
-export enum UserStatus {
-  ACTIVE = 'ACTIVE',
-  INACTIVE = 'INACTIVE',
-}
-
-// @ts-ignore TS1294
-export enum UserType {
-  USER = 'USER',
-  BOT = 'BOT',
-  APP = 'APP',
-}
-
-// @ts-ignore TS1294
-export enum AppIncomingWebhookType {
-  SLACK = 'SLACK',
-  SENTINELONE = 'SENTINELONE',
-}
-
-// @ts-ignore TS1294
-export enum AppIncomingWebhookAction {
-  MESSAGE = 'MESSAGE',
-  TICKET = 'TICKET',
-}
-
-// @ts-ignore TS1294
-export enum CommandType {
-  COMMAND = 'COMMAND',
-  SHORTCUT = 'SHORTCUT',
-}
-
-// @ts-ignore TS1294
-export enum CommandAccessibility {
-  CHAT = 'CHAT',
-  THREAD = 'THREAD',
-  BOTH = 'BOTH',
-  MESSAGE = 'MESSAGE',
-  GLOBAL = 'GLOBAL',
-}
-
-// @ts-ignore TS1294
-export enum UserPresenceStatus {
-  ONLINE = 'ONLINE',
-  AWAY = 'AWAY',
-  OFFLINE = 'OFFLINE',
-}
-
-// @ts-ignore TS1294
-export enum AccessType {
-  ADMIN = 'ADMIN',
-  READ = 'READ',
-  WRITE = 'WRITE',
-}
-
-// @ts-ignore TS1294
-export enum SessionStatus {
-  ACTIVE = 'ACTIVE',
-  EXPIRED = 'EXPIRED',
-  REVOKED = 'REVOKED',
-}
-
-// @ts-ignore TS1294
-export enum ACLAuditEventType {
-  RESOURCE_CREATED = 'RESOURCE_CREATED',
-  RESOURCE_UPDATED = 'RESOURCE_UPDATED',
-  RESOURCE_DELETED = 'RESOURCE_DELETED',
-  PERMISSION_GRANTED = 'PERMISSION_GRANTED',
-  PERMISSION_REVOKED = 'PERMISSION_REVOKED',
-  PERMISSION_UPDATED = 'PERMISSION_UPDATED',
-  USER_GROUP_CREATED = 'USER_GROUP_CREATED',
-  USER_GROUP_UPDATED = 'USER_GROUP_UPDATED',
-  USER_GROUP_DELETED = 'USER_GROUP_DELETED',
-  USER_GROUP_DEACTIVATED = 'USER_GROUP_DEACTIVATED',
-  USER_GROUP_REACTIVATED = 'USER_GROUP_REACTIVATED',
-}
-
-// @ts-ignore TS1294
-export enum ACLAuditTargetType {
-  RESOURCE = 'RESOURCE',
-  RESOURCE_ACCESS = 'RESOURCE_ACCESS',
-  USER_GROUP = 'USER_GROUP',
-}
-
-// @ts-ignore TS1294
-export enum QueryVisualizationType {
-  KPI = 'KPI',
-  BAR_CHART = 'BAR_CHART',
-  PIE_CHART = 'PIE_CHART',
-  DONUT_CHART = 'DONUT_CHART',
-  LINE_CHART = 'LINE_CHART',
-  FUNNEL = 'FUNNEL',
-  HEATMAP = 'HEATMAP',
-  DATA_TABLE = 'DATA_TABLE',
-  AREA_CHART = 'AREA_CHART',
-  KPI_COMPARE = 'KPI_COMPARE',
-  SCATTER_CHART = 'SCATTER_CHART',
-}
-
-// @ts-ignore TS1294
-export enum PRStatus {
-  OPEN = 'OPEN',
-  DECLINED = 'DECLINED',
-  MERGED = 'MERGED',
-  DELETED = 'DELETED',
-}
-
-// @ts-ignore TS1294
-export enum PRStatusEvent {
-  CREATED = 'CREATED',
-  UPDATED = 'UPDATED',
-  MERGED = 'MERGED',
-  DECLINED = 'DECLINED',
-  DELETED = 'DELETED',
-}
-
-// @ts-ignore TS1294
-export enum MessageDirection {
-  INCOMING = 'INCOMING',
-  OUTGOING = 'OUTGOING',
-}
-
-// @ts-ignore TS1294
-export enum NotificationType {
-  TICKET_STATUS_CHANGE = "TICKET_STATUS_CHANGE",
-  TICKET_ASSIGNMENT = "TICKET_ASSIGNMENT",
-  TICKET_REASSIGNMENT = "TICKET_REASSIGNMENT",
-  TICKET_DUE_DATE_CHANGED = "TICKET_DUE_DATE_CHANGED",
-  TICKET_PRIORITY_CHANGED = "TICKET_PRIORITY_CHANGED",
-  TICKET_USER_GROUP_CHANGED = "TICKET_USER_GROUP_CHANGED",
-  TICKET_TITLE_CHANGED = "TICKET_TITLE_CHANGED",
-  TICKET_DESCRIPTION_CHANGED = "TICKET_DESCRIPTION_CHANGED",
-  TICKET_RCA_CREATED = "TICKET_RCA_CREATED",
-  TICKET_RCA_UPDATED = "TICKET_RCA_UPDATED",
-  TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
-  TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
-  TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
-  CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
-  MENTION = "MENTION",
-  DIRECT_MESSAGE = "DIRECT_MESSAGE",
-  WORKFLOW_COMPLETION = "WORKFLOW_COMPLETION",
-  WORKFLOW_FAILURE = "WORKFLOW_FAILURE",
-  THREAD_REPLY = "THREAD_REPLY",
-  EMAIL_REPLY_RECEIVED = "EMAIL_REPLY_RECEIVED",
-  MESSAGE_DELETED = "MESSAGE_DELETED",
-  MESSAGE_EDITED = "MESSAGE_EDITED",
-  STAGE_APPROVAL_REQUESTED = "STAGE_APPROVAL_REQUESTED",
-  STAGE_APPROVAL_APPROVED = "STAGE_APPROVAL_APPROVED",
-  STAGE_APPROVAL_REJECTED = "STAGE_APPROVAL_REJECTED",
-}
-
-// @ts-ignore TS1294
-export enum NotificationStatus {
-  UNREAD = 'UNREAD',
-  READ = 'READ',
-  DISMISSED = 'DISMISSED',
-}
-
-// @ts-ignore TS1294
-export enum NotificationDeliveryMethod {
-  BROWSER = "BROWSER",
-  EMAIL = "EMAIL",
-  SLACK = "SLACK",
-  MOBILE = "MOBILE",
-}
-
-// @ts-ignore TS1294
-export enum NotificationLevel {
-  ALL = "ALL",
-  MENTIONS_ONLY = "MENTIONS_ONLY",
-  THREADS_ONLY = "THREADS_ONLY",
-  NONE = "NONE",
-}
-
-// @ts-ignore TS1294
-export enum CanvasVisibility {
-  PUBLIC = 'PUBLIC',
-  PRIVATE = 'PRIVATE',
-}
-
-// @ts-ignore TS1294
-export enum CanvasRole {
-  OWNER = 'OWNER',
-  EDITOR = 'EDITOR',
-  VIEWER = 'VIEWER',
-}
-
-// @ts-ignore TS1294
-export enum CanvasCommentThreadStatus {
-  OPEN = 'OPEN',
-  RESOLVED = 'RESOLVED',
-}
-
-// @ts-ignore TS1294
-export enum DashboardVisibility {
-  PUBLIC = 'PUBLIC',
-  PRIVATE = 'PRIVATE',
-}
-
-// @ts-ignore TS1294
-export enum DashboardRole {
-  OWNER = 'OWNER',
-  EDITOR = 'EDITOR',
-  VIEWER = 'VIEWER',
-}
-
-// @ts-ignore TS1294
-export enum DocType {
-  Canvas = 'Canvas',
-  Quarto = 'Quarto',
-}
-
-// @ts-ignore TS1294
-export enum BookmarkEntityType {
-  MESSAGE = 'MESSAGE',
-  CONVERSATION = 'CONVERSATION',
-  TICKET = 'TICKET',
-  CANVAS = 'CANVAS',
-}
-
-// @ts-ignore TS1294
-export enum LinkVisibility {
-  DEFAULT = 'DEFAULT',
-  PERSONAL = 'PERSONAL',
-}
-
-// @ts-ignore TS1294
-export enum EmailType {
-  DEFAULT = 'DEFAULT',
-  REPLY = 'REPLY',
-  REPLY_ALL = 'REPLY_ALL',
-  COMPOSE = 'COMPOSE',
-}
-
-// @ts-ignore TS1294
-export enum ChannelType {
-  DEFAULT = 'DEFAULT',
-  EMAIL = 'EMAIL',
-  SUPPORT = 'SUPPORT',
-  SLACK = 'SLACK',
-  APP = 'APP',
-  CALL = 'CALL',
-}
-
-// @ts-ignore TS1294
-export enum DeskType {
-  EMAIL = 'EMAIL',
-  DL = 'DL',
-  SLACK = 'SLACK',
-  APP = 'APP',
-  CALL = 'CALL',
-}
-
-// @ts-ignore TS1294
-export enum ExternalEntityType {
-  MESSAGE = 'MESSAGE',
-  EMAIL = 'EMAIL',
-  TICKET = 'TICKET',
-}
-
-// @ts-ignore TS1294
-export enum FormFieldType {
-  STRING = 'STRING',
-  NUMBER = 'NUMBER',
-  BOOLEAN = 'BOOLEAN',
-  DATE = 'DATE',
-  SINGLE_SELECT = 'SINGLE_SELECT',
-  MULTI_SELECT = 'MULTI_SELECT',
-  USER = 'USER',
-  DOC = 'DOC',
-}
-
-// @ts-ignore TS1294
-export enum FormContextType {
-  BOARD = 'BOARD',
-  RELEASE_CHANGE = 'RELEASE_CHANGE',
-  STAGE = 'STAGE',
-}
-
-// @ts-ignore TS1294
-export enum BoardType {
-  DEFAULT = 'DEFAULT',
-  RELEASE = 'RELEASE',
-  NON_LINEAR = 'NON_LINEAR',
-}
-
-// @ts-ignore TS1294
-export enum FormEntityType {
-  TICKET = 'TICKET',
-  SUB_TICKET = 'SUB_TICKET',
-  RELEASE_MIGRATION_FORM = "RELEASE_MIGRATION_FORM",
-  RELEASE_ENV_FORM = "RELEASE_ENV_FORM",
-}
-
-// @ts-ignore TS1294
-export enum SurfaceAreaType {
-  MESSAGE = 'MESSAGE',
-  TICKET = 'TICKET',
-  CANVAS = 'CANVAS',
-  CALL = 'CALL',
-  CONVERSATION = 'CONVERSATION',
-}
-
-// @ts-ignore TS1294
-export enum SurfaceLinkKind {
-  RELATES_TO = 'RELATES_TO',
-}
-
-// @ts-ignore TS1294
-export enum NudgeKind {
-  CREATE_TICKET_FROM_MESSAGE = 'CREATE_TICKET_FROM_MESSAGE',
-  FIND_RELATED_TICKET_FROM_MESSAGE = 'FIND_RELATED_TICKET_FROM_MESSAGE',
-  FIND_RELATED_MESSAGE_FROM_MESSAGE = 'FIND_RELATED_MESSAGE_FROM_MESSAGE',
-  LINK_PASTE_TO_SURFACE = 'LINK_PASTE_TO_SURFACE',
-  FORWARD_MESSAGE_LINK = 'FORWARD_MESSAGE_LINK',
-  DELETE_MESSAGE_CLEANUP = 'DELETE_MESSAGE_CLEANUP',
-  SCHEDULE_CALL_FROM_THREAD = 'SCHEDULE_CALL_FROM_THREAD',
-}
-
-// @ts-ignore TS1294
-export enum NudgeState {
-  ACTIVE = 'ACTIVE',
-  DISMISSED = 'DISMISSED',
-  ACTED_ON = 'ACTED_ON',
-}
-
-// @ts-ignore TS1294
-export enum LookupType {
-  TICKET_TYPE = 'TICKET_TYPE',
-  COE_ACTION_TYPE = 'COE_ACTION_TYPE',
-  COE_ACTION_TYPE_RELIABILITY_CHANGE = 'COE_ACTION_TYPE_RELIABILITY_CHANGE',
-  COE_ACTION_TYPE_RELIABILITY_CAPACITY = 'COE_ACTION_TYPE_RELIABILITY_CAPACITY',
-  COE_ACTION_TYPE_RELIABILITY_FAULT = 'COE_ACTION_TYPE_RELIABILITY_FAULT',
-  COE_ACTION_TYPE_PERF = 'COE_ACTION_TYPE_PERF',
-  COE_ACTION_TYPE_UIUX = 'COE_ACTION_TYPE_UIUX',
-  IMPACT_TYPE = 'IMPACT_TYPE',
-  BUG_TYPE = 'BUG_TYPE',
-  BUG_CATEGORY_TYPE = 'BUG_CATEGORY_TYPE',
-  BUG_ISSUE_TYPE = 'BUG_ISSUE_TYPE',
-  BUG_ISSUE_CATEGORY_CAPACITY = 'BUG_ISSUE_CATEGORY_CAPACITY',
-  BUG_ISSUE_CATEGORY_CHANGE = 'BUG_ISSUE_CATEGORY_CHANGE',
-  BUG_ISSUE_CATEGORY_FAULT = 'BUG_ISSUE_CATEGORY_FAULT',
-  BUG_RESOLUTION_CAPACITY = 'BUG_RESOLUTION_CAPACITY',
-  BUG_RESOLUTION_CHANGE = 'BUG_RESOLUTION_CHANGE',
-  BUG_RESOLUTION_FAULT = 'BUG_RESOLUTION_FAULT',
-  QUICK_FIX_OPTION = 'QUICK_FIX_OPTION',
-}
-
-// Release Management Enums
-
-
-
-// @ts-ignore TS1294
-export enum EnvChangeType {
-  ADDED = 'ADDED',
-  MODIFIED = 'MODIFIED',
-  REMOVED = 'REMOVED',
-}
-
-// @ts-ignore TS1294
-export enum ReleaseEventType {
-  RELEASE = 'RELEASE',
-  TICKET = 'TICKET',
-  SUBTICKET = 'SUBTICKET',
-  TESTING = 'TESTING',
-  SYSTEM = 'SYSTEM',
-  CANVAS = 'CANVAS',
-}
-
-// @ts-ignore TS1294
-export enum TicketStageRequestStatus {
-  DRAFT = 'DRAFT',
-  SUBMITTED = 'SUBMITTED',
-  APPROVED = 'APPROVED',
-  REJECTED = 'REJECTED',
-}
-export enum ReleaseEnvironment {
-  SANDBOX = 'SANDBOX',
-  PROD = 'PROD',
-}
-
-// @ts-ignore TS1294
-export enum ReleaseTicketStatus {
-  CREATED = 'CREATED',
-  ENV_READY = 'ENV_READY',
-  INITIATED = 'INITIATED',
-  TESTED = 'TESTED',
-  APPROVED = 'APPROVED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  MONITORING = 'MONITORING',
-  COMPLETED = 'COMPLETED',
-  REVERTED = 'REVERTED',
-}
-
-// @ts-ignore TS1294
-export enum ApplicationReleaseStatus {
-  PLANNED = 'PLANNED',
-  TESTING = 'TESTING',
-  APPROVED = 'APPROVED',
-  DEPLOYING = 'DEPLOYING',
-  DEPLOYED = 'DEPLOYED',
-  MONITORING = 'MONITORING',
-  STABILIZED = 'STABILIZED',
-  FAILED = 'FAILED',
-  REVERTING = 'REVERTING',
-  REVERTED = 'REVERTED',
-}
-
-// @ts-ignore TS1294
-export enum RCAStatus {
-  DRAFT = 'DRAFT',
-  IN_REVIEW = 'IN_REVIEW',
-  APPROVED = 'APPROVED',
-  CLOSED = 'CLOSED',
-}
-
-// @ts-ignore TS1294
-export enum COEStatus {
-  OPEN = 'OPEN',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-}
-
-// @ts-ignore TS1294
-export enum SEVERITY {
-  SEV_1 = 'SEV_1',
-  SEV_2 = 'SEV_2',
-  SEV_3 = 'SEV_3',
-}
-
-// @ts-ignore TS1294
-export enum AttributionConfidence {
-  LOW = 'LOW',
-  MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH',
-}
-
-// @ts-ignore TS1294
-export enum VCSProviderType {
-  GITHUB = 'GITHUB',
-  BITBUCKET_CLOUD = 'BITBUCKET_CLOUD',
-  BITBUCKET_SERVER = 'BITBUCKET_SERVER',
-}
-
-// @ts-ignore TS1294
-export enum ReleaseTrackingMode {
-  COMMIT_RANGE = 'COMMIT_RANGE',
-  VERSION = 'VERSION',
-}
-
-export enum ProjectType {
-  DEFAULT = "DEFAULT",
-  DM = "DM",
-}
-
-// Saved Views Enums
-
-// @ts-ignore TS1294
-export enum SavedConfigContextType {
-  BOARD = 'BOARD',
-}
-
-// @ts-ignore TS1294
-export enum SavedConfigVisibility {
-  PRIVATE = 'PRIVATE',
-  PUBLIC = 'PUBLIC',
-}
-
-// @ts-ignore TS1294
-export enum SavedConfigEntityName {
-  TICKET = 'TICKET',
-  FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
-}
-
-// @ts-ignore TS1294
-export enum DelayedMessageStatus {
-  PENDING = 'PENDING',
-  SENDING = 'SENDING',
-  SENT = 'SENT',
-  FAILED = 'FAILED',
-  CANCELLED = 'CANCELLED',
-}
-
-// @ts-ignore TS1294
-export enum AttachmentUploadStatus {
-  PENDING = 'PENDING',
-  STARTED = 'STARTED',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-}
-
-// @ts-ignore TS1294
-export enum VisitSlaMode {
-  STAGE_DEFAULT = 'STAGE_DEFAULT',
-  NONE = 'NONE',
-  FIXED_HOURS = 'FIXED_HOURS',
-}
-
-// @ts-ignore TS1294
-export enum ReenterMode {
-  RESET = 'RESET',
-  CONTINUE = 'CONTINUE',
-}
-
-// @ts-ignore TS1294
-export enum CollectionRole {
-  OWNER = 'OWNER',
-  EDITOR = 'EDITOR',
-  VIEWER = 'VIEWER',
-}
-
-// @ts-ignore TS1294
-export enum IngestionStatus {
-  NONE = 'NONE',
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-}
-
-export enum ApproverType {
-  USER = 'USER',
-  ROLE = 'ROLE',
-}
-
-// Recording / sharing enums. New Prisma enums are frozen at the DB level (see
-// scripts/validate-no-new-enums.sh) — the corresponding columns are plain
-// Strings validated app-side. These consts are the single source of truth for
-// valid values; import them everywhere instead of hardcoding string literals.
-export const ShareableEntityType = {
-  NOTE_TAKER: 'NOTE_TAKER',
-} as const;
-
-export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
-
-export const EntityUserAccess = {
-  VIEW: 'VIEW',
-  EDIT: 'EDIT',
-  ADMIN: 'ADMIN',
-  REVOKED: 'REVOKED',
-} as const;
-
-export type EntityUserAccess = typeof EntityUserAccess[keyof typeof EntityUserAccess];
-
-// Role that may be granted when sharing/updating access. REVOKED is reached via
-// update/revoke, not by explicitly "sharing" with that role.
-export type GrantableEntityUserAccess = Exclude<EntityUserAccess, 'REVOKED'>;
-
-export const DefaultOutlet = {
-  EMAIL: 'EMAIL',
-  MESSAGE: 'MESSAGE',
-} as const;
-
-export type DefaultOutlet = typeof DefaultOutlet[keyof typeof DefaultOutlet];
-
-// Define tables
+export * from './types';
+
+import {
+  AccessType,
+  ActivityClassification,
+  ActivityClassificationJobType,
+  ActivityType,
+  ApproverType,
+  AttachmentEntityType,
+  AttachmentUploadStatus,
+  AttributionConfidence,
+  AuthProvider,
+  AutoDraftMode,
+  AutoDraftStatus,
+  BoardType,
+  BookmarkEntityType,
+  COEStatus,
+  CalendarVisibility,
+  CallOrigin,
+  CallStatus,
+  CallType,
+  CallVisibility,
+  CanvasCommentThreadStatus,
+  CanvasRole,
+  CanvasVisibility,
+  ChannelAddUserPolicy,
+  ChannelFilterMode,
+  ChannelRole,
+  ChannelScopeType,
+  ChannelSortOrder,
+  ChannelType,
+  ChannelVisibility,
+  CollectionRole,
+  ConversationParticipation,
+  DelayedMessageStatus,
+  DeskType,
+  DocType,
+  EmailMergeMode,
+  EmailType,
+  EntityType,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  IngestionStatus,
+  InvitationResponse,
+  LinkVisibility,
+  LookupType,
+  MailboxState,
+  MessageArtifactStatus,
+  MeetingStatus,
+  MessageType,
+  NotificationLevel,
+  NotificationType,
+  NudgeKind,
+  NudgeState,
+  OrgRole,
+  PRStatus,
+  PRStatusEvent,
+  ProjectType,
+  QueryVisualizationType,
+  RCAStatus,
+  RecapEntityType,
+  RecurringCallSeriesStatus,
+  ReenterMode,
+  ReleaseEventType,
+  ReleaseTrackingMode,
+  RotationInterval,
+  SEVERITY,
+  SavedConfigContextType,
+  SavedConfigEntityName,
+  SavedConfigVisibility,
+  Status,
+  SurfaceAreaType,
+  SurfaceLinkKind,
+  TicketPriority,
+  TicketReferenceRelation,
+  TicketStageRequestStatus,
+  TicketStatus,
+  TicketStatusV2,
+  UserPresenceStatus,
+  UserResponsibility,
+  UserStatus,
+  UserType,
+  VCSProviderType,
+  VisitSlaMode,
+  WorkflowEventType,
+  WorkspaceRole,
+} from './types';
 
 export const agentTable = table('agents')
   .columns({
@@ -1062,7 +146,7 @@ export const toolTable = table('tools')
 
 export const agentToolsMappingTable = table('agent_tools_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     agentId: string(),
     toolId: string(),
@@ -1080,6 +164,7 @@ export const ticketTable = table('tickets')
     description: string(),
     status: enumeration<TicketStatus>(),  // Deprecated - use statusV2
     statusV2: enumeration<TicketStatusV2>(),
+    messageId: string().optional(), // Source message this ticket was created from
     createdBy: string(),
     updatedBy: string(),
     assignedTo: string().optional(),
@@ -1092,6 +177,7 @@ export const ticketTable = table('tickets')
     eta: number().optional(),
     priority: enumeration<TicketPriority>(),
     metadata: json().optional(),
+    rootId: string().optional(),
     closedAt: number().optional(),
     closedBy: string().optional(),
     xyneId: string(),
@@ -1100,6 +186,7 @@ export const ticketTable = table('tickets')
     userGroupId: string(),
     boardId: string(),
     stageName: string(),
+    isStageOverdue: boolean().optional(),
     ticketType: string().optional(),
     isArchived: boolean(),
     kanbanPosition: string().optional(),
@@ -1134,7 +221,7 @@ export const subTicketTable = table('sub_tickets')
 
 export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     subTicketId: string(),
@@ -1143,7 +230,7 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
 
 export const ticketAssignmentTable = table('ticket_assignments')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     userId: string(),
@@ -1156,7 +243,7 @@ export const ticketAssignmentTable = table('ticket_assignments')
 
 export const ticketActivityTable = table('ticket_activities')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     updatedBy: string(),
@@ -1169,7 +256,7 @@ export const ticketActivityTable = table('ticket_activities')
 
 export const ticketEntityMappingTable = table('ticket_entity_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     entityType: enumeration<EntityType>(),
@@ -1179,7 +266,7 @@ export const ticketEntityMappingTable = table('ticket_entity_mappings')
 
 export const ticketTagTable = table('ticket_tags')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     ticketId: string(),
@@ -1188,7 +275,7 @@ export const ticketTagTable = table('ticket_tags')
 
 export const projectTagTable = table('project_tags')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     projectId: string(),
@@ -1196,9 +283,21 @@ export const projectTagTable = table('project_tags')
   })
   .primaryKey('id');
 
+export const ticketExportTable = table('ticket_exports') // TicketExport
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    requestedBy: string(),
+    status: string(),
+    filters: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const ticketTagMappingTable = table('ticket_tag_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     tagId: string(),
@@ -1209,7 +308,7 @@ export const ticketTagMappingTable = table('ticket_tag_mappings')
 
 export const ticketReferenceMappingTable = table('ticket_reference_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     sourceTicketId: string(),
     targetTicketId: string(),
@@ -1222,7 +321,7 @@ export const ticketReferenceMappingTable = table('ticket_reference_mappings')
 
 export const ticketStageEtaTable = table('ticket_stage_eta')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     stageId: string(),
@@ -1263,6 +362,7 @@ export const boardTable = table('boards')
     createdBy: string(),
     updatedBy: string().optional(),
     metadata: json().optional(),
+    flowPlan: string().optional(),
     vcsProvider: enumeration<VCSProviderType>().optional(),
     releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
@@ -1272,7 +372,7 @@ export const boardTable = table('boards')
 
 export const stageTable = table('stages')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     eta: number().optional(),
@@ -1290,7 +390,7 @@ export const stageTable = table('stages')
 
 export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     stageId: string(),
     prStatus: enumeration<PRStatusEvent>(),
@@ -1300,7 +400,7 @@ export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
 
 export const userGroupMappingTable = table('user_group_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1308,6 +408,8 @@ export const userGroupMappingTable = table('user_group_mappings')
     roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1315,7 +417,7 @@ export const userGroupMappingTable = table('user_group_mappings')
 
 export const userAssignmentStateTable = table('user_assignment_states')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1329,7 +431,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
 
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userGroupId: string(),
     boardId: string(),
@@ -1343,7 +445,7 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
 
 export const userWorkloadMappingTable = table('user_workload_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1358,7 +460,7 @@ export const userWorkloadMappingTable = table('user_workload_mappings')
 
 export const userExpertiseMappingTable = table('user_expertise_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     userGroupId: string(),
@@ -1393,26 +495,10 @@ export const workflowTable = table('workflows')
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
-  })
-  .primaryKey('id');
-
-export const workflowExecutionTable = table('workflow_executions')
-  .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
-    id: string(),
-    workflowId: string(),
-    workflowType: string().optional(),
-    status: string(),
-    parentWorkflowExecutionId: string().optional(),
-    sourceStepsId: string().optional(),
-    stepInputOverrideData: string().optional(),
-    tag: string(),
-    createdAt: number(),
-    updatedAt: number(),
-    ignoreDuration: number(),
-    createdBy: string().optional(),
   })
   .primaryKey('id');
 
@@ -1428,6 +514,8 @@ export const userGroupTable = table('user_groups')
     autoRotationEnabled: boolean(),
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
+    reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -1467,7 +555,7 @@ export const userTable = table('users')
 
 export const userPresenceTable = table('user_presence')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     status: enumeration<UserPresenceStatus>(),
@@ -1492,7 +580,7 @@ export const userPresenceTable = table('user_presence')
 
 export const userProfileTable = table('user_profiles')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     dob: number().optional(), // Date of birth (optional) - stored as timestamp
@@ -1511,11 +599,16 @@ export const userProfileTable = table('user_profiles')
 
 export const userPreferenceTable = table('user_preferences')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    channelFilterMode: enumeration<ChannelFilterMode>().optional(), // Channels group filter
+    starredFilterMode: enumeration<ChannelFilterMode>().optional(), // Starred group filter
+    starredSortOrder: enumeration<ChannelSortOrder>().optional(),   // Starred group sort
+    dmFilterMode: enumeration<ChannelFilterMode>().optional(),      // DM group filter
+    dmSortOrder: enumeration<ChannelSortOrder>().optional(),        // DM group sort
     enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     allowThreadBroadcastMentions: boolean(), // Allow @channel/@here in thread replies
     // Global notification settings
@@ -1524,6 +617,7 @@ export const userPreferenceTable = table('user_preferences')
     threadReplyNotificationsEnabled: boolean(), // Receive thread reply notifications globally
     channelWideMentionsEnabled: boolean(),      // Receive @channel and @here notifications
     notificationKeywords: string().optional(), // Stringified JSON array of keywords (max 50, each <= 80 chars)
+    showThreadTags: boolean(), // Render thread classification chips in chat; opt-in
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1541,7 +635,7 @@ export const resourceTable = table('resources')
 
 export const resourceAccessTable = table('resource_access')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     groupId: string().optional(),
     userId: string().optional(),
@@ -1554,7 +648,7 @@ export const resourceAccessTable = table('resource_access')
 
 export const pullRequestsTable = table('pull_requests')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     prId: number(),
     ticketId: string().optional(),
@@ -1630,7 +724,7 @@ export const invitationTable = table('invitations')
   .columns({
     id: string(),
     orgId: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     email: string(),
     role: enumeration<WorkspaceRole>(),
     invitedBy: string(),
@@ -1682,9 +776,22 @@ export const channelTable = table('channels')
   })
   .primaryKey('id');
 
+export const channelBoardMappingTable = table('channel_board_mappings' /* ChannelBoardMapping */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    boardId: string(),
+    workspaceId: string(),
+    isDefault: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const channelStatsTable = table('channel_stats')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
     lastActivityAt: number(),
     participantCount: number(),
@@ -1695,7 +802,7 @@ export const channelStatsTable = table('channel_stats')
 
 export const channelParticipantTable = table('channel_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1712,7 +819,7 @@ export const channelParticipantTable = table('channel_participants')
 
 export const channelUserStatusTable = table('channel_user_status')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     userId: string(),
@@ -1751,6 +858,7 @@ export const channelSectionTable = table('channel_sections') // Prisma model: Ch
     createdAt: number(),
     updatedAt: number().optional(),
     sortOrder: enumeration<ChannelSortOrder>().optional(),
+    filterMode: enumeration<ChannelFilterMode>().optional(),
   })
   .primaryKey('id');
 
@@ -1760,7 +868,7 @@ export const conversationTable = table("conversations")
     channelId: string(),
     createdBy: string(),
     initialMessageId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     parentMessageId: string().optional(),
     lastActivityAt: number(),
     replyCount: number(),
@@ -1772,14 +880,16 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(), // Markdown format ticket card data
     initial_message_md: string().optional(), // Markdown format initial message data
     parent_message_md: string().optional(), // Markdown format parent message data
+    sub_tickets_md: string().optional(), // Markdown format sub-ticket card snapshots
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
+    threadType: string().optional(),
   })
   .primaryKey("conversationId");
 
 export const conversationParticipantTable = table('conversation_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     conversationId: string(),
     userId: string(),
@@ -1798,7 +908,7 @@ export const messageTable = table('messages')
     conversationId: string(),
     childConversationId: string().optional(),
     senderId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     content: string(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
@@ -1812,8 +922,36 @@ export const messageTable = table('messages')
     isSent: boolean(),
     reactions_md: string().optional(), // Markdown format reactions data
     link_preview_md: string().optional(), // Markdown format internal link preview data
+    messageActs: string().optional(),
   })
   .primaryKey('messageId');
+
+// Deliberately self-contained: the global artifact subscription must not relate
+// to `messages`, or every message delta in the workspace would flow through its
+// IVM pipeline. Each column below is either lifecycle state or the minimum
+// needed to route to the artifact without that join.
+export const messageArtifactTable = table('message_artifacts') // Prisma model: MessageArtifact
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    channelId: string(),
+    conversationId: string(),
+    // Whether the artifact is the conversation's initial message decides
+    // between the channel route and the thread route. It cannot be derived
+    // without joining messages/conversations, so it is projected here.
+    isInitialMessage: boolean(),
+    messagePreview: string(),
+    // The source message's createdAt — drives the banner's age label and the
+    // channel-list load anchor. Equal to the conversation's createdAt when the
+    // artifact is the initial message, which is the case the anchor is used for.
+    messageCreatedAt: number(),
+    command: string(),
+    status: enumeration<MessageArtifactStatus>(),
+    callExternalId: string().optional(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
 
 export const messageAttachmentTable = table('message_attachments')
   .columns({
@@ -1836,12 +974,19 @@ export const messageAttachmentTable = table('message_attachments')
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
+    position: number().optional(),
   })
   .primaryKey('id');
 
+// @ts-ignore TS1294
+export enum DraftOrigin {
+  user = 'user',
+  twin = 'twin',
+}
+
 export const draftMessageTable = table('draft_messages')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -1849,6 +994,8 @@ export const draftMessageTable = table('draft_messages')
     userId: string(),
     content: string(),
     hasAttachment: boolean(),
+    origin: enumeration<DraftOrigin>().optional(),
+    metadata: string().optional(), // twin-only: stringified JSON TwinReplyDraft payload
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1856,7 +1003,7 @@ export const draftMessageTable = table('draft_messages')
 
 export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     conversationId: string().optional(),
@@ -1874,7 +1021,7 @@ export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */
 
 export const reactionTable = table('reactions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     reactionId: string(),
     messageId: string(),
     userId: string(),
@@ -1885,7 +1032,7 @@ export const reactionTable = table('reactions')
 
 export const reactionCountTable = table('reaction_counts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     countId: string(),
     messageId: string(),
     emojiName: string(),
@@ -1896,7 +1043,7 @@ export const reactionCountTable = table('reaction_counts')
 
 export const customEmojiTable = table('custom_emojis')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     url: string(),
@@ -1909,7 +1056,7 @@ export const activityTable = table('activities')
   .columns({
     id: string(),
     userId: string(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     actorAction: string(),
     actionSource: string(), // @deprecated Use messageId, reactionId, or callId
     actionSourceId: string(), // @deprecated Use messageId, reactionId, or callId
@@ -1920,6 +1067,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     actorId: string(),
@@ -1935,7 +1083,7 @@ export const activityTable = table('activities')
 
 export const notificationPreferenceTable = table('notification_preferences')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     notificationType: enumeration<NotificationType>(),
@@ -1949,7 +1097,7 @@ export const notificationPreferenceTable = table('notification_preferences')
 
 export const proactiveNudgeTable = table('proactive_nudges')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     messageId: string(),
     type: string(),
@@ -1965,7 +1113,7 @@ export const proactiveNudgeTable = table('proactive_nudges')
 
 export const surfaceNudgeTable = table('surface_nudges')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     nudgeKind: enumeration<NudgeKind>(),
     sourceId: string(),
@@ -1976,7 +1124,7 @@ export const surfaceNudgeTable = table('surface_nudges')
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1984,7 +1132,7 @@ export const surfaceNudgeTable = table('surface_nudges')
 
 export const surfaceNudgeCountTable = table('surface_nudge_counts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     nudgeCount: number(),
     userId: string().optional(),
@@ -2003,7 +1151,7 @@ export const surfaceNudgeCountTable = table('surface_nudge_counts')
 
 export const callTable = table('calls')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     externalId: string(),
     title: string().optional(),
@@ -2036,9 +1184,12 @@ export const callTable = table('calls')
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    recordingParticipants: string(),
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
+    xyneManaged: boolean(),
+    visibility: enumeration<CallVisibility>().optional(),
   })
   .primaryKey('id');
 
@@ -2052,6 +1203,7 @@ export const entityAccessTable = table('entity_access' /* EntityAccess */)
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2069,12 +1221,13 @@ export const summaryTemplateTable = table('summary_templates' /* SummaryTemplate
     defaultOutlet: string(),
     createdBy: string(),
     createdAt: number(),
+    visibility: string(),
   })
   .primaryKey('id');
 
 export const callParticipantTable = table('call_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     callId: string(),
     userId: string(),
@@ -2094,7 +1247,7 @@ export const callParticipantTable = table('call_participants')
 
 export const recurringCallSeriesTable = table('recurring_call_series')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     description: string().optional(),
@@ -2115,7 +1268,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
 
 export const recurringCallParticipantTable = table('recurring_call_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     recurringSeriesId: string(),
     userId: string(),
@@ -2133,7 +1286,7 @@ export const recurringCallParticipantTable = table('recurring_call_participants'
 
 export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     projectId: string().optional(),
     channelId: string().optional(),
@@ -2146,7 +1299,7 @@ export const canvasFolderTable = table('canvas_folders' /* CanvasFolder */)
 
 export const canvasTable = table('canvases')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     content: json(),
@@ -2158,6 +1311,7 @@ export const canvasTable = table('canvases')
     editAccessId: string().optional(),
     visibility: enumeration<CanvasVisibility>(),
     isTemplate: boolean(),
+    isArchived: boolean(),
     isCollaborative: boolean(),
     lastEditedBy: string().optional(),
     lastEditedAt: number().optional(),
@@ -2176,7 +1330,7 @@ export const canvasTable = table('canvases')
 
 export const canvasVersionTable = table('canvas_versions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     name: string(),
@@ -2191,10 +1345,12 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
     initialCommentId: string().optional(),
+    commentCount: number(),
     status: enumeration<CanvasCommentThreadStatus>(),
     statusUpdatedBy: string().optional(),
     statusUpdatedAt: number().optional(),
@@ -2206,6 +1362,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2220,7 +1377,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
 
 export const canvasParticipantTable = table('canvas_participants')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     userId: string().optional(),
@@ -2234,7 +1391,7 @@ export const canvasParticipantTable = table('canvas_participants')
 
 export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserStatus */)
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     canvasId: string(),
     userId: string(),
@@ -2246,7 +1403,7 @@ export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserSta
 
 export const bookmarkTable = table('bookmarks')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     entityId: string(),
@@ -2261,7 +1418,7 @@ export const bookmarkTable = table('bookmarks')
 
 export const linkTable = table('links')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     url: string(),
     title: string(),
@@ -2277,7 +1434,7 @@ export const linkTable = table('links')
 
 export const linkAccessTable = table('link_access')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     linkId: string(),
     userId: string(),
@@ -2287,19 +1444,88 @@ export const linkAccessTable = table('link_access')
 
 export const repoTable = table('repos')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(),                     // e.g., "xyne-spaces"
-    url: string(),                      // SSH or HTTPS URL
-    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
-    prefix: string(),                   // Branch prefix: "feature"
+    name: string(), // e.g., "xyne-spaces"
+    url: string(), // SSH or HTTPS URL
+    canonicalUrl: string().optional(),
+    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
+    prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
+    projectId: string().optional(),
+    /** @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links */
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCapabilities: json().optional(),
+  })
+  .primaryKey('id');
+
+export const sdlcEntityLinkTable = table('sdlc_entity_links')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    // The only scope these rows carry; a repository is one end of the edge.
+    channelId: string().optional(),
+    /** @deprecated -> scope is channelId; the repository is an endpoint of the edge */
+    repoId: string().optional(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcArtifactTable = table('sdlc_artifacts')
+  .columns({
+    workspaceId: string(),
+    artifactId: string(),
+    /** @deprecated -> repository comes from the link table; no new reads or writes */
+    repoId: string().optional(),
+    artifactType: string(),
+    artifactStatus: string(),
+    workflowExecutionId: string().optional(),
+    generationCommit: string().optional(),
+    sourceReferences: string().optional(),
+    sourcePaths: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('artifactId');
+
+// Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
+export const sdlcFolderTable = table('sdlc_folders')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcTrackTable = table('sdlc_tracks')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    /** @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links */
+    repoId: string().optional(),
+    name: string(),
+    description: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
 export const emailTable = table('emails')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     type: enumeration<EmailType>(),
     subject: string(),
@@ -2315,6 +1541,9 @@ export const emailTable = table('emails')
     externalMessageId: string(),
     sentByUserId: string().optional(),
     rfcMessageId: string().optional(),
+    rating: number().optional(),
+    clientVersionName: string().optional(),
+    clientVersionCode: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2322,7 +1551,7 @@ export const emailTable = table('emails')
 
 export const emailDraftTable = table('email_drafts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     conversationId: string().optional(),
     userId: string().optional(),
@@ -2348,7 +1577,7 @@ export const conversationLabelTable = table('conversation_labels')
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2385,7 +1614,7 @@ export const ticketUserMailboxTable = table('ticket_user_mailbox')
 
 export const emailSignatureTable = table('email_signatures')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     name: string(),
@@ -2399,7 +1628,7 @@ export const emailSignatureTable = table('email_signatures')
 export const emailReadTable = table('email_reads') // Prisma model: EmailRead
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     ticketId: string(),
     userId: string(),
     lastReadEmailId: string(),
@@ -2429,17 +1658,22 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
-    workspaceId: string().optional(),
+    workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
+    appWebhookDeliveryEnabled: boolean().optional(),
+    deskReportEnabled: boolean().optional(),
+    deskReportAgentSlug: string().optional(),
+    deskReportRangeDays: number().optional(),
   })
   .primaryKey('channelId');
 
 export const classificationMappingTable = table('classification_mappings') // ClassificationMapping
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     channelId: string(),
     category: string(),
     subCategory: string().optional(),
@@ -2451,7 +1685,7 @@ export const classificationMappingTable = table('classification_mappings') // Cl
 export const boardSlaPolicyTable = table('board_sla_policies')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     boardId: string(),
     priority: enumeration<TicketPriority>(),
     responseHours: number(),
@@ -2482,7 +1716,7 @@ export const formTable = table('forms')
 
 export const formContextMappingTable = table('forms_context_mapping')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     formId: string(),
     contextId: string(),
@@ -2495,7 +1729,7 @@ export const formContextMappingTable = table('forms_context_mapping')
 export const globalFieldsTable = table('global_fields') // Prisma model: GlobalField
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     projectId: string(),
     fieldName: string(),
     fieldType: enumeration<FormFieldType>(),
@@ -2511,7 +1745,7 @@ export const globalFieldsTable = table('global_fields') // Prisma model: GlobalF
 export const formFieldsTable = table('form_fields') // Prisma model: FormFields
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     formId: string(),
     globalFieldId: string().optional(), // definition in global_fields (null for legacy rows)
     fieldName: string().optional(), // DEPRECATED: legacy definition only
@@ -2531,7 +1765,7 @@ export type FormFieldValue = string | string[] | null;
 export const formEntityValuesTable = table('form_entity_values')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     entityId: string(),
     entityType: string(),
     formId: string(),
@@ -2547,7 +1781,7 @@ export const formEntityValuesTable = table('form_entity_values')
 
 export const stageApproversTable = table('stage_approvers')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string().optional(), // set when approverType = USER
     roleId: string().optional(), // set when approverType = ROLE
@@ -2574,7 +1808,7 @@ export const rolesTable = table('roles')
 
 export const userRoleMappingsTable = table('user_role_mappings')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     roleId: string(),
@@ -2586,7 +1820,7 @@ export const userRoleMappingsTable = table('user_role_mappings')
 export const stageTransitionTable = table('stage_transitions') // Prisma: StageTransition
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     boardId: string(),
     fromStageId: string().optional(),
     toStageId: string(),
@@ -2634,7 +1868,7 @@ export const stageApproversTableRelationships = relationships(stageApproversTabl
 export const ticketStageRequestTable = table('ticket_stage_requests')
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     ticketId: string(),
     stageId: string(),
     formId: string().optional(),
@@ -2651,7 +1885,7 @@ export const ticketStageRequestTable = table('ticket_stage_requests')
 // publishedDocTable has been deprecated - published docs were folded into canvasTable
 export const dashboardTable = table('dashboards')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2663,7 +1897,7 @@ export const dashboardTable = table('dashboards')
 
 export const queryTable = table('queries')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     queryJson: json(),
@@ -2691,7 +1925,7 @@ export const lookupValueTable = table('lookup_values')
 
 export const applicationTable = table('applications')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     projectId: string(),
@@ -2713,7 +1947,7 @@ export const applicationTable = table('applications')
 
 export const applicationReleaseTicketTable = table('application_release_tickets')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     applicationReleaseId: string(),
     releaseId: string(),
@@ -2721,6 +1955,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
     testedBy: string().optional(),
     testedAt: number().optional(),
     failureReason: string().optional(),
+    isHotfix: boolean().optional(), // release-scoped: dev ticket entered as a hotfix
     createdAt: number(),
     updatedAt: number().optional(), // nullable in DB (no default; set app-side)
   })
@@ -2729,7 +1964,7 @@ export const applicationReleaseTicketTable = table('application_release_tickets'
 
 export const releaseEventTable = table('release_events')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2748,7 +1983,7 @@ export const releaseEventTable = table('release_events')
 
 export const releaseChangeTable = table('release_changes')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     releaseId: string(),
     applicationReleaseId: string().optional(),
@@ -2761,7 +1996,7 @@ export const releaseChangeTable = table('release_changes')
 
 export const releaseChangeTypeTable = table('release_change_types')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     applicationId: string(),
     changeType: string(),
@@ -2774,10 +2009,9 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
-
 export const rcaTable = table('rcas')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     title: string(),
     ticketId: string(),
@@ -2797,7 +2031,7 @@ export const rcaTable = table('rcas')
 
 export const impactTable = table('impacts')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     rcaId: string().optional(),
@@ -2809,7 +2043,7 @@ export const impactTable = table('impacts')
 
 export const coeTable = table('coes')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     rcaId: string(),
     ownerId: string(),
@@ -2824,7 +2058,7 @@ export const coeTable = table('coes')
 
 export const releaseAttributionTable = table('release_attributions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     ticketId: string(),
     releaseId: string(),
@@ -2837,7 +2071,7 @@ export const releaseAttributionTable = table('release_attributions')
 
 export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     dashboardId: string(),
     queryId: string(),
@@ -2849,7 +2083,7 @@ export const dashboardQueryMappingTable = table('dashboard_queries_mapping')
 
 export const surfaceLinkTable = table('surface_links')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     sourceType: enumeration<SurfaceAreaType>(),
     sourceId: string(),
@@ -2857,7 +2091,7 @@ export const surfaceLinkTable = table('surface_links')
     targetId: string(),
     linkKind: enumeration<SurfaceLinkKind>(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey('id');
@@ -2865,7 +2099,7 @@ export const surfaceLinkTable = table('surface_links')
 /** @deprecated Use channelRecapTable instead */
 export const channelDailyRecapTable = table('channel_daily_recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2876,7 +2110,7 @@ export const channelDailyRecapTable = table('channel_daily_recaps')
 
 export const channelRecapTable = table('channel_recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     channelId: string(),
     recapDate: number(),
@@ -2887,7 +2121,7 @@ export const channelRecapTable = table('channel_recaps')
 
 export const recapsTable = table('recaps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     recapDate: number(),
     entityType: enumeration<RecapEntityType>(),
@@ -2899,7 +2133,7 @@ export const recapsTable = table('recaps')
 
 export const appsTable = table('apps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     name: string(),
     description: string().optional(),
@@ -2908,7 +2142,8 @@ export const appsTable = table('apps')
     scope: string(),
     version: number(),
     webhookUrl: string().optional(),
-    signingSecret: string(),
+    // signingSecret intentionally NOT synced to clients (XYNE-56394): the app HMAC secret
+    // is read server-side via Prisma; the client never needs it. Kept in Postgres/Prisma only.
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2916,7 +2151,7 @@ export const appsTable = table('apps')
 
 export const installedAppsTable = table('installed_apps')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     appId: string(),
     userId: string(),
@@ -2932,7 +2167,7 @@ export const installedAppsTable = table('installed_apps')
 // Saved Views Tables
 export const savedUserConfigurationTable = table('saved_user_configurations')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     userId: string(),
     name: string(),
@@ -2947,7 +2182,7 @@ export const savedUserConfigurationTable = table('saved_user_configurations')
 
 export const savedUserConfigurationValueTable = table('saved_user_configuration_values')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     configId: string(),
     entityName: enumeration<SavedConfigEntityName>(),
@@ -2958,12 +2193,24 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
   })
   .primaryKey('id');
 
+export const viewAccessTable = table('view_access')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 
 // Knowledge Base / Collection tables
 
 export const collectionTable = table('collections')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     parentId: string().optional(),
     ownerId: string(),
@@ -2981,7 +2228,7 @@ export const collectionTable = table('collections')
 
 export const collectionItemTable = table('collection_items')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     rootCollectionId: string(),
     collectionId: string(),
@@ -3000,11 +2247,14 @@ export const collectionItemTable = table('collection_items')
 
 export const collectionPermissionTable = table('collection_permissions')
   .columns({
-    workspaceId: string().optional(), // denormalized tenant key (nullable; stamped on insert)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    // Grants every current+future member of this channel access — always
+    // VIEWER, only offered for workspace-scoped collections in the UI.
+    channelId: string().optional(),
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -3218,6 +2468,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['id'],
     destField: ['entityId'],
     destSchema: formEntityValuesTable,
+  }),
+  conversationLabelMappings: many({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: conversationLabelMappingTable,
   }),
   assignments: many({
     sourceField: ['id'],
@@ -3445,6 +2700,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     destField: ['projectId'],
     destSchema: canvasTable,
   }),
+  repos: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: repoTable,
+  }),
   projectTags: many({
     sourceField: ['id'],
     destField: ['projectId'],
@@ -3507,6 +2767,11 @@ export const boardTableRelationships = relationships(boardTable, ({ one, many })
     sourceField: ['id'],
     destField: ['boardId'],
     destSchema: boardSlaPolicyTable,
+  }),
+  channelMappings: many({
+    sourceField: ['id'],
+    destField: ['boardId'],
+    destSchema: channelBoardMappingTable,
   }),
 }));
 
@@ -3694,43 +2959,7 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     destField: ['id'],
     destSchema: ticketTable,
   }),
-  workflowExecutions: many({
-    sourceField: ['id'],
-    destField: ['workflowId'],
-    destSchema: workflowExecutionTable,
-  }),
 }));
-
-export const workflowExecutionTableRelationships = relationships(
-  workflowExecutionTable,
-  ({ one, many }) => ({
-    workflow: one({
-      sourceField: ['workflowId'],
-      destField: ['id'],
-      destSchema: workflowTable,
-    }),
-    parentWorkflowExecution: one({
-      sourceField: ['parentWorkflowExecutionId'],
-      destField: ['id'],
-      destSchema: workflowExecutionTable,
-    }),
-    childWorkflowExecutions: many({
-      sourceField: ['id'],
-      destField: ['parentWorkflowExecutionId'],
-      destSchema: workflowExecutionTable,
-    }),
-    pullRequests: many({
-      sourceField: ['id'],
-      destField: ['workflowExecutionId'],
-      destSchema: pullRequestsTable,
-    }),
-    createdByUser: one({
-      sourceField: ['createdBy'],
-      destField: ['id'],
-      destSchema: userTable,
-    }),
-  }),
-);
 
 
 export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
@@ -3748,6 +2977,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ one,
     sourceField: ['id'],
     destField: ['userGroupId'],
     destSchema: collectionPermissionTable,
+  }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['requestedBy'],
+    destSchema: ticketExportTable,
   }),
 }));
 
@@ -3862,6 +3096,13 @@ export const collectionTableRelationships = relationships(collectionTable, ({ ma
     destField: ['collectionId'],
     destSchema: collectionItemTable,
   }),
+  // Every file anywhere under this root collection (keyed on rootCollectionId, so it
+  // spans subfolders) — powers the KB root per-collection ingestion rollup.
+  allItems: many({
+    sourceField: ['id'],
+    destField: ['rootCollectionId'],
+    destSchema: collectionItemTable,
+  }),
   permissions: many({
     sourceField: ['rootCollectionId'],
     destField: ['collectionId'],
@@ -3897,6 +3138,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ['userGroupId'],
     destField: ['id'],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
@@ -4087,10 +3333,96 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
+  }),
+  boardMappings: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelBoardMappingTable,
+  }),
+}));
+
+export const channelBoardMappingTableRelationships = relationships(
+  channelBoardMappingTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    board: one({
+      sourceField: ['boardId'],
+      destField: ['id'],
+      destSchema: boardTable,
+    }),
+  }),
+);
+
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  // Membership edges pointing here. targetId is polymorphic, so readers filter
+  // by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  // Only meaningful on membership edges, where targetId is the repository.
+  repo: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+}));
+
+export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  canvas: one({
+    sourceField: ['artifactId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+}));
+
+export const sdlcFolderTableRelationships = relationships(sdlcFolderTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
   }),
 }));
 
@@ -4148,6 +3480,23 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destSchema: surfaceNudgeCountTable,
   }),
 }));
+
+export const messageArtifactTableRelationships = relationships(
+  messageArtifactTable,
+  ({ one, many }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    // Used by the artifact subscription to keep banner delivery participant-only.
+    channelParticipants: many({
+      sourceField: ['channelId'],
+      destField: ['channelId'],
+      destSchema: channelParticipantTable,
+    }),
+  }),
+);
 
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
   attachments: many({
@@ -4441,7 +3790,7 @@ export const entityAccessTableRelationships = relationships(
 
 export const summaryTemplateTableRelationships = relationships(
   summaryTemplateTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     workspace: one({
       sourceField: ['workspaceId'],
       destField: ['id'],
@@ -4451,6 +3800,16 @@ export const summaryTemplateTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    shares: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: entityAccessTable,
+    }),
+    workspaceResourceAccess: many({
+      sourceField: ['workspaceId'],
+      destField: ['workspaceId'],
+      destSchema: resourceAccessTable,
     }),
   }),
 );
@@ -4539,6 +3898,11 @@ export const canvasFolderTableRelationships = relationships(canvasFolderTable, (
 }));
 
 export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
+  sdlcArtifact: one({
+    sourceField: ['id'],
+    destField: ['artifactId'],
+    destSchema: sdlcArtifactTable,
+  }),
   participants: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -4686,11 +4050,6 @@ export const canvasUserStatusTableRelationships = relationships(
 );
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ['workflowExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   ticket: one({
     sourceField: ['ticketId'],
     destField: ['id'],
@@ -4789,6 +4148,24 @@ export const workspaceTableRelationships = relationships(workspaceTable, ({ one,
     sourceField: ['id'],
     destField: ['workspaceId'],
     destSchema: userGroupTable,
+  }),
+  ticketExports: many({
+    sourceField: ['id'],
+    destField: ['workspaceId'],
+    destSchema: ticketExportTable,
+  }),
+}));
+
+export const ticketExportTableRelationships = relationships(ticketExportTable, ({ one }) => ({
+  workspace: one({
+    sourceField: ['workspaceId'],
+    destField: ['id'],
+    destSchema: workspaceTable,
+  }),
+  requestedByUser: one({
+    sourceField: ['requestedBy'],
+    destField: ['id'],
+    destSchema: userTable,
   }),
 }));
 
@@ -5231,6 +4608,22 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['configId'],
       destSchema: savedUserConfigurationValueTable,
     }),
+    viewAccess: many({
+      sourceField: ['id'],
+      destField: ['viewId'],
+      destSchema: viewAccessTable,
+    }),
+  }),
+);
+
+export const viewAccessTableRelationships = relationships(
+  viewAccessTable,
+  ({ one }) => ({
+    view: one({
+      sourceField: ['viewId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
   }),
 );
 
@@ -5352,6 +4745,7 @@ export const schema = createSchema({
     ticketEntityMappingTable,
     ticketTagTable,
     projectTagTable,
+    ticketExportTable,
     ticketTagMappingTable,
     ticketReferenceMappingTable,
     ticketStageEtaTable,
@@ -5367,7 +4761,6 @@ export const schema = createSchema({
     userWorkloadMappingTable,
     userExpertiseMappingTable,
     workflowTable,
-    workflowExecutionTable,
     userGroupTable,
     userTable,
     userPresenceTable,
@@ -5383,6 +4776,7 @@ export const schema = createSchema({
     invitationTable,
     guestAccessTable,
     channelTable,
+    channelBoardMappingTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5390,6 +4784,7 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
     delayedMessageTable,
@@ -5418,6 +4813,10 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
+    sdlcEntityLinkTable,
+    sdlcArtifactTable,
+    sdlcFolderTable,
+    sdlcTrackTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -5465,6 +4864,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    viewAccessTable,
     // Knowledge Base
     collectionTable,
     collectionItemTable,
@@ -5483,6 +4883,7 @@ export const schema = createSchema({
     ticketEntityMappingTableRelationships,
     ticketTagTableRelationships,
     projectTagTableRelationships,
+    ticketExportTableRelationships,
     ticketTagMappingTableRelationships,
     ticketReferenceMappingTableRelationships,
     ticketStageEtaTableRelationships,
@@ -5499,7 +4900,6 @@ export const schema = createSchema({
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
     workflowTableRelationships,
-    workflowExecutionTableRelationships,
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
@@ -5510,8 +4910,15 @@ export const schema = createSchema({
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
+    channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
+    repoTableRelationships,
+    sdlcEntityLinkTableRelationships,
+    sdlcArtifactTableRelationships,
+    sdlcFolderTableRelationships,
+    sdlcTrackTableRelationships,
     messageTableRelationships,
+    messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
     channelParticipantTableRelationships,
@@ -5591,6 +4998,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    viewAccessTableRelationships,
     // Knowledge Base
     collectionTableRelationships,
     collectionItemTableRelationships,
@@ -5612,6 +5020,7 @@ export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
 export type TicketEntityMapping = Row<typeof schema.tables.ticket_entity_mappings>;
 export type TicketTag = Row<typeof schema.tables.ticket_tags>;
 export type ProjectTag = Row<typeof schema.tables.project_tags>;
+export type TicketExport = Row<typeof schema.tables.ticket_exports>;
 export type TicketTagMapping = Row<typeof schema.tables.ticket_tag_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
 export type TicketReferenceMapping = Row<typeof schema.tables.ticket_reference_mappings>;
@@ -5621,7 +5030,6 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
-export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
@@ -5642,6 +5050,7 @@ export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizat
 export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
@@ -5676,6 +5085,10 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
+export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
@@ -5686,8 +5099,8 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
-export type FormFields = Row<typeof schema.tables.form_fields>;
 export type GlobalField = Row<typeof schema.tables.global_fields>;
+export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;
@@ -5730,6 +5143,7 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 
 // Knowledge Base Types
 export type Collection = Row<typeof schema.tables.collections>;

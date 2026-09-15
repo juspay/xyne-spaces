@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
-import { gcsService } from '@/services/gcsService';
+import { storageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { whatsAppMigrationProgressService } from '@/services/whatsappMigrationProgressService';
 import { redisService } from '@/services/redisService';
@@ -132,7 +132,7 @@ class WhatsAppBulkMigrationService {
     await mkdir(downloadDir, { recursive: true });
 
     const localPath = join(downloadDir, `${stagedFile.stagedFileId}-${stagedFile.originalName.replace(/[^a-zA-Z0-9._-]+/g, '-')}`);
-    await gcsService.downloadFile(stagedFile.gcsPath, localPath);
+    await storageService.downloadFile(stagedFile.gcsPath, localPath);
     return localPath;
   }
 
@@ -141,7 +141,7 @@ class WhatsAppBulkMigrationService {
     const gcsPath = this.buildStagingPath(input.workspaceId, stagedFileId, input.file.originalname);
     const stream = createReadStream(input.file.path);
 
-    const upload = await gcsService.uploadStreamToPath(stream, {
+    const upload = await storageService.uploadStreamToPath(stream, {
       path: gcsPath,
       contentType: input.file.mimetype || 'application/zip',
       metadata: {
@@ -157,7 +157,7 @@ class WhatsAppBulkMigrationService {
       workspaceId: input.workspaceId,
       uploaderUserId: input.uploaderUserId,
       originalName: input.file.originalname,
-      gcsPath: upload.gcsPath,
+      gcsPath: upload.path,
       size: upload.size || input.file.size,
     });
   }

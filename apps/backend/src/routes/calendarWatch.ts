@@ -4,7 +4,9 @@
  * POST /api/calendar/watch/google      — Setup Google Calendar push watch
  * POST /api/calendar/watch/microsoft   — Setup Microsoft Calendar push subscription
  * GET  /api/calendar/watch/status      — Check if calendar watch is active
- * DELETE /api/calendar/watch/:provider — Stop calendar watch
+ * DELETE /api/calendar/watch/:provider — Disconnect calendar (stop watch + clear stored
+ *                                         OAuth credentials so reconnecting re-prompts
+ *                                         for consent, picking up any newly-added scopes)
  */
 
 import express from 'express';
@@ -14,6 +16,7 @@ import { parseCalendarCredentials } from '@/database/repositories/externalSource
 import { pubSubWatchService } from '@/pubsub';
 import { enqueueGoogleCalendarManualSync } from '@/queues/googleCalendarSyncQueue';
 import { enqueueMicrosoftCalendarManualSync } from '@/queues/microsoftCalendarSyncQueue';
+import { AuthProvider } from '@xyne/shared';
 
 const router = express.Router();
 
@@ -75,7 +78,7 @@ router.post('/google', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User email not found' });
     }
 
-    if (user.authProvider !== 'GOOGLE') {
+    if (user.authProvider !== AuthProvider.GOOGLE) {
       return res.status(400).json({
         success: false,
         error: 'User is not authenticated with Google',
@@ -130,7 +133,7 @@ router.post('/microsoft', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User email not found' });
     }
 
-    if (user.authProvider !== 'MICROSOFT') {
+    if (user.authProvider !== AuthProvider.MICROSOFT) {
       return res.status(400).json({
         success: false,
         error: 'User is not authenticated with Microsoft',
@@ -196,8 +199,9 @@ router.delete('/:provider', async (req, res) => {
           id: subscription.id,
           email: subscription.displayName,
         });
+        await repositories.externalSources.disconnectCalendarSource(subscription.id);
       }
-      logger.info(`[CALENDAR_SYNC][GOOGLE][WATCH] Watch stopped for ${user.email}`);
+      logger.info(`[CALENDAR_SYNC][GOOGLE][WATCH] Disconnected calendar for ${user.email}`);
     } else if (provider === 'microsoft') {
       const subscription = await repositories.externalSources.findCalendarSourceByOwner(
         userId,
@@ -208,13 +212,14 @@ router.delete('/:provider', async (req, res) => {
           id: subscription.id,
           email: subscription.displayName,
         });
+        await repositories.externalSources.disconnectCalendarSource(subscription.id);
       }
-      logger.info(`[CALENDAR_SYNC][MICROSOFT][WATCH] Subscription deleted for ${user.email}`);
+      logger.info(`[CALENDAR_SYNC][MICROSOFT][WATCH] Disconnected calendar for ${user.email}`);
     } else {
       return res.status(400).json({ success: false, error: 'Invalid provider' });
     }
 
-    return res.json({ success: true, message: `Calendar ${provider} watch stopped` });
+    return res.json({ success: true, message: `Calendar ${provider} disconnected` });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(

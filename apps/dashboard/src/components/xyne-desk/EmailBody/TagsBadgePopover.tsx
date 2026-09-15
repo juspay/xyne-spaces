@@ -3,7 +3,7 @@
  * All logic lives in dashboard/src/components/tags/TagsBadge.tsx and
  * dashboard/src/hooks/useSourceTags.ts.
  */
-import { JSX, useState } from 'react';
+import { JSX, useState, useMemo } from 'react';
 import { cn } from '../../../utils/classNames';
 import { ChevronDown } from 'lucide-react';
 import { Popover } from '../../ui/Popover/Popover';
@@ -32,10 +32,61 @@ export const EmailTagsRow = ({ emailId }: { emailId: string }): JSX.Element | nu
   return <InlineTagGroups groups={groups.filter(g => g.tags.length > 0)} />;
 };
 
+const MAX_VISIBLE_CHIPS = 4;
+
 export const TicketTagsRow = ({ ticketId }: { ticketId: string }): JSX.Element | null => {
+  const [expanded, setExpanded] = useState(false);
   const { groups, isLoading } = useTicketLatestEmailTags(ticketId, true);
-  if (isLoading || groups.every(g => g.tags.length === 0)) return null;
-  return <InlineTagGroups groups={groups.filter(g => g.tags.length > 0)} />;
+
+  const filtered = useMemo(() => groups.filter(g => g.tags.length > 0), [groups]);
+
+  const totalChips = useMemo(() => filtered.reduce((sum, g) => sum + g.tags.length, 0), [filtered]);
+
+  const { displayGroups, hiddenCount } = useMemo(() => {
+    if (expanded) return { displayGroups: filtered, hiddenCount: 0 };
+    if (totalChips <= MAX_VISIBLE_CHIPS) return { displayGroups: filtered, hiddenCount: 0 };
+    let remaining = MAX_VISIBLE_CHIPS;
+    const truncated = filtered.reduce<typeof filtered>((acc, g) => {
+      if (remaining <= 0) return acc;
+      const take = Math.min(remaining, g.tags.length);
+      remaining -= take;
+      return [...acc, { ...g, tags: g.tags.slice(0, take) }];
+    }, []);
+    return { displayGroups: truncated, hiddenCount: totalChips - MAX_VISIBLE_CHIPS };
+  }, [filtered, expanded, totalChips]);
+
+  if (isLoading || filtered.every(g => g.tags.length === 0)) return null;
+
+  return (
+    <div className='flex items-center gap-2 flex-wrap'>
+      <span className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0'>
+        Auto-tagged
+      </span>
+      <InlineTagGroups groups={displayGroups} />
+      {hiddenCount > 0 && (
+        <button
+          type='button'
+          onClick={() => setExpanded(true)}
+          className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+          data-track-category='Tags'
+          data-track-name='ExpandTagChips'
+        >
+          +{hiddenCount}
+        </button>
+      )}
+      {expanded && totalChips > MAX_VISIBLE_CHIPS && (
+        <button
+          type='button'
+          onClick={() => setExpanded(false)}
+          className='inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+          data-track-category='Tags'
+          data-track-name='CollapseTagChips'
+        >
+          Show less
+        </button>
+      )}
+    </div>
+  );
 };
 
 // ─── Read-only popover (used by TicketTagsBadge in the right column) ─────────

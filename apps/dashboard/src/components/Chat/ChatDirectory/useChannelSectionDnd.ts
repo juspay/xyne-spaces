@@ -10,6 +10,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import {
+  ChannelFilterMode,
   ChannelScopeType,
   ChannelSortOrder,
   ChannelType,
@@ -21,13 +22,18 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import {
+  applyChannelFilter,
   bucketChannelsBySection,
+  DEFAULT_FILTER_MODE,
   isDMChannel,
   keyBetween,
   suppressNextClick,
+  sumSectionUnread,
+  type ChannelFilterContext,
 } from './ChatDirectory.utils';
 import type { SectionBucket } from './ChatDirectory.types';
 import type { VisibleChannel } from '../../../machines/stateMachine';
+import type { SidebarGroup, SidebarGroupPreference } from '../../../hooks/useChannelSort';
 
 export const DEFAULT_CONTAINER = '__channels__';
 export const STARRED_CONTAINER = '__starred__';
@@ -36,10 +42,13 @@ export const DM_CONTAINER = '__dms__';
 interface UseChannelSectionDndParams {
   channels: VisibleChannel[];
   directMessages: VisibleChannel[];
-  allDirectMessages: VisibleChannel[];
   starred: VisibleChannel[];
   channelData: VisibleChannel[] | undefined;
   allChannelsUserStatus: ChannelUserStatus[];
+  groupPreferences: Record<SidebarGroup, SidebarGroupPreference>;
+  unreadCounts: Record<string, number>;
+  mentionCounts: Record<string, number>;
+  activeChannelId?: string | undefined;
 }
 
 interface ChannelSectionDnd {
@@ -51,6 +60,10 @@ interface ChannelSectionDnd {
   defaultDisplayChannels: VisibleChannel[];
   dmDisplayChannels: VisibleChannel[];
   starredDisplayChannels: VisibleChannel[];
+  sectionUnreadCounts: Record<string, number>;
+  defaultUnreadCount: number;
+  dmUnreadCount: number;
+  starredUnreadCount: number;
   activeOverlayChannel: VisibleChannel | null;
   activeOverlaySection: ChannelSection | null;
   moveChannelToSection: (channelId: string, sectionId: string | null) => void;
@@ -67,18 +80,20 @@ interface ChannelSectionDnd {
 export const useChannelSectionDnd = ({
   channels,
   directMessages,
-  allDirectMessages,
   starred,
   channelData,
   allChannelsUserStatus,
+  groupPreferences,
+  unreadCounts,
+  mentionCounts,
+  activeChannelId,
 }: UseChannelSectionDndParams): ChannelSectionDnd => {
   const zero = useZero();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
   const allSectionable = useMemo(
-    () => [...channels, ...allDirectMessages],
-    [channels, allDirectMessages],
+    () => [...channels, ...directMessages],
+    [channels, directMessages],
   );
-  const recentDmIds = useMemo(() => new Set(directMessages.map(c => c.id)), [directMessages]);
   const { sectioned, unsectioned } = useMemo(
     () => bucketChannelsBySection(allSectionable, allChannelsUserStatus, channelSections ?? []),
     [allSectionable, allChannelsUserStatus, channelSections],
@@ -144,32 +159,55 @@ export const useChannelSectionDnd = ({
     });
   };
 
+  const filterContext: ChannelFilterContext = {
+    unreadCounts,
+    mentionCounts,
+    statuses: statusByChannelId,
+    activeChannelId,
+    now: Date.now(),
+  };
+  const filterFor = (chs: VisibleChannel[], mode: ChannelFilterMode): VisibleChannel[] =>
+    applyChannelFilter(chs, mode, filterContext);
+
+  // Unfiltered group memberships — collapsed-section badges must still count hidden rows.
+  const defaultChannels = unsectioned.filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+  const dmChannels = unsectioned.filter(c => isDMChannel(c.scopeType));
+
+  const fromDrag = (container: string): VisibleChannel[] =>
+    (dragItems?.[container] ?? [])
+      .map(id => channelById.get(id))
+      .filter((c): c is VisibleChannel => Boolean(c));
+
   const displaySectioned = dragItems
-    ? sectioned.map(bucket => ({
-        section: bucket.section,
-        channels: (dragItems[bucket.section.id] ?? [])
-          .map(id => channelById.get(id))
-          .filter((c): c is VisibleChannel => Boolean(c)),
-      }))
+    ? sectioned.map(bucket => ({ section: bucket.section, channels: fromDrag(bucket.section.id) }))
     : sectioned.map(bucket => ({
         section: bucket.section,
-        channels: applySectionSort(bucket.channels, bucket.section.sortOrder, statusByChannelId),
+        channels: applySectionSort(
+          filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
+          bucket.section.sortOrder,
+          statusByChannelId,
+        ),
       }));
   const defaultDisplayChannels = dragItems
-    ? (dragItems[DEFAULT_CONTAINER] ?? [])
-        .map(id => channelById.get(id))
-        .filter((c): c is VisibleChannel => Boolean(c))
-    : unsectioned.filter(c => c.scopeType === ChannelScopeType.DEFAULT);
+    ? fromDrag(DEFAULT_CONTAINER)
+    : filterFor(defaultChannels, groupPreferences.channels.filterMode);
   const dmDisplayChannels = dragItems
-    ? (dragItems[DM_CONTAINER] ?? [])
-        .map(id => channelById.get(id))
-        .filter((c): c is VisibleChannel => Boolean(c))
-    : unsectioned.filter(c => isDMChannel(c.scopeType) && recentDmIds.has(c.id));
+    ? fromDrag(DM_CONTAINER)
+    : filterFor(dmChannels, groupPreferences.dms.filterMode);
   const starredDisplayChannels = dragItems
-    ? (dragItems[STARRED_CONTAINER] ?? [])
-        .map(id => channelById.get(id))
-        .filter((c): c is VisibleChannel => Boolean(c))
-    : starred;
+    ? fromDrag(STARRED_CONTAINER)
+    : filterFor(starred, groupPreferences.starred.filterMode);
+  const sectionUnreadCounts: Record<string, number> = {};
+  for (const bucket of sectioned) {
+    sectionUnreadCounts[bucket.section.id] = sumSectionUnread(
+      bucket.channels,
+      unreadCounts,
+      activeChannelId,
+    );
+  }
+  const defaultUnreadCount = sumSectionUnread(defaultChannels, unreadCounts, activeChannelId);
+  const dmUnreadCount = sumSectionUnread(dmChannels, unreadCounts, activeChannelId);
+  const starredUnreadCount = sumSectionUnread(starred, unreadCounts, activeChannelId);
   const activeOverlayChannel = activeDragId ? (channelById.get(activeDragId) ?? null) : null;
   const activeOverlaySection =
     activeDragId && !activeOverlayChannel
@@ -210,21 +248,12 @@ export const useChannelSectionDnd = ({
     setActiveDragId(id);
     if ((event.active.data.current as { type?: string } | undefined)?.type === 'channel') {
       const items: Record<string, string[]> = {};
-      for (const bucket of sectioned) {
-        const sorted = applySectionSort(
-          bucket.channels,
-          bucket.section.sortOrder,
-          statusByChannelId,
-        );
-        items[bucket.section.id] = sorted.map(c => c.id);
+      for (const bucket of displaySectioned) {
+        items[bucket.section.id] = bucket.channels.map(c => c.id);
       }
-      items[DEFAULT_CONTAINER] = unsectioned
-        .filter(c => c.scopeType === ChannelScopeType.DEFAULT)
-        .map(c => c.id);
-      items[STARRED_CONTAINER] = starred.map(c => c.id);
-      items[DM_CONTAINER] = unsectioned
-        .filter(c => isDMChannel(c.scopeType) && recentDmIds.has(c.id))
-        .map(c => c.id);
+      items[DEFAULT_CONTAINER] = defaultDisplayChannels.map(c => c.id);
+      items[STARRED_CONTAINER] = starredDisplayChannels.map(c => c.id);
+      items[DM_CONTAINER] = dmDisplayChannels.map(c => c.id);
       const startContainer = Object.keys(items).find(k => (items[k] ?? []).includes(id)) ?? null;
       activeDragStartContainerRef.current = startContainer;
       const draggedChannel = channelById.get(id);
@@ -429,6 +458,10 @@ export const useChannelSectionDnd = ({
     defaultDisplayChannels,
     dmDisplayChannels,
     starredDisplayChannels,
+    sectionUnreadCounts,
+    defaultUnreadCount,
+    dmUnreadCount,
+    starredUnreadCount,
     activeOverlayChannel,
     activeOverlaySection,
     moveChannelToSection,

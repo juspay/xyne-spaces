@@ -1,4 +1,5 @@
 import { getStorageService } from './storage';
+import { SessionRecordingProcessStatus } from '@xyne/shared';
 import { redisService } from './redisService';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { logger } from '@/utils/logger';
@@ -6,7 +7,6 @@ import { config } from '@/config/env';
 import { WORKFLOW_KEYS_SET, parseWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
 import { db } from '@/database/client';
 import { DatabaseClient } from '@/database/client';
-import { SessionRecordingProcessStatus } from '@prisma/client';
 
 export interface WorkflowStepData {
   stepId: string;

@@ -16,6 +16,7 @@ import {
   BoardType,
   type BoardMetadata,
   type TicketFormConfig,
+  ApproverType,
 } from '@xyne/shared';
 import { DEFAULT_STAGES_TEMPLATE } from './templates/defaultStagesTemplate';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -181,7 +182,7 @@ export const BoardForm = ({
             readonly id: string;
             readonly userId: string | null;
             readonly roleId: string | null;
-            readonly approverType: 'USER' | 'ROLE' | null;
+            readonly approverType: ApproverType | null;
             readonly stageId: string;
           }[];
         }[])
@@ -238,10 +239,14 @@ export const BoardForm = ({
         const approvers: ApproverEntry[] = (s.approvers ?? [])
           .map(a => {
             const type = a.approverType ?? 'USER';
-            if (type === 'ROLE') {
-              return a.roleId ? { approverId: a.roleId, approverType: 'ROLE' as const } : null;
+            if (type === ApproverType.ROLE) {
+              return a.roleId
+                ? { approverId: a.roleId, approverType: ApproverType.ROLE as const }
+                : null;
             }
-            return a.userId ? { approverId: a.userId, approverType: 'USER' as const } : null;
+            return a.userId
+              ? { approverId: a.userId, approverType: ApproverType.USER as const }
+              : null;
           })
           .filter((x): x is ApproverEntry => x !== null);
 
@@ -567,10 +572,14 @@ export const BoardForm = ({
           placeholder='Select board type'
           items={[
             {
-              items: Object.values(BoardType).map(type => ({
-                label: type.charAt(0) + type.slice(1).toLowerCase(),
-                value: type,
-              })),
+              // FLOW boards have a dedicated creation path and cannot be
+              // converted to/from other types (enforced server-side too).
+              items: Object.values(BoardType)
+                .filter(type => type !== BoardType.FLOW)
+                .map(type => ({
+                  label: type.charAt(0) + type.slice(1).toLowerCase(),
+                  value: type,
+                })),
             },
           ]}
           selected={boardType}

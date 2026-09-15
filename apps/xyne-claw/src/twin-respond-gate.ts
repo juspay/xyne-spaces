@@ -13,7 +13,7 @@
  * run on every mention.
  */
 
-import { fetchLiteLLMWithRetry } from "./litellm-retry.js";
+import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("twin-respond-gate");

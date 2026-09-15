@@ -6,8 +6,14 @@
  * Extracted from routes/webhook.ts (2026-07-22 refactor session 1.4).
  */
 import { CONFIG } from "../../config.js";
+import { errMsg } from "../../lib/errors.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
+import { SpacesApiError, isFlowSchemaRejection } from "../../mcp/servers/xyne-spaces-client.js";
+
+// Re-export so callers (webhook.ts) can branch on `err.status` / detect a
+// flow-schema rejection from the same module they import the fetch helpers.
+export { SpacesApiError, isFlowSchemaRejection };
 
 const log = createLogger("spaces-client");
 
@@ -15,7 +21,7 @@ export async function withSpaces5xxRetry<T>(label: string, fn: () => Promise<T>)
   try {
     return await fn();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     const status = /^Spaces app API (\d{3})/.exec(msg)?.[1];
     if (!status || Number(status) < 500) throw err;
     log.warn(`[spaces-retry] ${label} got ${status} — retrying once after 2s`);
@@ -42,7 +48,7 @@ export async function spacesAppFetchMultipart(path: string, form: FormData, appT
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+      throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
     }
 
     return res.json();
@@ -59,7 +65,7 @@ export async function spacesAppFetchGet(path: string, appToken?: string): Promis
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+    throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
   }
   return res.json();
 }
@@ -82,7 +88,7 @@ export async function spacesAppFetch(path: string, body: Record<string, unknown>
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Spaces app API ${res.status}: ${text.slice(0, 500)}`);
+      throw new SpacesApiError(res.status, `Spaces app API ${res.status}: ${text.slice(0, 500)}`);
     }
 
     return res.json();

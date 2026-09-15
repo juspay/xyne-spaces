@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
+import { currentWorkspaceId } from '@/database/tenant/context';
+import { FormContextType, FormEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
-import { FormContextType, FormEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilterOptions, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
@@ -616,8 +617,12 @@ export class JiraMigrationPreviewService {
         FROM public.form_fields ff
         INNER JOIN public.forms_context_mapping fcm ON fcm."formId" = ff."formId"
         WHERE fcm."contextId" = ${input.targetBoardId}
-          AND fcm."contextType" = CAST(${FormContextType.BOARD} AS "FormContextType")
-          AND fcm."entityType" = CAST(${FormEntityType.TICKET} AS "FormEntityType")
+          AND fcm."contextType" = ${FormContextType.BOARD}
+          AND fcm."entityType" = ${FormEntityType.TICKET}
+          AND EXISTS (
+            SELECT 1 FROM public.boards b
+            WHERE b.id = fcm."contextId" AND b."workspaceId" = ${currentWorkspaceId()}
+          )
         ORDER BY ff."createdAt" ASC
       `,
       this.fetchAllProjectStatuses(jiraProjectKey),

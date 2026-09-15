@@ -1,15 +1,13 @@
 import React from 'react';
 import CodeViewer from '../../FileViewer/CodeViewer';
 import type { BaseViewerProps } from '../../FileViewer/utils';
-import './fileViewerOverrides.css';
 
 // Thin wrapper around the shared CodeViewer for use only in the KB file
-// viewer route. The wrapping <div> applies `.kb-file-viewer` so the
-// scoped CSS in `fileViewerOverrides.css` repaints the inner surfaces
-// onto the cream / midnight page bg (`ai-page-bg`). Chat attachments and
-// citation modals don't get this class, so they're unaffected.
+// viewer route. The shell div supplies the full-size box the viewer expects;
+// the surface itself comes from the shared viewer's own `bg-background`,
+// which now matches the page.
 export const KbCodeViewer: React.FC<BaseViewerProps> = props => (
-  <div className='kb-file-viewer h-full w-full'>
+  <div className='h-full w-full'>
     <CodeViewer {...props} />
   </div>
 );

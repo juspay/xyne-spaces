@@ -6,7 +6,7 @@ import { OverlayPortal } from '../../ui/OverlayPortal';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
 
-type FilterTab = 'all' | 'created_by_me';
+type FilterTab = 'all' | 'created_by_me' | 'shared';
 
 export interface CanvasAttachmentModalProps {
   /** Whether the modal is open */
@@ -140,7 +140,12 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
           </Button>
 
           <div className='flex items-center gap-3'>
-            <Button variant='secondary' onClick={handleClose}>
+            <Button
+              variant='secondary'
+              onClick={handleClose}
+              data-track-category='CANVAS'
+              data-track-name='CLOSE_CANVAS_ATTACHMENT_MODAL'
+            >
               Cancel
             </Button>
             <Button

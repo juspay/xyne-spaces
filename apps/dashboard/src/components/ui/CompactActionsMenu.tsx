@@ -23,12 +23,15 @@ interface CompactActionsMenuProps {
   items: ActionMenuItem[];
   triggerClassName?: string;
   contentAlign?: 'start' | 'center' | 'end';
+  /** Force the dark theme's tokens on the (portaled) menu content, e.g. for in-call surfaces. */
+  forceDarkTheme?: boolean;
 }
 
 const CompactActionsMenu = ({
   items,
   triggerClassName = 'p-2 border border-[#E4E6E7] rounded-lg h-8 w-8',
   contentAlign = 'end',
+  forceDarkTheme = false,
 }: CompactActionsMenuProps): ReactElement => {
   const visibleItems = items.filter(item => item.visible !== false);
 
@@ -39,7 +42,11 @@ const CompactActionsMenu = ({
           <EllipsisVertical size={20} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={contentAlign} className='min-w-[14rem]'>
+      <DropdownMenuContent
+        align={contentAlign}
+        className='min-w-[14rem]'
+        {...(forceDarkTheme ? { 'data-theme': 'midnight' } : {})}
+      >
         {visibleItems.map((item, index) => {
           if (item.customContent) {
             return (
@@ -49,6 +56,8 @@ const CompactActionsMenu = ({
                   if (item.preventClose) e.preventDefault();
                   item.onSelect();
                 }}
+                disabled={item.disabled ?? false}
+                data-testid={item.testId}
                 className='p-0'
               >
                 {item.customContent}

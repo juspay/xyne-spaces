@@ -1,5 +1,5 @@
-import { ActivityClassification, TicketReferenceRelation } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityClassification, TicketReferenceRelation } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
@@ -97,7 +97,7 @@ export class TicketReferenceMappingsSideEffectHandler extends BaseSideEffectHand
     const ctx = await resolveReferenceMappingContext(
       mapping.sourceTicketId,
       mapping.targetTicketId,
-      mapping.relationType,
+      mapping.relationType as TicketReferenceRelation,
       this.ctx.userID,
     );
     if (!ctx) return;

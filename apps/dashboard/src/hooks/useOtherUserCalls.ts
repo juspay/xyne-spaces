@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { callService } from '../services/Call/callService';
 import type { User } from '../machines/authMachine';
+import { CalendarVisibility } from '@xyne/shared';
 
 export interface OtherUserBusySlot {
   startsAt: number;
@@ -13,7 +14,7 @@ export interface OtherUserCalls {
   user: User;
   color: string;
   calls: OtherUserBusySlot[];
-  calendarVisibility: 'PUBLIC' | 'PRIVATE';
+  calendarVisibility: CalendarVisibility;
 }
 
 const MEET_WITH_COLORS = [

@@ -1,6 +1,11 @@
 import { randomUUID } from 'crypto';
-import { ChannelType, ExternalEntityType } from '@prisma/client';
-import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  ChannelType,
+  ExternalEntityType,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { EmailRepository } from '@/database/repositories/emailRepository';

@@ -23,7 +23,11 @@ interface StateInner {
 }
 
 function hmac(payload: string): string {
-  return createHmac("sha256", CONFIG.encryptionKey).update(payload).digest("hex");
+  return createHmac("sha256", CONFIG.oauthStateSigningKey).update(payload).digest("hex");
+}
+
+function hmacLegacy(payload: string): string {
+  return createHmac("sha256", CONFIG.legacyOauthStateSigningKey).update(payload).digest("hex");
 }
 
 export function signOAuthState(userId: string, extra?: Record<string, unknown>): string {
@@ -56,15 +60,20 @@ export function verifyOAuthState(state: string): VerifiedState {
   const body = state.slice(0, dot);
   const sig = state.slice(dot + 1);
   const expected = hmac(body);
+  const legacyExpected = hmacLegacy(body);
   let sigBuf: Buffer;
   let expectedBuf: Buffer;
+  let legacyExpectedBuf: Buffer;
   try {
     sigBuf = Buffer.from(sig, "hex");
     expectedBuf = Buffer.from(expected, "hex");
+    legacyExpectedBuf = Buffer.from(legacyExpected, "hex");
   } catch {
     throw new OAuthStateError("bad_signature");
   }
-  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
+  const matchesCurrent = sigBuf.length === expectedBuf.length && timingSafeEqual(sigBuf, expectedBuf);
+  const matchesLegacy = sigBuf.length === legacyExpectedBuf.length && timingSafeEqual(sigBuf, legacyExpectedBuf);
+  if (!matchesCurrent && !matchesLegacy) {
     throw new OAuthStateError("bad_signature");
   }
 

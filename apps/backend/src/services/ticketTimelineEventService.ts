@@ -1,5 +1,5 @@
-import { MessageType, Prisma } from '@prisma/client';
-import type { ActivityType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { MessageType, ActivityType } from '@xyne/shared';
 import { db } from '@/database/client';
 
 /**
@@ -30,8 +30,7 @@ export interface RecordTicketActivityInput {
   updatedBy: string;
   activityType: ActivityType;
   value: Prisma.InputJsonValue;
-  /** Denormalized tenant key; conditionally set (omitted when falsy). */
-  workspaceId?: string | null;
+  workspaceId: string;
   /** Denormalized key behind @@index([channelId, timestamp]); needed by desk metrics for some kinds. */
   channelId?: string | null;
   timestamp?: Date;
@@ -46,8 +45,7 @@ export interface RecordTicketSystemMessageInput {
    * are not members of the ActivityType enum.
    */
   activityType: string;
-  /** Denormalized tenant key; conditionally set (omitted when falsy), matching prior call sites. */
-  workspaceId?: string | null;
+  workspaceId: string;
   createdAt?: Date;
   isAutomation?: boolean;
   /** Extra metadata merged in (e.g. fromStage/toStage/hasForm). Cannot override the invariants. */
@@ -76,7 +74,7 @@ export async function recordTicketTimelineEvent(
         updatedBy: activity.updatedBy,
         activityType: activity.activityType,
         value: activity.value,
-        ...(activity.workspaceId ? { workspaceId: activity.workspaceId } : {}),
+        workspaceId: activity.workspaceId,
         ...(activity.channelId != null ? { channelId: activity.channelId } : {}),
         ...(activity.timestamp ? { timestamp: activity.timestamp } : {}),
       },
@@ -95,7 +93,7 @@ export async function recordTicketTimelineEvent(
         isDeleted: false,
         isSent: true,
         showInChannel: false,
-        ...(message.workspaceId ? { workspaceId: message.workspaceId } : {}),
+        workspaceId: message.workspaceId,
         ...(message.createdAt ? { createdAt: message.createdAt } : {}),
         metadata: {
           ...(message.extraMetadata ?? {}),

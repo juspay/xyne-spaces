@@ -1,14 +1,19 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
-import { Button, ButtonType, Modal } from '@juspay/blend-design-system';
+import { Button } from '../../components/ui/Button';
+import { Dialog } from '../../components/ui/Dialog';
 import { ProjectForm, ProjectCard } from '../../components/Project';
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
-import type { Project as ZeroProject } from '@xyne/shared';
+import { AccessType, type Project as ZeroProject } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
+import { usePermissions } from '../../hooks/usePermissions';
+import { useAuth } from '../../hooks/useAuth';
+import { DownloadDown as Download } from '@xyne/icons';
 
 const ProjectsListView = (): ReactElement => {
   const zero = useZero();
@@ -16,6 +21,14 @@ const ProjectsListView = (): ReactElement => {
   const [editingProject, setEditingProject] = useState<ZeroProject | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { isMobile } = usePlatform();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const permissions = usePermissions();
+  const canExportTickets = permissions.some(
+    permission =>
+      permission.resourceName === 'TICKET-REPORTS' &&
+      (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -86,13 +99,32 @@ const ProjectsListView = (): ReactElement => {
         <div className='mb-6'>
           <div className='flex items-center justify-between mb-2'>
             <h2 className='text-lg font-bold text-foreground'>Projects</h2>
-            <Button
-              buttonType={ButtonType.PRIMARY}
-              text='New'
-              onClick={() => setShowCreateModal(true)}
-              data-track-category='Projects'
-              data-track-name='CreateProject'
-            />
+            <div className='flex items-center gap-2'>
+              {canExportTickets && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    void navigate(
+                      `${user?.workspaceId ? `/${user.workspaceId}` : ''}/ticket-reports?from=listProjects`,
+                    );
+                  }}
+                  className='inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent'
+                  data-track-category='TicketReports'
+                  data-track-name='OpenReportsFromProjectList'
+                >
+                  <Download className='size-4' />
+                  Export report
+                </button>
+              )}
+              <Button
+                size='sm'
+                onClick={() => setShowCreateModal(true)}
+                data-track-category='Projects'
+                data-track-name='CreateProject'
+              >
+                New
+              </Button>
+            </div>
           </div>
           <p className='text-xs text-muted-foreground'>Manage your projects</p>
           <div className='mt-3'>
@@ -139,37 +171,32 @@ const ProjectsListView = (): ReactElement => {
 
       {/* Create Modal */}
       {showCreateModal && (
-        <Modal
-          isOpen={true}
-          onClose={() => setShowCreateModal(false)}
-          title='Create New Project'
-          showCloseButton={true}
-          closeOnBackdropClick={false}
+        <Dialog
+          open={true}
+          onOpenChange={open => !open && setShowCreateModal(false)}
+          title='Create new project'
+          description='Name your project and pick a code for its ticket IDs.'
+          testId='create-project-dialog'
         >
-          <div data-testid='create-project-dialog'>
-            <ProjectForm
-              onSubmit={handleCreateProject}
-              onCancel={() => setShowCreateModal(false)}
-            />
-          </div>
-        </Modal>
+          <ProjectForm onSubmit={handleCreateProject} onCancel={() => setShowCreateModal(false)} />
+        </Dialog>
       )}
 
       {/* Edit Modal */}
       {editingProject && (
-        <Modal
-          isOpen={true}
-          onClose={() => setEditingProject(null)}
-          title='Edit Project'
-          showCloseButton={true}
-          closeOnBackdropClick={false}
+        <Dialog
+          open={true}
+          onOpenChange={open => !open && setEditingProject(null)}
+          title='Edit project'
+          description='Update the name and description for this project.'
+          testId='edit-project-dialog'
         >
           <ProjectForm
             project={editingProject}
             onSubmit={data => handleUpdateProject(editingProject.id, data)}
             onCancel={() => setEditingProject(null)}
           />
-        </Modal>
+        </Dialog>
       )}
     </div>
   );

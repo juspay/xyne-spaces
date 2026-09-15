@@ -35,10 +35,18 @@ export function buildVariableSources(
         ? buildWebhookTriggerOutputSchema(triggerConfig)
         : triggerSchema.outputSchema;
 
-    if (triggerSchema.type === 'TICKET_UPDATED' && formFieldNameMap && formFieldNameMap.size > 0) {
-      const selectedFieldIds = triggerConfig['formFieldIds'];
-      const selectedIds = Array.isArray(selectedFieldIds)
-        ? new Set<string>(selectedFieldIds.map(String))
+    if (
+      (triggerSchema.type === 'TICKET_UPDATED' || triggerSchema.type === 'TICKET_CREATED') &&
+      formFieldNameMap &&
+      formFieldNameMap.size > 0
+    ) {
+      const selectedFieldConditions =
+        (triggerConfig['formFieldConditions'] as Array<{ fieldId: string }> | undefined) ??
+        (triggerConfig['formFieldIds'] as string[] | undefined);
+      const selectedIds = Array.isArray(selectedFieldConditions)
+        ? new Set<string>(
+            selectedFieldConditions.map(c => (typeof c === 'string' ? c : String(c.fieldId))),
+          )
         : null;
 
       const formFieldProperties: Record<string, JsonSchema> = {};

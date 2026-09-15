@@ -1,5 +1,5 @@
 import type { Query } from '@rocicorp/zero';
-import { type Schema, type Context, ChannelVisibility } from '../../schema';
+import { type Schema, type Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
@@ -19,20 +19,12 @@ export class StagesACL extends BaseQueryACL<'stages'> {
       );
     }
 
-    // Direct workspaceId check through board - no need to traverse through project
+    // Scope to the board's workspace only — match BoardsACL (boards are workspace-
+    // visible). The old project→channels participation gate hid stages (empty board
+    // columns) from workspace members who could open the board but weren't channel
+    // participants.
     return query.whereExists('board', (boardQuery) =>
-      boardQuery
-        .where('workspaceId', '=', this.ctx.workspaceId)
-        .whereExists('project', (projectQuery) =>
-          projectQuery.whereExists('channels', (channelQuery) =>
-            channelQuery.where(({or, cmp, exists}) => {
-              return or(
-                cmp("visibility", ChannelVisibility.PUBLIC),
-                exists("participants", participants => participants.where("userId", this.ctx.userID))
-              )
-            })
-          )
-        )
+      boardQuery.where('workspaceId', '=', this.ctx.workspaceId),
     );
   }
 }

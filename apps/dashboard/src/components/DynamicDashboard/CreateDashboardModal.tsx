@@ -160,10 +160,21 @@ export const CreateDashboardModal = ({ onClose }: CreateDashboardModalProps): Re
         </div>
       </div>
       <div className='flex items-center justify-end gap-2 mt-5'>
-        <Button variant='ghost' onClick={onClose}>
+        <Button
+          variant='ghost'
+          onClick={onClose}
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='CANCEL_CREATE_DASHBOARD'
+        >
           Cancel
         </Button>
-        <Button onClick={handleCreateClick} disabled={!name.trim() || isCreating}>
+        <Button
+          onClick={handleCreateClick}
+          trackId='create_dashboard'
+          data-track-category='DYNAMIC_DASHBOARD'
+          data-track-name='CREATE_DASHBOARD'
+          disabled={!name.trim() || isCreating}
+        >
           {isCreating ? (
             <Loader2 size={14} className='mr-1.5 animate-spin' />
           ) : (

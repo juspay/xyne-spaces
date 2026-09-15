@@ -1,8 +1,8 @@
 import { BaseSideEffectHandler } from '../base-handler';
+import { InvitationResponse } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import { logger } from '@/utils/logger';
 import { TableSchema } from '@/zero/acl/core/types';
-import { InvitationResponse } from '@prisma/client';
 import { UpdateValue } from '@rocicorp/zero';
 import { callSideEffectService } from '@/services/callSideEffectService';
 

@@ -17,7 +17,6 @@ export interface CallContext {
       picture?: string;
     };
     callType: CallType;
-    title?: string;
   }>;
   // Store the callId being accepted to use after removing from queue
   acceptingCallId: string | null;

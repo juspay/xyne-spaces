@@ -5,16 +5,9 @@ import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
 interface SlackThreadProps {
   emails: SlackEmailMessage[];
   ticketId?: string | null | undefined;
-  lastEmailAt?: number | null | undefined;
-  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailAt: number }> | undefined;
 }
 
-const SlackThread = ({
-  emails,
-  ticketId,
-  lastEmailAt,
-  emailReads,
-}: SlackThreadProps): ReactElement => {
+const SlackThread = ({ emails, ticketId }: SlackThreadProps): ReactElement => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Sort oldest-first for chat-style display
@@ -26,7 +19,7 @@ const SlackThread = ({
   // Thread-level: upsert the current user's email_reads row on open, same as
   // EmailThread. Newest message is last in the oldest-first sorted list.
   const latestEmailId = sorted[sorted.length - 1]?.id ?? null;
-  useMarkEmailRead(ticketId, latestEmailId, lastEmailAt ?? null, emailReads, true);
+  useMarkEmailRead(ticketId, latestEmailId, true);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

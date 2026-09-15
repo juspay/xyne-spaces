@@ -10,8 +10,8 @@
  *  3. deleteSubscriptionForSource()  — DELETE /subscriptions/{id}.
  */
 
-import { AuthProvider } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { AuthProvider } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefresh';
 import { parseCalendarCredentials } from '@/database/repositories/externalSourceRepository';

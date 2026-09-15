@@ -97,6 +97,31 @@ export interface AIVoiceToggleMessage {
   participantName: string;
 }
 
+/**
+ * Transcription toggle event (host enables/disables the transcription agent mid-call).
+ * When `enabled` is false the still-in-room agent unsubscribes from audio and stops
+ * writing any transcript sinks; `at` is the epoch-ms cutoff for the pause.
+ */
+export interface TranscriptionToggleMessage {
+  type: 'transcription_toggle';
+  enabled: boolean;
+  at: number;
+  participantId: string;
+  participantName: string;
+}
+
+/**
+ * Authoritative transcription state, broadcast by the AGENT after it actually applies
+ * (or rejects) a `transcription_toggle` command. Clients reflect their privacy state
+ * from THIS message — never from the optimistic command — so the UI can never show
+ * "off" while the agent is still capturing audio.
+ */
+export interface TranscriptionStateMessage {
+  type: 'transcription_state';
+  enabled: boolean;
+  at: number;
+}
+
 // ============================================================================
 // Union Types
 // ============================================================================
@@ -110,7 +135,9 @@ export type AIDataMessage =
   | AIControlRequestMessage
   | AIControlTransferMessage
   | AIControlRequestDeniedMessage
-  | AIVoiceToggleMessage;
+  | AIVoiceToggleMessage
+  | TranscriptionToggleMessage
+  | TranscriptionStateMessage;
 
 /**
  * Generic data message from data channel (before parsing)
@@ -125,6 +152,7 @@ export interface RawDataMessage {
   new_controller_id?: string;
   new_controller_name?: string;
   enabled?: boolean;
+  at?: number;
   participantId?: string;
   participantName?: string;
   data?: {
@@ -189,6 +217,16 @@ export interface AIControlRequestDeniedEvent {
 }
 
 /**
+ * Parsed authoritative transcription-state event (from the agent). Clients reflect
+ * their privacy state from this, not from the optimistic toggle command.
+ */
+export interface AITranscriptionStateEvent {
+  type: 'AI_TRANSCRIPTION_STATE';
+  enabled: boolean;
+  at: number;
+}
+
+/**
  * All possible parsed AI events
  */
 export type AIEvent =
@@ -196,4 +234,5 @@ export type AIEvent =
   | AICreateTicketEvent
   | AIControllerEvent
   | AIControlRequestEvent
-  | AIControlRequestDeniedEvent;
+  | AIControlRequestDeniedEvent
+  | AITranscriptionStateEvent;

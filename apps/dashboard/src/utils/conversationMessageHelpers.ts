@@ -8,7 +8,7 @@ import type { MessageWithOptionalNudgeCounts } from '../components/ui/MessageBub
  */
 export function initialMessageSummaryToMessage(
   summary: InitialMessageSummary,
-  workspaceId: string | null,
+  workspaceId: string,
 ): MessageWithOptionalNudgeCounts {
   return {
     messageId: summary.messageId,
@@ -26,6 +26,9 @@ export function initialMessageSummaryToMessage(
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     metadata: summary.metadata ? JSON.parse(summary.metadata) : null,
     nudgeCount: summary.nudgeCount ?? null,
+    // initial_message_md doesn't carry message acts, so a message rebuilt from the blob
+    // always reports none. Same caveat as resolveMessage in @xyne/shared.
+    messageActs: null,
     isSent: summary.isSent,
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,
@@ -39,7 +42,7 @@ export function initialMessageSummaryToMessage(
  * to the given userId (respects the visibleTo visibility filter).
  */
 export function getInitialMessageFromConversation(
-  conversation: { initial_message_md?: string | null; workspaceId: string | null },
+  conversation: { initial_message_md?: string | null; workspaceId: string },
   userId?: string,
 ): MessageWithOptionalNudgeCounts | null {
   const summary = parseInitialMessageMd(conversation.initial_message_md);

@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   createContext,
   useCallback,
@@ -206,7 +207,11 @@ export function ClawConversationProvider({
         setHasUnseenAnswer(false);
         return true;
       } catch (error) {
-        console.error('[Claw] Failed to load conversation', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[Claw] Failed to load conversation'),
+          error: error,
+        });
         return false;
       } finally {
         if (loadRequestRef.current === requestId) setLoadingSessionId(null);

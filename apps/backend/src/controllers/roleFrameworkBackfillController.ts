@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
+import { ApproverType } from '@xyne/shared';
 
 /**
  * Role framework backfill controller.
@@ -733,7 +735,7 @@ export class RoleFrameworkBackfillController {
         if (!options.dryRun) {
           const result = await db.stageApprovers.updateMany({
             where: { id: { in: batchIds }, approverType: null },
-            data: { approverType: 'USER' },
+            data: { approverType: ApproverType.USER },
           });
           summary.updated += result.count;
         } else {
@@ -805,18 +807,20 @@ export class RoleFrameworkBackfillController {
       });
 
       let summary: BackfillSummary;
+      // Every mode seeds or repairs role-framework rows for each workspace in turn, so the
+      // sweep runs above any single workspace's scope.
       switch (mode) {
         case 'seedDefaultRoles':
-          summary = await RoleFrameworkBackfillController.seedDefaultRoles(options, runId);
+          summary = await runAsSystem(() => RoleFrameworkBackfillController.seedDefaultRoles(options, runId));
           break;
         case 'userGroupMappingsRoleId':
-          summary = await RoleFrameworkBackfillController.backfillUserGroupMappingsRoleId(options, runId);
+          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillUserGroupMappingsRoleId(options, runId));
           break;
         case 'boardMetadata':
-          summary = await RoleFrameworkBackfillController.backfillBoardMetadata(options, runId);
+          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillBoardMetadata(options, runId));
           break;
         case 'stageApproversApproverType':
-          summary = await RoleFrameworkBackfillController.backfillStageApproversApproverType(options, runId);
+          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillStageApproversApproverType(options, runId));
           break;
         default:
           // Future modes — not yet implemented.
@@ -866,14 +870,16 @@ export class RoleFrameworkBackfillController {
 
   static async getBackfillStats(_req: Request, res: Response<ApiResponse>) {
     try {
+      // These counts report the remaining work for a sweep that spans every workspace, so
+      // each read runs above any single workspace's scope.
       // seedDefaultRoles stats
-      const totalWorkspaces = await db.workspace.count();
-      const totalRoles = await db.role.count();
-      const rolesWithDefaultNames = await db.role.count({
+      const totalWorkspaces = await runAsSystem(() => db.workspace.count());
+      const totalRoles = await runAsSystem(() => db.role.count());
+      const rolesWithDefaultNames = await runAsSystem(() => db.role.count({
         where: { name: { in: [...DEFAULT_ROLE_NAMES] } },
-      });
+      }));
 
-      const workspacesWithAllDefaults = await db.workspace.findMany({
+      const workspacesWithAllDefaults = await runAsSystem(() => db.workspace.findMany({
         select: {
           id: true,
           _count: {
@@ -882,22 +888,22 @@ export class RoleFrameworkBackfillController {
             },
           },
         },
-      });
+      }));
       const workspacesNeedingSeed = workspacesWithAllDefaults.filter(
         w => w._count.roles < DEFAULT_ROLE_NAMES.length,
       ).length;
 
       // userGroupMappingsRoleId stats
-      const totalUserGroupMappings = await db.userGroupMapping.count();
-      const userGroupMappingsNeedingRoleId = await db.userGroupMapping.count({
+      const totalUserGroupMappings = await runAsSystem(() => db.userGroupMapping.count());
+      const userGroupMappingsNeedingRoleId = await runAsSystem(() => db.userGroupMapping.count({
         where: { roleId: null, responsibility: { not: null } },
-      });
+      }));
 
       // boardMetadata stats — count boards where each key is missing/empty
-      const totalBoards = await db.board.count();
-      const boards = await db.board.findMany({
+      const totalBoards = await runAsSystem(() => db.board.count());
+      const boards = await runAsSystem(() => db.board.findMany({
         select: { metadata: true },
-      });
+      }));
       let boardsNeedingAssignmentRoles = 0;
       let boardsNeedingTicketControlRoleIds = 0;
       let boardsNeedingBitbucketEventRoles = 0;
@@ -913,10 +919,10 @@ export class RoleFrameworkBackfillController {
       }
 
       // stageApproversApproverType stats
-      const totalStageApprovers = await db.stageApprovers.count();
-      const stageApproversNeedingApproverType = await db.stageApprovers.count({
+      const totalStageApprovers = await runAsSystem(() => db.stageApprovers.count());
+      const stageApproversNeedingApproverType = await runAsSystem(() => db.stageApprovers.count({
         where: { approverType: null },
-      });
+      }));
 
       const response: ApiResponse = {
         success: true,

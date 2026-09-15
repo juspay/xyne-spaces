@@ -1,7 +1,7 @@
 import { Router } from 'express';
+import { AccessType } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
-import { AccessType } from '@prisma/client';
 import { MigrationCleanupController } from '@/controllers/migrationCleanupController';
 import { UnknownGroupBackfillController } from '@/controllers/unknownGroupBackfillController';
 import { WorkspaceIdBackfillController } from '@/controllers/workspaceIdBackfillController';

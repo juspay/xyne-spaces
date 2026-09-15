@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { MessageType, ProjectType, UserType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { conversationService } from '@/services/conversationService';
-import { MessageType, ProjectType, UserType } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { getAutomationsBotUserId } from './automations-bot';
 import { logger } from '@/utils/logger';
@@ -122,9 +122,14 @@ export class SendMessageStep extends BaseActionStep<
         select: { userType: true },
       });
       const sender = senderUsers[0];
-      if (!sender || sender.userType === UserType.BOT || sender.userType === UserType.APP) {
+      // Automations may only post as a non-human (bot/app) identity. Posting as
+      // a human user is disallowed: it enables impersonation, and the earlier
+      // human-only rule both blocked legitimate bot/app senders (e.g. the RCA
+      // agent) and silently allowed deactivated humans. Blank sender falls back
+      // to the Automations bot above.
+      if (!sender || sender.userType === UserType.USER) {
         throw new Error(
-          `[SendMessageStep] Sender ${configuredSenderId} is not a human user in workspace ${workspaceId}`
+          `[SendMessageStep] Sender ${configuredSenderId} must be a bot or app identity in workspace ${workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`
         );
       }
     }
@@ -148,6 +153,7 @@ export class SendMessageStep extends BaseActionStep<
           isBot,
           isMarkdown: true,
           uploadedFiles: deliveryFiles,
+          emitsMessageReceivedViaSideEffects: true,
         });
       } catch (error) {
         await removeUnclaimedAutomationDeliveryFiles(deliveryFiles);

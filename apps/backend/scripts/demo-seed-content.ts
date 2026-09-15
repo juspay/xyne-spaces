@@ -1,3 +1,4 @@
+import { TicketPriority } from '@xyne/shared';
 /**
  * Conversation content for `demo-seed.ts`.
  *
@@ -508,7 +509,7 @@ export const TICKETS = [
     description:
       'Raised in #product from the onboarding spec review, and support is hearing the same thing. Step 3 collects company details before the user has seen anything work. Proposal: defer to after first successful action.',
     status: 'TODO' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 3,
     reporter: 2,
     thread: [
@@ -524,7 +525,7 @@ export const TICKETS = [
     description:
       'Two tests in the payment suite fail intermittently on CI. Same flake as last week rather than a new one — see the linked ticket. Blocking nothing right now but it is eroding trust in the pipeline.',
     status: 'STARTED' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 1,
     reporter: 1,
     thread: [
@@ -540,7 +541,7 @@ export const TICKETS = [
     description:
       'Three customer reports merged into one. Files exported from Excel with a BOM header fail to parse. Customer file attached from the support desk conversation.',
     status: 'TODO' as const,
-    priority: 'CRITICAL' as const,
+    priority: TicketPriority.CRITICAL as const,
     assignee: 1,
     reporter: 4,
     thread: [
@@ -555,7 +556,7 @@ export const TICKETS = [
     description:
       'Product needs per-step drop-off to stop guessing which screen loses people. Replaces the manually updated spreadsheet used in the weekly review.',
     status: 'STARTED' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 3,
     reporter: 5,
     thread: [
@@ -570,7 +571,7 @@ export const TICKETS = [
     description:
       'New empty states walked through on the design canvas. Needs the loading-state question resolved before build.',
     status: 'STARTED' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 5,
     reporter: 2,
     thread: [
@@ -585,7 +586,7 @@ export const TICKETS = [
     description:
       'Anything untouched for seven days goes back to triage instead of sitting in a stage nobody is watching. Implemented as an automation; this ticket tracks rolling it out to the other boards.',
     status: 'COMPLETED' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 0,
     reporter: 0,
     thread: [
@@ -600,7 +601,7 @@ export const TICKETS = [
     description:
       'Raised in #engineering — people can find a phrase but not narrow it to a period or a person, so they give up. Filters exist in the backend; the UI does not expose them.',
     status: 'STARTED' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 5,
     reporter: 5,
     thread: [
@@ -615,7 +616,7 @@ export const TICKETS = [
     description:
       'Agent watches the error rate and opens a ticket assigned to on-call, deduped on the alert key so one incident produces one ticket. Follow-up: tune the threshold per service.',
     status: 'COMPLETED' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 1,
     reporter: 1,
     thread: [
@@ -631,7 +632,7 @@ export const TICKETS = [
     description:
       'Automation closing the loop so the channel that raised something learns it shipped. Currently enabled on the Delivery board only.',
     status: 'STARTED' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 5,
     reporter: 3,
     thread: [
@@ -646,7 +647,7 @@ export const TICKETS = [
     description:
       'No ETA on the In Review stage means no reminders fire and tickets sit there unnoticed. Set an ETA and confirm the reminder automation picks it up.',
     status: 'TODO' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 3,
     reporter: 0,
     thread: [
@@ -661,7 +662,7 @@ export const TICKETS = [
     description:
       'Design wants a component link in a ticket to always point at the current frame rather than a snapshot. Confirm behaviour and document it.',
     status: 'TODO' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 2,
     reporter: 2,
     thread: [
@@ -675,7 +676,7 @@ export const TICKETS = [
     description:
       'Transcripts are indexed but ranked below messages, so they rarely surface. Adjust weighting and verify with the pricing-decision call as the test case.',
     status: 'COMPLETED' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 1,
     reporter: 0,
     thread: [
@@ -690,7 +691,7 @@ export const TICKETS = [
     description:
       'Support keeps re-explaining threads because the affordance appears on hover only. Raised in #customer-voice with three desk conversations linked. Needs a persistent affordance or an onboarding hint.',
     status: 'TODO' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 2,
     reporter: 4,
     thread: [
@@ -705,7 +706,7 @@ export const TICKETS = [
     description:
       'Three customers asked independently in the same week; all three desk conversations are linked here so the demand is visible rather than anecdotal. Scope: current filters, current columns, nothing clever.',
     status: 'TODO' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 3,
     reporter: 4,
     thread: [
@@ -720,7 +721,7 @@ export const TICKETS = [
     description:
       'Follow-up from the checkout incident. The cause was a config change at 13:58 and nothing flagged it; we only saw the error rate move four minutes later. Deploy markers exist, config markers do not.',
     status: 'STARTED' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 1,
     reporter: 5,
     thread: [
@@ -735,7 +736,7 @@ export const TICKETS = [
     description:
       'Every new joiner independently discovers starring in week two. Suggest it on first login instead, when the sidebar is still short enough to make the point.',
     status: 'TODO' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 2,
     reporter: 5,
     thread: [
@@ -749,7 +750,7 @@ export const TICKETS = [
     description:
       'Search covering call transcripts shipped quietly and two customers found it by accident and praised it. Write it up so everyone else knows it exists.',
     status: 'COMPLETED' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 3,
     reporter: 0,
     thread: [
@@ -763,7 +764,7 @@ export const TICKETS = [
     description:
       'A decision linked into a ticket must always render the current wording, not a snapshot from the day it was linked. Confirm behaviour matches the canvas link case and document both together.',
     status: 'STARTED' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 1,
     reporter: 0,
     thread: [
@@ -777,7 +778,7 @@ export const TICKETS = [
     description:
       'Found during ask-ai eval runs: one run in ten invents a plausible ticket ID rather than reporting an empty result. Prompt needs an explicit "say so and stop" rule, and the eval set should keep a case that returns nothing.',
     status: 'STARTED' as const,
-    priority: 'CRITICAL' as const,
+    priority: TicketPriority.CRITICAL as const,
     assignee: 1,
     reporter: 3,
     thread: [
@@ -792,7 +793,7 @@ export const TICKETS = [
     description:
       'A stage renamed in March silently broke an automation whose condition still compared the old name. No error, it just stopped firing. Renaming should list the automations that reference the stage.',
     status: 'TODO' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 5,
     reporter: 4,
     thread: [
@@ -807,7 +808,7 @@ export const TICKETS = [
     description:
       'Stale-to-triage and auto-assign-on-triage took turns on one ticket for an afternoon, producing forty activity entries. Needs loop detection, or at minimum a per-ticket rate limit on automated transitions.',
     status: 'STARTED' as const,
-    priority: 'HIGH' as const,
+    priority: TicketPriority.HIGH as const,
     assignee: 1,
     reporter: 3,
     thread: [
@@ -822,7 +823,7 @@ export const TICKETS = [
     description:
       'Everyone currently estimates how often a new automation would fire by reasoning about last week. Let it run against history and report the count and the affected items without acting.',
     status: 'TODO' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 5,
     reporter: 0,
     thread: [
@@ -837,7 +838,7 @@ export const TICKETS = [
     description:
       'Agents see exactly what the asker sees, so testing as admin hides permission problems and testing as a narrow account makes the agent look broken. Document the intended test persona and seed one.',
     status: 'TODO' as const,
-    priority: 'MEDIUM' as const,
+    priority: TicketPriority.MEDIUM as const,
     assignee: 0,
     reporter: 1,
     thread: [
@@ -851,7 +852,7 @@ export const TICKETS = [
     description:
       'Twenty real questions from the last month, scored by hand. Automating the grading now would scale whichever rubric we happen to have today; the disagreements between reviewers are currently the most useful signal.',
     status: 'STARTED' as const,
-    priority: 'LOW' as const,
+    priority: TicketPriority.LOW as const,
     assignee: 1,
     reporter: 0,
     thread: [

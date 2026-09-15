@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { MessageType } from '@prisma/client';
+import { MessageType } from '@xyne/shared';
 import { createVespaService } from 'vespa/src';
 import vespaConfig from 'vespa/src/config';
 import { config as envConfig } from '@/config/env';

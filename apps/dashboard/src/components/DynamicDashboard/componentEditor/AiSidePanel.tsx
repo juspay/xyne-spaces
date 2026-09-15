@@ -77,7 +77,7 @@ export const AiSidePanel = ({
       ]}
       dataSourcePicker={picker}
       lastError={lastError}
-      trackCategory='component-editor'
+      trackCategory='COMPONENT_EDITOR'
       className='flex flex-col h-full'
     />
   );

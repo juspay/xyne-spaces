@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -25,6 +26,14 @@ import {
   deleteClawConversation,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
+import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
+import {
+  buildSdlcAskAiContext,
+  resolveSdlcAskAiSelectedArtifact,
+} from '@/sdlc/sdlcAskAiContext';
+import { sdlcVcs } from '@/sdlc/vcs';
+import { computeWikiFreshness } from '@/sdlc/wiki/wikiFreshness';
+import { parseWikiExecutionContext } from '@/sdlc/wiki/wikiRunState';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -40,17 +49,20 @@ const ResearchContextSchema = z.object({
 // canvas_id accepted for backward compatibility with clients that predate
 // XYNE-17290. At least one must be provided; the newer name wins if multiple
 // are set.
-const SelectionContextSchema = z.object({
-  canvas_id: z.string().min(1).optional(),
-  canvasId: z.string().min(1).optional(),
-  canvas_view_access_id: z.string().min(1).optional(),
-  canvasViewAccessId: z.string().min(1).optional(),
-  selected_text: z.string().min(1),
-  canvas_title: z.string().optional(),
-}).refine(
-  (ctx) => Boolean(ctx.canvas_id || ctx.canvasId || ctx.canvas_view_access_id || ctx.canvasViewAccessId),
-  { message: 'canvas_id is required', path: ['canvas_id'] },
-);
+const SelectionContextSchema = z
+  .object({
+    canvas_id: z.string().min(1).optional(),
+    canvasId: z.string().min(1).optional(),
+    canvas_view_access_id: z.string().min(1).optional(),
+    canvasViewAccessId: z.string().min(1).optional(),
+    selected_text: z.string().min(1),
+    canvas_title: z.string().optional(),
+  })
+  .refine(
+    (ctx) =>
+      Boolean(ctx.canvas_id || ctx.canvasId || ctx.canvas_view_access_id || ctx.canvasViewAccessId),
+    { message: 'canvas_id is required', path: ['canvas_id'] }
+  );
 
 // Attached context item schema - for Add Context feature.
 // `collection` and `file` are appended below from top-level `collection_ids`
@@ -82,6 +94,13 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
+  workflowContext: z
+    .object({
+      workflowId: z.string().min(1).nullish(),
+      executionId: z.string().min(1).nullish(),
+      stepId: z.string().min(1).nullish(),
+    })
+    .optional(),
   // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
   canvasViewAccessId: z.string().optional(),
   canvas_view_access_id: z.string().optional(),
@@ -92,6 +111,14 @@ const XyneAIRequestSchemaV2 = z.object({
   web_search_enabled: z.boolean().optional().default(false),
   deepResearchEnabled: z.boolean().optional().default(false),
   deep_research_enabled: z.boolean().optional().default(false),
+  // Single search + single answer pass instead of the full agentic tool
+  // loop — see xyne-claw-auth's run-stream.ts POST / instant branch. Single
+  // word, so camelCase and snake_case are identical — no dual key needed
+  // (unlike webSearchEnabled/web_search_enabled above).
+  instant: z.boolean().optional().default(false),
+  // Per-run thinking level from the composer's dropdown. Absent = the agent's
+  // configured default (modelSettings.thinkingLevel or provider default).
+  thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -155,6 +182,13 @@ const XyneAIRequestSchemaV2 = z.object({
   collection_ids: z.array(z.string().min(1)).optional(),
   fileIds: z.array(z.string().min(1)).optional(),
   file_ids: z.array(z.string().min(1)).optional(),
+  // A folder scope from the composer picker. Forwarded to claw-auth as a
+  // single 'folder' attached_context pointer (like collectionIds is) — NOT
+  // expanded to individual file ids here. claw-auth resolves it to files
+  // itself at Vespa-query time; expanding it here could blow up to
+  // thousands of ids for one folder.
+  folderIds: z.array(z.string().min(1)).optional(),
+  folder_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -166,6 +200,11 @@ const XyneAIRequestSchemaV2 = z.object({
    *  no-ops the pin when it can't serve it, so an unservable id can't silently
    *  swap the model. */
   model: z.string().min(1).optional(),
+  /** Which provider the model pin rides: "litellm" = the agent's shared
+   *  LiteLLM credential, "spaces" = the keyless platform provider (the models
+   *  endpoint's pinProvider says which). Defaults to "litellm" for old
+   *  clients. */
+  modelProvider: z.enum(['litellm', 'spaces']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -222,13 +261,15 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
-      selectionContexts: _selectionContexts,
+      workflowContext,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
       web_search_enabled: webSearchEnabledSC,
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
+      instant,
+      thinkingLevel,
       researchContext,
       research_context,
       attachments,
@@ -253,24 +294,25 @@ export class XyneAIControllerV2 {
       collection_ids,
       fileIds,
       file_ids,
+      folderIds,
+      folder_ids,
       attachedContext,
       attached_context,
-      displayQuery: _displayQuery,
       draftMode,
       provider,
       model,
+      modelProvider,
       agentSlug,
     } = parseResult.data;
 
     // Use snake_case as fallback for camelCase (Web Worker sends snake_case)
     const effectiveSessionId = sessionId || session_id;
     const effectiveChannelIds = channelIds.length > 0 ? channelIds : channel_ids;
-    const effectiveResearchContext = researchContext || research_context;
+    let effectiveResearchContext = researchContext || research_context;
     const effectiveConversationId = conversationId || conversation_id;
     // Legacy pre-XYNE-17290 clients may still send canvasViewAccessId or
     // canvas_view_access_id — coalesce them into effectiveCanvasId.
-    const effectiveCanvasId =
-      canvasId || canvas_id || canvasViewAccessId || canvas_view_access_id;
+    const effectiveCanvasId = canvasId || canvas_id || canvasViewAccessId || canvas_view_access_id;
     const effectiveAttachedContext = attachedContext || attached_context;
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
@@ -282,10 +324,12 @@ export class XyneAIControllerV2 {
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
     const effectiveCollectionIds = collectionIds?.length ? collectionIds : collection_ids;
     const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
+    const effectiveFolderIds = folderIds?.length ? folderIds : folder_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
-    const effectiveParentAssistantMessageId = parentAssistantMessageIdCC || parentAssistantMessageIdSC;
+    const effectiveParentAssistantMessageId =
+      parentAssistantMessageIdCC || parentAssistantMessageIdSC;
     const effectiveEditedUserMessageId = editedUserMessageIdCC || editedUserMessageIdSC;
     const effectiveIsRegenerate = isRegenerateCC || isRegenerateSC;
     const effectiveIsEditUserMessage = isEditUserMessageCC || isEditUserMessageSC;
@@ -332,6 +376,149 @@ export class XyneAIControllerV2 {
         }
       }
 
+      let sdlcDashboardContext: string | undefined;
+      // Honour the caller's pinned repository; otherwise the hub's oldest membership,
+      // which is exact whenever the hub covers one.
+      const sdlcChannelId = effectiveChannelIds[0];
+      const pinnedRepoId =
+        effectiveResearchContext?.type === 'repository' ? effectiveResearchContext.id : null;
+      const sdlcRepoId = sdlcChannelId
+        ? ((
+            await db.sdlcEntityLink.findFirst({
+              where: {
+                channelId: sdlcChannelId,
+                targetType: 'REPOSITORY',
+                relationType: SDLC_MEMBERSHIP_RELATION,
+                ...(pinnedRepoId ? { targetId: pinnedRepoId } : {}),
+              },
+              orderBy: { createdAt: 'asc' },
+              select: { targetId: true },
+            })
+          )?.targetId ?? null)
+        : null;
+      const sdlcRepo = sdlcRepoId
+        ? await db.repo.findFirst({
+            where: { id: sdlcRepoId },
+            select: {
+              id: true,
+              name: true,
+              canonicalUrl: true,
+              url: true,
+              projectId: true,
+              workspaceId: true,
+            },
+          })
+        : null;
+      if (sdlcRepo) {
+        if (!effectiveResearchContext) {
+          effectiveResearchContext = {
+            type: 'repository',
+            id: sdlcRepo.id,
+            name: sdlcRepo.name,
+          };
+        }
+        const contextLinks = await db.sdlcEntityLink.findMany({
+          where: { channelId: sdlcChannelId, relationType: 'CONTEXT' },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          select: { targetType: true, targetId: true },
+        });
+        const selectedCanvas = effectiveCanvasId
+          ? await db.canvas.findFirst({
+              where: { id: effectiveCanvasId, channelId: effectiveChannelIds[0] },
+              select: {
+                id: true,
+                title: true,
+                sdlcArtifact: { select: { artifactType: true } },
+              },
+            })
+          : undefined;
+        const selectedArtifact = resolveSdlcAskAiSelectedArtifact(
+          selectedCanvas
+            ? {
+                id: selectedCanvas.id,
+                title: selectedCanvas.title,
+                artifactType: selectedCanvas.sdlcArtifact?.artifactType,
+              }
+            : selectedCanvas,
+        );
+        // Baseline knowledge-document injection is disabled until the standalone
+        // baseline approval flow returns; READY baselines gate artifact creation instead.
+        const approvedBaseline: Array<{ title: string; content: string }> = [];
+        const linkedContext = sdlcRepo.workspaceId
+          ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
+          : [];
+        const [baseBranchHeadSha, wikiRunLinks] = await Promise.all([
+          sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
+          db.sdlcEntityLink.findMany({
+            where: {
+              sourceType: 'REPOSITORY',
+              sourceId: sdlcRepo.id,
+              targetType: 'WORKFLOW_EXECUTION',
+              relationType: 'WIKI_RUN',
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: { targetId: true },
+          }),
+        ]);
+        const latestSuccessfulWiki = wikiRunLinks.length
+          ? await db.workflowExecution.findFirst({
+              where: {
+                id: { in: wikiRunLinks.map((link) => link.targetId) },
+                workflowType: 'SDLC_WIKI',
+                status: 'SUCCESS',
+              },
+              orderBy: { createdAt: 'desc' },
+              select: { context: true },
+            })
+          : null;
+        let wikiCommitSha: string | null = null;
+        if (latestSuccessfulWiki?.context) {
+          try {
+            const wikiContext = parseWikiExecutionContext(latestSuccessfulWiki.context);
+            wikiCommitSha = wikiContext.targetHeadSha ?? wikiContext.cursorSha;
+          } catch {
+            wikiCommitSha = null;
+          }
+        }
+        // Membership points at the repository through the polymorphic targetId, so
+        // no relation covers it: read the edges, then the repositories they name.
+        const siblingLinks = await db.sdlcEntityLink.findMany({
+          where: {
+            channelId: sdlcChannelId,
+            targetType: 'REPOSITORY',
+            relationType: SDLC_MEMBERSHIP_RELATION,
+            targetId: { not: sdlcRepo.id },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { targetId: true },
+        });
+        const siblingRepos = siblingLinks.length
+          ? await db.repo.findMany({
+              where: { id: { in: siblingLinks.map((link) => link.targetId) } },
+              select: { id: true, name: true, url: true, canonicalUrl: true },
+            })
+          : [];
+        sdlcDashboardContext = buildSdlcAskAiContext({
+          repo: {
+            id: sdlcRepo.id,
+            name: sdlcRepo.name,
+            url: sdlcRepo.canonicalUrl || sdlcRepo.url,
+          },
+          otherRepos: siblingRepos.map((sibling) => ({
+            id: sibling.id,
+            name: sibling.name,
+            url: sibling.canonicalUrl || sibling.url,
+          })),
+          channelId: effectiveChannelIds[0],
+          baselineDocuments: approvedBaseline,
+          linkedContext,
+          ...(selectedArtifact ? { selectedArtifact } : {}),
+          wikiFreshness: computeWikiFreshness({ wikiCommitSha, baseBranchHeadSha }),
+        });
+      }
+
       // Fetch user information for agent context
       const user = await db.user.findUnique({
         where: { id: userId },
@@ -355,16 +542,23 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve KB context (collections + files) → attached_context items so
-      // claw-auth's existing prompt-prefix mechanism surfaces them in the
-      // agent's prompt. We translate:
+      // Resolve KB context (collections + folders + files) → attached_context
+      // items so claw-auth's existing prompt-prefix mechanism surfaces them
+      // in the agent's prompt. We translate:
       //   • Collection.id (cuid)         → 'collection' attached_context item
+      //   • Collection.id (cuid, folder) → 'folder' attached_context item
       //   • CollectionItem.fileId (UUID) → CollectionItem.id (cuid) +
       //                                    'file' attached_context item
       // The cuid is what the agent's kb-* tools expect as fileId — see the
       // KB-tools handlers and the validateKbGrants files-set in claw-auth.
+      // A folder is deliberately sent as ONE pointer, not expanded to its
+      // (potentially thousands of) files here — attachedContext is a small,
+      // model-facing prompt list (claw-auth caps it at 20 items total), not a
+      // bulk id manifest. claw-auth resolves the folder to files itself, at
+      // Vespa-query time (buildVespaScope in kb-handlers.ts), from the KB
+      // tree it already fetches for permission checks.
       const kbAttachedContextItems: Array<{
-        type: 'collection' | 'file';
+        type: 'collection' | 'folder' | 'file';
         id: string;
         title: string;
       }> = [];
@@ -375,6 +569,15 @@ export class XyneAIControllerV2 {
         });
         for (const row of rows) {
           kbAttachedContextItems.push({ type: 'collection', id: row.id, title: row.name });
+        }
+      }
+      if (effectiveFolderIds && effectiveFolderIds.length > 0) {
+        const rows = await db.collection.findMany({
+          where: { id: { in: effectiveFolderIds }, deletedAt: null },
+          select: { id: true, name: true },
+        });
+        for (const row of rows) {
+          kbAttachedContextItems.push({ type: 'folder', id: row.id, title: row.name });
         }
       }
       if (effectiveFileIds && effectiveFileIds.length > 0) {
@@ -398,6 +601,7 @@ export class XyneAIControllerV2 {
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
           userId,
+          spacesWorkspaceId: req.user?.workspaceId,
           userName: user?.name || 'Unknown',
           userEmail: user?.email || '',
           query,
@@ -407,19 +611,23 @@ export class XyneAIControllerV2 {
           // agentConfig: claw-auth merges that over the agent's stored config,
           // and its platform-key strip covers secrets but NOT `tools` /
           // `subagents` / `outputFormat`. A bare model id can't reach those.
-          ...(model && { providerOverride: { provider: 'litellm', model } }),
+          ...(model && { providerOverride: { provider: modelProvider ?? 'litellm', model } }),
           conversationId: effectiveConversationId || '',
           channelId: effectiveChannelIds[0] || '',
           canvasIds: effectiveCanvasIds,
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
+          ...(workflowContext && { workflowContext }),
           attachedContext: mergedAttachedContext,
           attachments,
           messageAttachmentIds,
           webSearchEnabled,
           deepResearchEnabled,
+          instant,
+          ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
+          ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
           generateFollowUpSuggestions: true,
           sessionId: effectiveSessionId,
@@ -432,8 +640,12 @@ export class XyneAIControllerV2 {
           isRegenerate: effectiveIsRegenerate,
           isEditUserMessage: effectiveIsEditUserMessage,
           ...(effectiveParentMessageId ? { parentMessageId: effectiveParentMessageId } : {}),
-          ...(effectiveParentAssistantMessageId ? { parentAssistantMessageId: effectiveParentAssistantMessageId } : {}),
-          ...(effectiveEditedUserMessageId ? { editedUserMessageId: effectiveEditedUserMessageId } : {}),
+          ...(effectiveParentAssistantMessageId
+            ? { parentAssistantMessageId: effectiveParentAssistantMessageId }
+            : {}),
+          ...(effectiveEditedUserMessageId
+            ? { editedUserMessageId: effectiveEditedUserMessageId }
+            : {}),
         };
 
         // Set SSE headers
@@ -470,9 +682,7 @@ export class XyneAIControllerV2 {
           });
           if (result.error) {
             status = 'error';
-            res.write(
-              `data: ${JSON.stringify({ type: 'error', error: result.error })}\n\n`,
-            );
+            res.write(`data: ${JSON.stringify({ type: 'error', error: result.error })}\n\n`);
           }
         } catch (streamError) {
           status = 'error';
@@ -551,7 +761,7 @@ export class XyneAIControllerV2 {
         res.status(400).json({ error: 'sessionId is required' });
         return;
       }
-      const result = await cancelClawAgentRun(req, userId, sessionId);
+      const result = await cancelClawAgentRun(req, userId, sessionId, req.user?.workspaceId);
       if (!result.success) {
         res.status(502).json({ success: false, error: result.error ?? 'Cancel failed' });
         return;
@@ -736,7 +946,11 @@ export class XyneAIControllerV2 {
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
 
     try {
-      const result = await getClawConversationMessages({ headers: req.headers, userId }, convId, agentSlug);
+      const result = await getClawConversationMessages(
+        { headers: req.headers, userId },
+        convId,
+        agentSlug
+      );
       res.json({
         ...result,
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
@@ -779,7 +993,12 @@ export class XyneAIControllerV2 {
     const clampedComment = typeof comment === 'string' ? comment.slice(0, 500) : null;
 
     try {
-      const result = await rateClawRun({ headers: req.headers, userId }, messageId, rating, clampedComment);
+      const result = await rateClawRun(
+        { headers: req.headers, userId },
+        messageId,
+        rating,
+        clampedComment
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -790,7 +1009,7 @@ export class XyneAIControllerV2 {
 
   /**
    * GET /api/xyne-ai/v2/conversations/:convId/live
-   * SSE proxy to claw-auth's live stream so a Spaces AI tab that reloaded
+   * SSE proxy to claw-auth's live stream so a Hubs AI tab that reloaded
    * mid-run can re-attach and stream the in-flight answer (snapshot + deltas)
    * instead of waiting for the run to finish. Verbatim frame passthrough.
    */
@@ -829,7 +1048,9 @@ export class XyneAIControllerV2 {
     });
 
     try {
-      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, { signal: upstreamAbort.signal });
+      await streamClawConversationLive({ headers: req.headers, userId }, res, convId, agentSlug, {
+        signal: upstreamAbort.signal,
+      });
     } catch (error) {
       logger.error('[XyneAIv2] live proxy error:', error);
     } finally {
@@ -858,7 +1079,11 @@ export class XyneAIControllerV2 {
     const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
 
     try {
-      const result = await deleteClawConversation({ headers: req.headers, userId }, convId, agentSlug);
+      const result = await deleteClawConversation(
+        { headers: req.headers, userId },
+        convId,
+        agentSlug
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
@@ -878,11 +1103,28 @@ export class XyneAIControllerV2 {
       res.status(400).json({ success: false, error: 'convId is required' });
       return;
     }
+    // Run-page cursor. claw caps the page (default 25) and pages it with a
+    // `before` runId; validated here rather than forwarded raw because both
+    // values end up in a downstream URL. Anything malformed is dropped, which
+    // just means "first page" — claw also warns about a cursor it ignored.
+    const rawLimit = req.query.limit;
+    const rawBefore = req.query.before;
+    const paging = {
+      ...(typeof rawLimit === 'string' && /^\d+$/.test(rawLimit) ? { limit: rawLimit } : {}),
+      ...(typeof rawBefore === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(rawBefore)
+        ? { before: rawBefore }
+        : {}),
+    };
     try {
+      // `result` is forwarded untouched. The bundle carries `warnings`,
+      // `totalRuns`, `truncated` and per-event trace payloads whose shape is
+      // owned by xyne-claw's materializer; whitelisting fields here would blank
+      // debugger panels the next time that format grows one.
       const result = await getClawDebugArtifacts(
         { headers: req.headers, userId },
         convId,
-        (req.query.agentSlug as string) || 'ask-ai'
+        (req.query.agentSlug as string) || 'ask-ai',
+        paging
       );
       res.json(result);
     } catch (error) {
@@ -961,7 +1203,11 @@ export class XyneAIControllerV2 {
     }
 
     try {
-      const result = await listClawAgentModels({ headers: req.headers, userId }, req.params['slug']);
+      const result = await listClawAgentModels(
+        { headers: req.headers, userId },
+        req.params['slug'],
+        (req as any).user?.workspaceId
+      );
       res.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';

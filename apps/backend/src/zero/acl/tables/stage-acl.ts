@@ -93,7 +93,13 @@ export class StageAcl extends BaseACL<'stages'> {
         assertGuestWriteBlocked(this.ctx, 'stages', 'upsert', 'Stage');
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
-            throw new MutationACLError('Stage upsert failed: stage or its board does not exist', 'stages');
+            // Row doesn't exist yet → this upsert is an INSERT of a new stage (board
+            // edits upsert freshly-generated stage ids). Authorize via the board,
+            // same as canInsert, instead of failing on the missing row.
+            const { board } = await this.verifyBoardWorkspace(args.boardId, tx);
+            if (board.createdBy === this.ctx.userID) return;
+            if (await hasProjectAdminAccess(this.ctx, tx)) return;
+            throw new MutationACLError('Stage upsert failed: only the board creator or project admin can add stages', 'stages');
         }
         
         // Direct workspaceId check - no project lookup needed

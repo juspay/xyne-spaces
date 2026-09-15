@@ -1,5 +1,5 @@
-import { FormFieldType, Prisma } from '@prisma/client';
-import { parseFieldOptionValues } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
+import { parseFieldOptionValues, FormFieldType } from '@xyne/shared';
 
 type CustomFieldDefinition = {
   fieldName: string;

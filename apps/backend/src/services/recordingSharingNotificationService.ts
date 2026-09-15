@@ -1,5 +1,4 @@
-import { ActivityClassification } from '@prisma/client';
-import { EntityUserAccess, ShareableEntityType } from '@xyne/shared';
+import { EntityUserAccess, ShareableEntityType, ActivityClassification } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { activityService } from '@/services/activity/activityService';
@@ -42,7 +41,9 @@ export class RecordingSharingNotificationService {
 
   private async publishOne(actorId: string, change: RecordingAccessActivity): Promise<void> {
     const share = await db.entityAccess.findUnique({ where: { id: change.shareId } });
-    if (!share || share.shareableEntityType !== ShareableEntityType.NOTE_TAKER) return;
+    const isRecordingShare = share?.shareableEntityType === ShareableEntityType.NOTE_TAKER;
+    const isCallShare = share?.shareableEntityType === ShareableEntityType.CALL;
+    if (!share || (!isRecordingShare && !isCallShare)) return;
 
     const isRevoked = share.entityUserAccess === EntityUserAccess.REVOKED;
     if (
@@ -76,7 +77,8 @@ export class RecordingSharingNotificationService {
 
     const actor = await repositories.users.findById(actorId);
     const actorName = actor?.name || 'Someone';
-    const recordingTitle = call.title || 'a recording';
+    const subject = isRecordingShare ? 'recording' : 'call';
+    const recordingTitle = call.title || `a ${subject}`;
 
     await Promise.all([
       activityService.createActivities(
@@ -97,6 +99,7 @@ export class RecordingSharingNotificationService {
         actorId,
         actorName,
         change.action,
+        subject,
       ),
     ]);
   }

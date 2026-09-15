@@ -264,7 +264,7 @@ export function getSyncDmModal(channelId?: string) {
         },
         hint: {
           type: 'plain_text',
-          text: ':key: *How to get your Slack User Token:*\n1. Ensure you are an app collaborator for **Xyne Spaces**.\n2. Navigate to <https://app.slack.com/app-settings/T04T5CL7L/A09QL5AE5PY/oauth|App OAuth Settings> to request installation.\n3. Once approved, copy your token (`xoxp-...`) from either the *OAuth & Permissions* or *Install App* tabs.',
+          text: ':key: *How to get your Slack User Token:*\n1. Ensure you are an app collaborator for **Xyne Spaces**.\n2. Navigate to <https://app.slack.com/app-settings/workspaceId/botId/oauth|App OAuth Settings> to request installation.\n3. Once approved, copy your token (`xoxp-...`) from either the *OAuth & Permissions* or *Install App* tabs.',
         },
         element: {
           type: 'plain_text_input',

@@ -1,11 +1,10 @@
 import { db } from '@/database/client';
-import { getContextOrNull } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import {
   buildSurfaceNudgeCountRowId,
   getSurfaceAreaIdField,
-  type SurfaceAreaIdField,
-} from '@xyne/shared';
+  type SurfaceAreaIdField, NudgeState } from '@xyne/shared';
 import type { Prisma, PrismaClient } from '@prisma/client';
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -104,7 +103,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
   const renderableNudges = await tx.surfaceNudge.findMany({
     where: {
       sourceId,
-      state: 'ACTIVE',
+      state: NudgeState.ACTIVE,
     },
     select: {
       id: true,
@@ -128,7 +127,7 @@ export async function rebuildSurfaceNudgeAudienceCounts(params: {
     });
     workspaceId = channel?.workspaceId ?? undefined;
   }
-  workspaceId ??= getContextOrNull()?.workspaceId;
+  workspaceId ??= currentWorkspaceId() ?? undefined;
   if (!workspaceId) {
     throw new Error(
       '[SurfaceNudgeAudienceCount] workspaceId required: no channel or tenant context',

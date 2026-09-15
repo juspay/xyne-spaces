@@ -22,11 +22,10 @@ import {
 } from '../repositories/team-intelligence.repository';
 import { teamIntelligenceQueue } from '../queue';
 import { teamIntelligenceContentStorageService } from './team-intelligence-content-storage.service';
-import {
-  Prisma,
-  TeamIntelligenceBatchStatus,
-  TeamIntelligenceUserIngestionStatus,
-} from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
+import { config as appConfig } from '@/config/env';
+import { db } from '@/database/client';
 
 export class TeamIntelligenceIdempotencyConflictError extends Error {
   constructor() {
@@ -151,6 +150,16 @@ function startOfUtcDay(reportDate: string): Date {
   return new Date(`${reportDate}T00:00:00.000Z`);
 }
 
+async function resolveDefaultOrgId(): Promise<string | null> {
+  const workspaceId = appConfig.defaultWorkspaceId?.trim();
+  if (!workspaceId) return null;
+  const mapping = await db.workspaceOrganization.findFirst({
+    where: { workspaceId },
+    select: { orgId: true },
+  });
+  return mapping?.orgId ?? null;
+}
+
 class TeamIntelligenceService {
   async getOrgSummaryByBatchId(batchId: string): Promise<{
     id: string;
@@ -190,7 +199,7 @@ class TeamIntelligenceService {
       summaryText,
       summaryMetadata,
       provenance,
-      status: orgSummary.status,
+      status: orgSummary.status as TeamIntelligenceBatchStatus,
       totalTeams: orgSummary.totalTeams,
       completedTeams: orgSummary.completedTeams,
       failedTeams: orgSummary.failedTeams,
@@ -212,6 +221,7 @@ class TeamIntelligenceService {
     }
     const source = (metadata.source ?? parsedRequest.source ?? 'mettle').trim() || 'mettle';
     const reportDate = startOfUtcDay(parsedRequest.reportDate);
+    const orgId = await resolveDefaultOrgId();
 
     const existingBatch = await teamIntelligenceRepository.findBatchWithUsersByIdempotencyKey(
       idempotencyKey
@@ -250,6 +260,7 @@ class TeamIntelligenceService {
     });
 
     const batchPayload: CreateTeamIntelligenceBatchData = {
+      orgId,
       reportDate,
       source,
       idempotencyKey,
@@ -277,6 +288,7 @@ class TeamIntelligenceService {
         });
 
         return {
+          orgId,
           reportDate,
           source: user.source,
           userEmail: user.userEmail,
@@ -333,6 +345,7 @@ class TeamIntelligenceService {
     const now = new Date();
     const queuedUserIds: string[] = [];
     const failedUserIds: string[] = [];
+    const batchOrgId = batchWithUsers.batch.orgId ?? '';
 
     const users = [...batchWithUsers.users].sort((left, right) =>
       compareStrings(left.userEmail, right.userEmail)
@@ -349,6 +362,7 @@ class TeamIntelligenceService {
           teamId: user.teamId,
           teamName: user.teamName,
           source,
+          orgId: batchOrgId,
         });
 
         if (enqueueResult.enqueued || enqueueResult.duplicateJobState) {

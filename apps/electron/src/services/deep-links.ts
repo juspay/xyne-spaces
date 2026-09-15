@@ -7,7 +7,12 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import ElectronEvent from './logger/electron-events';
-import { isHexToken } from '../utils/validation';
+import {
+  isHexToken,
+  sanitizeAskAiText,
+  normalizeAskAiUrl,
+  normalizeAskAiDomain,
+} from '../utils/validation';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -18,6 +23,22 @@ let mainWindow: BrowserWindow | null = null;
  * an embedded scheme, a protocol-relative '//', backslashes, or path traversal (raw or
  * percent-encoded) is rejected.
  */
+/**
+ * Route prefixes a deep link may open, matched against the first path segment.
+ *
+ * Empty means "allow any well-formed in-app path", which is the current behaviour. Add the
+ * app's top-level routes here to narrow it — for example 'chat', 'canvas', 'tickets' — and
+ * anything outside the list stops being reachable from a link. Keep it in step with the
+ * renderer's router when routes are added or renamed.
+ */
+const DEEP_LINK_ROUTE_ALLOWLIST: readonly string[] = [];
+
+function isAllowedDeepLinkRoute(pathStr: string): boolean {
+  if (DEEP_LINK_ROUTE_ALLOWLIST.length === 0) return true;
+  const [firstSegment] = pathStr.replace(/^\//, '').split(/[/?#]/);
+  return DEEP_LINK_ROUTE_ALLOWLIST.includes(firstSegment);
+}
+
 function isSafeDeepLinkPath(pathStr: string): boolean {
   if (typeof pathStr !== 'string' || !pathStr.startsWith('/') || pathStr.startsWith('//')) {
     return false;
@@ -35,8 +56,12 @@ function isSafeDeepLinkPath(pathStr: string): boolean {
     if (/[\u0000-\u001F\u007F]/.test(c)) return false;     // control chars
     if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
   }
-  // Conservative in-app route charset (path + query only).
-  return /^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr);
+  // Conservative in-app route charset (path + query + hash fragment).
+  // '#' is allowed so shared thread links keep their anchor
+  // (e.g. #origin=…&messageId=…&createdAt=…); the guards above still reject
+  // traversal, protocol-relative '//', backslashes and embedded schemes.
+  if (!/^\/[A-Za-z0-9\-._~/?=&%#]*$/.test(pathStr)) return false;
+  return isAllowedDeepLinkRoute(pathStr);
 }
 
 /** Parse JSON body from an Electron IncomingMessage stream */
@@ -171,10 +196,29 @@ async function handleDeepLink(url: string): Promise<void> {
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://ask-ai`)) {
     try {
       const urlObj = new URL(url);
-      const text = urlObj.searchParams.get('text') || '';
-      const sourceUrl = urlObj.searchParams.get('url') || '';
-      const domain = urlObj.searchParams.get('domain') || '';
-      const title = urlObj.searchParams.get('title') || '';
+
+      // PY-JP-019: ask-ai params are attacker-controllable (any web page can invoke
+      // this protocol) and are forwarded verbatim to the privileged renderer, where
+      // they land in an AI prompt / DOM. Validate & sanitize every param against its
+      // expected format before forwarding; log and drop anything that fails.
+      const rawText = urlObj.searchParams.get('text') || '';
+      const rawUrl = urlObj.searchParams.get('url') || '';
+      const rawDomain = urlObj.searchParams.get('domain') || '';
+      const rawTitle = urlObj.searchParams.get('title') || '';
+
+      const text = sanitizeAskAiText(rawText, 8000);
+      const sourceUrl = normalizeAskAiUrl(rawUrl);
+      const domain = normalizeAskAiDomain(rawDomain);
+      const title = sanitizeAskAiText(rawTitle, 512);
+
+      if (rawUrl && !sourceUrl) {
+        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'url', value: rawUrl.slice(0, 128) });
+        log.warn('[DeepLinks] Rejected invalid ask-ai url param');
+      }
+      if (rawDomain && !domain) {
+        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'domain', value: rawDomain.slice(0, 128) });
+        log.warn('[DeepLinks] Rejected invalid ask-ai domain param');
+      }
 
       log.info('[DeepLinks] Ask AI context received:', { text: text.slice(0, 50), domain, title });
 
@@ -355,12 +399,8 @@ async function handleDeepLink(url: string): Promise<void> {
       pathStr = '/' + pathStr;
     }
 
-    // ACCEPTED RISK (secops #398, LOW): isSafeDeepLinkPath (#9110) is a SYNTAX filter — it blocks
-    // protocol-relative '//', backslashes, path traversal and non-route charsets, but it is NOT the
-    // route-prefix allowlist the finding recommends, so a syntactically-valid path to any in-app
-    // route can still be forwarded. The team accepted this residual (the renderer router only
-    // exposes known screens). Tighten to an explicit allowlist if the deep-link surface grows.
-    // XYNE Issues 398/405: only forward validated in-app route paths.
+    // Only well-formed in-app route paths are forwarded: protocol-relative prefixes,
+    // backslashes, traversal and non-route character sets are all rejected.
     if (!isSafeDeepLinkPath(pathStr)) {
       log.warn('[DeepLinks] Rejected unsafe deep-link navigation path:', pathStr);
       return;
@@ -371,6 +411,7 @@ async function handleDeepLink(url: string): Promise<void> {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
+      mainWindow.focus();
       mainWindow.webContents.send('navigate-to', pathStr);
     }
   }
@@ -443,6 +484,12 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
                 name: responseBody.name,
                 picture: responseBody.picture,
                 userExistsButRemoved: responseBody.userExistsButRemoved || false,
+                // Present when the user's email domain already maps to an enterprise org;
+                // the renderer needs these to show request-to-join instead of create-org.
+                domainConflictError: responseBody.domainConflictError,
+                publicEmailDomainError: responseBody.publicEmailDomainError,
+                enterpriseJoinOrgName: responseBody.enterpriseJoinOrgName,
+                enterpriseJoinWorkspaces: responseBody.enterpriseJoinWorkspaces,
               });
               forwardAuthEventToClawOverlay('auth:success');
               mainWindow?.show();

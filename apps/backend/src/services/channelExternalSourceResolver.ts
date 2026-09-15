@@ -12,8 +12,8 @@
  * (ZohoUploadController) paths so they can't drift apart.
  */
 
-import { DeskType } from '@prisma/client';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { DeskType } from '@xyne/shared';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { logger } from '@/utils/logger';
 
@@ -27,7 +27,9 @@ export class ChannelExternalSourceResolver {
    * backs the channel (caller should surface a 404).
    */
   async resolveForChannel(channelId: string) {
-    const source = await this.externalSourceRepo.findByChannelId(channelId);
+    const source = await this.externalSourceRepo.findChannelSource(channelId, {
+      sourceTypes: ['google', 'microsoft', 'zoho'],
+    });
     if (source) {
       return source;
     }

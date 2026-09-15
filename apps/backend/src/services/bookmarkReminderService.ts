@@ -1,5 +1,6 @@
 import Bull from 'bull';
-import { BookmarkEntityType, NotificationType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { BookmarkEntityType, NotificationType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';

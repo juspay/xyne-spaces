@@ -1,10 +1,6 @@
 import { DatabaseClient } from '../client';
-import {
-  Prisma,
-  RecordingStatus,
-  RecordingType,
-  type CallRecording,
-} from '@prisma/client';
+import { Prisma, type CallRecording } from '@prisma/client';
+import { RecordingStatus, RecordingType } from '@xyne/shared';
 
 export type { CallRecording };
 
@@ -123,6 +119,10 @@ export class CallRecordingRepository {
 
   async setMessageId(id: string, messageId: string): Promise<void> {
     await this.db.callRecording.update({ where: { id }, data: { messageId } });
+  }
+
+  async setAttachmentId(id: string, attachmentId: string): Promise<void> {
+    await this.db.callRecording.update({ where: { id }, data: { attachmentId } });
   }
 
   async rename(id: string, name: string): Promise<CallRecording> {

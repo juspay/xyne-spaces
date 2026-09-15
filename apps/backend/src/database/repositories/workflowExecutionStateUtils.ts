@@ -19,7 +19,7 @@ export type WorkflowExecutionWithState = WorkflowExecution & {
  * Resolve the workspaceId to denormalize onto a WorkflowExecutionState row from
  * its owning WorkflowExecution (1:1 via workflowExecutionId).
  */
-async function resolveExecutionWorkspaceId(workflowExecutionId: string): Promise<string | null> {
+async function resolveExecutionWorkspaceId(workflowExecutionId: string): Promise<string> {
   const execution = await prisma.workflowExecution.findUnique({
     where: { id: workflowExecutionId },
     select: { workspaceId: true },
@@ -78,6 +78,28 @@ export async function stitchExecutionStateMany<T extends WorkflowExecution>(
     ...execution,
     context: stateMap.get(execution.id)?.context ?? null,
     output: stateMap.get(execution.id)?.output ?? null,
+  }));
+}
+
+/**
+ * Like stitchExecutionStateMany, but reads only `context`. List views never use
+ * `output`, and both columns hold full JSON blobs — skipping one halves the read.
+ */
+export async function stitchExecutionContextMany<T extends { id: string }>(
+  executions: T[]
+): Promise<(T & { context: string | null })[]> {
+  if (executions.length === 0) return [];
+
+  const states = await prisma.workflowExecutionState.findMany({
+    where: { workflowExecutionId: { in: executions.map(e => e.id) } },
+    select: { workflowExecutionId: true, context: true },
+  });
+
+  const contextMap = new Map(states.map(s => [s.workflowExecutionId, s.context]));
+
+  return executions.map(execution => ({
+    ...execution,
+    context: contextMap.get(execution.id) ?? null,
   }));
 }
 

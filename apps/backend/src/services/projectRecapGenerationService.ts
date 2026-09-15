@@ -6,7 +6,7 @@ import { getPrompt, PROMPT_NAMES } from '../agents/xyne-ai/langfuse/prompts.js';
 import { compileFallbackPrompt } from '../agents/xyne-ai/langfuse/fallback-prompts.js';
 import { CacConfigService } from './cacConfigService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { OrgLLMServiceAccountPurpose, RecapEntityType } from '@xyne/shared';
 
 async function getProjectRecapPrompt(
   promptName: string,
@@ -614,7 +614,7 @@ export class ProjectRecapGenerationService {
     // Use the upsert pattern without relying on the unique constraint name
     const existing = await db.recap.findFirst({
       where: { 
-        entityType: 'PROJECT',
+        entityType: RecapEntityType.PROJECT,
         entityId: projectId,
         userId,
         recapDate: normalizedDate
@@ -636,7 +636,7 @@ export class ProjectRecapGenerationService {
       }
       await db.recap.create({
         data: {
-          entityType: 'PROJECT',
+          entityType: RecapEntityType.PROJECT,
           entityId: projectId,
           userId,
           workspaceId: project.workspaceId,
@@ -668,7 +668,7 @@ export class ProjectRecapGenerationService {
     );
 
     const recaps = await db.recap.findMany({
-      where: { userId, recapDate, entityType: 'PROJECT' },
+      where: { userId, recapDate, entityType: RecapEntityType.PROJECT },
       select: { summary: true },
     });
 
@@ -689,7 +689,7 @@ export class ProjectRecapGenerationService {
     cutoff.setUTCHours(0, 0, 0, 0);
 
     const result = await db.recap.deleteMany({
-      where: { recapDate: { lt: cutoff }, entityType: 'PROJECT' },
+      where: { recapDate: { lt: cutoff }, entityType: RecapEntityType.PROJECT },
     });
 
     logger.info(

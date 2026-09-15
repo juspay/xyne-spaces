@@ -2,6 +2,7 @@ import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, ConversationPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
+import { ChannelScopeType } from '@xyne/shared';
 
 
 export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
@@ -30,7 +31,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
     ]);
 
     // Non DM channels unread count is handled by messages handler because of activity creation
-    const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+    const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
     if (channelParticipantsRaw.length === 0 || !isDMChannel) {
       return;
     }
@@ -61,7 +62,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    const isDMChannel = channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM';
+    const isDMChannel = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
 
     await handleUnreadCount(
       previousValue!.channelId,

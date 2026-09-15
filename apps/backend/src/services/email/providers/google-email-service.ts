@@ -69,8 +69,6 @@ export class GoogleEmailService extends BaseEmailService {
     if (!this.isConfigured || !this.transporter) {
       logger.info('[GoogleEmailService] ==================== EMAIL (NOT SENT - NOT CONFIGURED) ====================');
       logger.info(`[GoogleEmailService] To: ${Array.isArray(to) ? to.join(', ') : to}`);
-      logger.info(`[GoogleEmailService] Subject: ${subject}`);
-      if (text) logger.info(`[GoogleEmailService] Text: ${text}`);
       logger.info('[GoogleEmailService] =====================================================================================');
       return { success: false, error: 'Email service not configured' };
     }

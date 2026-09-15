@@ -3,6 +3,15 @@ import { logger } from '@/utils/logger';
 import type { ActivityContextResolverInput, ActivityContextOutput } from '../types';
 import { EMPTY_ACTIVITY_CONTEXT } from '../types';
 import { ENTITY_URL_PATTERNS } from '../entityUrlPatterns';
+import { Platform } from '@xyne/shared';
+
+/**
+ * activity_events.platform is a TEXT column, so Prisma hands it back as string.
+ * Writes are constrained to the enum by the Prisma middleware, but the compiler
+ * cannot know that — validate once here rather than asserting at each use.
+ */
+const toPlatform = (value: string): Platform =>
+  (Object.values(Platform) as string[]).includes(value) ? (value as Platform) : Platform.WEB;
 
 // Hard upper bounds
 const MAX_LOOKBACK_MINUTES = 60;
@@ -82,7 +91,7 @@ class ActivityContextResolver {
       name: event.eventName.toUpperCase().trim(),
       label: event.eventLabel?.trim() || undefined,
       url: event.url || undefined,
-      platform: event.platform as 'WEB' | 'ELECTRON' | 'MOBILE',
+      platform: toPlatform(event.platform),
       triggerType: event.triggerType,
       confidence: this.computeRecencyConfidence(event.timestamp, now, lookbackMinutes),
     }));

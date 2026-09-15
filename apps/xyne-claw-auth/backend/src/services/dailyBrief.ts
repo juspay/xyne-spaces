@@ -19,15 +19,24 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { buildThreadCitationMeta } from "../lib/citations.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import {
+  agentRunRepository,
+  chatMessageRepository,
   generatedContentRepository,
   userAgentInstructionRepository,
   DAILY_BRIEF_KIND,
 } from "../repositories/index.js";
+import {
+  recordDailyBriefGenerated,
+  recordScheduledDeliveryDelay,
+  type DailyBriefTrigger,
+} from "../otel/daily-brief-metrics.js";
 
 const log = createLogger("daily-brief");
 
@@ -113,11 +122,20 @@ export interface GenerateBriefResult {
  *
  * @param onProgress optional coarse progress callback (used by the SSE regenerate
  *   route to stream "generating…" labels to the dashboard).
+ * @param trigger which path asked for this brief — only labels the OTel counter.
  */
 export async function generateDailyBrief(
   userId: string,
-  opts: { onProgress?: (label: string) => void; signal?: AbortSignal } = {},
+  opts: {
+    onProgress?: (label: string) => void;
+    signal?: AbortSignal;
+    trigger?: DailyBriefTrigger;
+    attempt?: number;
+  } = {},
 ): Promise<GenerateBriefResult | null> {
+  const trigger = opts.trigger ?? "scheduled";
+  const attempt = opts.attempt ?? 1;
+  const startedAt = Date.now();
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { orgId: true, name: true, email: true },
@@ -152,6 +170,71 @@ export async function generateDailyBrief(
   });
 
   let sessionId: string | undefined;
+
+  // The brief conversation has to read back as an ordinary chat session in
+  // /v3/chat, which projects ONE path down the message tree: an assistant row is
+  // only on that path when its parentId points at the user row. persistRunStart
+  // would create the user message for us but does not hand back its id, so make
+  // it here (and tell the run to skip its own) to keep the two linked.
+  let userMessageId: string | null = null;
+  try {
+    const userMsg = await chatMessageRepository.create({
+      conversationId,
+      agentSlug,
+      userId,
+      role: "user",
+      content: BRIEF_TASK,
+      status: "completed",
+      orgId,
+    });
+    userMessageId = userMsg.id;
+  } catch (msgErr) {
+    log.warn(`[daily-brief] failed to persist user message for ${userId}: ${errMsg(msgErr)}`);
+  }
+
+  /**
+   * Close the chat turn the same way an interactive run does.
+   *
+   * Nothing else does this on the brief path: generateDailyBrief consumes the
+   * SSE stream itself rather than registering a callbackUrl, so the /callback
+   * machinery that normally writes the assistant row and finalizes the AgentRun
+   * never fires. Without this the conversation holds only the user message and
+   * the run sits at "running" forever.
+   */
+  const closeBriefTurn = async (
+    status: "completed" | "failed",
+    content: string,
+    toolInvocations?: unknown,
+  ): Promise<void> => {
+    let assistantMessageId: string | undefined;
+    try {
+      const assistantMsg = await chatMessageRepository.create({
+        conversationId,
+        agentSlug,
+        userId,
+        role: "assistant",
+        content,
+        status,
+        orgId,
+        parentId: userMessageId,
+      });
+      assistantMessageId = assistantMsg.id;
+    } catch (msgErr) {
+      log.warn(`[daily-brief] failed to persist assistant message for ${userId}: ${errMsg(msgErr)}`);
+    }
+    if (!sessionId) return;
+    try {
+      await agentRunRepository.finalize(sessionId, {
+        status,
+        ...(status === "completed" ? { result: content } : { error: content }),
+        ...(toolInvocations !== undefined ? { toolInvocations } : {}),
+        ...(assistantMessageId ? { chatMessageId: assistantMessageId } : {}),
+      });
+    } catch (runErr) {
+      log.warn(`[daily-brief] failed to finalize run ${sessionId}: ${errMsg(runErr)}`);
+    }
+  };
+
   try {
     const streamResult = await consumeClawStream({
       url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
@@ -165,6 +248,8 @@ export async function generateDailyBrief(
         mode: "daily_brief",
         eventType: "daily_brief",
         conversationId,
+        // We already wrote the user row above, parented correctly.
+        __skipUserMessagePersist: true,
         ...(briefInstructions ? { additionalInstructions: briefInstructions } : {}),
       },
       handlers: {
@@ -187,17 +272,27 @@ export async function generateDailyBrief(
     // The terminal `done` payload carries the structured brief as `dailyBrief`
     // (see xyne-claw run.ts). ClawDoneStatus doesn't type our new field, so read
     // it off loosely.
-    const done = streamResult.result as unknown as { dailyBrief?: DailyBriefPayload } | undefined;
+    const done = streamResult.result as unknown as
+      | { dailyBrief?: DailyBriefPayload; toolInvocations?: unknown }
+      | undefined;
     const brief = done?.dailyBrief;
     if (!brief) {
       log.warn(
         `[daily-brief] run for ${userId} finished without a dailyBrief payload (lastEvent=${streamResult.lastEventName}, error=${streamResult.errorReason ?? "none"})`,
       );
       await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket);
+      await closeBriefTurn(
+        "failed",
+        "The brief run finished without producing a brief. Please try regenerating it.",
+        done?.toolInvocations,
+      );
+      recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt, attempt);
       return null;
     }
 
     const content = renderBriefMarkdown(brief);
+    const citationMeta = buildThreadCitationMeta(done?.toolInvocations, content);
+    const generatedAt = new Date();
     await generatedContentRepository.saveReady({
       userId,
       orgId,
@@ -205,15 +300,23 @@ export async function generateDailyBrief(
       dateBucket,
       agentSlug,
       content,
-      data: brief as unknown as import("@prisma/client").Prisma.InputJsonValue,
+      data: {
+        ...brief,
+        ...(citationMeta ?? {}),
+      } as unknown as import("@prisma/client").Prisma.InputJsonValue,
       sessionId: sessionId ?? null,
-      generatedAt: new Date(),
+      generatedAt,
     });
+    await closeBriefTurn("completed", content, done?.toolInvocations);
     log.info(`[daily-brief] generated + persisted for ${userId} (session=${sessionId ?? "?"})`);
+    recordDailyBriefGenerated(trigger, "ready", Date.now() - startedAt, attempt);
+    if (trigger === "scheduled") recordScheduledDeliveryDelay(dateBucket, generatedAt);
     return { brief, content, sessionId };
   } catch (err) {
-    log.error(`[daily-brief] generation failed for ${userId}:`, err instanceof Error ? err.message : String(err));
+    log.error(`[daily-brief] generation failed for ${userId}:`, errMsg(err));
     await generatedContentRepository.markFailed(userId, DAILY_BRIEF_KIND, dateBucket).catch(() => {});
+    await closeBriefTurn("failed", `The brief could not be generated: ${errMsg(err)}`).catch(() => {});
+    recordDailyBriefGenerated(trigger, "failed", Date.now() - startedAt, attempt);
     return null;
   }
 }

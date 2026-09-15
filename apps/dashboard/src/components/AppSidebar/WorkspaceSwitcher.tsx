@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
@@ -12,6 +13,7 @@ import {
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
 
@@ -191,6 +193,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       setIsOpen(false);
       return;
     }
+    if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
     setSwitching(targetWorkspaceId);
     try {
       // NEW: Call switch-workspace API instead of logout
@@ -215,7 +218,11 @@ export const WorkspaceSwitcher: React.FC = () => {
       window.location.href = `/${targetWorkspaceId}/chat/dir`;
     } catch (err) {
       setError('Failed to switch workspace. Please try again.');
-      console.error('[WorkspaceSwitcher] Switch failed:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[WorkspaceSwitcher] Switch failed:'),
+        error: err,
+      });
     } finally {
       setSwitching(null);
     }
@@ -224,6 +231,7 @@ export const WorkspaceSwitcher: React.FC = () => {
   const handleCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (!workspaceName.trim()) return;
+    if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
     setCreating(true);
     setError(null);
     try {
@@ -333,10 +341,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                   <button
                     key={ws.id}
                     onClick={() => void handleSwitch(ws.id)}
+                    data-ph-capture-attribute-track-id='switch_workspace'
                     disabled={isSwitching}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Switch_Workspace'
-                    className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted transition-colors text-left disabled:opacity-60'
+                    className='h-auto w-full flex items-center justify-start gap-2.5 px-3 py-2 rounded-none hover:bg-muted transition-colors text-left disabled:opacity-60'
                   >
                     {/* Workspace icon with deterministic color */}
                     <div
@@ -413,10 +422,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                         <button
                           key={ws.id}
                           onClick={() => void handleSwitch(ws.id)}
+                          data-ph-capture-attribute-track-id='switch_workspace_signin'
                           disabled={isSwitching}
                           data-track-category='Workspace_Switcher'
                           data-track-name='Switch_Workspace_SignIn'
-                          className='w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
+                          className='h-auto w-full flex items-center justify-start gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
                         >
                           <div
                             className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
@@ -472,10 +482,11 @@ export const WorkspaceSwitcher: React.FC = () => {
                   <div className='flex gap-2'>
                     <button
                       type='submit'
+                      data-ph-capture-attribute-track-id='create_workspace'
                       disabled={creating || !workspaceName.trim()}
                       data-track-category='Workspace_Switcher'
                       data-track-name='Create_Workspace'
-                      className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                      className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
                     >
                       {creating ? 'Creating…' : 'Create'}
                     </button>

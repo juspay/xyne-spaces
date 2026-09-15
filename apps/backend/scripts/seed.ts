@@ -10,9 +10,22 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, OrgRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType, OrgLLMServiceAccountProvider, OrgLLMServiceAccountPurpose, OrgLLMServiceAccountCredentialStatus } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  OrgLLMServiceAccountProvider,
+  OrgLLMServiceAccountPurpose,
+  OrgLLMServiceAccountCredentialStatus,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  OrgRole,
+  ProjectType,
+} from '@xyne/shared';
 import { encrypt } from '../src/services/encryptionService';
 
 const prisma = new PrismaClient();
@@ -31,6 +44,9 @@ const ESSENTIAL_RESOURCES = [
   { name: 'AUTH', description: 'Authentication endpoints (/api/auth/*)' },
   { name: 'XYNE-APPS', description: 'Xyne Apps management endpoints (/api/apps/*)' },
   { name: 'VESPA', description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)' },
+  { name: 'RELEASE-MANAGER', description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.' },
+  { name: 'ROLES', description: 'Role creation and management UI' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
 ];
 
 // Default user groups with their permissions
@@ -248,7 +264,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -335,6 +351,7 @@ async function main() {
           data: {
             userId: adminUser.id,
             userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId,
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');

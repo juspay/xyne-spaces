@@ -10,6 +10,7 @@ packages:
   - apps/backend/eslint-rules
   - apps/dashboard
   - apps/dashboard-external
+  - apps/dashboard-edge
   - apps/electron
   - apps/site
   - apps/xyne-claw
@@ -17,9 +18,11 @@ packages:
   - apps/xyne-claw-auth/frontend
 
   - packages/shared
+  - packages/storage
   - packages/icons
   - packages/framework
   - packages/kata-sdk
+  - packages/litellm-client
   - packages/xyne-claw-shared
   - packages/xyne-claw-mcp
   - packages/xyne-claw-pi-plugin

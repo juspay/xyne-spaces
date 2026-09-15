@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { TicketMigrationController } from '@/controllers/ticketMigrationController';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';

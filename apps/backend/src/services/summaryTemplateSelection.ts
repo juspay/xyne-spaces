@@ -1,4 +1,5 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
+import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
 
 const MAX_TRANSCRIPT_CHARS = 60_000;
 const MAX_STRUCTURE_CHARS = 2_000;
@@ -13,10 +14,34 @@ function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
 }
 
-export function formatSummaryTemplateSections(sections: Prisma.JsonValue): string {
+function isStructuredSection(
+  section: Prisma.JsonValue
+): section is Prisma.JsonObject & { title: string; description?: string } {
+  return (
+    typeof section === 'object' &&
+    section !== null &&
+    !Array.isArray(section) &&
+    typeof section.title === 'string' &&
+    (section.description === undefined || typeof section.description === 'string')
+  );
+}
+
+export function formatSummaryTemplateSections(rawSections: Prisma.JsonValue): string {
+  // Sections a Scribe admin disabled stay stored on the template but never reach a prompt.
+  const sections = getEnabledSummaryTemplateSections(rawSections);
   if (typeof sections === 'string') return sections.trim();
   if (sections === null) return '';
   if (Array.isArray(sections) && sections.length === 0) return '';
+  if (Array.isArray(sections) && sections.every(isStructuredSection)) {
+    return sections
+      .map((section) => {
+        const title = typeof section.title === 'string' ? section.title.trim() : '';
+        const description =
+          typeof section.description === 'string' ? section.description.trim() : '';
+        return `### ${title}${description ? `\n${description}` : ''}`;
+      })
+      .join('\n---\n');
+  }
   if (
     typeof sections === 'object' &&
     !Array.isArray(sections) &&

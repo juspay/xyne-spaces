@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { EmailMergeMode, AutoDraftMode, ChannelType, ChannelRole } from '@xyne/shared';
+import {
+  EmailMergeMode,
+  AutoDraftMode,
+  ChannelType,
+  ChannelRole,
+  isDeskChannelType,
+  parseDeskMetricsGuestVisibility,
+} from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import {
   useDeskChannelPreferenceAutoSave,
@@ -94,7 +101,9 @@ export function useDeskSettingsForm(
   const isEmail = channelType === ChannelType.EMAIL;
   const isSlack = channelType === ChannelType.SLACK;
   const isApp = channelType === ChannelType.APP;
+  const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
+  const isDeskChannel = isDeskChannelType(channelType);
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
     queries.channelParticipants({ channelId: channelId ?? '' }),
@@ -199,6 +208,11 @@ export function useDeskSettingsForm(
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
+    metricsGuestVisibility: emailChannelPreference?.metricsGuestVisibility ?? null,
+    appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
+    deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
+    deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
+    deskReportRangeDays: emailChannelPreference?.deskReportRangeDays ?? 1,
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -227,6 +241,11 @@ export function useDeskSettingsForm(
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
   const metricsEnabled = pref.draft.metricsEnabled;
   const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
+  const guestVisibility = parseDeskMetricsGuestVisibility(pref.draft.metricsGuestVisibility);
+  const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
+  const deskReportEnabled = pref.draft.deskReportEnabled;
+  const deskReportAgentSlug = pref.draft.deskReportAgentSlug;
+  const deskReportRangeDays = pref.draft.deskReportRangeDays;
   const boardId = emailChannelPreference?.boardId ?? null;
   const classificationEnabledDraft = cls.draft.enabled;
   const classificationEnabledSaved = classificationConfig?.enabled ?? false;
@@ -260,6 +279,17 @@ export function useDeskSettingsForm(
     if (!canManage) return;
     pref.setField('metricsEnabled', checked);
   };
+  const setAppWebhookDeliveryEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pref.setField('appWebhookDeliveryEnabled', checked);
+  };
+  const setDeskReportEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pref.setField('deskReportEnabled', checked);
+  };
+  const setDeskReportAgentSlug = (slug: string | null) =>
+    pref.setField('deskReportAgentSlug', slug);
+  const setDeskReportRangeDays = (days: number) => pref.setField('deskReportRangeDays', days);
   const setFrtStageNames = (updater: string[] | ((prev: string[]) => string[])) => {
     if (!canManage) return;
     pref.setField('frtStageNames', prevStr => {
@@ -268,6 +298,11 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  const toggleGuestVisibility = (key: string) =>
+    pref.setField(
+      'metricsGuestVisibility',
+      JSON.stringify({ ...guestVisibility, [key]: guestVisibility[key] === false }),
+    );
 
   const setClassificationEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -339,9 +374,24 @@ export function useDeskSettingsForm(
       if (d.metricsEnabled !== s.metricsEnabled) {
         patch.metricsEnabled = d.metricsEnabled;
       }
+      if (d.appWebhookDeliveryEnabled !== s.appWebhookDeliveryEnabled) {
+        patch.appWebhookDeliveryEnabled = d.appWebhookDeliveryEnabled;
+      }
       if (d.frtStageNames !== s.frtStageNames) {
         const names = parseFrtStageNames(d.frtStageNames);
         patch.frtStageNames = names.length > 0 ? JSON.stringify(names) : null;
+      }
+      if (d.metricsGuestVisibility !== s.metricsGuestVisibility) {
+        patch.metricsGuestVisibility = d.metricsGuestVisibility;
+      }
+      if (d.deskReportEnabled !== s.deskReportEnabled) {
+        patch.deskReportEnabled = d.deskReportEnabled;
+      }
+      if (d.deskReportAgentSlug !== s.deskReportAgentSlug) {
+        patch.deskReportAgentSlug = d.deskReportAgentSlug;
+      }
+      if (d.deskReportRangeDays !== s.deskReportRangeDays) {
+        patch.deskReportRangeDays = d.deskReportRangeDays;
       }
 
       if (cls.dirty) {
@@ -423,7 +473,9 @@ export function useDeskSettingsForm(
     isEmail,
     isSlack,
     isApp,
+    isSocial,
     isCall,
+    isDeskChannel,
     isDirty,
     saving,
     save,
@@ -451,6 +503,16 @@ export function useDeskSettingsForm(
     setMetricsEnabled,
     frtStageNames,
     setFrtStageNames,
+    guestVisibility,
+    toggleGuestVisibility,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
+    deskReportEnabled,
+    setDeskReportEnabled,
+    deskReportAgentSlug,
+    setDeskReportAgentSlug,
+    deskReportRangeDays,
+    setDeskReportRangeDays,
     boardId,
     clawAgents,
     classificationEnabledDraft,

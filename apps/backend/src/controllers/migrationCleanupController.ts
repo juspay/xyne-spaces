@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+import { UserStatus } from '@xyne/shared';
 
 const BATCH_SIZE = 50;
 const BATCH_GAP_MS = 3_000; // 3 seconds between batches
@@ -32,60 +34,62 @@ export class MigrationCleanupController {
 
       // Run batched deletion in background
       (async () => {
-        let totalDeleted = 0;
-        let batch = 0;
+            await runAsSystem(async () => {
+          let totalDeleted = 0;
+          let batch = 0;
 
-        while (true) {
-          // Fetch a batch of IDs to delete
-          const rows = await db.conversation.findMany({
-            where,
-            select: { conversationId: true },
-            take: BATCH_SIZE,
-          });
+          while (true) {
+            // Fetch a batch of IDs to delete
+            const rows = await db.conversation.findMany({
+              where,
+              select: { conversationId: true },
+              take: BATCH_SIZE,
+            });
 
-          if (rows.length === 0) break;
+            if (rows.length === 0) break;
 
-          const ids = rows.map(r => r.conversationId);
+            const ids = rows.map(r => r.conversationId);
 
-          // Fetch messageIds for this batch (needed to delete message-level children)
-          const messageRows = await db.message.findMany({
-            where: { conversationId: { in: ids } },
-            select: { messageId: true },
-          });
-          const messageIds = messageRows.map(m => m.messageId);
+            // Fetch messageIds for this batch (needed to delete message-level children)
+            const messageRows = await db.message.findMany({
+              where: { conversationId: { in: ids } },
+              select: { messageId: true },
+            });
+            const messageIds = messageRows.map(m => m.messageId);
 
-          // Delete all child records in dependency order to avoid FK violations
-          if (messageIds.length > 0) {
-            await db.reaction.deleteMany({ where: { messageId: { in: messageIds } } });
-            await db.reactionCount.deleteMany({ where: { messageId: { in: messageIds } } });
+            // Delete all child records in dependency order to avoid FK violations
+            if (messageIds.length > 0) {
+              await db.reaction.deleteMany({ where: { messageId: { in: messageIds } } });
+              await db.reactionCount.deleteMany({ where: { messageId: { in: messageIds } } });
+            }
+            await db.conversationParticipant.deleteMany({ where: { conversationId: { in: ids } } });
+            await db.messageAttachment.deleteMany({ where: { conversationId: { in: ids } } });
+            await db.message.deleteMany({ where: { conversationId: { in: ids } } });
+
+            const { count } = await db.conversation.deleteMany({
+              where: { conversationId: { in: ids } },
+            });
+
+            totalDeleted += count;
+            batch++;
+
+            logger.info('[MigrationCleanupController] Batch deleted', {
+              batch,
+              batchSize: count,
+              totalDeleted,
+              channelId: channelId ?? 'ALL',
+            });
+
+            if (rows.length < BATCH_SIZE) break; // Last batch
+
+            await sleep(BATCH_GAP_MS);
           }
-          await db.conversationParticipant.deleteMany({ where: { conversationId: { in: ids } } });
-          await db.messageAttachment.deleteMany({ where: { conversationId: { in: ids } } });
-          await db.message.deleteMany({ where: { conversationId: { in: ids } } });
 
-          const { count } = await db.conversation.deleteMany({
-            where: { conversationId: { in: ids } },
-          });
-
-          totalDeleted += count;
-          batch++;
-
-          logger.info('[MigrationCleanupController] Batch deleted', {
-            batch,
-            batchSize: count,
+          logger.info('[MigrationCleanupController] Deletion complete', {
+            totalBatches: batch,
             totalDeleted,
             channelId: channelId ?? 'ALL',
           });
-
-          if (rows.length < BATCH_SIZE) break; // Last batch
-
-          await sleep(BATCH_GAP_MS);
-        }
-
-        logger.info('[MigrationCleanupController] Deletion complete', {
-          totalBatches: batch,
-          totalDeleted,
-          channelId: channelId ?? 'ALL',
         });
       })().catch(error => {
         logger.error('[MigrationCleanupController] Batch deletion failed', { error });
@@ -120,10 +124,12 @@ export class MigrationCleanupController {
 
       // All INACTIVE users (optionally scoped to a workspace). We carry workspaceId
       // so we can roll the per-table counts up by workspace in code.
-      const inactiveUsers = await db.user.findMany({
-        where: { status: 'INACTIVE', ...(workspaceId ? { workspaceId } : {}) },
-        select: { id: true, workspaceId: true },
-      });
+      const inactiveUsers = await runAsSystem(() =>
+        db.user.findMany({
+          where: { status: UserStatus.INACTIVE, ...(workspaceId ? { workspaceId } : {}) },
+          select: { id: true, workspaceId: true },
+        }),
+      );
       const inactiveUserIds = inactiveUsers.map(u => u.id);
       const workspaceByUser = new Map(inactiveUsers.map(u => [u.id, u.workspaceId]));
 
@@ -147,11 +153,13 @@ export class MigrationCleanupController {
 
       // Count stale rows per user across the three tables, then roll up by workspace.
       if (inactiveUserIds.length > 0) {
-        const [groupMappingCounts, assignmentStateCounts, expertiseMappingCounts] = await Promise.all([
-          db.userGroupMapping.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
-          db.userAssignmentState.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
-          db.userExpertiseMapping.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
-        ]);
+        const [groupMappingCounts, assignmentStateCounts, expertiseMappingCounts] = await runAsSystem(() =>
+          Promise.all([
+            db.userGroupMapping.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
+            db.userAssignmentState.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
+            db.userExpertiseMapping.groupBy({ by: ['userId'], where: { userId: { in: inactiveUserIds } }, _count: { _all: true } }),
+          ]),
+        );
         for (const g of groupMappingCounts) {
           const ws = workspaceByUser.get(g.userId);
           if (ws) ensureWorkspace(ws).userGroupMappings += g._count._all;
@@ -202,34 +210,36 @@ export class MigrationCleanupController {
       });
 
       (async () => {
-        const deleted = { userGroupMappings: 0, userAssignmentStates: 0, userExpertiseMappings: 0 };
-        const USER_BATCH = 20;
+          await runAsSystem(async () => {
+          const deleted = { userGroupMappings: 0, userAssignmentStates: 0, userExpertiseMappings: 0 };
+          const USER_BATCH = 20;
 
-        for (let i = 0; i < inactiveUserIds.length; i += USER_BATCH) {
-          const batch = inactiveUserIds.slice(i, i + USER_BATCH);
+          for (let i = 0; i < inactiveUserIds.length; i += USER_BATCH) {
+            const batch = inactiveUserIds.slice(i, i + USER_BATCH);
 
-          const [gm, as, ex] = await db.$transaction([
-            db.userGroupMapping.deleteMany({ where: { userId: { in: batch } } }),
-            db.userAssignmentState.deleteMany({ where: { userId: { in: batch } } }),
-            db.userExpertiseMapping.deleteMany({ where: { userId: { in: batch } } }),
-          ]);
+            const [gm, as, ex] = await db.$transaction([
+              db.userGroupMapping.deleteMany({ where: { userId: { in: batch } } }),
+              db.userAssignmentState.deleteMany({ where: { userId: { in: batch } } }),
+              db.userExpertiseMapping.deleteMany({ where: { userId: { in: batch } } }),
+            ]);
 
-          deleted.userGroupMappings += gm.count;
-          deleted.userAssignmentStates += as.count;
-          deleted.userExpertiseMappings += ex.count;
+            deleted.userGroupMappings += gm.count;
+            deleted.userAssignmentStates += as.count;
+            deleted.userExpertiseMappings += ex.count;
 
-          logger.info('[MigrationCleanupController] Deactivated-user cleanup batch done', {
+            logger.info('[MigrationCleanupController] Deactivated-user cleanup batch done', {
+              workspaceId: workspaceId ?? 'ALL',
+              processedUsers: Math.min(i + USER_BATCH, inactiveUserIds.length),
+              totalUsers: inactiveUserIds.length,
+              deleted,
+            });
+          }
+
+          logger.info('[MigrationCleanupController] Deactivated-user cleanup complete', {
             workspaceId: workspaceId ?? 'ALL',
-            processedUsers: Math.min(i + USER_BATCH, inactiveUserIds.length),
-            totalUsers: inactiveUserIds.length,
+            deactivatedUsers: inactiveUserIds.length,
             deleted,
           });
-        }
-
-        logger.info('[MigrationCleanupController] Deactivated-user cleanup complete', {
-          workspaceId: workspaceId ?? 'ALL',
-          deactivatedUsers: inactiveUserIds.length,
-          deleted,
         });
       })().catch(error => {
         logger.error('[MigrationCleanupController] Deactivated-user cleanup failed', {

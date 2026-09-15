@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useZero } from '../../../../src/hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-import { X } from 'lucide-react';
+import { MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';

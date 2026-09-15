@@ -15,8 +15,6 @@ function buildTicketTypeInstructions(): string {
     [BaseTicketType.Feature]: 'New features, enhancements, additions, improvements, new functionality',
     [BaseTicketType.Story]: 'User stories (deliverable product work), typically feature-sized, can be planned in sprints',
     [BaseTicketType.Hotfix]: 'Critical/urgent production issues, outages, blockers requiring immediate attention',
-    [BaseTicketType.Support]: 'General support requests, questions, non-urgent issues, user assistance',
-    [BaseTicketType.DESK]: 'Tickets originating from a desk email inbox (customer email threads, conversations from connected mailboxes)',
     [BaseTicketType.Epic]: 'Large initiative or body of work spanning multiple features or sprints',
   };
 
@@ -97,44 +95,6 @@ END OF DESCRIPTION
 ---
 
 Provide a concise, descriptive title and the appropriate ticket type (${ticketTypeOptions}).
-`;
-}
-
-export function getCanvasTitleGeneratorSystemPrompt(): string {
-  return `
-You generate concise, descriptive titles for collaborative documents.
-
-CRITICAL RULES:
-- Use 4-10 words
-- Never exceed 100 characters
-- Describe the document's main subject, not the act of writing it
-- Prefer a meaningful heading when it accurately represents the whole document
-- Do not start with "Canvas", "Document", "Notes about", or "Discussion about"
-- Do not add quotes, labels, markdown, or ending punctuation
-
-Output JSON only:
-{
-  "title": "Concise descriptive title"
-}
-`;
-}
-
-export function buildCanvasTitleGeneratorUserPrompt(
-  content: string,
-  maxLength: number = 100
-): string {
-  return `
-Generate a title for this canvas.
-
-Maximum length: ${maxLength} characters
-
----
-CANVAS CONTENT:
----
-${content}
----
-END OF CANVAS CONTENT
----
 `;
 }
 

@@ -1,5 +1,5 @@
 import express, { Router, type Request, type Response } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
 import { config } from '@/config/env';
 import { authorize } from '@/middleware/authorize';

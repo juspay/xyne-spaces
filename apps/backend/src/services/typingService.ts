@@ -1,5 +1,6 @@
 import { redisService } from './redisService';
 import {logger} from '@/utils/logger';
+import { MessageType } from '@xyne/shared';
 
 export interface TypingUser {
   userId: string;
@@ -168,7 +169,7 @@ export class TypingService {
             timestamp: new Date()
           }
         }),
-        msgType: 'SYSTEM',
+        msgType: MessageType.SYSTEM,
         createdAt: new Date()
       };
 

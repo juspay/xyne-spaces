@@ -20,7 +20,7 @@ import { notificationHooks } from '@/hooks/notificationHooks'
 import { cleanupRepository } from '@framework'
 import { generateConsolidatedKnowledgeLearnings } from '../utils/knowledge-generator'
 import type { WorkflowStorage } from '../workflow-storage'
-import { runWithContext } from '@/database/tenant/context'
+import { runAsServiceActor } from '@/database/tenant/context'
 
 
 interface PollingLoop {
@@ -227,7 +227,7 @@ export class WorkflowPoller {
     // Open a per-execution tenant scope so the workspaceId stamper fills workspaceId
     // on every downstream Prisma write (this job runs in the background with no request
     // context). userId is inert — only workspaceId is read by the stamp.
-    await runWithContext({ userId: 'workflow-poller', workspaceId: workflow.workspaceId }, async () => {
+    await runAsServiceActor('workflow-poller', workflow.workspaceId, async () => {
       // For child executions, workflowType is in execution; for parent, in workflow
       const workflowType = (execution.workflowType || workflow.workflowType) as WorkflowType
 

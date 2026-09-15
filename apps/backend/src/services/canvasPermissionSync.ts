@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
@@ -30,7 +31,10 @@ async function refreshForShares(
   where: { channelId: string } | { userGroupId: string },
   label: string,
 ): Promise<void> {
-  const shares = await db.canvasParticipant.findMany({ where, select: { canvasId: true } });
+  // Runs after the membership row is gone, so it must not be scoped to the actor.
+  const shares = await withWorkspaceScope(() =>
+    db.canvasParticipant.findMany({ where, select: { canvasId: true } }),
+  );
   const canvasIds = Array.from(new Set(shares.map(s => s.canvasId)));
   if (canvasIds.length === 0) return;
 

@@ -394,6 +394,80 @@ export function serializeTicketMd(summary: TicketCardSummary | null | undefined)
   return lines.join('\n');
 }
 
+// ==========================================================================
+// SUB-TICKETS SNAPSHOT
+// ==========================================================================
+
+export interface SubTicketsMdData {
+  total: number;
+  items: TicketCardSummary[];
+}
+
+const SUBTICKETS_META_BLOCK_START = ':::subtickets';
+
+export const SUB_TICKETS_MD_LIMIT = 5;
+
+export function parseSubTicketsMd(md: string | null | undefined): SubTicketsMdData {
+  if (!md) return { total: 0, items: [] };
+
+  const lines = md.split('\n');
+  const items: TicketCardSummary[] = [];
+  let total = 0;
+  let inMetaBlock = false;
+  let currentBlock: string[] | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === SUBTICKETS_META_BLOCK_START) {
+      inMetaBlock = true;
+      continue;
+    }
+
+    if (trimmed === TICKET_BLOCK_START) {
+      currentBlock = [TICKET_BLOCK_START];
+      continue;
+    }
+
+    if (trimmed === TICKET_BLOCK_END) {
+      if (currentBlock) {
+        currentBlock.push(TICKET_BLOCK_END);
+        const summary = parseTicketMd(currentBlock.join('\n'));
+        if (summary) items.push(summary);
+        currentBlock = null;
+      }
+      inMetaBlock = false;
+      continue;
+    }
+
+    if (currentBlock) {
+      currentBlock.push(line);
+      continue;
+    }
+
+    if (inMetaBlock && trimmed.startsWith('total:')) {
+      const parsed = Number(trimmed.slice('total:'.length).trim());
+      if (!Number.isNaN(parsed)) total = parsed;
+    }
+  }
+
+  return { total: Math.max(total, items.length), items };
+}
+
+export function serializeSubTicketsMd(
+  total: number,
+  summaries: TicketCardSummary[],
+): string | null {
+  if (total <= 0) return null;
+
+  const parts: string[] = [SUBTICKETS_META_BLOCK_START, `total: ${total}`, TICKET_BLOCK_END];
+  for (const summary of summaries.slice(0, SUB_TICKETS_MD_LIMIT)) {
+    const block = serializeTicketMd(summary);
+    if (block) parts.push(block);
+  }
+  return parts.join('\n');
+}
+
 /**
  * Get unique replier count
  */
@@ -540,18 +614,84 @@ export function serializeInitialMessageMd(
   return lines.join('\n');
 }
 
-// ==========================================================================
-// PARENT MESSAGE SNAPSHOT
-// ==========================================================================
-
-export interface ParentMessageSummary {
+/**
+ * Input for `buildInitialMessageMd`. Every field the message row does not yet
+ * define at creation time carries a default, so a caller about to insert the
+ * message can build the md without reading the row back.
+ */
+export interface InitialMessageMdInput {
   messageId: string;
-  conversationId?: string | null;
+  conversationId: string;
   senderId: string;
   content: string;
   msgType: MessageType;
   createdAt: number;
+  workspaceId?: string | null;
+  hasAttachment?: boolean;
+  edited?: boolean;
+  isDeleted?: boolean;
+  showInChannel?: boolean;
+  visibleTo?: string | null;
+  metadata?: unknown;
+  nudgeCount?: number | null;
+  isSent?: boolean;
+  reactions_md?: string | null;
+  link_preview_md?: string | null;
+  childConversationId?: string | null;
 }
+
+/**
+ * The single builder for `conversations.initial_message_md`.
+ *
+ * Every writer — Zero mutators, mutation-sync handlers, Prisma services,
+ * migration scripts — must go through this. Divergence is not a type error:
+ * a writer that serializes differently silently rewrites the md on every
+ * conversation it touches, and each of those writes fans out through every
+ * subscribed Zero pipeline.
+ */
+export function buildInitialMessageMd(msg: InitialMessageMdInput): string | null {
+  return serializeInitialMessageMd({
+    messageId: msg.messageId,
+    conversationId: msg.conversationId,
+    workspaceId: msg.workspaceId ?? null,
+    senderId: msg.senderId,
+    content: msg.content,
+    msgType: msg.msgType,
+    hasAttachment: msg.hasAttachment ?? false,
+    edited: msg.edited ?? false,
+    isDeleted: msg.isDeleted ?? false,
+    showInChannel: msg.showInChannel ?? false,
+    visibleTo: msg.visibleTo ?? null,
+    createdAt: msg.createdAt,
+    metadata: msg.metadata ? JSON.stringify(msg.metadata) : null,
+    nudgeCount: msg.nudgeCount ?? null,
+    isSent: msg.isSent ?? false,
+    reactions_md: msg.reactions_md ?? null,
+    link_preview_md: msg.link_preview_md ?? null,
+    childConversationId: msg.childConversationId ?? null,
+  });
+}
+
+// ==========================================================================
+// PARENT MESSAGE SNAPSHOT
+// ==========================================================================
+
+export type ConversationAnchorType = 'THREAD_REPLY' | 'SUBTICKET';
+
+export interface ParentMessageSummary {
+  messageId: string;
+  conversationId?: string | null;
+  channelId?: string | null;
+  senderId: string;
+  content: string;
+  msgType: MessageType;
+  createdAt: number;
+  anchorType?: ConversationAnchorType | null;
+}
+
+export const resolveConversationAnchorType = (
+  summary: Pick<ParentMessageSummary, 'anchorType'> | null | undefined,
+): ConversationAnchorType => summary?.anchorType ?? 'THREAD_REPLY';
 
 const PARENT_MESSAGE_BLOCK_START = ':::parentMessage';
 const PARENT_MESSAGE_BLOCK_END = ':::';
@@ -591,10 +731,12 @@ export function parseParentMessageMd(md: string | null | undefined): ParentMessa
   return {
     messageId: summary['messageId'],
     conversationId: summary['conversationId'] || null,
+    channelId: summary['channelId'] || null,
     senderId: summary['senderId'] ?? '',
     content: summary['content'] ?? '',
     msgType: (summary['msgType'] as MessageType) ?? 'USER',
     createdAt: Number(summary['createdAt']) || 0,
+    anchorType: (summary['anchorType'] as ConversationAnchorType) || null,
   };
 }
 
@@ -607,10 +749,12 @@ export function serializeParentMessageMd(
   const entries: Array<[string, string | number | null | undefined]> = [
     ['messageId', summary.messageId],
     ['conversationId', summary.conversationId],
+    ['channelId', summary.channelId],
     ['senderId', summary.senderId],
     ['content', summary.content],
     ['msgType', summary.msgType],
     ['createdAt', summary.createdAt],
+    ['anchorType', summary.anchorType],
   ];
 
   for (const [key, value] of entries) {

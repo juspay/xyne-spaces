@@ -79,6 +79,7 @@ import { cloneRepository, pushCommits, hasUncommittedChanges, commitAllChanges }
 import type { OrchestratorEventHandler } from '@framework'
 import { UpdateAgentStepInput } from '@/types/database'
 import { workspaceEventService } from '@/services/workspaceEventService'
+import { WorkflowExecutionMode } from '@xyne/shared';
 
 interface AgentTracker {
   hasCommits: boolean
@@ -956,7 +957,7 @@ export class AgentExecutor {
           // into the Redis message-storage branch (WAIT_FOR_EVENT + MANUAL).
           // The endpoint will reset mode to AUTOMATIC before re-queuing so the agent
           // completes without pausing again after processing the answer.
-          await this.storage.setExecutionMode(parentExecutionId, 'MANUAL');
+          await this.storage.setExecutionMode(parentExecutionId, WorkflowExecutionMode.MANUAL);
 
           await createQuestionActivity(parentExecutionId);
 
@@ -1388,7 +1389,7 @@ export class AgentExecutor {
     updateState: (newRequest: ConversationRequest, newController: AbortController, newCleanup: () => Promise<void>) => void
   ): Promise<boolean> {
     // Set execution mode to MANUAL when continuation is received
-    await this.storage.setExecutionMode(parentExecutionId, 'MANUAL');
+    await this.storage.setExecutionMode(parentExecutionId, WorkflowExecutionMode.MANUAL);
     logger.info(`🎛️ [AGENT-EXECUTOR] Execution mode set to MANUAL for ${parentExecutionId}`);
 
     // Fetch full conversation history from Redis/GCS including all LLM calls and tool executions

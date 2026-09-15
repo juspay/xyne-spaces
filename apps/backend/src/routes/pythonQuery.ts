@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express'
 import { readReplicaDb } from '@/database/client'
 import { logger } from '@/utils/logger'
-import { validateQueryAST, translateQueryAST, ACLFactory } from '@/services/pythonQuery'
+import { validateQueryAST, translateQueryAST } from '@/services/pythonQuery'
+import { ACLFactory } from '@/database/acl'
+import { Prisma } from '@prisma/client'
+import { isWorkspaceScopedModel } from '@/database/tenant/acl-extension'
 const router = Router()
 
 router.post('/', async (req: Request, res: Response) => {
@@ -14,8 +17,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const userId = req.user?.id
+    const workspaceId = req.user?.workspaceId
 
-    if (!userId) {
+    if (!userId || !workspaceId) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
@@ -38,10 +42,31 @@ router.post('/', async (req: Request, res: Response) => {
     // Translate AST to Prisma query
     const translated = translateQueryAST(ast)
 
-    // Apply ACLs
-    const aclContext = { userId, workspaceId: req.user?.workspaceId, role: req.user?.role }
-    const acl = ACLFactory.getACL(translated.modelName, aclContext, readReplicaDb)
+    // Apply ACLs. Include memberId/orgRole so the org / org_member / workspace ACLs (which
+    // scope by org membership and fail closed when memberId is absent) resolve correctly —
+    // matching the context built in acl-extension.ts.
+    const aclContext = {
+      userId,
+      workspaceId,
+      memberId: req.user?.memberId,
+      orgRole: req.user?.orgRole,
+      role: req.user?.role,
+    }
+    const acl = ACLFactory.getACL(
+      translated.modelName as Uncapitalize<Prisma.ModelName>,
+      aclContext,
+      readReplicaDb,
+    )
     const whereWithAcl = await acl.applyToWhere(translated.args.where as Record<string, unknown>)
+
+    // Tenant backstop: scope reads to the caller's workspace (also enforced by the Prisma
+    // ACL extension on readReplicaDb; explicit here so it doesn't depend on it).
+    const scopedWhere =
+      workspaceId && isWorkspaceScopedModel(translated.modelName)
+        ? (whereWithAcl && Object.keys(whereWithAcl).length
+            ? { AND: [whereWithAcl, { workspaceId }] }
+            : { workspaceId })
+        : whereWithAcl
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const model = (readReplicaDb as any)[translated.modelName]
@@ -56,12 +81,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (translated.operation === 'count') {
       result = await model.count({
-        where: whereWithAcl,
+        where: scopedWhere,
       })
     } else {
       const findManyArgs = {
         ...translated.args,
-        where: whereWithAcl,
+        where: scopedWhere,
       }
 
       result = await model.findMany(findManyArgs)

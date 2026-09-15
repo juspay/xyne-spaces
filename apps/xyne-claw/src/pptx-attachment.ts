@@ -15,15 +15,12 @@
  * Sibling of docx-attachment.ts, pdf-attachment.ts, xlsx-attachment.ts.
  */
 import JSZip from "jszip";
+import { matchesAttachmentType, PPTX_ATTACHMENT } from "xyne-claw-shared";
 
-const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-export const PPTX_EXTENSIONS = new Set([".pptx"]);
+export const PPTX_EXTENSIONS = PPTX_ATTACHMENT.extensions;
 
-export function isPptxAttachment(fileName: string, mimeType: string): boolean {
-  if ((mimeType ?? "").toLowerCase() === PPTX_MIME) return true;
-  const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return PPTX_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+export function isPptxAttachment(fileName: string, mimeType?: string | null): boolean {
+  return matchesAttachmentType(fileName, mimeType, PPTX_ATTACHMENT.mimeTypes, PPTX_ATTACHMENT.extensions);
 }
 
 const MAX_SLIDES = 200;          // refuse > 200-slide decks; will note in footer

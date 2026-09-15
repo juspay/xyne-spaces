@@ -8,7 +8,6 @@ const fieldTypeOptionsDisplay = [
   { value: 'project', label: 'String' },
   { value: 'status', label: 'String' },
   { value: 'priority', label: 'String' },
-  { value: 'workflow', label: 'String' },
   { value: 'tags', label: 'String' },
   { value: 'ticketType', label: 'String' },
 ];

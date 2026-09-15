@@ -1,5 +1,5 @@
-import { AccessType } from '@prisma/client';
 import { authorize } from './authorize';
+import { AccessType } from '@xyne/shared';
 
 /**
  * Middleware to check if user can create workspaces.

@@ -29,6 +29,16 @@ export const PLATFORM_ONLY_CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
   "QUERY_ROUTING_KEY",
   "IMAGE_GENERATION_ENDPOINT",
   "IMAGE_GENERATION_API_KEY",
+  "PDF_BASE_URL",
+  "PDF_API_KEY",
+  "RESEARCH_AGENT_API_URL",
+  "RESEARCH_AGENT_API_KEY",
+  "SANDBOX_PW_ROUTER_URL",
+  "GRAFANA_URL",
+  "HINDSIGHT_URL",
+  "HINDSIGHT_DATABASE_URL",
+  "BITBUCKET_DASHBOARD_BASE_URL",
+  "JENKINS_BASE_URL",
 ]);
 
 /**
@@ -40,10 +50,10 @@ export function stripPlatformConfigKeys(
   config: Record<string, unknown> | undefined | null,
 ): Record<string, unknown> {
   if (!config) return {};
-  const out: Record<string, unknown> = {};
+  const out = new Map<string, unknown>();
   for (const [key, value] of Object.entries(config)) {
     if (PLATFORM_ONLY_CONFIG_KEYS.has(key)) continue;
-    out[key] = value;
+    out.set(key, value);
   }
-  return out;
+  return Object.fromEntries(out);
 }

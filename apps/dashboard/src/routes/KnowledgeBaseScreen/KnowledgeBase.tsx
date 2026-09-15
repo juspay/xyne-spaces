@@ -95,9 +95,9 @@ const KnowledgeBaseScreen = (): ReactElement => {
   };
 
   return (
-    <div className='ai-page-bg h-full flex flex-col md:rounded-2xl shadow-md overflow-hidden'>
+    <div className='bg-background h-full flex flex-col md:rounded-2xl shadow-md overflow-hidden'>
       {/* Header */}
-      <div className='ai-page-bg border-b px-6 py-4'>
+      <div className='bg-background border-b px-6 py-4'>
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <BookOpen size={24} className='text-blue-600' />
@@ -110,7 +110,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
       <div className='flex-1 overflow-auto p-6'>
         <div className='max-w-5xl mx-auto'>
           {/* Project Selector */}
-          <div className='ai-page-bg rounded-lg shadow-sm border p-4 mb-6'>
+          <div className='bg-background rounded-lg shadow-sm border p-4 mb-6'>
             <p className='block text-sm font-medium text-foreground mb-2'>Select Project</p>
             <div className='max-w-md'>
               <SingleSelect
@@ -127,7 +127,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
           {/* Documents Section */}
           {!selectedProjectId ? (
             // No project selected state
-            <div className='ai-page-bg rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
               <FolderOpen size={48} className='mx-auto text-muted mb-4' />
               <h2 className='text-lg font-medium text-foreground mb-2'>Select a Project</h2>
               <p className='text-muted-foreground'>
@@ -136,13 +136,13 @@ const KnowledgeBaseScreen = (): ReactElement => {
             </div>
           ) : isLoadingDocuments ? (
             // Loading state
-            <div className='ai-page-bg rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
               <Loader2 size={32} className='mx-auto text-blue-500 animate-spin mb-4' />
               <p className='text-muted-foreground'>Loading documents...</p>
             </div>
           ) : documents.length === 0 ? (
             // Empty state
-            <div className='ai-page-bg rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
               <FileText size={48} className='mx-auto text-muted mb-4' />
               <h2 className='text-lg font-medium text-foreground mb-2'>No Documents Yet</h2>
               <p className='text-muted-foreground'>
@@ -151,7 +151,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
             </div>
           ) : (
             // Documents list
-            <div className='ai-page-bg rounded-lg shadow-sm border overflow-hidden'>
+            <div className='bg-background rounded-lg shadow-sm border overflow-hidden'>
               <div className='px-4 py-3 border-b ai-kb-section'>
                 <h2 className='font-medium text-foreground'>
                   Knowledge Documents ({documentsData?.total || 0})
@@ -167,7 +167,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     className='p-4 hover:bg-muted/50 transition-colors cursor-pointer'
                     onClick={() => setSelectedDocument(doc)}
                     onKeyDown={e => e.key === 'Enter' && setSelectedDocument(doc)}
-                    data-track-category='KnowledgeBase'
+                    data-track-category='knowledge-base'
                     data-track-name='SelectDocument'
                     data-track-metadata={JSON.stringify({
                       documentId: doc.id,
@@ -195,7 +195,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                         disabled={deletingId === doc.id}
                         className='p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50/10 rounded transition-colors disabled:opacity-50'
                         title='Delete document'
-                        data-track-category='KnowledgeBase'
+                        data-track-category='knowledge-base'
                         data-track-name='DeleteDocument'
                         data-track-metadata={JSON.stringify({ documentId: doc.id })}
                       >
@@ -220,8 +220,8 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     <button
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
-                      className='p-1.5 rounded border ai-page-bg hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
-                      data-track-category='KnowledgeBase'
+                      className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      data-track-category='knowledge-base'
                       data-track-name='PreviousPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
@@ -230,8 +230,8 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     <button
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
-                      className='p-1.5 rounded border ai-page-bg hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
-                      data-track-category='KnowledgeBase'
+                      className='p-1.5 rounded border bg-background hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed'
+                      data-track-category='knowledge-base'
                       data-track-name='NextPage'
                       data-track-metadata={JSON.stringify({ currentPage, totalPages })}
                     >
@@ -253,7 +253,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
         className='max-w-3xl'
       >
         <div className='prose prose-sm w-full max-h-[70vh] overflow-auto max-w-3xl relative'>
-          <div className='flex items-center justify-between gap-4 text-sm mb-4 p-4 border-b sticky top-0 ai-page-bg rounded-t-lg'>
+          <div className='flex items-center justify-between gap-4 text-sm mb-4 p-4 border-b sticky top-0 bg-background rounded-t-lg'>
             <div className='flex items-center gap-2'>
               {selectedDocument?.repositoryUrl && (
                 <div className='flex items-center gap-2'>

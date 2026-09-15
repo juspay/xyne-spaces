@@ -3,7 +3,8 @@ import { db } from '@/database/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { userActivityService } from '@/services/userActivityService';
 import { superpositionClient } from '@/services/superpositionClient';
-import { SurfaceAreaType, type UserActivityEvent, type Platform } from '@prisma/client';
+import { type UserActivityEvent } from '@prisma/client';
+import { SurfaceAreaType, Platform } from '@xyne/shared';
 import { nudgeRegistry } from './registry';
 import { AgentsConfig } from '@/agents/config';
 import { activityContextResolver } from './services/activityContextResolver';
@@ -48,10 +49,6 @@ export class NudgeEvaluationEngine {
         : undefined;
 
     const effectivePayload = messagePayload ?? event;
-    const persistenceProjectId = this.resolveProjectIdForPersistence(
-      event,
-      typeof enrichedMeta.projectId === 'string' ? enrichedMeta.projectId : null,
-    );
     const persistenceSourceId = this.resolveSourceIdForPersistence(
       event,
       messagePayload?.messageId ?? null,
@@ -195,13 +192,13 @@ export class NudgeEvaluationEngine {
 
     for (const { definition, candidates } of allCandidates) {
       if (definition.mode === 'implicit') {
-        await this.executeImplicitActions(candidates, persistenceSourceId, persistenceProjectId, event.userId);
+        await this.executeImplicitActions(candidates, persistenceSourceId, eventUser.workspaceId, event.userId);
       } else {
         await nudgeService.persistCandidates({
           sourceId: persistenceSourceId,
           sourceType: definition.direction.from,
           nudgeKind: definition.kind,
-          projectId: persistenceProjectId,
+          workspaceId: eventUser.workspaceId,
           candidates,
           priority: definition.priority,
         });
@@ -212,7 +209,7 @@ export class NudgeEvaluationEngine {
   private async executeImplicitActions(
     candidates: NudgeCandidate[],
     sourceId: string,
-    projectId: string,
+    workspaceId: string,
     userId: string,
   ): Promise<void> {
     for (const candidate of candidates) {
@@ -229,7 +226,7 @@ export class NudgeEvaluationEngine {
           targetId: actions.targetId as string,
           linkKind: actions.linkKind as any,
           createdBy: userId,
-          projectId: (actions.projectId as string) ?? projectId,
+          workspaceId,
         });
       } else if (actionType === 'DELETE_SURFACE_LINKS') {
         const deleteSourceId = (actions.sourceId as string) ?? sourceId;
@@ -302,23 +299,6 @@ export class NudgeEvaluationEngine {
       messageText,
       messageCreatedAt,
     };
-  }
-
-  private resolveProjectIdForPersistence(
-    event: ActivityEventNudgePayload,
-    resolvedProjectId: string | null,
-  ): string {
-    if (resolvedProjectId && resolvedProjectId.trim().length > 0) {
-      return resolvedProjectId;
-    }
-
-    const metadataProjectId = this.extractContextString(event.contextMetadata, 'projectId');
-    if (metadataProjectId) {
-      return metadataProjectId;
-    }
-
-    // User-scoped fallback for activity events that are intentionally not project-bound.
-    return `user:${event.userId}`;
   }
 
   private resolveSourceIdForPersistence(

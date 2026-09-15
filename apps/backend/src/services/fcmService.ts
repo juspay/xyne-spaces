@@ -7,7 +7,8 @@ import { logger } from '@/utils/logger';
 import { redisService } from './redisService';
 import { sendLocalIosPush } from './localIosPush';
 import { getNotificationFcmPayloadTruncated } from '@/services/otel';
-import { Prisma, SessionStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { SessionStatus } from '@xyne/shared';
 
 type CachedAccessToken = {
   accessToken: string;
@@ -565,7 +566,7 @@ class FcmPushService {
         token,
         data: this.buildDataPayload(payload, isSilent),
         android: {
-          priority: 'high',
+          priority: isSilent ? 'normal' : 'high',
           ttl: '86400s',
         },
         ...(webpush ? { webpush } : {}),

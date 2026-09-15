@@ -52,15 +52,65 @@ function getTableNameFromQuery(query: unknown): TableName {
   return query.ast.table as TableName;
 }
 
+// Records each distinct `root -> related` query shape once per process for coverage
+// analysis. Observational only — never throws.
+const loggedRelatedAclSkips = new Set<string>();
+function logSkippedRelatedACLs(query: unknown, rootTable: string): void {
+  try {
+    const related = (query as { ast?: { related?: Array<{ subquery?: { table?: string } }> } })?.ast?.related;
+    if (!related || related.length === 0) return;
+    const relatedTables = Array.from(
+      new Set(
+        related
+          .map((r) => r?.subquery?.table)
+          .filter((t): t is string => typeof t === 'string'),
+      ),
+    ).sort();
+    if (relatedTables.length === 0) return;
+    const signature = `${rootTable}=>${relatedTables.join(',')}`;
+    if (loggedRelatedAclSkips.has(signature)) return;
+    loggedRelatedAclSkips.add(signature);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[related-acl] nested related() subquery not independently ACL-filtered: synced query on ` +
+        `'${rootTable}' has .related() subqueries [${relatedTables.join(', ')}] (only the root ACL + ` +
+        `workspace backstop apply).`,
+    );
+  } catch {
+    /* observability only — must never break a query */
+  }
+}
+
+// Tables that carry a workspaceId column — derived structurally from the schema.
+const WORKSPACE_SCOPED_TABLES: ReadonlySet<string> = new Set(
+  Object.entries(schema.tables)
+    .filter(([, t]) => 'workspaceId' in (t as { columns: Record<string, unknown> }).columns)
+    .map(([name]) => name),
+);
+// Tables whose own ACL owns cross-workspace/global visibility (e.g. GLOBAL apps) — skip the backstop.
+const WORKSPACE_SCOPE_OPT_OUT: ReadonlySet<string> = new Set(['apps']);
+
 function applyQueryACL<TQuery>(
   query: TQuery,
   ctx: Context,
   args?: SelectArgs
 ): TQuery {
   const tableName = getTableNameFromQuery(query);
+  logSkippedRelatedACLs(query, tableName); // observability only (no behavior change)
   const acl = QueryACLFactory.getACL(tableName, ctx);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return acl.canSelect(query as any, args) as TQuery;
+  const scoped = acl.canSelect(query as any, args) as TQuery;
+  // Tenant backstop: scope root rows to the caller's workspace. Structural + idempotent with
+  // per-table ACLs that already filter workspaceId. Skips tables with no workspaceId column / opt-outs.
+  if (
+    ctx.workspaceId &&
+    WORKSPACE_SCOPED_TABLES.has(tableName) &&
+    !WORKSPACE_SCOPE_OPT_OUT.has(tableName)
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (scoped as any).where('workspaceId', '=', ctx.workspaceId) as TQuery;
+  }
+  return scoped;
 }
 
 type QueryDefinitionFunction<TTable extends TableName, TOutput, TReturn> = (

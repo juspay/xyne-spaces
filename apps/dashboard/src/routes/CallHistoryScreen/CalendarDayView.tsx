@@ -127,7 +127,7 @@ function DayViewCallCard({
           {...(draggable ? listeners : {})}
           onClick={e => e.stopPropagation()}
           title={call.title ?? 'Call'}
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='calendar-day-call-card'
           className='group absolute left-2 right-2 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
@@ -201,7 +201,7 @@ function DayViewCallCard({
               onPointerDown={e => onResizePointerDown(e, call)}
               onClick={e => e.stopPropagation()}
               onKeyDown={e => e.stopPropagation()}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='calendar-resize-handle'
             >
               <div className='w-6 h-0.5 rounded-full bg-blue-500' />

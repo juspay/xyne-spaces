@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type { DelayedMessage } from '@xyne/shared';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { InputBox } from '../../ui/InputBox';
+
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { sanitizeHtmlContent } from '../ChatInput/ChatInput.utils';
@@ -138,6 +139,7 @@ export const DelayedMessageEditModal = ({
           <button
             type='button'
             onClick={() => void handleSave()}
+            data-ph-capture-attribute-track-id='edit_scheduled_message'
             disabled={isSaving || !hasContent}
             className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors inline-flex items-center gap-2'
             data-track-category='delayed-messages'

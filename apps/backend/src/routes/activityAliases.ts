@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AccessType } from '@prisma/client';
+import { AccessType } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
 import {
   getAllAliases,

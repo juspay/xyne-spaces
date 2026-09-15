@@ -11,6 +11,7 @@
  */
 
 import { WorkflowEngine, AgenticCheckpointConfig } from '../../workflow-types';
+import { MessageType, TicketStatusV2 } from '@xyne/shared';
 import { WorkflowDefinition } from '../../registry/workflowRegistry';
 import { NetworkDocumentContext } from '../../types/workflow-enums';
 import { WorkflowType } from '../../types/workflow-enums';
@@ -203,7 +204,7 @@ async function createTicketForDocument(
       channelId,
       userId: systemUserId,
       content: messageContent,
-      msgType: 'USER',
+      msgType: MessageType.USER,
     });
 
     // Create ticket using TicketController
@@ -230,7 +231,7 @@ async function createTicketForDocument(
       projectId,
       boardId,
       priority: analysisResult.priority || 'MEDIUM',
-      statusV2: 'TODO',
+      statusV2: TicketStatusV2.TODO,
       messageContent: `Ticket has been created and assigned, kindly find the network document hereunder.`
     });
 
@@ -264,7 +265,7 @@ async function createTicketForDocument(
       conversationId: conversation.conversationId,
       userId: systemUserId,
       content: 'Attachment',
-      msgType: 'USER',
+      msgType: MessageType.USER,
       files: [mockFile]
     });
 

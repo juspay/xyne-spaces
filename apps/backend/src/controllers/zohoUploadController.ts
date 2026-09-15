@@ -15,7 +15,8 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import FormData from 'form-data';
-import { ExternalSource, AttachmentEntityType } from '@prisma/client';
+import { ExternalSource } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';

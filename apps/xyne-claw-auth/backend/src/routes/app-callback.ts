@@ -12,6 +12,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
@@ -41,7 +42,7 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
     .catch((e) =>
       log.warn(
         `[app-callback] markUsedUserToken failed for conv ${conversationId}:`,
-        e instanceof Error ? e.message : String(e),
+        errMsg(e),
       ),
     );
 }
@@ -197,7 +198,7 @@ async function escalateWriteActionFailure(opts: {
     await spacesAppFetch("/chat/postMessage", body, appToken);
     log.info(`[app-callback] Posted failure message with Retry/Dismiss for ${tool} in ${conversationId ?? channelId}`);
   } catch (err) {
-    log.error(`[app-callback] Failed to post failure message:`, err instanceof Error ? err.message : String(err));
+    log.error(`[app-callback] Failed to post failure message:`, errMsg(err));
   }
 }
 
@@ -322,7 +323,7 @@ async function startWriteRetryRun(opts: {
       log.error(`[app-callback] write-retry: /run failed — ${JSON.stringify(runBody)}`);
     }
   } catch (err) {
-    log.error("[app-callback] write-retry: failed to start /run:", err instanceof Error ? err.message : String(err));
+    log.error("[app-callback] write-retry: failed to start /run:", errMsg(err));
   }
 }
 
@@ -373,8 +374,9 @@ router.post("/callback", async (req: Request, res: Response) => {
     const { getQuestion, deleteQuestion } = await import("./pending-questions.js");
     const { setSession } = await import("./webhook.js");
     const question = await getQuestion(questionId);
-    const questionText = question?.question ?? "a question";
-    const optionsList = question?.options?.join(", ") ?? "";
+    const firstPrompt = question?.questions?.[0];
+    const questionText = firstPrompt?.question ?? "a question";
+    const optionsList = firstPrompt?.options?.join(", ") ?? "";
 
     try {
       const agent = await findAgent(answerAgentSlug, answerSpacesAppId);
@@ -566,10 +568,10 @@ router.post("/callback", async (req: Request, res: Response) => {
           channelName = joinRes.channelName ?? targetChannelId;
           log.info(`[app-callback] spaces-send-message: ensured membership in #${channelName}`);
         } catch (e) {
-          const errMsg = e instanceof Error ? e.message : String(e);
+          const errText = errMsg(e);
           // 403 with "private" in the message means private channel — report and bail
           // (other 403s like "bot/app users" from the join endpoint are logged and we still attempt the post)
-          if (errMsg.includes("private")) {
+          if (errText.includes("private")) {
             const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
             if (sourceConversationId) {
               await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }, appToken).catch(() => {});
@@ -739,13 +741,13 @@ router.post("/callback", async (req: Request, res: Response) => {
       const result = await callTool(writeUserId, serverType, effective.credentials, tool, params, agentSlug);
       log.info(`[app-callback] Write action approved: ${tool} → ${result.content.slice(0, 100)}`);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      log.error(`[app-callback] Failed to execute write action ${tool}:`, errMsg);
+      const errText = errMsg(err);
+      log.error(`[app-callback] Failed to execute write action ${tool}:`, errText);
 
       await escalateWriteActionFailure({
         tool,
         serverType,
-        errorReason: errMsg.slice(0, 500),
+        errorReason: errText.slice(0, 500),
         writeUserId,
         signature,
         agentSlug,

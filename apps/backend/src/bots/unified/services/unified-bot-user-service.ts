@@ -5,7 +5,8 @@
  * to the User table with authProvider: 'API_KEY' and userType: 'BOT'.
  */
 
-import { User, AuthProvider, UserStatus, UserType } from '@prisma/client';
+import { User } from '@prisma/client';
+import { AuthProvider, UserStatus, UserType, OrgRole } from '@xyne/shared';
 import { db } from '@/database/client';
 import { botCatalog, type BotDefinition } from '../index.js';
 import {logger} from '@/utils/logger';
@@ -66,10 +67,21 @@ class UnifiedBotUserService {
    * Also ensures bot is added to the workspace's org as a member.
    */
   async ensureBotUserExists(definition: BotDefinition, workspaceId: string): Promise<User> {
-    // First, ensure bot is in org_member table
+    // First, ensure bot is in org_member table (idempotent: creates only when missing)
     await this.ensureBotInOrgMember(definition.email, workspaceId);
 
-    // Fetch the orgMember for the bot
+    // Read the current row first and only write when the code-defined bot has actually
+    // drifted from the DB. Skipping no-op writes avoids re-triggering the setupUserVespaSync
+    // Prisma middleware (a user-index enqueue) on every restart for unchanged bots.
+    const existing = await db.user.findUnique({
+      where: { email_workspaceId: { email: definition.email, workspaceId } },
+    });
+
+    if (existing && !this.botUserNeedsUpdate(existing, definition)) {
+      return existing;
+    }
+
+    // Fetch the orgMember for the bot (memberId is the FK the create branch needs)
     const orgMember = await db.orgMember.findUnique({
       where: { email: definition.email },
       select: { memberId: true }
@@ -81,6 +93,8 @@ class UnifiedBotUserService {
 
     const user = await db.user.upsert({
       where: { email_workspaceId: { email: definition.email, workspaceId } },
+      // Identity/FK fields in `create` (authProvider, providerUserId, orgMemberId) are set
+      // once and excluded from botUserNeedsUpdate; won't self-heal if a bot's id changes.
       create: {
         name: definition.name,
         email: definition.email,
@@ -112,6 +126,25 @@ class UnifiedBotUserService {
   }
 
   /**
+   * True when the DB row differs from the code-defined bot on any field the sync writes
+   * (name, picture, status, userType, and the metadata we own: botId + description).
+   * Only these fields are compared, so unrelated metadata keys don't force a rewrite.
+   */
+  private botUserNeedsUpdate(existing: User, definition: BotDefinition): boolean {
+    const desiredPicture = definition.picture || null;
+    const metadata = (existing.metadata as Record<string, unknown> | null) ?? {};
+
+    return (
+      existing.name !== definition.name ||
+      existing.picture !== desiredPicture ||
+      existing.status !== UserStatus.ACTIVE ||
+      existing.userType !== UserType.BOT ||
+      metadata.botId !== definition.id ||
+      metadata.description !== definition.description
+    );
+  }
+
+  /**
    * Ensure a bot user is in the org_member table for ACL access
    */
   private async ensureBotInOrgMember(botEmail: string, workspaceId: string): Promise<void> {
@@ -139,7 +172,7 @@ class UnifiedBotUserService {
           data: {
             email: botEmail,
             orgId: orgId,
-            role: 'MEMBER',
+            role: OrgRole.MEMBER,
           }
         });
         logger.info(`[UnifiedBotUserService] Added bot '${botEmail}' to org_member for org ${orgId}`);

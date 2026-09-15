@@ -119,10 +119,22 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({
           )}
 
           <div className='flex justify-end gap-2 mt-4'>
-            <Button variant='outline' onClick={onClose} disabled={isLoading}>
+            <Button
+              variant='outline'
+              onClick={onClose}
+              data-track-category='MESSAGE'
+              data-track-name='CANCEL_CREATE_DOCUMENT'
+              disabled={isLoading}
+            >
               Cancel
             </Button>
-            <Button onClick={handleGenerate} loading={isLoading} disabled={isGenerateDisabled}>
+            <Button
+              onClick={handleGenerate}
+              data-track-category='MESSAGE'
+              data-track-name='GENERATE_DOCUMENT'
+              loading={isLoading}
+              disabled={isGenerateDisabled}
+            >
               Generate
             </Button>
           </div>

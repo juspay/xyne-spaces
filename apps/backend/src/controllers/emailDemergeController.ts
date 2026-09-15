@@ -7,17 +7,19 @@
  */
 
 import { Request, Response } from 'express';
+import { EmailType } from '@xyne/shared';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { emailService } from '@/services/emailService';
 import { logger } from '@/utils/logger';
-import { EmailType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { mailSchema } from '@/vespa/src/types';
 import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
+import { syncTicketTagsForConversation } from '@/tags/deskTicket';
 
 interface DemergeEmailRequest {
   emailId: string;
@@ -26,11 +28,13 @@ interface DemergeEmailRequest {
 export class EmailDemergeController {
   private emailRepo: EmailRepository;
   private channelRepo: ChannelRepository;
+  private channelParticipantRepo: ChannelParticipantRepository;
   private prisma;
 
   constructor() {
     this.emailRepo = new EmailRepository();
     this.channelRepo = new ChannelRepository();
+    this.channelParticipantRepo = new ChannelParticipantRepository();
     this.prisma = DatabaseClient.getInstance();
   }
 
@@ -92,6 +96,22 @@ export class EmailDemergeController {
       if (!channel) {
         return res.status(404).json({ error: 'Channel not found' });
       }
+
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      if (originalTicket.workspaceId !== workspaceId || channel.workspaceId !== workspaceId) {
+        return res.status(404).json({ error: 'Ticket not found' });
+      }
+      if (channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepo.isParticipant(originalTicket.channelId, userId);
+        if (!isParticipant) {
+          return res.status(403).json({ error: 'Not a member of this channel' });
+        }
+      }
+
       // Demerge is intentionally NOT gated on the inbox's auto-merge setting —
       // tickets that were auto-merged in the past must remain demerge-able even
       // after the merchant disables the setting.
@@ -140,6 +160,11 @@ export class EmailDemergeController {
         await syncTicketEmailCount(tx, originalTicket.conversationId);
         await syncTicketEmailCount(tx, newConversation.conversationId);
       });
+
+      // Re-sync old ticket's tags — emails moved out so its latest email changed,
+      // but no tag write fired on the old conversation's side.
+      // New conversation's ticket tags are covered by the regen jobs below.
+      void syncTicketTagsForConversation(originalTicket.conversationId);
 
       // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed
       for (const id of emailIdsToMove) {

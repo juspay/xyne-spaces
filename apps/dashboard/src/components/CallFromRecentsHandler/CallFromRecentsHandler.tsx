@@ -44,7 +44,7 @@ export const CallFromRecentsHandler = (): ReactElement | null => {
           return;
         }
 
-        const callType = payloadCallType === 'VIDEO' ? CallType.VIDEO : CallType.AUDIO;
+        const callType = payloadCallType === CallType.VIDEO ? CallType.VIDEO : CallType.AUDIO;
         setPendingCall({ channelId, callType });
       },
     );

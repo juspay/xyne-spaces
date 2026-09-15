@@ -4,6 +4,7 @@ import { projectRecapGenerationService } from '@/services/projectRecapGeneration
 import { redisService } from '@/services/redisService';
 import { db } from '@/database/client';
 import Bull from 'bull';
+import { RecapEntityType } from '@xyne/shared';
 
 function getYesterdayIST(now = new Date()): Date {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -105,7 +106,7 @@ export class RecapWorker {
       // Delete channel recaps older than cutoff date
       const result = await db.recap.deleteMany({
         where: {
-          entityType: 'CHANNEL',
+          entityType: RecapEntityType.CHANNEL,
           recapDate: {
             lt: cutoffDate,
           },

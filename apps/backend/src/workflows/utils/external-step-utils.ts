@@ -8,8 +8,8 @@
  */
 
 import { repositories } from '@/database/repositories'
+import { ActivityClassification } from '@xyne/shared';
 import { logger } from '@/utils/logger'
-import { ActivityClassification } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
 import { activityService } from '@/services/activity/activityService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'

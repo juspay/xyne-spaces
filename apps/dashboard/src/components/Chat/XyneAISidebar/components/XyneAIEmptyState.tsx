@@ -50,7 +50,7 @@ const SuggestionCard = ({
     <button
       type='button'
       onClick={() => onSelect(prompt)}
-      data-track-category='XYNE_AI'
+      data-track-category='XyneAI'
       data-track-name='SELECT_SUGGESTION'
       className={cn(
         'flex flex-col items-start gap-[24px] overflow-clip rounded-[20px] border border-border bg-card px-[20px] pb-[20px] pt-[16px] text-left',

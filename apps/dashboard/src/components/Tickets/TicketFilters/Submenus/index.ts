@@ -10,5 +10,6 @@ export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';
 export { SourceChannelsSubmenu } from './SourceChannelsSubmenu/SourceChannelsSubmenu';
 export { AICategorySubmenu } from './AICategorySubmenu/AICategorySubmenu';
 export { GeneratedTagsSubmenu } from './GeneratedTagsSubmenu/GeneratedTagsSubmenu';
+export { ConversationLabelSubmenu } from './ConversationLabelSubmenu/ConversationLabelSubmenu';
 export { RoleSubmenu } from './RoleSubmenu/RoleSubmenu';
 export type { RoleAssignmentValue } from './RoleSubmenu/RoleSubmenu';

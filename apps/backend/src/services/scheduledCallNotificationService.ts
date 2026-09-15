@@ -1,9 +1,15 @@
 import Bull from 'bull';
+import {
+  CallStatus,
+  NotificationType,
+  ActivityClassification,
+  InvitationResponse,
+  MeetingStatus,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
-import { CallStatus, NotificationType, ActivityClassification, InvitationResponse, MeetingStatus } from '@prisma/client';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 import { recurringCallService } from '@/services/recurringCallService';
 import { db } from '@/database/client';

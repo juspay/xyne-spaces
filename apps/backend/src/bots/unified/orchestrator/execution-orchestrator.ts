@@ -5,8 +5,8 @@
  * Handles resolution, context building, persistence, and streaming.
  */
 
-import { MessageType } from '@prisma/client';
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { MessageType } from '@xyne/shared';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { websocketService } from '@/services/websocketService';
@@ -111,7 +111,7 @@ class ExecutionOrchestrator {
     const context = await this.buildContext(request, entry);
 
     // 3. Update conversation activity
-    await this.updateConversationActivity(request);
+    await this.updateConversationActivity(request, context.triggerMessage);
 
     // 4. Delegate to appropriate runtime
     if (isInternalBot(entry.definition)) {
@@ -366,8 +366,16 @@ class ExecutionOrchestrator {
   /**
    * Update conversation activity counts
    */
-  private async updateConversationActivity(request: ExecutionRequest): Promise<void> {
-    await conversationRepository.incrementReplyCount(request.conversationId);
+  private async updateConversationActivity(
+    request: ExecutionRequest,
+    triggerMessage: BotExecutionContext['triggerMessage'],
+  ): Promise<void> {
+    const conversation = await conversationRepository.findById(request.conversationId);
+    const replyCreatedAt =
+      triggerMessage && triggerMessage.messageId !== conversation?.initialMessageId
+        ? triggerMessage.createdAt
+        : null;
+    await conversationRepository.incrementReplyCount(request.conversationId, replyCreatedAt);
     await channelRepository.updateLastActivity(request.channelId);
   }
 

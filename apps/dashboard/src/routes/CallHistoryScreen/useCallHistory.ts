@@ -15,7 +15,7 @@ import {
   isMissedCallForUser,
   isExternalCalendarEvent,
   isExternalCalendarEventForUser,
-  isScheduledCallJoinable,
+  canJoinCall,
   shouldShowInCallLists,
   shouldShowInScheduledList,
   type Call,
@@ -416,17 +416,8 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   };
 
   const handleCallRowClick = (call: Call): void => {
-    if (call.status === CallStatus.SCHEDULED) {
-      if (!isScheduledCallJoinable(call)) {
-        toast.info('Call has not started yet', {
-          description: 'You can join at the scheduled start time.',
-          duration: 3000,
-        });
-        return;
-      }
-      handleJoinCall(call);
-    } else if (call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS) {
-      // For active/in-progress calls, join them
+    if (canJoinCall(call)) {
+      // Scheduled calls can be joined before their start time as well.
       handleJoinCall(call);
     } else {
       // For ended calls, restart them
@@ -576,6 +567,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     startsAt: call.startsAt!,
     endsAt: call.endsAt!,
     participants: [...participants],
+    organizerUserId: call.organizerId ?? call.createdByUserId,
     channelId: call.channelId,
     recurringSeriesId: call.recurringSeriesId,
     callUpdatesChannel: call.callUpdatesChannel ?? null,

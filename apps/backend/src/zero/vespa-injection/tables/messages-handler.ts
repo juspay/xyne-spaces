@@ -5,6 +5,7 @@ import type { VespaQueueHandler } from '../core/types';
 import type { QueryContext } from '../../acl/core/types';
 import { messageSchema } from '@/vespa/src/types';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 
 type MessagesSchema = Schema['tables']['messages'];
 
@@ -19,10 +20,9 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
   }
 
   onInsert(args: InsertValue<MessagesSchema>, _tx: Transaction<Schema>): VespaQueueHandler[] {
-    // Fire-and-forget: enqueue the thread (conversationId == threadId) for the
-    // nightly entity-extraction pass. Fully guarded internally, so it can never
-    // affect ingestion. Skipped inside if the channel has no approved types.
+    // Fire-and-forget: both are guarded internally and must never affect ingestion.
     void entityExtractionQueue.enqueueForMessage(args.conversationId);
+    void messageClassificationQueue.enqueueForMessage(args.conversationId);
     return [{
       schema: messageSchema,
       jobType: 'feed',

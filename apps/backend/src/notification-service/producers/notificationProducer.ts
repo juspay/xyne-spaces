@@ -1,11 +1,11 @@
 import { NotificationEvent, MobilePushJobData, MobilePushPayload, DeliveryChannel } from '../types';
+import { NotificationStatus } from '@xyne/shared';
 import { notificationWorker } from '../consumers/notificationWorker';
 import { notificationRedisService } from '../config/redis';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
-import { NotificationStatus } from '@prisma/client';
 
 export class NotificationProducer {
   private logger = logger.child({ module: 'NotificationProducer' });
@@ -34,7 +34,7 @@ export class NotificationProducer {
       const eventId = uuidv4();
 
       // workspace context — clients always render workspace at the top.
-      let workspaceId: string | undefined;
+      let workspaceId = typeof data?.workspaceId === 'string' ? data.workspaceId : undefined;
       let workspaceName: string | undefined;
       let orgMemberId: string | undefined;
       try {
@@ -50,8 +50,10 @@ export class NotificationProducer {
             await redisService.setWorkspaceContext(userId, ctx);
           }
         }
-        workspaceId = ctx?.workspaceId;
-        workspaceName = ctx?.workspaceName;
+        workspaceId ??= ctx?.workspaceId;
+        if (workspaceId === ctx?.workspaceId) {
+          workspaceName = ctx?.workspaceName;
+        }
         orgMemberId = ctx?.orgMemberId;
       } catch (lookupError) {
         this.logger.error('Failed to resolve workspace context for notification', { userId, error: lookupError });
@@ -94,7 +96,6 @@ export class NotificationProducer {
         userId,
         orgMemberId,
         type,
-        title,
       });
 
       return event.id;

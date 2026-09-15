@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { emailService } from '@/services/emailService';
 import { db } from '@/database/client';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 
 export async function handleAutoDraftCallback(
   req: Request<{ conversationId: string; channelId: string }>,
@@ -47,7 +47,7 @@ export async function handleAutoDraftCallback(
       throw new Error(`AutoDraft callback: channel ${channelId} not found or has no workspaceId`);
     }
     const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
-      runWithContext({ userId: 'autodraft-callback', workspaceId: channel.workspaceId }, fn);
+      runAsServiceActor('autodraft-callback', channel.workspaceId, fn);
 
     if (status !== 'completed' || !result || !result.trim()) {
       logger.warn('[AutoDraft] callback skip: non-success or empty result', {

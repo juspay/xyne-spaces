@@ -551,10 +551,13 @@ export function useDeskAIDraft({
 
   const acceptDraft = useCallback(() => {
     setIsDraftActive(false);
+    if (threadId && ourStreamIdRef.current) {
+      xyneAIStreamManager.abortStreamByThread(threadId);
+    }
     ourStreamIdRef.current = null;
     clearStorage();
     return draftContent;
-  }, [draftContent, clearStorage]);
+  }, [draftContent, clearStorage, threadId]);
 
   const rejectDraft = useCallback(() => {
     if (threadId && ourStreamIdRef.current) {

@@ -5,6 +5,22 @@ export type { IngestionStatus };
 export type NodeType = 'FILE' | 'FOLDER';
 export type CollectionRole = 'VIEWER' | 'EDITOR' | 'OWNER';
 
+/** The backend's own item-type vocabulary (lowercase, e.g. searchItems'
+ *  itemType field) — distinct from NodeType (the frontend's normalized,
+ *  uppercase vocabulary). Named so toNodeType can switch over it exhaustively:
+ *  if this union ever grows, toNodeType fails to compile until it's updated,
+ *  instead of the new value silently falling through to 'FILE'. */
+export type BackendItemType = 'file' | 'folder';
+
+function toNodeType(itemType: BackendItemType): NodeType {
+  switch (itemType) {
+    case 'file':
+      return 'FILE';
+    case 'folder':
+      return 'FOLDER';
+  }
+}
+
 export interface CollectionChild {
   id: string;
   name: string;
@@ -14,6 +30,11 @@ export interface CollectionChild {
   type: NodeType;
   mimeType: string;
   parentId: string | null;
+  /** Per-collection ingestion rollup, only populated for collections at the KB
+   *  root (see useGlobalCollections). Undefined for files and subfolders. */
+  fileTotal?: number;
+  fileIngested?: number;
+  fileFailed?: number;
 }
 
 export interface CollectionItemVersion {
@@ -85,19 +106,24 @@ export async function searchCollectionItems(
   collectionId: string,
   query: string,
 ): Promise<CollectionChild[]> {
+  // The backend's search response shape doesn't match CollectionChild's field
+  // names — it sends `itemType: 'folder' | 'file'` (lowercase, not `type`)
+  // and `collectionId` (the item's containing folder, same field name Zero's
+  // synced schema uses everywhere else — see CollectionTreeDataSync's
+  // filesByFolder map) rather than `parentId`. Mapped explicitly below
+  // instead of trusting a response type that never matched reality.
   const response = await apiInstance.get<{
     success: boolean;
     items: Array<{
       id: string;
       name: string;
-      type: NodeType;
+      itemType: BackendItemType;
       createdAt: string;
       updatedAt: string;
-      uploadedByEmail: string;
       ingestionStatus: IngestionStatus;
-      fileSize: string;
-      mimeType: string;
-      parentId: string | null;
+      fileSize: string | null;
+      mimeType: string | null;
+      collectionId: string;
     }>;
     query: string;
   }>(`/collections/${collectionId}/search`, {
@@ -107,12 +133,15 @@ export async function searchCollectionItems(
   return response.data.items.map(item => ({
     id: item.id,
     name: item.name,
-    type: item.type,
+    type: toNodeType(item.itemType),
     updatedAt: item.updatedAt,
     ingestionStatus: item.ingestionStatus,
     size: item.fileSize ? parseInt(item.fileSize, 10) || 0 : 0,
-    mimeType: item.mimeType,
-    parentId: item.parentId ?? null,
+    mimeType: item.mimeType ?? '',
+    // Root-level items' collectionId equals the collection being searched —
+    // normalize that to null to match CollectionChild.parentId's
+    // "root has no parent" convention used everywhere else.
+    parentId: item.collectionId === collectionId ? null : item.collectionId,
   }));
 }
 
@@ -199,6 +228,77 @@ export async function uploadFilesToCollection(
     onProgress({ uploaded: files.length, total: files.length });
   }
 
+  return response.data;
+}
+
+/** Returned by addDriveLinkToCollection once the import is enqueued. */
+export interface DriveImportStarted {
+  /** null when there was nothing to import. */
+  sessionId: string | null;
+  total: number;
+  files: Array<{ name: string }>;
+}
+
+export type DriveImportFileStatus = 'pending' | 'uploaded' | 'skipped' | 'failed';
+
+/** Live progress of a background Drive import (polled from the status endpoint). */
+export interface DriveImportProgress {
+  collectionId: string;
+  total: number;
+  processed: number;
+  done: boolean;
+  /** Set when the connected token was rejected mid-import → prompt a reconnect. */
+  needsDriveAuth?: boolean;
+  files: Array<{ name: string; status: DriveImportFileStatus; error?: string }>;
+}
+
+/**
+ * Ask the backend for the Google Drive OAuth "connect" URL. Uses OAuth incremental
+ * authorization, so an already-signed-in Google user just approves the Drive scope —
+ * no re-login. `returnPath` is the same-origin SPA path (e.g. the current KB URL) the
+ * backend redirects back to after consent, with `?driveOAuth=success` appended.
+ */
+export async function initDriveOAuth(returnPath: string): Promise<{ authUrl?: string }> {
+  const { data } = await apiInstance.post<{ success: boolean; authUrl?: string }>(
+    '/drive/oauth/google/init',
+    { returnPath },
+  );
+  return data.authUrl ? { authUrl: data.authUrl } : {};
+}
+
+/**
+ * Start a Google Drive import. The server lists the file/folder (as the user, via their
+ * connected OAuth token), enqueues a background download job, and returns a `sessionId` +
+ * the file list immediately. Poll {@link getDriveImportStatus} for live progress. If the
+ * user hasn't connected Drive, the request fails with `needsDriveAuth: true` on the error.
+ */
+export async function addDriveLinkToCollection(
+  collectionId: string,
+  driveUrl: string,
+  opts?: {
+    parentId?: string | null;
+    duplicateStrategy?: 'skip' | 'rename' | 'overwrite';
+  },
+): Promise<DriveImportStarted> {
+  const response = await apiInstance.post<DriveImportStarted>(
+    `/collections/${collectionId}/upload-drive-link`,
+    {
+      driveUrl,
+      parentId: opts?.parentId ?? null,
+      duplicateStrategy: opts?.duplicateStrategy ?? 'rename',
+    },
+  );
+  return response.data;
+}
+
+/** Poll the progress of a background Drive import started above. */
+export async function getDriveImportStatus(
+  collectionId: string,
+  sessionId: string,
+): Promise<DriveImportProgress> {
+  const response = await apiInstance.get<DriveImportProgress>(
+    `/collections/${collectionId}/drive-import/${sessionId}`,
+  );
   return response.data;
 }
 

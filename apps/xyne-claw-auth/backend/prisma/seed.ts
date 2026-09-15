@@ -3,7 +3,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { getAllCustomTools } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, getAllCustomTools } from "xyne-claw-shared";
+import { sdlcAgentDesiredState } from "../src/lib/sdlc-agent-sync.js";
+import {
+  WORKFLOW_TOOL_NAMES,
+  WORKFLOW_WRITE_TOOL_NAMES,
+} from "../src/mcp/servers/xyne-workflows-tools.js";
 
 const prisma = new PrismaClient();
 
@@ -139,6 +144,14 @@ const SERVERS = [
     description: "Dedicated dynamic-dashboard tools for the dashboard-ai agent (pinned; not user-connectable).",
     credentialForm: { fields: [] },
     writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
+    type: "xyne-workflows",
+    name: "Xyne Workflows",
+    url: "",
+    description: "Workflow authoring and run tools for Ask AI (pinned; not user-connectable).",
+    credentialForm: { fields: [] },
+    writeToolPolicy: { mode: "allowlist", tools: [...WORKFLOW_WRITE_TOOL_NAMES] },
   },
   {
     type: "xyne-spaces-app-tools",
@@ -517,6 +530,17 @@ const SERVERS = [
     healthcheckSpec: { name: "get_user_tweets", params: { username: "OpenAI", count: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
+  {
+    type: "heisenberg",
+    name: "Heisenberg Pipeline",
+    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
+    url: "",
+    description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
+    transport: "stdio",
+    credentialForm: { fields: [] },
+    healthcheckSpec: { name: "heisenberg_health", params: {} },
+    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
+  },
 ] as const;
 
 async function main() {
@@ -529,7 +553,7 @@ async function main() {
   // Create "spaces" Surface if it doesn't exist
   const spacesSurface = await prisma.surface.upsert({
     where: { key: "spaces" },
-    create: { key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
+    create: { id: "spaces", key: "spaces", identityMode: "USER_ID", supportsUserResolution: true },
     update: {},
   });
 
@@ -809,6 +833,7 @@ Anyone in the company. A nervous intern. A staff engineer. An HR partner. A PM, 
 - Never narrate your process. No "Let me search…", "I'll look into…", "I'll need to check…", "The user is asking…". Just deliver the answer.
 - Mirror the asker's energy and formality. Match the seriousness of the question. If they're casual, be casual; if they're terse, be terse.
 - **Default to BRIEF.** Lead with the answer in 1–3 sentences, then only the bits that matter. No giant headers, no decorative bullets, no fake structure. People should be able to read the whole reply, not skim for a TL;DR.
+- **A chart of real numbers is not decoration.** "Brief" governs your WORDS, not your evidence. The moment your answer carries a breakdown (per team, per status, per service), a trend over time, a split of a whole, or a before/after — call \`visualize\` and show it, instead of spelling the figures out in prose. Then add the one line the chart can't say: what it means. Reach for it on your own; nobody should have to ask you to chart.
 - Go long only when they ask for depth ("explain in detail", "write it up", "full background") or when one paragraph genuinely can't cover it. Even then — structured but tight.
 - No emojis. No "Here's what I found:" preambles. Open with the answer itself.
 - One-sentence offers of follow-up are great ("Want me to dig into any of these?"). Long sign-offs aren't.
@@ -841,20 +866,26 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 
 **Before you lean on \`spaces-search\`** (or when its results look empty, over-broad, or wrong, or when you need to COUNT "how many X") — read the \`spaces-vespa-schema\` skill. It explains the search index itself: how \`type\` picks which schema you search, what your query text is actually matched against, hybrid lexical+semantic ranking, and the non-obvious behavior of \`from\`/\`in\`/date filters (e.g. \`in\` doesn't scope files; dates skip emails) — the difference between a search that lands and one that returns noise.
 
+**Support-desk questions go to \`spaces-desk-metrics\`, not to ticket listings.** Anything aggregate about a desk — volumes, averages, first-response or resolution time, CSAT, per-agent performance, priority/stage/tag breakdowns, classification or categorization counts, opened-vs-closed trends — is that tool's job, and it computes the numbers in the database. Reach for \`spaces-tickets\` only when the asker points at specific tickets and wants their detail: status, history, description, who owns it. Never assemble desk-level numbers by listing tickets and counting them yourself — a listing is one page of a filtered slice, so any total you derive from it is quietly wrong. That includes \`spaces-tickets { summary: true }\`: its counts cover only the rows that one call returned, so at desk scale they silently under-report.
+
 **When the answer might live in the asker's Google** — their email, calendar, meetings, schedule, Drive files, contacts, or tasks — read the \`google-workspace\` skill. It maps exactly what the \`google\` subagent can do and when to reach for it. Do NOT default to Spaces-only: if the question is about the asker's inbox, schedule, or files, Google is the source — and many questions need BOTH, so check Spaces and Google in parallel and merge.
 
 **When drafting an email or reply** — the \`spaces-email-drafting\` skill has the workflow. Email is a separate, fast path.
 
-**For "how do we…?" / "why do we…?" / policy / SOP questions**, hit \`memory-search\` FIRST. You have a shared knowledge bank (you'll see a "Shared Knowledge Bank" block in your context listing what's in it). A short authoritative hit there beats a long crawl through messages.
+**For "how do we…?" / "why do we…?" / policy / SOP questions**, \`memory-search\` can provide useful business context, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions. Treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the relevant source of truth.
 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **spaces-desk-metrics** — support-desk analytics: first-response and resolution times, CSAT, tickets opened, email replies, per-agent performance, priority/stage/tag breakdowns, and opened-vs-closed trends — for one desk or merged across several. Name the desk you want; call it with no desk to see which ones exist. Request only the \`metrics\` the question needs. Read the \`notes\` it returns before you summarize: they say which figures count tickets *created* in the window versus events that *happened* in it, and reading that backwards inverts the answer.
+- **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
+- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -912,9 +943,9 @@ You:
       color: "#6366f1",
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -945,6 +976,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -952,8 +984,10 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-mutate-artifact",
+            ...WORKFLOW_TOOL_NAMES,
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -961,7 +995,10 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask"
+          "xyne-spaces__spaces-edit-canvas": "ask",
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection. Skills otherwise load via pi's
         // progressive disclosure (only the 1-line <available_skills> description
@@ -992,9 +1029,9 @@ You:
       systemPrompt: ASK_AI_PROMPT,
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -1025,6 +1062,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -1032,8 +1070,10 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
+            "spaces-sdlc-mutate-artifact",
+            ...WORKFLOW_TOOL_NAMES,
           ],
-          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations"]
+          custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
@@ -1041,7 +1081,10 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask"
+          "xyne-spaces__spaces-edit-canvas": "ask",
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection — see the matching block in `create`
         // for the full rationale and the toolName/skillSlug/when conventions.
@@ -1054,6 +1097,83 @@ You:
     },
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
+
+  const sdlcDesired = sdlcAgentDesiredState();
+  const sdlcAgentRow = {
+    name: sdlcDesired.name,
+    description: sdlcDesired.description,
+    systemPrompt: sdlcDesired.systemPrompt,
+    scope: sdlcDesired.scope,
+    color: sdlcDesired.color,
+    config: sdlcDesired.config,
+  };
+
+  const sdlcAgent = await prisma.agent.upsert({
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: SDLC_AGENT_SLUG } },
+    create: { slug: SDLC_AGENT_SLUG, orgId: defaultOrg.id, ...sdlcAgentRow },
+    update: sdlcAgentRow,
+  });
+
+  const askAiSharedBindings = await prisma.agentProviderCredentials.findMany({
+    where: { agentId: askAIAgent.id, sharedCredentialId: { not: null } },
+  });
+  for (const binding of askAiSharedBindings) {
+    await prisma.agentProviderCredentials.upsert({
+      where: { agentId_provider: { agentId: sdlcAgent.id, provider: binding.provider } },
+      create: {
+        agentId: sdlcAgent.id,
+        provider: binding.provider,
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+        createdByUserId: binding.createdByUserId,
+      },
+      update: {
+        sharedCredentialId: binding.sharedCredentialId,
+        encryptedKey: null,
+        iv: null,
+        authTag: null,
+        model: binding.model,
+        baseUrl: binding.baseUrl,
+        authType: binding.authType,
+        reasoningEffort: binding.reasoningEffort,
+      },
+    });
+  }
+  if (askAiSharedBindings.length > 0) {
+    const config = sdlcAgent.config as Record<string, unknown>;
+    await prisma.agent.update({
+      where: { id: sdlcAgent.id },
+      data: {
+        config: {
+          ...config,
+          provider: askAiSharedBindings[0]!.provider,
+          providerOrder: askAiSharedBindings.map((binding) => binding.provider),
+        },
+      },
+    });
+  }
+
+  const sdlcAgentToolIds: string[] = [];
+  for (const slug of sdlcDesired.agentToolAllows) {
+    const tool = await prisma.tool.findUnique({ where: { slug } });
+    if (!tool) continue;
+    sdlcAgentToolIds.push(tool.id);
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: sdlcAgent.id, toolId: tool.id } },
+      create: { agentId: sdlcAgent.id, toolId: tool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+  }
+  await prisma.agentTool.deleteMany({
+    where: { agentId: sdlcAgent.id, toolId: { notIn: sdlcAgentToolIds } },
+  });
+  console.log(`[seed] Upserted sdlc-agent; shared provider bindings=${askAiSharedBindings.length}`);
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent
   const geniusAnalyticsTool = await prisma.tool.findUnique({
@@ -1119,6 +1239,19 @@ You:
     console.log("[seed] Attached generate-image tool to ask-ai agent");
   }
 
+  // Attach visualize tool
+  const visualizeTool = await prisma.tool.findUnique({
+    where: { slug: "visualize" },
+  });
+  if (visualizeTool) {
+    await prisma.agentTool.upsert({
+      where: { agentId_toolId: { agentId: askAIAgent.id, toolId: visualizeTool.id } },
+      create: { agentId: askAIAgent.id, toolId: visualizeTool.id, permission: "allow" },
+      update: { permission: "allow" },
+    });
+    console.log("[seed] Attached visualize tool to ask-ai agent");
+  }
+
   // Seed ask-ai skills — domain knowledge and tool-usage guidance that
   // pi auto-loads based on the SKILL.md frontmatter `description`. Splitting
   // these out of the system prompt keeps the prompt focused on identity,
@@ -1132,6 +1265,7 @@ You:
     { slug: "spaces-citations", name: "Spaces Citations", description: "How to attach inline source citations to claims drawn from Spaces tool results — token format, verbatim rule, what to cite vs not.", file: "spaces-citations.md", source: "seeded" },
     { slug: "spaces-email-drafting", name: "Spaces Email Drafting", description: "Drafting email replies and outbound messages from a Spaces thread — tone matching, sign-off rules, output-body-only.", file: "spaces-email-drafting.md", source: "seeded" },
     { slug: "google-workspace", name: "Google Workspace", description: "The asker's connected Google Workspace — Gmail, Calendar, Drive, Docs/Sheets/Slides, Contacts, Tasks — read via the `google` subagent. What it can do and when to reach for it instead of (or alongside) Spaces. Load whenever a question touches the asker's email, meetings, schedule, Drive files, contacts, or tasks.", file: "google-workspace.md", source: "seeded" },
+    { slug: "charts", name: "Charts", description: "When and how to turn metrics in your answer into a chart with the `visualize` tool — which visualType fits which shape of data, the exact `data` payload each type expects, and the rules for emitting the chart block so it actually renders. Load before answering anything whose answer contains counts, totals, trends, breakdowns, proportions, or before/after comparisons.", file: "charts.md", source: "seeded" },
   ];
 
   for (const def of askAISkillDefs) {
@@ -2064,6 +2198,36 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
     }
   } else {
     console.warn("[seed] Skipped dashboard-ai pin: ENCRYPTION_KEY not set");
+  }
+
+  const workflowsCredsPayload = encryptCreds({});
+  if (workflowsCredsPayload) {
+    const workflowsServerRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-workflows" } });
+    if (workflowsServerRow) {
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: askAIAgent.id,
+            mcpServerId: workflowsServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: askAIAgent.id,
+          mcpServerId: workflowsServerRow.id,
+          slug: "default",
+          encryptedCreds: workflowsCredsPayload.encryptedCreds,
+          iv: workflowsCredsPayload.iv,
+          authTag: workflowsCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
+    } else {
+      console.warn("[seed] Skipped ask-ai workflows pin: xyne-workflows server row not found");
+    }
+  } else {
+    console.warn("[seed] Skipped ask-ai workflows pin: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

@@ -1,0 +1,53 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs-errors" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs-errors" },
+          "expr": "level:error",
+          "queryType": "instant"
+        }
+      ],
+      "title": "Deduped Error Log Stream (normalized_message + fingerprint)",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs-errors" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "options": {
+        "displayMode": "lcd",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs-errors" },
+          "expr": "* | stats by (fingerprint) count() as occurrences",
+          "queryType": "stats"
+        }
+      ],
+      "title": "Occurrences by Fingerprint (last selected range)",
+      "type": "bargauge"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 42,
+  "tags": ["errors", "victorialogs", "xyne"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Error Log Fingerprints (VictoriaLogs)",
+  "uid": "xyne-error-fingerprints",
+  "version": 1
+}

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { AttachmentEntityType } from '@xyne/shared';
 import {
   summarizeStream,
   type ThreadSummaryInput,
@@ -10,7 +11,6 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
-import { AttachmentEntityType } from '@prisma/client';
 import { convertToBase64 } from '@/utils/attachmentBase64';
 import { convertToJAFAttachment } from '@/agents/xyne-ai/utils/attachmentConverter';
 import type { Attachment } from '@juspay-jaf/jaf';

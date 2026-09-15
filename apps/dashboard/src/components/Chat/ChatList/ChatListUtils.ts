@@ -1,6 +1,6 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-import { MessageType } from '@xyne/shared';
+import { MessageType, parseAppliedTags, visibleTags } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
@@ -48,10 +48,14 @@ export const extractMessageIdFromHash = (hash: string): string | null => {
  * - It's the first message
  * - Different sender than previous message
  * - Previous message was a conversation with replies
+ *
+ * `showThreadTags` is the reader's own preference: a tag chip only breaks grouping for
+ * someone who has the chips turned on.
  */
 export const shouldShowAvatar = (
   currentItem: CombinedMessageItem,
   prevItem: CombinedMessageItem | null,
+  showThreadTags: boolean,
 ): boolean => {
   if (!prevItem) return true;
 
@@ -99,6 +103,18 @@ export const shouldShowAvatar = (
     return !!isPreviousMessageAWorkflowMessage || isPreviousMessageAnActivity;
   };
 
+  // A tagged thread shows its chip beside the name and timestamp, so it needs its own
+  // header row — grouped under the previous message there is nowhere to put it. Only when
+  // the reader has chips switched on: the classifier tags nearly every thread, so applying
+  // this unconditionally un-clubs the whole channel for people who see no chips at all.
+  // Goes through the shared parser so removed tags — which render nothing — don't count.
+  const hasVisibleThreadTag = (): boolean => {
+    if (!showThreadTags) return false;
+    if (currentItem.type !== 'conversation') return false;
+    return visibleTags(parseAppliedTags(currentItem.data.threadType)).length > 0;
+  };
+
+  if (hasVisibleThreadTag()) return true;
   if (isCurrentItemCallMessage()) return true;
   if (!isSameDayMessege()) return true;
 

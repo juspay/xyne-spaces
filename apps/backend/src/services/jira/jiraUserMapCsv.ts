@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises';
 import { config } from '@/config/env';
-import { GCSService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
 const USER_MAP_TTL_MS = 15 * 60 * 1000;
@@ -69,7 +69,7 @@ export const loadJiraUserMapFromLocation = async (location: string): Promise<Man
 
   const gs = parseGsLocation(trimmed);
   if (gs) {
-    const buffer = await new GCSService(gs.bucket).getFileBuffer(gs.objectPath);
+    const buffer = await getStorageService(gs.bucket).getFileBuffer(gs.objectPath);
     return parseJiraUserMapCsv(buffer.toString('utf-8'));
   }
 

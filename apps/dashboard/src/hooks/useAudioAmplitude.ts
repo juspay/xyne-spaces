@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * useAudioAmplitude — extracts real-time amplitude data from the LiveKit
  * microphone track using the Web Audio API (AnalyserNode).
@@ -59,7 +60,11 @@ export function useAudioAmplitude(
       try {
         tentativeAudioContext = new AudioContext();
         tentativeAudioContext.resume().catch(err => {
-          console.warn('[useAudioAmplitude] Failed to resume AudioContext:', err);
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_warn',
+            message: String('[useAudioAmplitude] Failed to resume AudioContext:'),
+            context: [err],
+          });
         });
         analyser = tentativeAudioContext.createAnalyser();
         analyser.fftSize = FFT_SIZE;
@@ -71,8 +76,12 @@ export function useAudioAmplitude(
         audioContext = tentativeAudioContext;
         retryCount = 0;
       } catch (err) {
-        console.error('[useAudioAmplitude] Failed to create AudioContext:', err);
-        tentativeAudioContext?.close().catch(() => {}); // Clean up on error
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[useAudioAmplitude] Failed to create AudioContext:'),
+          error: err,
+        });
+        tentativeAudioContext?.close().catch(() => undefined); // Clean up on error
         if (retryCount++ < MAX_RETRIES) {
           retryTimer = setTimeout(setup, RETRY_MS);
         }
@@ -89,7 +98,7 @@ export function useAudioAmplitude(
           if (rafId !== null) cancelAnimationFrame(rafId);
           source?.disconnect();
           analyser?.disconnect();
-          audioContext?.close().catch(() => {}); // Suppress unhandled rejection
+          audioContext?.close().catch(() => undefined); // Suppress unhandled rejection
           source = null;
           analyser = null;
           audioContext = null;
@@ -130,7 +139,7 @@ export function useAudioAmplitude(
       if (retryTimer !== null) clearTimeout(retryTimer);
       source?.disconnect();
       analyser?.disconnect();
-      audioContext?.close().catch(() => {}); // Suppress unhandled rejection
+      audioContext?.close().catch(() => undefined); // Suppress unhandled rejection
     };
   }, [room, isActive, isPaused]);
 

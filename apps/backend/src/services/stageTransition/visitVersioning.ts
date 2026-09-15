@@ -1,4 +1,4 @@
-import { ReenterMode } from '@prisma/client';
+import { ReenterMode } from '@xyne/shared';
 
 /**
  * Visit versioning + ETA reset/continue decision logic for NON_LINEAR stage transitions.

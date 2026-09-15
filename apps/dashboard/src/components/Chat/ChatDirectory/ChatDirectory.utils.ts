@@ -1,5 +1,8 @@
 import {
+  ChannelFilterMode,
   ChannelScopeType,
+  ChannelSortOrder,
+  ChannelType,
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
@@ -47,6 +50,39 @@ export const sumSectionUnread = (
     0,
   );
 
+export const DEFAULT_FILTER_MODE = ChannelFilterMode.ACTIVE;
+export const DEFAULT_GROUP_SORT_ORDER = ChannelSortOrder.UNREAD;
+export const ACTIVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+export interface ChannelFilterContext {
+  unreadCounts: Record<string, number>;
+  mentionCounts: Record<string, number>;
+  statuses: Map<string, ChannelUserStatus>;
+  activeChannelId?: string | undefined;
+  now: number;
+}
+
+export const applyChannelFilter = (
+  channels: VisibleChannel[],
+  mode: ChannelFilterMode,
+  { unreadCounts, mentionCounts, statuses, activeChannelId, now }: ChannelFilterContext,
+): VisibleChannel[] => {
+  if (mode === ChannelFilterMode.ALL) return channels;
+  const cutoff = now - ACTIVE_WINDOW_MS;
+  return channels.filter(channel => {
+    if (channel.id === activeChannelId) return true;
+    const unread = unreadCounts[channel.id] ?? 0;
+    if (mode === ChannelFilterMode.MENTIONS) return (mentionCounts[channel.id] ?? 0) > 0;
+    const lastActivity = channel.channelStats?.lastActivityAt ?? 0;
+    // Purely age-based, as the label says — an old unread does not keep a channel visible.
+    if (mode === ChannelFilterMode.ACTIVE) return lastActivity >= cutoff;
+    // UNREADS — same predicate the Unreads inbox uses.
+    if (unread > 0) return true;
+    if (isDMChannel(channel.scopeType)) return false;
+    return lastActivity > (statuses.get(channel.id)?.lastViewedAt ?? 0);
+  });
+};
+
 // Optimized function to group channels by scope type (single pass)
 export const groupChannelsByScope = (
   channelData: VisibleChannel[],
@@ -59,7 +95,19 @@ export const groupChannelsByScope = (
   const starred: VisibleChannel[] = [];
   const channels: VisibleChannel[] = [];
   const directMessages: VisibleChannel[] = [];
+  // Index statuses by channelId once (O(n)) so the per-channel lookup below is
+  // O(1) — same pattern used by bucketChannelsBySection. Previously this used
+  // `allChannelsUserStatus.find(...)` per channel, giving O(n * m) behaviour.
+  const statusByChannelId = new Map<string, ChannelUserStatus>();
+  for (const status of allChannelsUserStatus) {
+    statusByChannelId.set(status.channelId, status);
+  }
   for (const channel of channelData) {
+    // SDLC repository channels are system-managed and hidden from chat,
+    // the same way SUPPORT channels are.
+    if (channel.type === ChannelType.SDLC) {
+      continue;
+    }
     // EMAIL channels live in Xyne Desk, not in the chat directory.
     // TODO: filter this out at the source by excluding EMAIL-type channels in the
     // `visibleChannels` query itself, so the client never receives them here.
@@ -67,7 +115,7 @@ export const groupChannelsByScope = (
       continue;
     }
 
-    const currentUserParticipation = allChannelsUserStatus.find(p => p.channelId === channel.id);
+    const currentUserParticipation = statusByChannelId.get(channel.id);
 
     // Skip closed DMs (soft-deleted by user)
     if (currentUserParticipation?.isClosed && isDMChannel(channel.scopeType)) {
@@ -179,40 +227,49 @@ export const formatChannelLabel = (ch: {
 };
 
 /**
- * Resolve human-readable searchable names for a channel.
+ * Resolve a DM's participant names for BOTH display and search in a single pass.
  *
- * - Regular channels: returns `[channel.name]`
- * - Self-DMs: returns `[currentUserName, 'You']` so the channel is findable by name
- * - Regular DMs / Group DMs: returns the other participants' display names
+ * - `display`: one name per participant (`displayName || name`) — safe to render.
+ * - `search`: superset with both `displayName` AND raw `name` per participant (deduped), so a
+ *   full-name query still matches a short-nickname displayName. Feed to
+ *   filterChannelsBySearchableNames via `searchNames` — never render it (would duplicate names).
  *
- * Canonical implementation — use this everywhere DM names need to be resolved for
- * search/display so self-DM and multi-participant logic stays consistent.
+ * Regular channels → `[channel.name]` for both. Self-DM → own name + 'You'. The current user is
+ * excluded from multi-participant DMs. Canonical resolver — use everywhere DM names are needed.
  */
-export const getDMSearchableNames = (
+export const getDMNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
   usersById: Map<string, { name: string; displayName?: string | null }>,
-): string[] => {
+): { display: string[]; search: string[] } => {
   if (!isDMChannel(channel.scopeType)) {
-    return [channel.name];
+    return { display: [channel.name], search: [channel.name] };
   }
 
   const userIds = parseDMParticipantIds(channel);
   const isSelfDM = userIds.length === 1 && userIds[0] === currentUserId;
 
   if (isSelfDM) {
-    const currentUser = usersById.get(currentUserId);
-    const currentUserName = currentUser ? currentUser.displayName || currentUser.name : undefined;
-    return currentUserName ? [currentUserName, 'You'] : ['You'];
+    const u = usersById.get(currentUserId);
+    const preferred = u ? u.displayName || u.name : undefined;
+    return {
+      display: preferred ? [preferred, 'You'] : ['You'],
+      search: [...new Set([u?.displayName, u?.name, 'You'].filter((n): n is string => !!n))],
+    };
   }
 
-  const otherUserIds = userIds.filter(id => id !== currentUserId);
-  return otherUserIds
-    .map(id => {
-      const u = usersById.get(id);
-      return u ? u.displayName || u.name : undefined;
-    })
-    .filter((n): n is string => !!n);
+  const display: string[] = [];
+  const search: string[] = [];
+  for (const id of userIds) {
+    if (id === currentUserId) continue;
+    const u = usersById.get(id);
+    if (!u) continue;
+    const preferred = u.displayName || u.name;
+    if (preferred) display.push(preferred);
+    if (u.displayName) search.push(u.displayName);
+    if (u.name && u.name !== u.displayName) search.push(u.name);
+  }
+  return { display, search };
 };
 
 /**
@@ -233,6 +290,39 @@ export const getDMParticipantIdsToFetch = (
   // For DM: should only be 1 other user
   // For GROUP_DM: limit to 4 (we only need 3 names + count)
   return otherIds.slice(0, 4);
+};
+
+/**
+ * A channel's human label. Regular channels are their `name`; a DM's `name` column holds
+ * its participant ids comma-joined, so rendering it raw prints cuids — those resolve to the
+ * other people's names instead.
+ *
+ * Pure (no hooks), so pickers that only have arrays — not a React channel context — can
+ * label DMs the same way `useChannelDisplayName` does.
+ */
+export const resolveChannelLabel = (
+  channel: { name: string; scopeType: ChannelScopeType },
+  currentUserId: string,
+  allUsers: ReadonlyArray<{ id: string; name?: string | null; displayName?: string | null }>,
+): string => {
+  if (!isDMChannel(channel.scopeType)) return channel.name;
+  // A self-DM has no *other* participants, so the id list comes back empty — name it after
+  // the current user, the way useChannelDisplayName does, instead of falling through to the
+  // raw `name` (which is the participant id).
+  const allIds = parseDMParticipantIds(channel);
+  if (allIds.length === 1 && allIds[0] === currentUserId) {
+    const self = allUsers.find(u => u.id === currentUserId);
+    const selfName = self ? self.displayName || self.name : null;
+    return selfName ? `${selfName} (you)` : 'You';
+  }
+  const names = getDMParticipantIdsToFetch(channel, currentUserId)
+    .map(id => {
+      const user = allUsers.find(u => u.id === id);
+      return user ? user.displayName || user.name || null : null;
+    })
+    .filter((name): name is string => Boolean(name));
+  // Still nothing resolvable (users not synced yet) — 'Direct message' beats a raw cuid.
+  return names.length > 0 ? names.join(', ') : 'Direct message';
 };
 
 export const getDMSearchableName = (

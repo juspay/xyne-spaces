@@ -12,7 +12,7 @@ import { assertGuestWriteBlocked } from '../core/guest-access';
  */
 export class WorkspaceOrganizationsACL extends BaseACL<'workspace_organizations'> {
 
-  async canInsert(_args: InsertValue<TableSchema<'workspace_organizations'>>, _tx: Transaction<Schema>): Promise<void> {
+  async canInsert(args: InsertValue<TableSchema<'workspace_organizations'>>, _tx: Transaction<Schema>): Promise<void> {
     if (this.ctx.role === WorkspaceRole.COMMUNITY_MEMBER) {
       throw new MutationACLError('Workspace organization insert failed: community members cannot link workspaces to organizations', 'workspace_organizations');
     }
@@ -20,11 +20,12 @@ export class WorkspaceOrganizationsACL extends BaseACL<'workspace_organizations'
     // Verify user has ADMIN or OWNER role (uses ctx.role, no DB query)
     verifyWorkspaceAdminOrOwnerFromContext(this.ctx, 'workspace_organizations');
 
-    // Workspace-organization linking is handled through organization flow
-    throw new MutationACLError(
-      'Workspace organization insert failed: links are created through organization flow',
-      'workspace_organizations'
-    );
+    // Allow the insert: organization creation / workspace-org linking legitimately
+    // inserts these rows (the caller is already gated to workspace ADMIN/OWNER above).
+    // Ensure the row belongs to the caller's workspace.
+    if (args.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Workspace organization insert failed: workspace ID mismatch', 'workspace_organizations');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'workspace_organizations'>>, _tx: Transaction<Schema>): Promise<void> {

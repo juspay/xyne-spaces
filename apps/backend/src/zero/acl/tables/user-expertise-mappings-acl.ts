@@ -32,6 +32,13 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     if (!membership && !hasAdminAccess) {
       throw new MutationACLError('User expertise mapping insert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
+
+    // Expertise drives assignment routing, so a row targeting another member is only
+    // allowed for USER-GROUPS admins — otherwise any group member could redirect work
+    // by writing a colleague's expertise.
+    if (args.userId !== this.ctx.userID && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping insert failed: you can only modify your own expertise unless you have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'user_expertise_mappings'>>, tx: Transaction<Schema>): Promise<void> {
@@ -54,6 +61,15 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
     if (!membership && !hasAdminAccess) {
       throw new MutationACLError('User expertise mapping update failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
+
+    // Only the owning member (or a USER-GROUPS admin) may change an expertise row, and the
+    // row's owner cannot be reassigned to someone else.
+    if (mapping.userId !== this.ctx.userID && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping update failed: you can only modify your own expertise unless you have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
+    if (args.userId !== undefined && args.userId !== mapping.userId && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping update failed: cannot reassign the mapping to another user', 'user_expertise_mappings');
     }
   }
 
@@ -78,6 +94,10 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     if (!membership && !hasAdminAccess) {
       throw new MutationACLError('User expertise mapping delete failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
     }
+
+    if (mapping.userId !== this.ctx.userID && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping delete failed: you can only remove your own expertise unless you have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
@@ -94,6 +114,17 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
     if (!membership && !hasAdminAccess) {
       throw new MutationACLError('User expertise mapping upsert failed: you must be a group member or have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
+
+    // Upsert reaches the same row as insert/update, so it carries the same restriction:
+    // a row targeting another member requires USER-GROUPS admin, and an existing row's
+    // owner cannot be taken over.
+    if (args.userId !== this.ctx.userID && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping upsert failed: you can only modify your own expertise unless you have ADMIN access to USER-GROUPS', 'user_expertise_mappings');
+    }
+    const existing = await tx.run(zql.user_expertise_mappings.where('id', args.id).one());
+    if (existing && existing.userId !== this.ctx.userID && !hasAdminAccess) {
+      throw new MutationACLError('User expertise mapping upsert failed: cannot modify another user\'s expertise', 'user_expertise_mappings');
     }
   }
 }

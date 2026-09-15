@@ -14,6 +14,7 @@
  */
 
 import { CONFIG } from "../../config.js";
+import { errMsg } from "../../lib/errors.js";
 import { callVespa, esc } from "../../mcp/servers/vespa-direct.js";
 import { createLogger, createTraceId } from "../../logger.js";
 
@@ -125,7 +126,7 @@ export async function getChannel(channelId: string): Promise<ChannelInfo> {
   } catch (err) {
     logger.error("[entity-source] channel lookup failed", {
       channelId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return { id: channelId, name: channelId };
   }
@@ -150,7 +151,7 @@ export async function getChannelThreadIds(channelId: string, maxThreads = 300): 
   } catch (err) {
     logger.error("[entity-source] thread ids failed", {
       channelId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -198,7 +199,7 @@ export async function getThreadMessages(threadId: string): Promise<ChannelThread
   } catch (err) {
     logger.error("[entity-source] thread messages failed", {
       threadId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
   return messages;
@@ -244,7 +245,7 @@ export async function getThreadMails(threadId: string): Promise<ThreadMail[]> {
   } catch (err) {
     logger.error("[entity-source] thread mails failed", {
       threadId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -266,7 +267,7 @@ export async function getChannelMailThreadIds(channelId: string, maxThreads = 30
   } catch (err) {
     logger.error("[entity-source] mail thread ids failed", {
       channelId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }
@@ -314,7 +315,7 @@ export async function getChannelTickets(
   } catch (err) {
     logger.error("[entity-source] channel tickets failed", {
       channelId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return [];
   }

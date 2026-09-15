@@ -20,12 +20,14 @@ interface StoredOrgLLMCredentials {
   key?: string;
   providerUrl?: string;
   defaultModel?: string | null;
+  defaultModels?: string[];
 }
 
 export interface OrgLLMCredential {
   apiKey: string;
   baseUrl: string;
   defaultModel: string | null;
+  defaultModels?: string[];
   purpose: OrgLLMServiceAccountPurpose;
 }
 
@@ -269,6 +271,7 @@ class OrgLLMCredentialService {
         apiKey: parsed.key,
         baseUrl: parsed.providerUrl,
         defaultModel: parsed.defaultModel ?? null,
+        defaultModels: parsed.defaultModels,
         purpose: row.purpose as OrgLLMServiceAccountPurpose,
       };
 
@@ -299,8 +302,15 @@ class OrgLLMCredentialService {
     const baseUrl = config.litellm.baseUrl;
 
     if (!apiKey) {
+      logger.warn('[OrgLLMCredentialService] env fallback requested but env not configured', {
+        purpose,
+      });
       return null;
     }
+
+    logger.warn('[OrgLLMCredentialService] using env credential (no org-provisioned key in DB)', {
+      purpose,
+    });
 
     return {
       apiKey,

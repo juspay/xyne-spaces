@@ -1,14 +1,10 @@
 import { BaseRepository } from './base';
-import { getContextOrNull } from '@/database/tenant/context';
-import {
-  type Prisma,
-  type AvailableAppPermission,
-  AppPermissionStatus,
-  AppPermissionType,
-} from '@prisma/client';
+import { currentWorkspaceId } from '@/database/tenant/context';
+import { type Prisma, type AvailableAppPermission } from '@prisma/client';
 
 // ─── Prisma transaction client type ──────────────────────────────────────────
 import { PrismaClient } from '@prisma/client';
+import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 // ─── Typed row shapes from Prisma includes ────────────────────────────────────
@@ -111,7 +107,7 @@ export class AppPermissionRepository extends BaseRepository<
       where: { appId },
       include: { permission: { select: { name: true, type: true } } },
     });
-    return rows.map((r) => toScope(r.permission.name, r.permission.type));
+    return rows.map((r) => toScope(r.permission.name, r.permission.type as AppPermissionType));
   }
 
   async setAppPermissions(appId: string, scopes: string[]): Promise<void> {
@@ -125,11 +121,11 @@ export class AppPermissionRepository extends BaseRepository<
         select: { id: true, name: true, type: true },
       });
 
-      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type)));
+      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type as AppPermissionType)));
       const unknown = scopes.filter((s) => !foundScopes.has(s));
       if (unknown.length > 0) throw new Error(`Unknown permissions: ${unknown.join(', ')}`);
 
-      const workspaceId = getContextOrNull()?.workspaceId;
+      const workspaceId = currentWorkspaceId();
       if (!workspaceId) throw new Error('workspaceId required: no tenant context');
       await tx.appPermission.createMany({
         data: permissions.map((p) => ({ appId, permissionId: p.id, workspaceId })),
@@ -150,7 +146,7 @@ export class AppPermissionRepository extends BaseRepository<
 
     const effectiveNames = rows
       .filter((r) => r.status === AppPermissionStatus.APPROVED || r.status === AppPermissionStatus.PENDINGDELETE)
-      .map((r) => toScope(r.permission.name, r.permission.type));
+      .map((r) => toScope(r.permission.name, r.permission.type as AppPermissionType));
 
     const hasPendingChanges = rows.some(
       (r) => r.status === AppPermissionStatus.UNAPPROVED || r.status === AppPermissionStatus.PENDINGDELETE,
@@ -177,7 +173,7 @@ export class AppPermissionRepository extends BaseRepository<
     });
     return rows
       .filter((r) => r.status !== AppPermissionStatus.PENDINGDELETE)
-      .map((r) => toScope(r.permission.name, r.permission.type));
+      .map((r) => toScope(r.permission.name, r.permission.type as AppPermissionType));
   }
 
   /** All installed permissions with their current status (for status-badge UI). */
@@ -188,7 +184,7 @@ export class AppPermissionRepository extends BaseRepository<
       where: { installedAppId },
       include: { permission: { select: { name: true, type: true } } },
     });
-    return rows.map((r) => ({ scope: toScope(r.permission.name, r.permission.type), status: r.status }));
+    return rows.map((r) => ({ scope: toScope(r.permission.name, r.permission.type as AppPermissionType), status: r.status as AppPermissionStatus }));
   }
 
 
@@ -200,7 +196,7 @@ export class AppPermissionRepository extends BaseRepository<
         select: { id: true, name: true, type: true },
       });
 
-      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type)));
+      const foundScopes = new Set(permissions.map((p) => toScope(p.name, p.type as AppPermissionType)));
       const unknown = scopes.filter((s) => !foundScopes.has(s));
       if (unknown.length > 0) throw new Error(`Unknown permissions: ${unknown.join(', ')}`);
 
@@ -240,7 +236,7 @@ export class AppPermissionRepository extends BaseRepository<
       // Insert brand-new entries
       const toInsert = permissions.filter((p) => !existingMap.has(p.id));
       if (toInsert.length > 0) {
-        const workspaceId = getContextOrNull()?.workspaceId;
+        const workspaceId = currentWorkspaceId();
         if (!workspaceId) throw new Error('workspaceId required: no tenant context');
         await tx.installedAppPermission.createMany({
           data: toInsert.map((p) => ({
@@ -282,7 +278,7 @@ export class AppPermissionRepository extends BaseRepository<
     });
     if (grants.length === 0) return;
 
-    const workspaceId = getContextOrNull()?.workspaceId;
+    const workspaceId = currentWorkspaceId();
     if (!workspaceId) throw new Error('workspaceId required: no tenant context');
     await this.db.installedAppPermission.createMany({
       data: grants.map((g) => ({
@@ -325,7 +321,7 @@ export class AppPermissionRepository extends BaseRepository<
       // Add template permissions missing from the install, as APPROVED.
       const toAdd = wantedIds.filter((id) => !existingSet.has(id));
       if (toAdd.length > 0) {
-        const workspaceId = getContextOrNull()?.workspaceId;
+        const workspaceId = currentWorkspaceId();
         if (!workspaceId) throw new Error('workspaceId required: no tenant context');
         await tx.installedAppPermission.createMany({
           data: toAdd.map((permissionId) => ({

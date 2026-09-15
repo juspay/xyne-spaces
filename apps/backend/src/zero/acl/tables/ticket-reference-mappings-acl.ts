@@ -60,6 +60,24 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
     if (!ticket) {
       throw new MutationACLError('Ticket reference insert failed: you do not have access to the parent ticket', 'ticket_reference_mappings');
     }
+
+    // Also verify the target ticket: require its channel be one the caller can access
+    // (PUBLIC or participant), matching TicketsACL's read predicate.
+    await this.verifyTicketInWorkspace(args.targetTicketId, tx);
+    const targetAccessible = await tx.run(zql.tickets
+      .where('id', args.targetTicketId)
+      .whereExists('channel', (channel) =>
+        channel.where(({ or, cmp, exists }) =>
+          or(
+            cmp('visibility', ChannelVisibility.PUBLIC),
+            exists('participants', (participants) => participants.where('userId', this.ctx.userID))
+          )
+        )
+      )
+      .one());
+    if (!targetAccessible) {
+      throw new MutationACLError('Ticket reference insert failed: you do not have access to the target ticket', 'ticket_reference_mappings');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {

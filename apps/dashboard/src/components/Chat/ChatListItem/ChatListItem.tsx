@@ -9,6 +9,15 @@ import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { ChannelScopeType, MessageAttachment } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { useAuth } from '../../../hooks/useAuth';
+import { useZero } from '../../../hooks/useZero';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
+
+import {
+  usePendingStatusByMessageId,
+  usePendingByMessageId,
+  firePendingMutator,
+  removePending,
+} from '@xyne/shared/messages';
 
 type ChatListItemProps = {
   item: ChatListItemWithSeparator;
@@ -48,6 +57,11 @@ const ChatListItemComponent = ({
   const draft = useDraft(channelId, conversation?.conversationId ?? '');
   const draftFromDB = useDraftFromDB(channelId, conversation?.conversationId ?? '');
   const hasDraftAttachments = draftFromDB?.attachments && draftFromDB.attachments?.length > 0;
+  const zero = useZero();
+  const pendingMessageId = conversation?.initialMessageId ?? '';
+  const pendingStatus = usePendingStatusByMessageId(pendingMessageId);
+  const pendingEntry = usePendingByMessageId(pendingMessageId);
+  const { showThreadTags } = useShowThreadTags();
 
   // Render date separator
   if (item.type === 'date-separator') {
@@ -82,7 +96,7 @@ const ChatListItemComponent = ({
   let showAvatar = true;
 
   if (prevItem && prevItem.type !== 'date-separator') {
-    showAvatar = shouldShowAvatar(item, prevItem);
+    showAvatar = shouldShowAvatar(item, prevItem, showThreadTags);
   }
 
   return (
@@ -110,6 +124,31 @@ const ChatListItemComponent = ({
         {...(onEmojiPickerOpenChange && { onEmojiPickerOpenChange })}
         {...(linkedConversationId !== null && { linkedConversationId })}
       />
+      {pendingStatus === 'failed' && pendingEntry && (
+        <div className='flex items-center gap-3 pl-12 pt-1 text-xs text-red-500'>
+          <span>Failed to send.</span>
+          <button
+            type='button'
+            data-ph-capture-attribute-track-id='retry_failed_send'
+            data-track-category='PENDING_MESSAGE'
+            data-track-name='retry_failed_send'
+            className='font-medium underline hover:opacity-80'
+            onClick={() => firePendingMutator(zero, pendingEntry)}
+          >
+            Retry
+          </button>
+          <button
+            type='button'
+            data-ph-capture-attribute-track-id='delete_failed_send'
+            data-track-category='PENDING_MESSAGE'
+            data-track-name='delete_failed_send'
+            className='font-medium underline hover:opacity-80'
+            onClick={() => removePending(pendingEntry.messageId)}
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 };

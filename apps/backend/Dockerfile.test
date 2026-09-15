@@ -29,6 +29,7 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
@@ -39,8 +40,9 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 # COPY below do that work instead.
     pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-backend...
 COPY packages/shared    packages/shared
+COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
-RUN pnpm --filter @xyne/shared --filter agentic-framework run build
+RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
 COPY apps/backend apps/backend
 RUN ln -s /repo/apps/backend /app
 WORKDIR /repo/apps/backend

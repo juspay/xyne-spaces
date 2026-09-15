@@ -38,6 +38,7 @@ Application ports, for reference: **backend 3001**, **dashboard 5173**.
 ```bash
 pnpm run services         # start everything and wait for health checks
 pnpm run services:stop    # stop and remove containers
+pnpm run reset            # remove this project's containers + volumes (wipes all local data, keeps images) recommended to run if you see strange errors or want to start fresh!
 pnpm run cleanup          # reclaim disk (volumes, build caches)
 ```
 

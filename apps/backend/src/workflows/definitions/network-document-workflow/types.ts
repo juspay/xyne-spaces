@@ -1,3 +1,4 @@
+import { TicketPriority } from '@xyne/shared';
 /**
  * Network Document Workflow Types
  * 
@@ -40,5 +41,5 @@ export interface DocumentAnalysisResult {
   keyFindings: string[];
   actionItems: string[];
   tags: string[];
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  priority: TicketPriority;
 }

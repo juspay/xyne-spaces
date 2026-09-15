@@ -5,27 +5,39 @@ import { createPreviewUrl } from '../../../services/clients/fileFetchService';
  * Resolves `cid:<contentId>` references in an email body to authenticated
  * blob object URLs.
  *
- * Caller passes the email's attachment rows (already loaded via the
- * `email.attachments` Zero relation). Each inline image's `metadata.contentId`
- * is mapped to its row id; the bytes are fetched via the auth-aware blob
- * pipeline. Unresolved `cid:` refs render an inline-SVG placeholder so
- * recipients never see the browser's broken-image icon.
+ * Caller may pass attachment rows from the full thread so quoted history can
+ * resolve images owned by an older email. Only content IDs referenced by the
+ * current body are mapped and fetched through the auth-aware blob pipeline.
+ * Unresolved `cid:` refs render an inline-SVG placeholder so recipients never
+ * see the browser's broken-image icon.
  */
 export const useCidImageResolver = (
   attachments?: ReadonlyArray<{ id: string; metadata?: unknown }>,
+  body?: string,
 ): {
   rewrite: (html: string) => string;
   blobUrlToAttachmentId: Map<string, string>;
 } => {
-  // Map contentId → MessageAttachment.id (pure derivation, no effects).
+  const referencedCids = useMemo(() => {
+    const cids = new Set<string>();
+    const cidRe = /cid:([^\s"'>]+)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = cidRe.exec(body ?? '')) !== null) {
+      if (match[1]) cids.add(match[1].trim());
+    }
+    return cids;
+  }, [body]);
+
   const cidToAttachmentId = useMemo(() => {
     const map = new Map<string, string>();
     for (const a of attachments ?? []) {
       const meta = a.metadata as { contentId?: string } | null | undefined;
-      if (meta?.contentId) map.set(meta.contentId, a.id);
+      if (meta?.contentId && referencedCids.has(meta.contentId)) {
+        map.set(meta.contentId, a.id);
+      }
     }
     return map;
-  }, [attachments]);
+  }, [attachments, referencedCids]);
 
   // Fetch each cid's blob once and stash a stable object URL.
   const [cidToBlobUrl, setCidToBlobUrl] = useState<Record<string, string>>({});
@@ -36,22 +48,25 @@ export const useCidImageResolver = (
     }
     let cancelled = false;
     const created: string[] = [];
-    void (async () => {
+    void (async (): Promise<void> => {
+      const results = await Promise.allSettled(
+        [...cidToAttachmentId].map(async ([cid, attId]) => ({
+          cid,
+          blob: await createPreviewUrl(attId),
+        })),
+      );
+      if (cancelled) return;
+
       const next: Record<string, string> = {};
-      for (const [cid, attId] of cidToAttachmentId) {
-        try {
-          const blob = await createPreviewUrl(attId);
-          if (cancelled) return;
-          const url = URL.createObjectURL(blob);
-          created.push(url);
-          next[cid] = url;
-        } catch {
-          /* skip — rewrite will use the placeholder */
-        }
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const url = URL.createObjectURL(result.value.blob);
+        created.push(url);
+        next[result.value.cid] = url;
       }
-      if (!cancelled) setCidToBlobUrl(next);
+      setCidToBlobUrl(next);
     })();
-    return () => {
+    return (): void => {
       cancelled = true;
       for (const u of created) URL.revokeObjectURL(u);
     };

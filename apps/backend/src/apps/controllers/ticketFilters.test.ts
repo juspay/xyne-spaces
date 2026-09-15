@@ -1,5 +1,5 @@
-import { TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { buildTicketFilterWhere } from './ticketFilters';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 
 describe('buildTicketFilterWhere', () => {
   it('returns an empty where for no filters (caller owns scope/defaults)', () => {

@@ -1,4 +1,5 @@
 import Bull from 'bull';
+import { ActivityClassification, ActivityType, EmailType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { emailClassificationQueue, type EmailClassificationJobData } from '@/queues/emailClassificationQueue';
 import { EmailClassificationService } from '@/services/emailClassificationService';
@@ -9,14 +10,16 @@ import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssig
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
-import { ActivityClassification, ActivityType, EmailType } from '@prisma/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { runWithContext } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
+import type { TicketLike } from '@/automations/triggers/ticket-context';
 
 const emailClassificationService = new EmailClassificationService();
 const prisma = DatabaseClient.getInstance();
+const EMAIL_FETCH_MAX_RETRIES = 3;
+const EMAIL_FETCH_RETRY_DELAY_MS = 500;
 
 function shouldAssignTicketPerson(
   boardId: string | null,
@@ -73,8 +76,7 @@ class EmailClassificationWorker {
       });
       throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
     }
-    return runWithContext(
-      { userId: 'email-classification-worker', workspaceId: channel.workspaceId },
+    return runAsServiceActor('email-classification-worker', channel.workspaceId,
       () => this.classifyAndAssign(job, channel.workspaceId),
     );
   }
@@ -93,10 +95,15 @@ class EmailClassificationWorker {
       return;
     }
 
-    const emailRecord = await prisma.email.findUnique({
+    const fetchEmailRecord = () => prisma.email.findUnique({
       where: { id: emailId },
       select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true, type: true },
     });
+    let emailRecord = await fetchEmailRecord();
+    for (let retry = 0; !emailRecord && retry < EMAIL_FETCH_MAX_RETRIES; retry++) {
+      await new Promise(resolve => setTimeout(resolve, EMAIL_FETCH_RETRY_DELAY_MS));
+      emailRecord = await fetchEmailRecord();
+    }
     if (!emailRecord) {
       logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} not found, skipping classification for ticket ${ticketId}`);
       return;
@@ -141,7 +148,10 @@ class EmailClassificationWorker {
         // AI resolution (null when unmapped) — the default-group fallback is
         // an assignment concern, not part of the classification result.
         if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
-          await emailClassificationService.storeOnTicket(ticketId, result, resolvedGroupId);
+          await emailClassificationService.storeOnTicket(ticketId, result, resolvedGroupId, {
+            config,
+            actorId: systemActorId,
+          });
         }
       }
     }
@@ -279,7 +289,7 @@ class EmailClassificationWorker {
 
       if (newAssignedTo && assignmentSucceeded) {
         void emitTicketUpdated({
-          ticket: updatedTicket,
+          ticket: updatedTicket as TicketLike,
           changes: { assignedTo: { previousValue: ticket.assignedTo ?? null, newValue: newAssignedTo } },
           performedById: systemActorId,
         });

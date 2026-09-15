@@ -11,10 +11,11 @@
  */
 
 import { randomUUID } from 'crypto';
-import { PrismaClient,
+import { PrismaClient } from '@prisma/client';
+import {
   AccessType,
   AuthProvider,
-  UserStatus, 
+  UserStatus,
   SessionStatus,
   TicketStatus,
   TicketStatusV2,
@@ -49,8 +50,7 @@ import { PrismaClient,
   FormContextType,
   FormEntityType,
   DocType,
-  ProjectType
-} from '@prisma/client';
+  ProjectType, UserPresenceStatus } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 
 const prisma = new PrismaClient();
@@ -209,7 +209,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user1.id,
-          status: 'ONLINE' as any,
+          status: UserPresenceStatus.ONLINE as any,
           lastActiveAt: now(),
           lastSeenAt: now(),
           isManual: false,
@@ -221,7 +221,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user2.id,
-          status: 'AWAY' as any,
+          status: UserPresenceStatus.AWAY as any,
           lastActiveAt: hoursAgo(1),
           lastSeenAt: hoursAgo(1),
           isManual: false
@@ -231,7 +231,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user3.id,
-          status: 'OFFLINE' as any,
+          status: UserPresenceStatus.OFFLINE as any,
           lastActiveAt: hoursAgo(4),
           lastSeenAt: hoursAgo(4),
           isManual: false
@@ -241,7 +241,7 @@ async function main() {
       await tx.userPresence.create({
         data: {
           userId: user4.id,
-          status: 'ONLINE' as any,
+          status: UserPresenceStatus.ONLINE as any,
           lastActiveAt: now(),
           lastSeenAt: now(),
           isManual: false,
@@ -427,7 +427,7 @@ async function main() {
           name: 'Xyne Spaces',
           code: 'XYNE',
           description: 'Unified collaboration platform',
-          type: ProjectType.DEFAULT
+          type: ProjectType.DEFAULT,
           createdBy: user1.id,
           updatedBy: user2.id
         }
@@ -945,7 +945,7 @@ async function main() {
             ticketId: ticket2.id,
             updatedBy: user4.id,
             activityType: ActivityType.PRIORITY,
-            value: { priority: 'HIGH', newPriority: 'CRITICAL' }
+            value: { priority: TicketPriority.HIGH, newPriority: 'CRITICAL' }
           },
           {
             ticketId: ticket3.id,
@@ -1266,8 +1266,6 @@ async function main() {
           {
             userId: user1.id,
             type: NotificationType.TICKET_ASSIGNMENT,
-            title: 'New ticket assigned',
-            message: 'You have been assigned to ticket XYNE-00001',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'ticket',
@@ -1277,8 +1275,6 @@ async function main() {
           {
             userId: user1.id,
             type: NotificationType.MENTION,
-            title: 'You were mentioned',
-            message: '@john.developer mentioned you in #general',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'message',
@@ -1288,8 +1284,6 @@ async function main() {
           {
             userId: user2.id,
             type: NotificationType.WORKFLOW_COMPLETION,
-            title: 'Workflow completed',
-            message: 'Workflow for ticket XYNE-00002 completed successfully',
             status: NotificationStatus.READ,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER, NotificationDeliveryMethod.EMAIL],
             relatedEntityType: 'workflow',
@@ -1299,8 +1293,6 @@ async function main() {
           {
             userId: user3.id,
             type: NotificationType.TICKET_STATUS_CHANGE,
-            title: 'Ticket status updated',
-            message: 'Ticket XYNE-00003 status changed to COMPLETED',
             status: NotificationStatus.UNREAD,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'ticket',
@@ -1310,8 +1302,6 @@ async function main() {
           {
             userId: user4.id,
             type: NotificationType.THREAD_REPLY,
-            title: 'New reply in thread',
-            message: '@lisa.qa replied to your message',
             status: NotificationStatus.DISMISSED,
             deliveryMethods: [NotificationDeliveryMethod.BROWSER],
             relatedEntityType: 'message',

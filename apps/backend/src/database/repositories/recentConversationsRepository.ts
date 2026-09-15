@@ -6,6 +6,7 @@ import {
   SurfaceNudgeCount,
 } from '@prisma/client';
 import { DatabaseClient } from '../client';
+import { AttachmentEntityType } from '@xyne/shared';
 
 export interface RecentConversationMessage {
   message: Message;
@@ -108,7 +109,7 @@ export class RecentConversationsRepository {
 
     const [initialAttachments, initialNudges, threadMessages, participants] = await Promise.all([
       this.db.messageAttachment.findMany({
-        where: { entityId: { in: initialMessageIds }, entityType: 'CHAT' },
+        where: { entityId: { in: initialMessageIds }, entityType: AttachmentEntityType.CHAT },
       }),
       this.db.surfaceNudgeCount.findMany({
         where: {
@@ -132,7 +133,7 @@ export class RecentConversationsRepository {
     const [messageAttachments, messageNudges] = await Promise.all([
       messageIds.length
         ? this.db.messageAttachment.findMany({
-            where: { entityId: { in: messageIds }, entityType: 'CHAT', isDeleted: false },
+            where: { entityId: { in: messageIds }, entityType: AttachmentEntityType.CHAT, isDeleted: false },
             orderBy: { createdAt: 'asc' },
           })
         : Promise.resolve([] as MessageAttachment[]),

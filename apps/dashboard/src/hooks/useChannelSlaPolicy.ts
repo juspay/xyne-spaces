@@ -5,6 +5,7 @@ import { useCachedQuery } from './useCachedQuery';
 import { mutators } from '../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import type { QueryResultType } from '@rocicorp/zero';
+import { TicketPriority } from '@xyne/shared';
 
 export type BoardSlaPolicy = QueryResultType<typeof queries.getBoardSlaPolicies>[number];
 
@@ -40,7 +41,7 @@ export function useUpsertBoardSlaPolicy() {
   return useCallback(
     (policy: {
       boardId: string;
-      priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      priority: TicketPriority;
       responseHours: number;
       resolutionHours: number;
       businessHoursOnly: boolean;

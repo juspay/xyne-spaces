@@ -55,7 +55,21 @@ export class ConversationsACL extends BaseACL<'conversations'> {
     if (args.channelId || args.createdBy) {
       throw new MutationACLError('Conversation update failed: channelId and createdBy are immutable fields', 'conversations')
     }
-    return
+
+    const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).related('channel').one());
+    if (!conversation || !conversation.channel) {
+      throw new MutationACLError('Conversation update failed: conversation does not exist', 'conversations');
+    }
+
+    const channelParticipant = await tx.run(zql.channel_participants
+      .where('channelId', conversation.channel.id)
+      .where('userId', this.ctx.userID)
+      .one());
+
+    if (conversation.channel.visibility === ChannelVisibility.PUBLIC || channelParticipant) {
+      return;
+    }
+    throw new MutationACLError('Conversation update failed: you must be a channel participant to update this conversation', 'conversations');
   }
 
   async canDelete(args: DeleteID<TableSchema<'conversations'>>, tx: Transaction<Schema>): Promise<void> {

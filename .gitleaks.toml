@@ -47,8 +47,8 @@ paths = [
   # Test fixtures / mocks that intentionally contain fake secrets
   '''(^|/)__tests__/''',
   '''(^|/)__mocks__/''',
-  '''\.test\.(ts|tsx|js|jsx)$''',
-  '''\.spec\.(ts|tsx|js|jsx)$''',
+  '''\.test\.(ts|tsx|js|jsx|mjs|cjs)$''',
+  '''\.spec\.(ts|tsx|js|jsx|mjs|cjs)$''',
 
   # Lockfiles (dependency checksums, not secrets)
   '''(^|/)Podfile\.lock$''',
@@ -76,7 +76,7 @@ regexes = [
   # Claude OAuth *client id* — public identifier (claude-oauth-refresh.ts)
   '''9d1c250a-e61b-44d9-88ed-5944d1962f5e''',
   # False positives: variable references, not literal secrets (config/env.ts)
-  '''envVars\.(XYNE_CLAW_S2S_KEY|INTERNAL_S2S_KEY)''',
+  '''envVars\.(XYNE_CLAW_S2S_KEY|INTERNAL_S2S_KEY|ENC_S2S_KEY)''',
   # False positives: test-fixture labels (testAuthSeeder.ts)
   '''(dm-fixtures-v1|thread-fixtures-v2)''',
   # Keyboard-shortcut chords in the shortcuts catalog — `keys: '<chord>'` trips generic-api-key

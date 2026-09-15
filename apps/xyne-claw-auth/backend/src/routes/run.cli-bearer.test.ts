@@ -109,7 +109,7 @@ vi.mock("../services/agentCatalogService.js", () => ({
   buildAgentCatalog: vi.fn(async () => ""),
 }));
 
-vi.mock("../services/gcsService.js", () => ({
+vi.mock("../services/storageService.js", () => ({
   gcsService: { uploadFile: vi.fn(async () => undefined) },
 }));
 

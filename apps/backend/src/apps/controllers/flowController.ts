@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
+import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
+import { decrypt } from '@/services/encryptionService';
+import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -49,6 +54,13 @@ export class FlowController {
       return;
     }
 
+    // 2b. Amazon SNS confirmation is owned by the incoming-webhook controller,
+    // not proxied: an incoming webhook has no outbound webhookUrl to proxy to.
+    if (actionId === SNS_CONFIRM_ACTION_ID) {
+      res.status(200).json(await incomingWebhookController.confirmSnsSubscription(values));
+      return;
+    }
+
     try {
       // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
       const message = await repositories.messages.findById(messageId);
@@ -85,6 +97,17 @@ export class FlowController {
         return;
       }
 
+      // Flow actions are sent to the same app webhook as ordinary Spaces
+      // events, so they must carry the same app-level HMAC. claw-auth treats
+      // fields such as context.userId as authoritative; never forward the
+      // action unsigned when signing material is missing.
+      const app = await repositories.apps.findById(appId);
+      if (!app?.signingSecret) {
+        logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
+        res.status(502).json({ error: `No signing secret configured for app: ${appId}` });
+        return;
+      }
+
       // 5. Build the payload sent to the app backend
       const appPayload = {
         actionId,
@@ -97,32 +120,47 @@ export class FlowController {
           userId: userId ?? null,
         },
       };
+      // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
+      const body = JSON.stringify(appPayload);
+      const signature = signWebhookPayload(body, decrypt(app.signingSecret));
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 
-      // Reject webhook URLs whose host resolves to an internal/private address.
+      // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+      const dispatchHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Xyne-Event': 'flow_action',
+        'X-Xyne-Signature': signature,
+        'X-Source': 'XyneSpaces',
+      };
+      let dispatchUrl: string;
+      let dispatchIsInternal = false;
       try {
-        await assertWebhookUrlSafe(installedApp.webhookUrl);
+        const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
+        dispatchUrl = prepared.url;
+        dispatchIsInternal = prepared.isInternal;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
-          res.status(502).json({ error: 'App webhook URL is not allowed' });
-          return;
+        } else {
+          logger.error('[FLOW-ACTION] Could not resolve app webhook URL', { appId, error: err });
         }
-        throw err;
+        res.status(502).json({ error: 'App webhook URL is not allowed' });
+        return;
       }
 
-      // 6. Call the app backend synchronously.
-      const appResponse = await fetch(installedApp.webhookUrl, {
+      // 6. Call the app backend synchronously. Internal = trusted-config pod URL
+      // (plain client); external = user-supplied, so pin the connection (rebinding-safe).
+      const dispatchInit: RequestInit = {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Xyne-Event': 'flow_action',
-        },
-        body: JSON.stringify(appPayload),
+        headers: dispatchHeaders,
+        body,
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      const appResponse = dispatchIsInternal
+        ? await fetch(dispatchUrl, dispatchInit)
+        : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {
         const text = await appResponse.text().catch(() => 'unknown error');
@@ -181,4 +219,3 @@ export class FlowController {
     }
   };
 }
-

@@ -38,13 +38,6 @@ export const guestChannelAccessWhere = (ctx: Context): GuestPredicate => ({
 }: any) =>
   or(
     directGuestAccessExists(ctx, GuestEntity.CHANNEL)(exists),
-    exists('project', (project: any) =>
-      project.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.PROJECT),
-      ),
-    ),
     exists('participants', (participant: any) => participant.where('userId', '=', ctx.userID)),
     and(
       or(
@@ -57,7 +50,6 @@ export const guestChannelAccessWhere = (ctx: Context): GuestPredicate => ({
 
 export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
   or(
-    directGuestAccessExists(ctx, GuestEntity.PROJECT)(exists),
     exists('channels', (channel: any) =>
       channel.whereExists('guestAccess', (mapping: any) =>
         mapping
@@ -71,13 +63,6 @@ export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ or, 
 export const guestTicketAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
   or(
     exists('channel', (channel: any) => channel.where(guestChannelAccessWhere(ctx))),
-    exists('project', (project: any) =>
-      project.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.PROJECT),
-      ),
-    ),
   );
 
 export const guestCanvasAccessWhere = (ctx: Context): GuestPredicate => ({
@@ -99,13 +84,6 @@ export const guestCanvasAccessWhere = (ctx: Context): GuestPredicate => ({
         mapping
           .where('userId', '=', ctx.userID)
           .where('accessibleEntityType', '=', GuestEntity.CHANNEL),
-      ),
-    ),
-    exists('project', (project: any) =>
-      project.whereExists('guestAccess', (mapping: any) =>
-        mapping
-          .where('userId', '=', ctx.userID)
-          .where('accessibleEntityType', '=', GuestEntity.PROJECT),
       ),
     ),
   );

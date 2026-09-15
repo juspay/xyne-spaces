@@ -77,6 +77,7 @@ export const RecipientSuggestionsDropdown = ({
         top: pos.top,
         width: pos.width,
         maxHeight: DROPDOWN_MAX_HEIGHT,
+        pointerEvents: 'auto',
       }}
       className='z-50 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md recipient-suggestions-dropdown'
     >
@@ -94,7 +95,7 @@ export const RecipientSuggestionsDropdown = ({
             className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
               isHighlighted ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
             }`}
-            data-track-category='SUPPORT'
+            data-track-category='Support'
             data-track-name='SelectRecipientSuggestion'
           >
             <span className='flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>

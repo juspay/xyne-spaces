@@ -1,7 +1,7 @@
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
+import { ChannelScopeType, ChannelVisibility, ChannelRole } from '@xyne/shared';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { ChannelScopeType, ChannelVisibility } from '@prisma/client';
 import { logger } from '../utils/logger';
 
 
@@ -44,7 +44,7 @@ export class ChannelService {
 
       const channel = await this.channelRepository.create(channelData);
 
-      await this.channelParticipantRepository.addParticipant(channel.id, userId, 'ADMIN');
+      await this.channelParticipantRepository.addParticipant(channel.id, userId, ChannelRole.ADMIN);
 
       logger.info(`[ChannelService] Created self-DM channel for user ${userId}: ${channel.id}`);
 

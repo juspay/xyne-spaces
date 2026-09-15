@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { TagMethod } from '@prisma/client';
-import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags } from '@xyne/shared';
+import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags, TagMethod } from '@xyne/shared';
 
 export const TagMethodSchema = z.nativeEnum(TagMethod);
 
@@ -115,6 +114,10 @@ export const DeleteTagBodySchema = z.object({
   configKey: z.string().min(1).nullable().optional(),
 });
 
+export const ConfirmTagBodySchema = z.object({
+  tagId: z.string().min(1),
+});
+
 export const SetManualTagsBodySchema = z.object({
   sourceId: z.string().min(1),
   sourceType: z.string().min(1),
@@ -139,4 +142,5 @@ export type UpdateTagsConfigBody = z.infer<typeof UpdateTagsConfigBodySchema>;
 export type CreateTagBody = z.infer<typeof CreateTagBodySchema>;
 export type UpdateTagBody = z.infer<typeof UpdateTagBodySchema>;
 export type DeleteTagBody = z.infer<typeof DeleteTagBodySchema>;
+export type ConfirmTagBody = z.infer<typeof ConfirmTagBodySchema>;
 export type SetManualTagsBody = z.infer<typeof SetManualTagsBodySchema>;

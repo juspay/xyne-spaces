@@ -309,6 +309,8 @@ export const CitationPdfViewer: React.FC<CitationPdfViewerProps> = ({
               {/* eslint-disable local-rules/require-tracking-on-click */}
               <button
                 onClick={() => goToPage(currentVisiblePage - 1)}
+                data-track-category='FileViewer'
+                data-track-name='PDF_PREV_PAGE'
                 disabled={currentVisiblePage <= 1}
                 className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
               >
@@ -347,6 +349,8 @@ export const CitationPdfViewer: React.FC<CitationPdfViewerProps> = ({
 
               <button
                 onClick={() => goToPage(currentVisiblePage + 1)}
+                data-track-category='FileViewer'
+                data-track-name='PDF_NEXT_PAGE'
                 disabled={currentVisiblePage >= numPages}
                 className='flex items-center gap-1 px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white disabled:text-gray-400 dark:disabled:text-gray-600 disabled:cursor-not-allowed transition-colors'
               >

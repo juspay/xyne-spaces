@@ -26,6 +26,9 @@ export interface RunAgentRequest {
   agentSlug: string;
   task: string;
   userId: string;
+  spacesWorkspaceId: string;
+  spacesOrgId: string;
+  spacesOrgMemberId: string;
   callbackUrl: string;
   context?: string;
   conversationId?: string;
@@ -86,6 +89,9 @@ class ClawClient {
       sessionId: req.sessionId,
       task: req.task,
       userId: req.userId,
+      spacesWorkspaceId: req.spacesWorkspaceId,
+      spacesOrgId: req.spacesOrgId,
+      spacesOrgMemberId: req.spacesOrgMemberId,
       callbackUrl: req.callbackUrl,
       ...(req.context ? { context: req.context } : {}),
       ...(req.conversationId ? { conversationId: req.conversationId } : {}),

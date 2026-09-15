@@ -4,10 +4,10 @@
 # mirror needs no auth and isn't rate-limited; tags match Docker Hub 1:1.
 FROM public.ecr.aws/docker/library/node:22.22.3-slim AS builder
 WORKDIR /app
-COPY xyne-claw-auth/frontend/package*.json ./
+COPY apps/xyne-claw-auth/frontend/package*.json ./
 RUN npm ci
-COPY xyne-claw-auth/frontend/tsconfig.json xyne-claw-auth/frontend/vite.config.ts xyne-claw-auth/frontend/vite-env.d.ts xyne-claw-auth/frontend/index.html ./
-COPY xyne-claw-auth/frontend/src ./src
+COPY apps/xyne-claw-auth/frontend/tsconfig.json apps/xyne-claw-auth/frontend/vite.config.ts apps/xyne-claw-auth/frontend/vite-env.d.ts apps/xyne-claw-auth/frontend/index.html ./
+COPY apps/xyne-claw-auth/frontend/src ./src
 RUN npm run build
 
 FROM public.ecr.aws/docker/library/nginx:stable-alpine AS runner
@@ -42,6 +42,17 @@ RUN printf 'server {\n\
     }\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
+# Run as the image's built-in non-root "nginx" user. The master no longer runs as
+# root, so the pid file and the dirs nginx writes at runtime are relocated/owned
+# accordingly. The port stays 80 (no Service targetPort change); binding a
+# privileged port as non-root requires NET_BIND_SERVICE, which the pod's
+# securityContext.capabilities must add (add: ["NET_BIND_SERVICE"]) in the deploy
+# manifest — otherwise nginx fails to bind on startup.
+RUN sed -i 's|pid .*nginx.pid;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+    && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /etc/nginx/conf.d
+
 EXPOSE 80
+
+USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]

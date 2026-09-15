@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: 'Geist Mono';
+        font-style: normal;
+        font-weight: 500;
+        src: url('fonts/GeistMono-Medium-latin.woff2') format('woff2');
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }
+
+      @keyframes xn-pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.55;
+          transform: scale(0.72);
+        }
+      }
+
+      #pill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 8px 0 7px;
+        border-radius: 999px;
+        background: #ff4f4f;
+        box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.25) inset;
+      }
+
+      body.paused #pill {
+        background: #ca8a04;
+      }
+
+      #dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #fff;
+        flex: none;
+        animation: xn-pulse 1.4s ease-in-out infinite;
+      }
+
+      body.paused #dot {
+        width: 0;
+        height: 0;
+        border-radius: 0;
+        background: transparent;
+        border-style: solid;
+        border-width: 5px 0 5px 8px;
+        border-color: transparent transparent transparent #fff;
+        animation: none;
+      }
+
+      #label {
+        font: 500 14px 'Geist Mono', ui-monospace, monospace;
+        color: #fff;
+        letter-spacing: 0.2px;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="pill">
+      <span id="dot"></span>
+      <span id="label">0:00</span>
+    </div>
+    <script>
+      const label = document.getElementById('label');
+      const pill = document.getElementById('pill');
+
+      window.__set = (text, paused) => {
+        label.textContent = text;
+        document.body.classList.toggle('paused', !!paused);
+      };
+
+      window.__measure = async () => {
+        await document.fonts.ready;
+        return pill.getBoundingClientRect().width;
+      };
+    </script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { ActivityClassification } from '@prisma/client';
+import { ActivityClassification, DelayedMessageStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
@@ -84,7 +84,7 @@ class DelayedMessageWorker {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const prisma = DatabaseClient.getInstance() as any;
     const pending = await prisma.delayedMessage.findMany({
-      where: { status: 'PENDING' },
+      where: { status: DelayedMessageStatus.PENDING },
     });
 
     const GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes

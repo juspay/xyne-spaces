@@ -1,7 +1,7 @@
 import { db } from '@/database/client';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@/utils/logger';
-import type { Prisma, NudgeKind, SurfaceAreaType } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
+import { NudgeKind, SurfaceAreaType, NudgeState } from '@xyne/shared';
 import { rebuildSurfaceNudgeAudienceCounts } from './surfaceNudgeAudienceCountService';
 import { getNudgeCreatedTotal } from '@/services/otel';
 import type { NudgeCandidate } from '../types';
@@ -10,7 +10,7 @@ interface PersistCandidatesInput {
   sourceId: string;
   sourceType: SurfaceAreaType;
   nudgeKind: NudgeKind;
-  projectId: string;
+  workspaceId: string;
   candidates: NudgeCandidate[];
   priority?: string; // definition-level default
 }
@@ -20,8 +20,8 @@ class NudgeService {
     try {
       await db.$transaction(async (tx) => {
         await tx.surfaceNudge.updateMany({
-          where: { sourceId, state: { in: ['ACTIVE', 'ACTED_ON'] } },
-          data: { state: 'DISMISSED' },
+          where: { sourceId, state: { in: [NudgeState.ACTIVE, NudgeState.ACTED_ON] } },
+          data: { state: NudgeState.DISMISSED },
         });
         await rebuildSurfaceNudgeAudienceCounts({
           tx,
@@ -41,11 +41,9 @@ class NudgeService {
   }
 
   async persistCandidates(input: PersistCandidatesInput): Promise<void> {
-    const { sourceId, sourceType, nudgeKind, projectId, candidates, priority } = input;
+    const { sourceId, sourceType, nudgeKind, workspaceId, candidates, priority } = input;
 
     if (candidates.length === 0) return;
-
-    const workspaceId = await resolveWorkspaceIdFromModel(db, 'project', { id: projectId });
 
     try {
       await db.$transaction(async (tx) => {
@@ -59,8 +57,7 @@ class NudgeService {
               description: candidate.description,
               priority: candidate.priority ?? priority ?? 'medium',
               actions: (candidate.actions as Prisma.InputJsonValue) ?? undefined,
-              state: 'ACTIVE',
-              projectId,
+              state: NudgeState.ACTIVE,
               visibleTo: candidate.visibleTo ?? null,
             },
           });

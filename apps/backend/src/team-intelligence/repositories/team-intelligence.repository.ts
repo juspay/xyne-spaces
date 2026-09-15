@@ -1,16 +1,16 @@
 import {
   Prisma,
   PrismaClient,
-  TeamIntelligenceBatchStatus,
   TeamIntelligenceIngestionBatchV2,
   TeamIntelligenceOrgSummaryV2,
   TeamIntelligenceTeamSummaryV2,
   TeamIntelligenceUserIngestionV2,
-  TeamIntelligenceUserIngestionStatus,
 } from '@prisma/client';
 import { db } from '@/database/client';
+import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 
 export interface CreateTeamIntelligenceBatchData {
+  orgId?: string | null;
   reportDate: Date;
   source: string;
   idempotencyKey: string;
@@ -24,6 +24,7 @@ export interface CreateTeamIntelligenceBatchData {
 }
 
 export interface CreateTeamIntelligenceUserData {
+  orgId?: string | null;
   reportDate: Date;
   source: string;
   userEmail: string;
@@ -52,6 +53,7 @@ export interface TeamIntelligenceBatchProgress {
 }
 
 export interface CreateTeamIntelligenceTeamSummaryData {
+  orgId?: string | null;
   batchId: string;
   reportDate: Date;
   source: string;
@@ -74,6 +76,7 @@ export interface TeamIntelligenceTeamProgress {
 }
 
 export interface CreateTeamIntelligenceOrgSummaryData {
+  orgId?: string | null;
   batchId: string;
   reportDate: Date;
   source: string;
@@ -161,10 +164,16 @@ class TeamIntelligenceRepository {
       completedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceIngestionBatchV2> {
-    return await this.prisma.teamIntelligenceIngestionBatchV2.update({
+  ): Promise<TeamIntelligenceIngestionBatchV2 | null> {
+    const result = await this.prisma.teamIntelligenceIngestionBatchV2.updateMany({
       where: { id: batchId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceIngestionBatchV2.findUnique({
+      where: { id: batchId },
     });
   }
 
@@ -178,10 +187,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceUserIngestionV2> {
-    return await this.prisma.teamIntelligenceUserIngestionV2.update({
+  ): Promise<TeamIntelligenceUserIngestionV2 | null> {
+    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceUserIngestionV2.findUnique({
+      where: { id: userIngestionId },
     });
   }
 
@@ -240,6 +255,13 @@ class TeamIntelligenceRepository {
     });
   }
 
+  async findUsersByBatchId(batchId: string): Promise<TeamIntelligenceUserIngestionV2[]> {
+    return await this.prisma.teamIntelligenceUserIngestionV2.findMany({
+      where: { batchId },
+      orderBy: [{ teamName: 'asc' }, { userEmail: 'asc' }],
+    });
+  }
+
   async updateUserIngestionSummary(
     userIngestionId: string,
     data: {
@@ -251,10 +273,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceUserIngestionV2> {
-    return await this.prisma.teamIntelligenceUserIngestionV2.update({
+  ): Promise<TeamIntelligenceUserIngestionV2 | null> {
+    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceUserIngestionV2.findUnique({
+      where: { id: userIngestionId },
     });
   }
 
@@ -273,6 +301,21 @@ class TeamIntelligenceRepository {
   async findTeamSummaryById(teamSummaryId: string): Promise<TeamIntelligenceTeamSummaryV2 | null> {
     return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
       where: { id: teamSummaryId },
+    });
+  }
+
+  async findPreviousCompletedTeamSummary(
+    teamId: string,
+    beforeReportDate: Date
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findFirst({
+      where: {
+        teamId,
+        status: TeamIntelligenceBatchStatus.COMPLETED,
+        reportDate: { lt: beforeReportDate },
+        contentUrl: { not: null },
+      },
+      orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
     });
   }
 
@@ -317,10 +360,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceTeamSummaryV2> {
-    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
+      where: { id: teamSummaryId },
     });
   }
 
@@ -365,10 +414,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceTeamSummaryV2> {
-    return await this.prisma.teamIntelligenceTeamSummaryV2.update({
+  ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceTeamSummaryV2.findUnique({
+      where: { id: teamSummaryId },
     });
   }
 
@@ -381,6 +436,21 @@ class TeamIntelligenceRepository {
   async findOrgSummaryById(orgSummaryId: string): Promise<TeamIntelligenceOrgSummaryV2 | null> {
     return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
       where: { id: orgSummaryId },
+    });
+  }
+
+  async findPreviousCompletedOrgSummary(
+    orgId: string,
+    beforeReportDate: Date
+  ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findFirst({
+      where: {
+        orgId,
+        status: TeamIntelligenceBatchStatus.COMPLETED,
+        reportDate: { lt: beforeReportDate },
+        contentUrl: { not: null },
+      },
+      orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
     });
   }
 
@@ -415,10 +485,16 @@ class TeamIntelligenceRepository {
       failedAt: Date | null;
       errorMessage: string | null;
     }>
-  ): Promise<TeamIntelligenceOrgSummaryV2> {
-    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
+      where: { id: orgSummaryId },
     });
   }
 
@@ -463,10 +539,16 @@ class TeamIntelligenceRepository {
       failedAt?: Date | null;
       errorMessage?: string | null;
     }
-  ): Promise<TeamIntelligenceOrgSummaryV2> {
-    return await this.prisma.teamIntelligenceOrgSummaryV2.update({
+  ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
+    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
+    });
+    if (result.count === 0) {
+      return null;
+    }
+    return await this.prisma.teamIntelligenceOrgSummaryV2.findUnique({
+      where: { id: orgSummaryId },
     });
   }
 

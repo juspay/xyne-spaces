@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { toast } from 'sonner';
 import type { Ticket, TicketStatusV2 } from '@xyne/shared';
-import { TicketStageRequestStatus, type TicketStageRequest } from '@xyne/shared';
+import { TicketStageRequestStatus, type TicketStageRequest, ApproverType } from '@xyne/shared';
 import type { Zero } from '@rocicorp/zero';
 import { generateKeyBetween } from 'fractional-indexing';
 import { mutators } from '../zero/mutators';
@@ -20,7 +20,7 @@ export interface StageTransitionInfo {
   toStageId: string;
   formId?: string | null;
   requiresApproval: boolean;
-  approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
+  approvers?: Array<{ approverId: string; approverType: ApproverType }>;
 }
 
 interface UseDragAndDropProps {
@@ -45,6 +45,8 @@ interface UseDragAndDropProps {
   stageFormMap?: Map<string, string>; // Map of stageId -> formId
   isNonLinearBoard?: boolean;
   transitions?: StageTransitionInfo[];
+  /** Keep sortable ordering but prevent moving a ticket to another stage/status column. */
+  allowCrossColumnMove?: boolean;
 }
 
 export const useDragAndDrop = ({
@@ -59,6 +61,7 @@ export const useDragAndDrop = ({
   stageFormMap = new Map(),
   isNonLinearBoard = false,
   transitions,
+  allowCrossColumnMove = true,
 }: UseDragAndDropProps): {
   activeTicket: Ticket | null;
   handleDragStart: (event: DragStartEvent) => void;
@@ -179,6 +182,10 @@ export const useDragAndDrop = ({
 
         // Handle moving to a different stage
         if (newStageName && activeTicket.stageName !== newStageName) {
+          if (!allowCrossColumnMove) {
+            toast.info('Ticket stages are updated by the SDLC workflow');
+            return;
+          }
           const currentStage = stages.find(s => s.name === activeTicket.stageName);
 
           if (currentStage && targetStage) {
@@ -219,7 +226,7 @@ export const useDragAndDrop = ({
                   if (matchingTransition.requiresApproval) {
                     const isApprover =
                       matchingTransition.approvers?.some(a => {
-                        if (a.approverType === 'ROLE') {
+                        if (a.approverType === ApproverType.ROLE) {
                           return currentUserRoleIds.includes(a.approverId);
                         }
                         return a.approverId === (currentUser?.id ?? '');
@@ -430,6 +437,7 @@ export const useDragAndDrop = ({
                     stageName: newStageName,
                     ...(newStatus && { statusV2: newStatus }),
                     ...(kanbanPosition !== undefined && { kanbanPosition }),
+                    updatedAt: Date.now(),
                   }
                 : t,
             ),
@@ -610,7 +618,11 @@ export const useDragAndDrop = ({
             );
 
             setLocalTickets(prev =>
-              prev.map(t => (t.id === activeTicket.id ? { ...t, kanbanPosition: newPosition } : t)),
+              prev.map(t =>
+                t.id === activeTicket.id
+                  ? { ...t, kanbanPosition: newPosition, updatedAt: Date.now() }
+                  : t,
+              ),
             );
 
             void zero.mutate(
@@ -633,9 +645,15 @@ export const useDragAndDrop = ({
 
         // Handle moving to a different status
         if (newStatus && activeTicket.statusV2 !== newStatus) {
+          if (!allowCrossColumnMove) {
+            toast.info('Ticket stages are updated by the SDLC workflow');
+            return;
+          }
           // Update local state immediately for smooth UI
           setLocalTickets(prev =>
-            prev.map(t => (t.id === activeTicket.id ? { ...t, statusV2: newStatus } : t)),
+            prev.map(t =>
+              t.id === activeTicket.id ? { ...t, statusV2: newStatus, updatedAt: Date.now() } : t,
+            ),
           );
 
           // Update database
@@ -669,8 +687,10 @@ export const useDragAndDrop = ({
       onBackwardStageChange,
       stageFormMap,
       currentUser,
+      currentUserRoleIds,
       isNonLinearBoard,
       transitions,
+      allowCrossColumnMove,
     ],
   );
 

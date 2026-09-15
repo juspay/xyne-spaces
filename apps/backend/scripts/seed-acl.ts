@@ -10,10 +10,23 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
+import {
+  WorkspaceJoinPolicy,
+  WorkspaceType,
+  AccessType,
+  AuthProvider,
+  UserStatus,
+  SessionStatus,
+  WorkspaceRole,
+  ProjectType,
+  OrgRole,
+  UserType,
+} from '@xyne/shared';
+import { runAsSystem } from '../src/database/tenant/context';
 import { hashPassword } from '../src/utils/passwordUtils';
+import { vespaQueue } from '../src/queues/vespaQueue';
 
 const prisma = new PrismaClient();
 
@@ -43,6 +56,8 @@ const ESSENTIAL_RESOURCES = [
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
+  { name: 'ROLES', description: 'Role creation and management UI' },
+  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
   {
     name: 'AUTOMATIONS',
     description:
@@ -52,6 +67,11 @@ const ESSENTIAL_RESOURCES = [
     name: 'VESPA',
     description:
       'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*). WRITE or ADMIN access lets a user trigger and manage backfill jobs.',
+  },
+  {
+    name: 'RELEASE-MANAGER',
+    description:
+      'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.',
   },
 ];
 
@@ -89,6 +109,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'WORKSPACE', accessType: AccessType.WRITE },
       { resourceName: 'ORGANIZATIONS', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.WRITE },
+      { resourceName: 'SDLC', accessType: AccessType.WRITE },
     ]
   },
   {
@@ -113,6 +134,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'DASHBOARDS', accessType: AccessType.READ },
       { resourceName: 'WORKSPACE', accessType: AccessType.READ },
       { resourceName: 'AUTOMATIONS', accessType: AccessType.READ },
+      { resourceName: 'SDLC', accessType: AccessType.READ },
     ]
   }
 ];
@@ -145,6 +167,8 @@ const DEFAULT_WORKSPACE = {
 
 async function main() {
   console.log('🚀 Starting ACL system seeding...');
+
+  await vespaQueue.initialize();
 
   try {
     // Step 1: Create essential resources
@@ -233,7 +257,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -303,7 +327,8 @@ async function main() {
             await repositories.resourceAccess.create({
               groupId: group.id,
               resourceId: resourceId,
-              accessType: permission.accessType
+              accessType: permission.accessType,
+              workspaceId: defaultWorkspaceId
             });
             console.log(`    ✅ Granted ${permission.accessType} access to ${permission.resourceName}`);
           } catch (error) {
@@ -364,7 +389,7 @@ async function main() {
           data: {
             orgId: defaultOrg.orgId,
             workspaceId: defaultWorkspace.id,
-            role: 'OWNER',
+            role: WorkspaceRole.OWNER,
           }
         });
         console.log('  ✅ Linked organization to workspace');
@@ -395,7 +420,7 @@ async function main() {
           data: {
             email: DEFAULT_ADMIN_USER.email,
             orgId: DEFAULT_ORG.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
             passwordHash,
           }
         });
@@ -425,7 +450,8 @@ async function main() {
         await prisma.userGroupMapping.create({
           data: {
             userId: adminUser.id,
-            userGroupId: adminGroupId
+            userGroupId: adminGroupId,
+            workspaceId: defaultWorkspaceId
           }
         });
         console.log('  ✅ Linked admin user to ADMIN group');
@@ -452,6 +478,7 @@ async function main() {
               userId: adminUser.id,
               resourceId: resourceId,
               accessType: AccessType.ADMIN,
+              workspaceId: defaultWorkspaceId,
             },
           });
           grantedCount++;
@@ -477,7 +504,7 @@ async function main() {
           data: {
             email: adminUser.email,
             orgId: DEFAULT_ORG.orgId,
-            role: 'OWNER',
+            role: OrgRole.OWNER,
           }
         });
         console.log('  ✅ Linked admin user to organization as OWNER');
@@ -505,7 +532,7 @@ async function main() {
             data: {
               email: defaultAdminEmail,
               orgId: DEFAULT_ORG.orgId,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
             }
           });
           console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
@@ -540,7 +567,8 @@ async function main() {
             await prisma.userGroupMapping.create({
               data: {
                 userId: defaultAdminUser.id,
-                userGroupId: adminGroupId
+                userGroupId: adminGroupId,
+                workspaceId: defaultWorkspaceId
               }
             });
             console.log('  ✅ Linked default admin email user to ADMIN group');
@@ -565,6 +593,7 @@ async function main() {
                 userId: defaultAdminUser.id,
                 resourceId: resourceId,
                 accessType: AccessType.ADMIN,
+                workspaceId: defaultWorkspaceId,
               },
             });
             grantedCount++;
@@ -588,7 +617,7 @@ async function main() {
             data: {
               email: defaultAdminUser.email,
               orgId: DEFAULT_ORG.orgId,
-              role: 'OWNER',
+              role: OrgRole.OWNER,
             }
           });
           console.log('  ✅ Linked default admin email user to organization as OWNER');
@@ -643,11 +672,11 @@ async function main() {
     // Step 8: Ensure all bot users are in OrgMember table
     console.log('\n🤖 Ensuring all bot users are in org_member table...');
     try {
-      const { UserType } = await import('@prisma/client');
+      const { UserType } = await import('@xyne/shared');
 
       // Find all bots (using string literal since UserType enum may not be generated yet)
       const botUsers = await prisma.user.findMany({
-        where: { userType: 'BOT' }
+        where: { userType: UserType.BOT }
       });
 
       let addedCount = 0;
@@ -666,7 +695,7 @@ async function main() {
             data: {
               email: botUser.email,
               orgId: DEFAULT_ORG.orgId,
-              role: 'MEMBER', // Bots are regular members, not owners
+              role: OrgRole.MEMBER, // Bots are regular members, not owners
             }
           });
           addedCount++;
@@ -724,8 +753,10 @@ async function main() {
   }
 }
 
-// Execute the seeding script when run directly
-main()
+// Execute the seeding script when run directly. Run under a system tenant context so
+// audit logging works: ACLAuditLog.workspaceId is NOT NULL, and the seed creates global
+// resources before any workspace exists, so logEvent has no request-scoped tenant to read.
+runAsSystem(() => main())
   .then(() => {
     process.exit(0);
   })

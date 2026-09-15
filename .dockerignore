@@ -15,7 +15,9 @@ __tests__
 
 # Build outputs
 dist
+**/dist
 build
+**/*.tsbuildinfo
 .next
 out
 

@@ -48,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
+import { VisitSlaMode, ApproverType, ReenterMode } from '@xyne/shared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,8 +60,8 @@ export interface TransitionMeta {
   // the moment a ticket enters the source stage — no manual move needed. Only
   // honored at runtime when the source stage has a single outgoing transition.
   requestApprovalOnEntry?: boolean;
-  approvers?: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
-  visitSlaMode: string;
+  approvers?: Array<{ approverId: string; approverType: ApproverType }>;
+  visitSlaMode: VisitSlaMode;
   fixedEtaHours?: number | null;
   onReenter: string;
 }
@@ -666,10 +667,10 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
 
 // ─── Edge Settings Panel ──────────────────────────────────────────────────────
 
-const SLA_OPTIONS = [
-  { value: 'STAGE_DEFAULT', label: 'Stage default' },
-  { value: 'FIXED_HOURS', label: 'Fixed hours' },
-  { value: 'NONE', label: 'None' },
+const SLA_OPTIONS: Array<{ value: VisitSlaMode; label: string }> = [
+  { value: VisitSlaMode.STAGE_DEFAULT, label: 'Stage default' },
+  { value: VisitSlaMode.FIXED_HOURS, label: 'Fixed hours' },
+  { value: VisitSlaMode.NONE, label: 'None' },
 ];
 
 type EdgeSettingsPanelProps = {
@@ -965,7 +966,10 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   data-track-category='transition_config'
                   data-track-name='select_visit_sla'
                   value={meta.visitSlaMode}
-                  onChange={e => onUpdateMeta({ visitSlaMode: e.target.value })}
+                  onChange={e => {
+                    const next = SLA_OPTIONS.find(o => String(o.value) === e.target.value);
+                    if (next) onUpdateMeta({ visitSlaMode: next.value });
+                  }}
                 >
                   {SLA_OPTIONS.map(opt => (
                     <option key={opt.value} value={opt.value}>
@@ -973,7 +977,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     </option>
                   ))}
                 </select>
-                {meta.visitSlaMode === 'FIXED_HOURS' && (
+                {meta.visitSlaMode === VisitSlaMode.FIXED_HOURS && (
                   <input
                     type='number'
                     min='1'
@@ -1221,8 +1225,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         const meta: TransitionMeta = transitionsMeta.get(metaKey) ?? {
           requiresApproval: false,
           approvers: [],
-          visitSlaMode: 'STAGE_DEFAULT',
-          onReenter: 'RESET',
+          visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+          onReenter: ReenterMode.RESET,
         };
 
         // Detect reciprocal edge and assign alternating curve offset
@@ -1311,8 +1315,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             formId: m.formId,
             requiresApproval: false,
             approvers: [],
-            visitSlaMode: 'STAGE_DEFAULT',
-            onReenter: 'RESET',
+            visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+            onReenter: ReenterMode.RESET,
           },
           onSelectEdge: handleSelectEdge,
           selectedEdgeId,
@@ -1386,8 +1390,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         formId: merged.formId,
         requiresApproval: false,
         approvers: [],
-        visitSlaMode: 'STAGE_DEFAULT',
-        onReenter: 'RESET',
+        visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+        onReenter: ReenterMode.RESET,
       };
       return {
         edgeId: selectedEdgeId,
@@ -1407,8 +1411,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     const meta: TransitionMeta = transitionsMeta.get(`${fromTempId}->${toTempId}`) ?? {
       requiresApproval: false,
       approvers: [],
-      visitSlaMode: 'STAGE_DEFAULT',
-      onReenter: 'RESET',
+      visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
+      onReenter: ReenterMode.RESET,
     };
     return {
       edgeId: selectedEdgeId,

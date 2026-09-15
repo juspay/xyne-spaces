@@ -1,4 +1,4 @@
-import { AuthProvider, UserStatus } from '@prisma/client';
+import { AuthProvider, UserStatus } from '@xyne/shared';
 import type {
   CalendarOAuthProvider,
   CalendarOAuthState,

@@ -1,7 +1,8 @@
 // Handles inbound Mobius release events and records them as ticket activities.
 
 import { z } from 'zod';
-import { ActivityType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { ActivityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { runWithContext } from '@/database/tenant/context';
 import { TicketRepository } from '@/database/repositories/ticketRepository';

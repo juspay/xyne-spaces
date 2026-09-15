@@ -13,16 +13,74 @@ import * as os from 'os';
 import { net, app } from 'electron';
 import si from 'systeminformation';
 import { config } from '../../app/config';
-import { ElectronEventType } from './electron-events';
+import type { ElectronEventType } from './electron-events';
 import Store from 'electron-store';
+
+const MAX_LIBRARY_STACK_FRAMES = 3;
+
+const redact = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
+      /\b(authorization|token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
+      '$1=[REDACTED]'
+    );
+
+const isLibraryStackFrame = (line: string): boolean =>
+  /(?:[/\\]node_modules[/\\]|\bnode:[^)\s]+|\bat (?:async )?internal[/\\])/.test(line);
+
+export const limitLibraryStackFrames = (stack: string): string => {
+  let libraryFrames = 0;
+
+  return stack
+    .split('\n')
+    .filter((line, index) => {
+      if (index === 0 || !isLibraryStackFrame(line)) return true;
+      libraryFrames += 1;
+      return libraryFrames <= MAX_LIBRARY_STACK_FRAMES;
+    })
+    .join('\n');
+};
+
+const serializeError = (value: unknown): Record<string, unknown> => {
+  if (!(value instanceof Error)) {
+    return {
+      name: 'NonError',
+      message: redact(typeof value === 'string' ? value : String(value)),
+    };
+  }
+
+  return {
+    name: value.name,
+    message: redact(value.message),
+    stack: value.stack ? redact(limitLibraryStackFrames(value.stack)) : undefined,
+  };
+};
+
+const errorFrom = (value: unknown): Error | undefined => {
+  if (value instanceof Error) return value;
+  if (!value || typeof value !== 'object') return undefined;
+  return Object.values(value as Record<string, unknown>).find(
+    item => item instanceof Error
+  ) as Error | undefined;
+};
+
+export const installElectronLogStackHook = (): void => {
+  log.hooks.push(message => {
+    if (message.level !== 'error') return message;
+    const error = message.data.map(errorFrom).find(Boolean);
+    if (error) message.data.push({ error: serializeError(error) });
+    return message;
+  });
+};
 
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
 errorLogger.transports.file.fileName = 'errors.log';
 errorLogger.transports.file.level = 'error'; // Only error
-errorLogger.transports.console.level = false; 
+errorLogger.transports['console'].level = false;
 
-type EventType = EnrollmentEventType | ElectronEventType;
+export type LogEvent = EnrollmentEventType | ElectronEventType | string;
 
 export const LogLevel = {
   DEBUG: 'DEBUG',
@@ -41,7 +99,7 @@ interface LogEntry {
   timestamp: string;
   level: LogLevel;
   hostname: string;
-  event: EventType;
+  event: LogEvent;
   serialNumber: string;
   preProdEnabled: boolean;
   [key: string]: unknown;
@@ -133,39 +191,38 @@ class LoggerService {
   /**
    * Log a debug event
    */
-  debug(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  debug(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.DEBUG, event, extraFields, logType);
   }
 
   /**
    * Log an info event
    */
-  info(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  info(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.INFO, event, extraFields, logType);
   }
 
   /**
    * Log a warning event
    */
-  warn(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  warn(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.WARN, event, extraFields, logType);
   }
 
   /**
    * Log an error event
    */
-  error(event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  error(event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     this.addLog(LogLevel.ERROR, event, extraFields, logType);
   }
 
   /**
    * Log an error with exception details
    */
-  logError(event: EventType, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
+  logError(event: LogEvent, error: unknown, extraFields?: Record<string, unknown>, logType?: string): void {
     const errorDetails = {
       ...(extraFields || {}),
-      error_message: error instanceof Error ? error.message : String(error),
-      error_stack: error instanceof Error ? error.stack : undefined,
+      error: serializeError(error),
     };
     this.error(event, errorDetails, logType);
   }
@@ -186,11 +243,21 @@ class LoggerService {
   /**
    * Add a log entry
    */
-  private addLog(level: LogLevel, event: EventType, extraFields?: Record<string, unknown>, logType?: string): void {
+  private addLog(level: LogLevel, event: LogEvent, extraFields?: Record<string, unknown>, logType?: string): void {
     if (!this.isEnabled) {
       return;
     }
 
+    let error: Error | undefined;
+    if (level === LogLevel.ERROR && extraFields) {
+      error =
+        extraFields instanceof Error
+          ? extraFields
+          : Object.values(extraFields).find(value => value instanceof Error);
+    }
+    const normalizedFields = error
+      ? { ...(extraFields instanceof Error ? {} : extraFields), error: serializeError(error) }
+      : extraFields;
     const logEntry: LogEntry = {
       clientSessionId: this.clientSessionId,
       platformName: this.platformName,
@@ -202,7 +269,7 @@ class LoggerService {
       hostname: os.hostname(),
       serialNumber: this.serialNumber,
       event,
-      ...(extraFields || {}),
+      ...(normalizedFields || {}),
     };
 
     // Write to main log (all levels)

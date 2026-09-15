@@ -78,6 +78,11 @@ export interface SlashCommandClickEvent extends CommonSlashEventFields {
   target_type?: 'user' | 'channel';
   /** For `/goto`: the nav path (e.g. `/activity`) or the extra id (`preferences`/`profile`). */
   destination?: string;
+  /**
+   * For `/chat` & `/call` target picks: how the target was reached — `slash` (typed the
+   * `/`-prefix) vs `actions_menu` (the ⌥↵ Cmd+K result Actions menu).
+   */
+  source?: 'slash' | 'actions_menu';
 }
 
 /**

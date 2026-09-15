@@ -1,8 +1,8 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
-import { AccessType, PrismaClient, WorkspaceRole } from '@prisma/client';
-import { GuestEntity } from '@xyne/shared';
+import { PrismaClient } from '@prisma/client';
+import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -32,6 +32,25 @@ import { v4 as uuidv4 } from 'uuid';
  *
  * Handles business logic for user groups, users, resources, and access control
  */
+/**
+ * Label for a guest grant whose target the *viewing admin* cannot read.
+ *
+ * Both lookups behind this screen run through the ACL'd client, so a grant on a channel the
+ * admin is not a participant of (ChannelsACL: PUBLIC or participant) or on a canvas they
+ * cannot reach (CanvasesACL) resolves to nothing. Naming the kind is deliberate: the admin
+ * may revoke without being shown a private name, and 'Unknown entity' read like a data bug.
+ */
+function unresolvedEntityName(entityType: string): string {
+  switch (entityType) {
+    case GuestEntity.CHANNEL:
+      return 'Private channel'
+    case GuestEntity.CANVAS:
+      return 'Private canvas'
+    default:
+      return 'Unknown entity'
+  }
+}
+
 export class UserManagementService {
   private static instance: UserManagementService;
   private prisma: PrismaClient;
@@ -427,9 +446,6 @@ export class UserManagementService {
     const guestUserMap = new Map(guestUsers.map(user => [user.id, user]));
     const userMap = new Map(users.map(user => [user.id, user]));
 
-    const projectIds = mappings
-      .filter(mapping => mapping.accessibleEntityType === GuestEntity.PROJECT)
-      .map(mapping => mapping.accessibleEntityId);
     const channelIds = mappings
       .filter(mapping => mapping.accessibleEntityType === GuestEntity.CHANNEL)
       .map(mapping => mapping.accessibleEntityId);
@@ -437,13 +453,7 @@ export class UserManagementService {
       .filter(mapping => mapping.accessibleEntityType === GuestEntity.CANVAS)
       .map(mapping => mapping.accessibleEntityId);
 
-    const [projects, channels, canvases] = await Promise.all([
-      projectIds.length
-        ? this.prisma.project.findMany({
-            where: { workspaceId, id: { in: [...new Set(projectIds)] } },
-            select: { id: true, name: true },
-          })
-        : [],
+    const [channels, canvases] = await Promise.all([
       channelIds.length
         ? this.prisma.channel.findMany({
             where: { workspaceId, id: { in: [...new Set(channelIds)] } },
@@ -458,7 +468,6 @@ export class UserManagementService {
         : [],
     ]);
 
-    const projectNameById = new Map(projects.map(project => [project.id, project.name]));
     const channelNameById = new Map(channels.map(channel => [channel.id, channel.name]));
     const canvasTitleById = new Map(canvases.map(canvas => [canvas.id, canvas.title]));
     const accessByUserId = new Map<string, Array<{
@@ -474,17 +483,15 @@ export class UserManagementService {
     for (const mapping of mappings) {
       if (!guestUserMap.has(mapping.userId)) continue;
       const entityName =
-        mapping.accessibleEntityType === GuestEntity.PROJECT
-          ? projectNameById.get(mapping.accessibleEntityId)
-          : mapping.accessibleEntityType === GuestEntity.CHANNEL
-            ? channelNameById.get(mapping.accessibleEntityId)
-            : canvasTitleById.get(mapping.accessibleEntityId);
+        mapping.accessibleEntityType === GuestEntity.CHANNEL
+          ? channelNameById.get(mapping.accessibleEntityId)
+          : canvasTitleById.get(mapping.accessibleEntityId);
       const access = accessByUserId.get(mapping.userId) ?? [];
       access.push({
         id: mapping.id,
         accessibleEntityId: mapping.accessibleEntityId,
         accessibleEntityType: mapping.accessibleEntityType,
-        entityName: entityName ?? 'Unknown entity',
+        entityName: entityName ?? unresolvedEntityName(mapping.accessibleEntityType),
         createdAt: mapping.createdAt,
         invitedBy: mapping.invitedBy,
         invitedByName: userMap.get(mapping.invitedBy)?.name ?? null,
@@ -540,64 +547,12 @@ export class UserManagementService {
       }
 
       if (params.accessibleEntityType === GuestEntity.CHANNEL) {
-        const channel = await tx.channel.findFirst({
-          where: { id: params.accessibleEntityId, workspaceId: params.workspaceId },
-          select: { id: true, projectId: true },
+        await tx.channelParticipant.deleteMany({
+          where: { channelId: params.accessibleEntityId, userId: params.userId },
         });
-        const stillHasProjectAccess = channel?.projectId
-          ? await tx.guestAccess.findFirst({
-              where: {
-                workspaceId: params.workspaceId,
-                userId: params.userId,
-                accessibleEntityType: GuestEntity.PROJECT,
-                accessibleEntityId: channel.projectId,
-              },
-              select: { id: true },
-            })
-          : null;
-
-        if (!stillHasProjectAccess) {
-          await tx.channelParticipant.deleteMany({
-            where: { channelId: params.accessibleEntityId, userId: params.userId },
-          });
-          await tx.channelUserStatus.deleteMany({
-            where: { channelId: params.accessibleEntityId, userId: params.userId },
-          });
-        }
-      }
-
-      if (params.accessibleEntityType === GuestEntity.PROJECT) {
-        const projectChannels = await tx.channel.findMany({
-          where: { workspaceId: params.workspaceId, projectId: params.accessibleEntityId },
-          select: { id: true },
+        await tx.channelUserStatus.deleteMany({
+          where: { channelId: params.accessibleEntityId, userId: params.userId },
         });
-        const channelIds = projectChannels.map(channel => channel.id);
-        if (channelIds.length > 0) {
-          const directChannelAccess = await tx.guestAccess.findMany({
-            where: {
-              workspaceId: params.workspaceId,
-              userId: params.userId,
-              accessibleEntityType: GuestEntity.CHANNEL,
-              accessibleEntityId: { in: channelIds },
-            },
-            select: { accessibleEntityId: true },
-          });
-          const directlyAccessibleChannelIds = new Set(
-            directChannelAccess.map(mapping => mapping.accessibleEntityId),
-          );
-          const cleanupChannelIds = channelIds.filter(
-            channelId => !directlyAccessibleChannelIds.has(channelId),
-          );
-
-          if (cleanupChannelIds.length > 0) {
-            await tx.channelParticipant.deleteMany({
-              where: { channelId: { in: cleanupChannelIds }, userId: params.userId },
-            });
-            await tx.channelUserStatus.deleteMany({
-              where: { channelId: { in: cleanupChannelIds }, userId: params.userId },
-            });
-          }
-        }
       }
 
       if (params.accessibleEntityType === GuestEntity.CANVAS) {
@@ -683,9 +638,10 @@ export class UserManagementService {
   async grantUserResourceAccess(
     userId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
-    return aclService.grantUserAccess(userId, resourceName, accessType);
+    return aclService.grantUserAccess(userId, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -694,9 +650,10 @@ export class UserManagementService {
   async grantGroupResourceAccess(
     groupId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{ success: boolean; message: string }> {
-    return aclService.grantGroupAccess(groupId, resourceName, accessType);
+    return aclService.grantGroupAccess(groupId, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -725,7 +682,8 @@ export class UserManagementService {
   async bulkGrantUserAccess(
     userIds: string[],
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{
     successful: string[];
     failed: { userId: string; error: string }[];
@@ -737,7 +695,7 @@ export class UserManagementService {
 
     for (const userId of userIds) {
       try {
-        const result = await this.grantUserResourceAccess(userId, resourceName, accessType);
+        const result = await this.grantUserResourceAccess(userId, resourceName, accessType, workspaceId);
         if (result.success) {
           results.successful.push(userId);
         } else {
@@ -760,7 +718,8 @@ export class UserManagementService {
   async grantGroupUsersAccess(
     groupId: string,
     resourceName: string,
-    accessType: AccessType
+    accessType: AccessType,
+    workspaceId: string
   ): Promise<{
     successful: string[];
     failed: { userId: string; error: string }[];
@@ -768,7 +727,7 @@ export class UserManagementService {
     const users = await this.getUsersByGroup(groupId);
     const userIds = users.map(user => user.id);
 
-    return this.bulkGrantUserAccess(userIds, resourceName, accessType);
+    return this.bulkGrantUserAccess(userIds, resourceName, accessType, workspaceId);
   }
 
   /**
@@ -819,7 +778,7 @@ export class UserManagementService {
     // Add direct access (higher priority)
     directAccess.forEach(access => {
       resourceMap.set(access.resource.name, {
-        accessType: access.accessType,
+        accessType: access.accessType as AccessType,
         source: 'direct'
       });
     });
@@ -828,7 +787,7 @@ export class UserManagementService {
     groupAccess.forEach(access => {
       if (!resourceMap.has(access.resource.name)) {
         resourceMap.set(access.resource.name, {
-          accessType: access.accessType,
+          accessType: access.accessType as AccessType,
           source: 'group'
         });
       }
@@ -898,12 +857,15 @@ export class UserManagementService {
         return { success: false, message: 'User is already in this group' };
       }
 
-      // Create new mapping
+      // Create new mapping. Use the GROUP's workspace (the mapping belongs to the
+      // group's tenant), not user.workspaceId — users are multi-workspace and their
+      // workspaceId is only their home workspace, which would mis-scope/hide the
+      // mapping when assigning to a group in another workspace.
       await this.prisma.userGroupMapping.create({
         data: {
           userId,
           userGroupId: groupId,
-          workspaceId: user.workspaceId,
+          workspaceId: group.workspaceId,
         }
       });
 

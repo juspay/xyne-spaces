@@ -4,6 +4,7 @@ import { Popover } from '../../ui/Popover/Popover';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { cn } from '../../../utils/classNames';
 
 interface PriorityPickerProps {
@@ -33,8 +34,11 @@ export function PriorityPicker({
 
   const setPriority = (next: TicketPriority): void => {
     if (next !== current) {
-      void zero.mutate(
-        mutators.ticket.update({ id: ticketId, priority: next, updatedAt: Date.now() }),
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.update({ id: ticketId, priority: next, updatedAt: Date.now() }),
+        ),
+        'Failed to update priority',
       );
     }
     setOpen(false);
@@ -79,6 +83,7 @@ export function PriorityPicker({
           <button
             key={p}
             type='button'
+            data-ph-capture-attribute-track-id='ticket_set_priority_row'
             onClick={e => {
               e.stopPropagation();
               setPriority(p);

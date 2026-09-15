@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
 import { useUser } from '../../hooks/useUsers';
-import { useMigratedChannels } from '../../hooks/useChannels';
+import { useMigratedChannels, useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
-import { setAIOnboardingPending } from '../../contexts/AIOnboardingContext';
 import Confetti from 'react-confetti';
+import LocalHarnessOnboardingStep from './LocalHarnessOnboardingStep';
+import type { LocalHarnessInstallation } from '../../types/electron';
 
 const OnboardingScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -19,6 +20,30 @@ const OnboardingScreen: React.FC = () => {
 
   // Get migrated channels using the hook
   const migratedChannels = useMigratedChannels();
+
+  // Resolve the default "general" channel so first-time users land there after
+  // onboarding instead of the user guide.
+  const generalChannel = useChannelByName('general');
+
+  const [localHarnesses, setLocalHarnesses] = useState<LocalHarnessInstallation[]>([]);
+  const currentStepRef = useRef(0);
+  currentStepRef.current = currentStep;
+
+  useEffect(() => {
+    const api = window.electronAPI?.localHarness;
+    if (!api) return;
+    let cancelled = false;
+    void api
+      .detect()
+      .then(found => {
+        if (cancelled || currentStepRef.current !== 0) return;
+        setLocalHarnesses(found.filter(install => install.authenticated));
+      })
+      .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
 
   // Build onboarding steps dynamically based on whether user has migrated channels
   const hasMigratedChannels = migratedChannels?.length > 0;
@@ -49,6 +74,15 @@ const OnboardingScreen: React.FC = () => {
           {
             key: 'channels',
             title: '',
+            animation: 'fadeUp',
+          } as const,
+        ]
+      : []),
+    ...(localHarnesses.length > 0
+      ? [
+          {
+            key: 'localHarness',
+            title: 'Run agents on your own machine',
             animation: 'fadeUp',
           } as const,
         ]
@@ -99,21 +133,15 @@ const OnboardingScreen: React.FC = () => {
   const handleCompleteOnboarding = (): void => {
     setIsCompleting(true);
 
-    // Capture new-user status before COMPLETE_ONBOARDING flips isNewUser to false.
-    const isNewUser = Cookies.get('is_new_user') === 'true';
-
-    // Mark AI onboarding as pending so AppRoot can auto-trigger it
-    setAIOnboardingPending();
-
     // Send event to auth machine to update isNewUser state
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = currentUser?.workspaceId;
     if (workspaceId) {
-      // First-time users land on the user guide for an oriented walkthrough before
-      // dropping into an empty inbox; returning users go straight to chat.
-      const landing = isNewUser ? 'guide' : 'chat/dir';
-      void navigate(`/${workspaceId}/${landing}`);
+      // After onboarding, land directly in the chat directory on the general
+      // channel instead of the user guide.
+      const landing = generalChannel?.id ? `/chat/dir/${generalChannel.id}` : '/chat/dir';
+      void navigate(`/${workspaceId}${landing}`);
     }
   };
 
@@ -249,6 +277,9 @@ const OnboardingScreen: React.FC = () => {
           </div>
         );
 
+      case 'localHarness':
+        return <LocalHarnessOnboardingStep installations={localHarnesses} onNext={nextStep} />;
+
       case 'profile':
         return (
           <div className='relative w-full min-h-screen bg-background overflow-hidden flex items-center justify-center px-4 sm:px-8'>
@@ -271,7 +302,7 @@ const OnboardingScreen: React.FC = () => {
               <div
                 className={`
             flex flex-col items-center text-center gap-6
-            transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
+            transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
             ${profileAnim ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'}
           `}
               >
@@ -301,7 +332,7 @@ const OnboardingScreen: React.FC = () => {
                 <div
                   className={`
               relative w-[300px]
-              transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
+              transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
               ${
                 profileAnim
                   ? 'translate-y-0 scale-100 rotate-0 opacity-100'

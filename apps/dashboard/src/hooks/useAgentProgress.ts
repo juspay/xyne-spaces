@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useEffect, useRef, useState } from 'react';
 import { websocketService } from '../services/clients/socketClient';
 import {
@@ -5,6 +6,7 @@ import {
   type AgentSpinnerVariant,
 } from '../components/ui/AgentSpinner';
 import { apiInstance } from '../services/clients/apiClient';
+import { MessageType } from '@xyne/shared';
 
 /**
  * Ephemeral agent-progress state.
@@ -19,6 +21,7 @@ import { apiInstance } from '../services/clients/apiClient';
  */
 export interface ActiveAgent {
   agentSlug: string | null;
+  agentName: string | null;
   agentUserId: string | null;
   toolLabel: string | null;
   /** Human who started the run — only this user may stop it (gates the Stop button). */
@@ -34,6 +37,7 @@ interface AgentProgressData {
     conversationId?: string;
     channelId?: string;
     agentSlug?: string | null;
+    agentName?: string | null;
     agentUserId?: string | null;
     /** Run id. Scopes done-suppression so a straggler from a finished run can't resurrect the spinner. */
     sessionId?: string | null;
@@ -57,7 +61,7 @@ interface SessionActivityEvent {
     senderId: string;
     senderName: string;
     content: string;
-    msgType: string;
+    msgType: MessageType;
     createdAt: Date;
   };
 }
@@ -88,6 +92,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
       .get<{
         data?: Array<{
           agentSlug?: string | null;
+          agentName?: string | null;
           agentUserId?: string | null;
           sessionId?: string | null;
           toolLabel?: string | null;
@@ -108,6 +113,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
             if (d.sessionId && doneSessionsRef.current.has(d.sessionId)) continue; // its run already ended live — don't resurrect
             next.set(key, {
               agentSlug: d.agentSlug ?? null,
+              agentName: d.agentName ?? d.agentSlug ?? null,
               agentUserId: d.agentUserId ?? null,
               toolLabel: d.toolLabel ?? null,
               triggeredByUserId: d.triggeredByUserId ?? null,
@@ -123,8 +129,12 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
       });
 
     const handler = (evt: SessionActivityEvent): void => {
-      console.info('Received session_activity event', evt);
-      if (evt?.message?.msgType !== 'SYSTEM') return;
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String('Received session_activity event'),
+        context: [evt],
+      });
+      if (evt?.message?.msgType !== MessageType.SYSTEM) return;
       let parsed: AgentProgressData | undefined;
       try {
         parsed = JSON.parse(evt.message.content) as AgentProgressData;
@@ -159,6 +169,7 @@ export function useAgentProgress(sessionId: string | undefined): UseAgentProgres
             : pickRandomAgentSpinnerVariant(existing?.variant);
         next.set(key, {
           agentSlug: d.agentSlug ?? null,
+          agentName: d.agentName ?? d.agentSlug ?? null,
           agentUserId: d.agentUserId ?? null,
           toolLabel: nextLabel,
           // Tool-label updates may omit the triggerer; keep the first value seen.

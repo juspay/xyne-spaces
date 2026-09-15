@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
+import { AccessType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import type { Workflow } from '@/types/database';
-import { AccessType } from '@prisma/client';
 import { AutomationStatus, isLiveStatus } from '../types/status';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -231,7 +231,7 @@ class ApprovalService {
     liveId: string,
     actorUserId: string,
     nextStatus: AutomationStatus.ACTIVE | AutomationStatus.DISABLED,
-    opts: { isEnvAdmin?: boolean } = {},
+    opts: { isEnvAdmin?: boolean; cancelQueued?: boolean } = {},
   ): Promise<AutomationView> {
     if (nextStatus !== AutomationStatus.ACTIVE && nextStatus !== AutomationStatus.DISABLED) {
       throw new ApprovalError(
@@ -262,9 +262,9 @@ class ApprovalService {
       );
       return automation;
     }
-    const automation = await automationService.disable(liveId);
+    const automation = await automationService.disable(liveId, opts.cancelQueued ?? true);
     logger.info(
-      `[approval] toggleLive DISABLED id=${liveId} actorUserId=${actorUserId}`,
+      `[approval] toggleLive DISABLED id=${liveId} actorUserId=${actorUserId} cancelQueued=${opts.cancelQueued ?? true}`,
     );
     return automation;
   }

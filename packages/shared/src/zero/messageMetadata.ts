@@ -52,6 +52,7 @@ export async function resolveMessage(
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     metadata: summary.metadata ? JSON.parse(summary.metadata) : null,
     nudgeCount: summary.nudgeCount ?? null,
+    messageActs: null,
     isSent: summary.isSent,
     reactions_md: summary.reactions_md ?? null,
     link_preview_md: summary.link_preview_md ?? null,

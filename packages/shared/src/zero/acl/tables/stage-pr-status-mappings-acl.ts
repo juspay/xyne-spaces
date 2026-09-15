@@ -1,5 +1,5 @@
 import type { Query } from '@rocicorp/zero';
-import { type Schema, type Context, ChannelVisibility } from '../../schema';
+import { type Schema, type Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
@@ -21,23 +21,13 @@ export class StagePRStatusMappingsACL extends BaseQueryACL<'stage_pr_status_mapp
       );
     }
 
-    // Users can see PR status mappings for stages in boards they have access to
-    // Access chain: stage_pr_status_mappings -> stage -> board (with workspaceId) -> project -> channels -> participants
+    // Scope to the board's workspace via stage -> board — match StagesACL/BoardsACL.
+    // The old project→channels participation gate hid mappings from workspace members
+    // who could see the board but weren't channel participants (empty board columns).
     return query.whereExists('stage', (stageQuery) =>
       stageQuery.whereExists('board', (boardQuery) =>
-        boardQuery
-          .where('workspaceId', '=', this.ctx.workspaceId)
-          .whereExists('project', (projectQuery) =>
-            projectQuery.whereExists('channels', (channelQuery) =>
-              channelQuery.where(({or, cmp, exists}) => {
-                return or(
-                  cmp("visibility", ChannelVisibility.PUBLIC),
-                  exists("participants", participants => participants.where("userId", this.ctx.userID))
-                )
-              })
-            )
-          )
-      )
+        boardQuery.where('workspaceId', '=', this.ctx.workspaceId),
+      ),
     );
   }
 }

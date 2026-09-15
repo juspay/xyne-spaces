@@ -66,7 +66,15 @@ export const CitationLink = forwardRef<HTMLAnchorElement, CitationLinkProps>(
     };
 
     return (
-      <Link ref={ref} to={url} aria-label={ariaLabel} onClick={handleClick} {...rest}>
+      <Link
+        ref={ref}
+        to={url}
+        aria-label={ariaLabel}
+        onClick={handleClick}
+        data-track-category='citation'
+        data-track-name='citation-open-internal'
+        {...rest}
+      >
         {children}
       </Link>
     );

@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import EditAppForm from '../EditAppForm/EditAppForm';
 import { useUser } from '../../../hooks/useUsers';
+import { AccessType } from '@xyne/shared';
+import type { UserPermission } from '../../../machines/stateMachine';
 
 interface AppRow extends Record<string, unknown> {
   id: string;
@@ -56,7 +58,7 @@ interface AppsTableProps {
   onGetJwtToken?: (appId: string) => Promise<string>;
   onGetSigningSecret?: (appId: string) => Promise<string>;
   onUploadPicture?: (appId: string, file: File) => Promise<void>;
-  userPermissions: Array<{ resourceName: string; accessType: string }>;
+  userPermissions: UserPermission[];
   isInstalling?: boolean;
   isUpdatingApp?: boolean;
   // Promote ORG -> GLOBAL (marketplace). Shown on org-view apps when the user is a XYNE-APPS admin.
@@ -95,23 +97,25 @@ export const AppsTable = ({
   const isInstalledView = dataSource === 'install';
   const appAccessLevel = useMemo(() => {
     const appPerms = userPermissions.filter(p => p.resourceName === 'XYNE-APPS');
-    if (appPerms.some(p => p.accessType === 'ADMIN')) return 'ADMIN';
-    if (appPerms.some(p => p.accessType === 'WRITE')) return 'WRITE';
-    if (appPerms.some(p => p.accessType === 'READ')) return 'READ';
+    if (appPerms.some(p => p.accessType === AccessType.ADMIN)) return 'ADMIN';
+    if (appPerms.some(p => p.accessType === AccessType.WRITE)) return 'WRITE';
+    if (appPerms.some(p => p.accessType === AccessType.READ)) return 'READ';
     return null;
   }, [userPermissions]);
 
   // Check if user has admin access
   const hasAdminAccess = appAccessLevel === 'ADMIN';
 
-  // Who may edit, by screen:
-  // - Installed view: editing the install copy -> any XYNE-APPS admin.
+  // Who may OPEN the edit dialog, by screen:
+  // - Installed view: any XYNE-APPS admin, plus the app's creator (webhooks only -- see below).
   // - Org/Marketplace view: editing the app template -> creator only (matches AppsACL.canUpdate).
   const canEditApp = (app: AppRow): boolean => {
     if (appAccessLevel === 'READ' || appAccessLevel === null) return false;
-    if (isInstalledView) return hasAdminAccess;
+    if (isInstalledView) return hasAdminAccess || app.createdBy === currentUserId;
     return app.createdBy === currentUserId;
   };
+
+  const canEditInstallSettings = (): boolean => !isInstalledView || hasAdminAccess;
 
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [editingApp, setEditingApp] = useState<AppRow | null>(null);
@@ -248,6 +252,8 @@ export const AppsTable = ({
                   e.stopPropagation();
                   void handleCopyBotUserId(app);
                 }}
+                data-track-category='Apps'
+                data-track-name='COPY_BOT_USER_ID'
                 title='Copy bot user ID'
                 className='h-6 w-6 p-0'
               >
@@ -322,6 +328,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopyToken(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_TOKEN'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -350,6 +358,8 @@ export const AppsTable = ({
               variant='ghost'
               size='sm'
               onClick={() => void handleCopySigningSecret(app.id)}
+              data-track-category='Apps'
+              data-track-name='COPY_APP_SIGNING_SECRET'
               disabled={!canCopy}
               className='h-6 w-6 p-0'
               title={
@@ -474,6 +484,7 @@ export const AppsTable = ({
             appInstallations={editingApp.installations}
             editMode={isInstalledView ? 'install' : 'template'}
             installedAppId={isInstalledView ? (editingApp.installations?.[0]?.id ?? null) : null}
+            canEditInstallSettings={canEditInstallSettings()}
             onSave={handleSaveEdit}
             onUploadPicture={uploadPictureHandler}
             isLoading={isUpdatingApp}

@@ -40,6 +40,7 @@ import {
   type AppPermission,
 } from '../../../services/Apps/appsService';
 import { APPS_PUBLIC_BASE_URL } from '../../../config';
+import { AppIncomingWebhookAction, CommandAccessibility, CommandType } from '@xyne/shared';
 
 // ─── Inline command row ───────────────────────────────────────────────────────
 
@@ -85,6 +86,8 @@ const CommandRow = ({
           size='sm'
           className='h-7 w-7 p-0'
           onClick={() => onEdit(command)}
+          data-track-category='app-command'
+          data-track-name='EDIT_COMMAND'
           title='Edit command'
         >
           <Pencil size={13} />
@@ -95,6 +98,8 @@ const CommandRow = ({
           size='sm'
           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
           onClick={() => onDelete(command.commandName)}
+          data-track-category='app-command'
+          data-track-name='DELETE_COMMAND'
           title='Delete command'
         >
           <Trash2 size={13} />
@@ -122,8 +127,8 @@ const CommandFormInline = ({
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState(initial?.commandName ?? '');
   const [desc, setDesc] = useState(initial?.description ?? '');
-  const [accessibility, setAccessibility] = useState<'CHAT' | 'THREAD' | 'BOTH'>(
-    (initial?.commandAccessibility as 'CHAT' | 'THREAD' | 'BOTH') ?? 'BOTH',
+  const [accessibility, setAccessibility] = useState<CommandAccessibility>(
+    initial?.commandAccessibility ?? CommandAccessibility.BOTH,
   );
   const [nameError, setNameError] = useState('');
 
@@ -146,7 +151,7 @@ const CommandFormInline = ({
       const payload: UpsertCommandRequest = {
         commandName: trimmed,
         description: desc.trim(),
-        commandType: 'COMMAND',
+        commandType: CommandType.COMMAND,
         commandAccessibility: accessibility,
       };
       const saved = initial
@@ -206,8 +211,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'CHAT'}
-            onChange={() => setAccessibility('CHAT')}
+            checked={accessibility === CommandAccessibility.CHAT}
+            onChange={() => setAccessibility(CommandAccessibility.CHAT)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-chat'
@@ -218,8 +223,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'THREAD'}
-            onChange={() => setAccessibility('THREAD')}
+            checked={accessibility === CommandAccessibility.THREAD}
+            onChange={() => setAccessibility(CommandAccessibility.THREAD)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-thread'
@@ -230,8 +235,8 @@ const CommandFormInline = ({
           <input
             type='radio'
             name='command-accessibility'
-            checked={accessibility === 'BOTH'}
-            onChange={() => setAccessibility('BOTH')}
+            checked={accessibility === CommandAccessibility.BOTH}
+            onChange={() => setAccessibility(CommandAccessibility.BOTH)}
             disabled={saving}
             data-track-category='app-command'
             data-track-name='toggle-accessibility-both'
@@ -246,6 +251,8 @@ const CommandFormInline = ({
           size='sm'
           className='h-7'
           onClick={onCancel}
+          data-track-category='app-command'
+          data-track-name='CANCEL_COMMAND_FORM'
           disabled={saving}
         >
           <X size={13} className='mr-1' /> Cancel
@@ -255,6 +262,8 @@ const CommandFormInline = ({
           size='sm'
           className='h-7'
           onClick={() => void handleSave()}
+          data-track-category='app-command'
+          data-track-name='SAVE_COMMAND'
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
@@ -291,7 +300,7 @@ const ShortcutRow = ({
         </span>
         <span
           className={`text-[10px] px-1 py-0.5 rounded ${
-            shortcut.commandAccessibility === 'GLOBAL'
+            shortcut.commandAccessibility === CommandAccessibility.GLOBAL
               ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
               : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
           }`}
@@ -309,6 +318,8 @@ const ShortcutRow = ({
           size='sm'
           className='h-7 w-7 p-0'
           onClick={() => onEdit(shortcut)}
+          data-track-category='app-shortcut'
+          data-track-name='EDIT_SHORTCUT'
           title='Edit shortcut'
         >
           <Pencil size={13} />
@@ -319,6 +330,8 @@ const ShortcutRow = ({
           size='sm'
           className='h-7 w-7 p-0 text-destructive hover:text-destructive'
           onClick={() => onDelete(shortcut.commandName)}
+          data-track-category='app-shortcut'
+          data-track-name='DELETE_SHORTCUT'
           title='Delete shortcut'
         >
           <Trash2 size={13} />
@@ -450,6 +463,8 @@ const ShortcutFormInline = ({
           size='sm'
           className='h-7'
           onClick={onCancel}
+          data-track-category='app-shortcut'
+          data-track-name='CANCEL_SHORTCUT_FORM'
           disabled={saving}
         >
           <X size={13} className='mr-1' /> Cancel
@@ -459,6 +474,8 @@ const ShortcutFormInline = ({
           size='sm'
           className='h-7'
           onClick={() => void handleSave()}
+          data-track-category='app-shortcut'
+          data-track-name='SAVE_SHORTCUT'
           disabled={saving}
         >
           <Check size={13} className='mr-1' />
@@ -478,6 +495,8 @@ interface PermissionsSectionProps {
   // workspace's installed_app_permissions (admin, Installed screen).
   editMode: 'template' | 'install';
   installedAppId: string | null;
+  // true -> render the section but lock every control (app creator on the Installed screen).
+  readOnly?: boolean;
 }
 
 const PermissionsSection = ({
@@ -485,6 +504,7 @@ const PermissionsSection = ({
   isInstalled,
   editMode,
   installedAppId,
+  readOnly = false,
 }: PermissionsSectionProps): ReactElement => {
   const isInstallMode = editMode === 'install' && !!installedAppId;
   const [available, setAvailable] = useState<AppPermission[]>([]);
@@ -494,6 +514,8 @@ const PermissionsSection = ({
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Everything the `saving` flag already disables should also be disabled when read-only.
+  const locked = saving || readOnly;
 
   // Always load the full registry
   useEffect(() => {
@@ -648,7 +670,7 @@ const PermissionsSection = ({
             variant='ghost'
             className='h-7 text-xs'
             onClick={handleToggleSelectAll}
-            disabled={saving || !loaded || available.length === 0}
+            disabled={locked || !loaded || available.length === 0}
             data-track-category='Apps'
             data-track-name='ToggleSelectAllPermissions'
           >
@@ -660,7 +682,9 @@ const PermissionsSection = ({
             variant='outline'
             className='h-7 text-xs'
             onClick={() => void handleSave()}
-            disabled={saving || !loaded}
+            data-track-category='Apps'
+            data-track-name='SAVE_APP'
+            disabled={locked || !loaded}
           >
             {saving ? 'Saving…' : 'Save Permissions'}
           </Button>
@@ -671,7 +695,9 @@ const PermissionsSection = ({
               variant='default'
               className='h-7 text-xs'
               onClick={() => void handleActivate()}
-              disabled={activating || saving}
+              data-track-category='Apps'
+              data-track-name='ACTIVATE_APP_INSTALL'
+              disabled={activating || locked}
               title='Re-sync this install to activate pending permission changes'
             >
               {activating ? 'Applying…' : 'Apply & activate'}
@@ -694,16 +720,16 @@ const PermissionsSection = ({
               <div
                 key={scope}
                 role='button'
-                tabIndex={saving ? -1 : 0}
+                tabIndex={locked ? -1 : 0}
                 aria-pressed={selected.has(scope)}
                 className={`flex items-start gap-2.5 group px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
-                  saving ? 'cursor-not-allowed' : 'cursor-pointer'
+                  locked ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
                 onClick={() => {
-                  if (!saving) handleToggle(scope, !selected.has(scope));
+                  if (!locked) handleToggle(scope, !selected.has(scope));
                 }}
                 onKeyDown={e => {
-                  if (saving) return;
+                  if (locked) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     handleToggle(scope, !selected.has(scope));
@@ -717,7 +743,7 @@ const PermissionsSection = ({
                 <span className='mt-0.5 pointer-events-none'>
                   <Checkbox
                     checked={selected.has(scope)}
-                    disabled={saving}
+                    disabled={locked}
                     onChange={checked => handleToggle(scope, checked)}
                     label=''
                   />
@@ -762,6 +788,9 @@ export interface EditAppFormProps {
   // (admin; edits this workspace's install — webhook + permissions, commands read-only).
   editMode?: 'template' | 'install';
   installedAppId?: string | null;
+  // false = the app's creator viewing their own install: every section still renders, but each
+  // control is locked -- Incoming Webhooks is the only editable one. Admins/template edits pass true.
+  canEditInstallSettings?: boolean;
   onSave: (data: { description: string; webhookUrl: string }) => Promise<void>;
   onUploadPicture?: ((appId: string, file: File) => Promise<void>) | undefined;
   isLoading?: boolean | undefined;
@@ -772,11 +801,17 @@ const WEBHOOK_NAME_MAX_LENGTH = 84;
 const WEBHOOK_TYPE_OPTIONS = [
   { value: 'SLACK', label: 'Slack' },
   { value: 'SENTINELONE', label: 'SentinelOne' },
+  { value: 'AMAZON_SNS', label: 'Amazon SNS' },
+  { value: 'PINGDOM', label: 'Pingdom' },
+  { value: 'GCP', label: 'GCP Monitoring' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
+const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
+  WEBHOOK_TYPE_OPTIONS.map(option => [option.value, option.label]),
+) as Record<IncomingWebhookType, string>;
 const WEBHOOK_ACTION_OPTIONS = [
-  { value: 'MESSAGE', label: 'Message' },
-  { value: 'TICKET', label: 'Ticket' },
+  { value: AppIncomingWebhookAction.MESSAGE, label: 'Message' },
+  { value: AppIncomingWebhookAction.TICKET, label: 'Ticket' },
 ] as const;
 type IncomingWebhookAction = (typeof WEBHOOK_ACTION_OPTIONS)[number]['value'];
 
@@ -852,6 +887,7 @@ export const EditAppForm = ({
   appInstallations,
   editMode = 'template',
   installedAppId = null,
+  canEditInstallSettings = true,
   onSave,
   onUploadPicture,
   isLoading = false,
@@ -860,7 +896,11 @@ export const EditAppForm = ({
   // Install mode = editing this workspace's install (admin). Template mode = editing the app
   // (creator). In install mode commands and name/description are read-only (template-owned).
   const isInstallMode = editMode === 'install';
-  const [activeSection, setActiveSection] = useState<EditAppSection>('basic');
+  // The app's creator on the Installed screen: everything is locked except Incoming Webhooks, so
+  // open on that section rather than dropping them onto a Basic info form they can't submit.
+  const [activeSection, setActiveSection] = useState<EditAppSection>(
+    canEditInstallSettings ? 'basic' : 'incoming',
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [botChannels, setBotChannels] = useState<BotChannel[]>([]);
   const [webhooks, setWebhooks] = useState<IncomingWebhook[]>([]);
@@ -870,8 +910,9 @@ export const EditAppForm = ({
   const [webhookName, setWebhookName] = useState('');
   const [selectedChannelId, setSelectedChannelId] = useState('');
   const [selectedWebhookType, setSelectedWebhookType] = useState<IncomingWebhookType>('SLACK');
-  const [selectedWebhookAction, setSelectedWebhookAction] =
-    useState<IncomingWebhookAction>('MESSAGE');
+  const [selectedWebhookAction, setSelectedWebhookAction] = useState<IncomingWebhookAction>(
+    AppIncomingWebhookAction.MESSAGE,
+  );
   const [projectBoards, setProjectBoards] = useState<ProjectBoard[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -917,7 +958,7 @@ export const EditAppForm = ({
   useEffect(() => {
     if (
       selectedWebhookType !== 'SENTINELONE' ||
-      selectedWebhookAction !== 'TICKET' ||
+      selectedWebhookAction !== AppIncomingWebhookAction.TICKET ||
       !selectedChannelId
     ) {
       setProjectBoards([]);
@@ -963,18 +1004,21 @@ export const EditAppForm = ({
       await appsService.createIncomingWebhook({
         installedAppId: incomingInstalledAppId,
         channelId: selectedChannelId,
-        ...(selectedWebhookAction === 'TICKET' && selectedBoardId
+        ...(selectedWebhookAction === AppIncomingWebhookAction.TICKET && selectedBoardId
           ? { boardId: selectedBoardId }
           : {}),
         name: webhookName.trim(),
         type: selectedWebhookType,
-        action: selectedWebhookType === 'SENTINELONE' ? selectedWebhookAction : 'MESSAGE',
+        action:
+          selectedWebhookType === 'SENTINELONE'
+            ? selectedWebhookAction
+            : AppIncomingWebhookAction.MESSAGE,
       });
       setShowCreateForm(false);
       setWebhookName('');
       setSelectedChannelId('');
       setSelectedWebhookType('SLACK');
-      setSelectedWebhookAction('MESSAGE');
+      setSelectedWebhookAction(AppIncomingWebhookAction.MESSAGE);
       setProjectBoards([]);
       setSelectedBoardId('');
       toast.success('Incoming webhook created');
@@ -1043,7 +1087,7 @@ export const EditAppForm = ({
     // Install mode: read-only snapshot from installed_app_commands. Template mode: app_commands.
     const fetcher =
       isInstallMode && installedAppId
-        ? appsService.getInstalledCommands(installedAppId, 'COMMAND')
+        ? appsService.getInstalledCommands(installedAppId, CommandType.COMMAND)
         : appsService.getCommands(appId);
     fetcher
       .then(setCommands)
@@ -1055,7 +1099,7 @@ export const EditAppForm = ({
     setShortcutsLoading(true);
     const fetcher =
       isInstallMode && installedAppId
-        ? appsService.getInstalledCommands(installedAppId, 'SHORTCUT')
+        ? appsService.getInstalledCommands(installedAppId, CommandType.SHORTCUT)
         : appsService.getShortcuts(appId);
     fetcher
       .then(setShortcuts)
@@ -1195,6 +1239,9 @@ export const EditAppForm = ({
   }, [appDescription, webhookUrlValue, reset]);
 
   const onSubmit = async (formData: EditAppFormData): Promise<void> => {
+    // Authoritative gate: the Save button is disabled, but a stray Enter in another section's
+    // input can still trigger implicit form submission, so re-check rather than trust the button.
+    if (!canEditInstallSettings) return;
     await onSave({
       description: formData.description.trim(),
       webhookUrl: formData.webhookUrl.trim(),
@@ -1279,6 +1326,13 @@ export const EditAppForm = ({
 
         {/* Section content */}
         <div role='tabpanel' className='flex-1 overflow-y-auto p-6 space-y-6'>
+          {!canEditInstallSettings && (
+            <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm dark:bg-amber-500/10 dark:text-amber-400'>
+              You&apos;re viewing this app as its creator. Only a workspace apps admin can change
+              these settings — you can create and manage Incoming Webhooks.
+            </div>
+          )}
+
           {activeSection === 'basic' && (
             <>
               <SectionHeading
@@ -1349,7 +1403,7 @@ export const EditAppForm = ({
                       id='webhookUrl'
                       type='url'
                       placeholder='https://your-app.com/webhook'
-                      disabled={isLoading}
+                      disabled={isLoading || !canEditInstallSettings}
                       className='text-foreground'
                       {...field}
                     />
@@ -1386,7 +1440,9 @@ export const EditAppForm = ({
                       variant='outline'
                       size='sm'
                       onClick={handleUploadClick}
-                      disabled={isLoading}
+                      data-track-category='Apps'
+                      data-track-name='UPLOAD_BOT_AVATAR'
+                      disabled={isLoading || !canEditInstallSettings}
                       className='gap-1'
                       title='Upload bot profile picture'
                     >
@@ -1407,7 +1463,7 @@ export const EditAppForm = ({
               <div>
                 <SectionHeading
                   title='Incoming Webhooks'
-                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack and SentinelOne webhook URL formats.'
+                  subtitle='Generate webhook URLs for external services to post messages as this bot. Supports Slack, SentinelOne, Amazon SNS, Pingdom and GCP Monitoring webhook URL formats.'
                 />
                 {botChannels.length > 0 && !showCreateForm && (
                   <Button
@@ -1415,6 +1471,8 @@ export const EditAppForm = ({
                     variant='outline'
                     size='sm'
                     onClick={() => setShowCreateForm(true)}
+                    data-track-category='INCOMING_WEBHOOKS'
+                    data-track-name='OPEN_CREATE_WEBHOOK_FORM'
                     className='gap-1 w-full mt-2'
                   >
                     <Plus size={14} />
@@ -1508,50 +1566,51 @@ export const EditAppForm = ({
                       </SelectContent>
                     </Select>
                   </div>
-                  {selectedWebhookType === 'SENTINELONE' && selectedWebhookAction === 'TICKET' && (
-                    <div className='space-y-2'>
-                      <label
-                        htmlFor='webhook-board-select'
-                        className='block text-xs font-medium text-foreground'
-                      >
-                        Board
-                      </label>
-                      <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
-                        <SelectTrigger
-                          id='webhook-board-select'
-                          className='w-full'
-                          disabled={!selectedChannelId || projectBoards.length === 0}
+                  {selectedWebhookType === 'SENTINELONE' &&
+                    selectedWebhookAction === AppIncomingWebhookAction.TICKET && (
+                      <div className='space-y-2'>
+                        <label
+                          htmlFor='webhook-board-select'
+                          className='block text-xs font-medium text-foreground'
                         >
-                          <SelectValue
-                            placeholder={
-                              !selectedChannelId
-                                ? 'Select a channel first'
-                                : projectBoards.length === 0
-                                  ? 'No boards available'
-                                  : 'Select a board'
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {projectBoards.map(board => (
-                            <SelectItem key={board.id} value={board.id}>
-                              {board.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {!selectedChannelId && (
-                        <p className='text-xs text-muted-foreground'>
-                          Choose a channel first so we can load boards from that project.
-                        </p>
-                      )}
-                      {selectedChannelId && projectBoards.length === 0 && (
-                        <p className='text-xs text-muted-foreground'>
-                          No boards found for the selected channel&apos;s project.
-                        </p>
-                      )}
-                    </div>
-                  )}
+                          Board
+                        </label>
+                        <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
+                          <SelectTrigger
+                            id='webhook-board-select'
+                            className='w-full'
+                            disabled={!selectedChannelId || projectBoards.length === 0}
+                          >
+                            <SelectValue
+                              placeholder={
+                                !selectedChannelId
+                                  ? 'Select a channel first'
+                                  : projectBoards.length === 0
+                                    ? 'No boards available'
+                                    : 'Select a board'
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {projectBoards.map(board => (
+                              <SelectItem key={board.id} value={board.id}>
+                                {board.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!selectedChannelId && (
+                          <p className='text-xs text-muted-foreground'>
+                            Choose a channel first so we can load boards from that project.
+                          </p>
+                        )}
+                        {selectedChannelId && projectBoards.length === 0 && (
+                          <p className='text-xs text-muted-foreground'>
+                            No boards found for the selected channel&apos;s project.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   <div className='space-y-1'>
                     <label
                       htmlFor='webhook-name-input'
@@ -1572,12 +1631,14 @@ export const EditAppForm = ({
                       type='button'
                       size='sm'
                       onClick={() => void handleCreateWebhook()}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='CREATE_WEBHOOK'
                       disabled={
                         isCreating ||
                         !webhookName.trim() ||
                         !selectedChannelId ||
                         (selectedWebhookType === 'SENTINELONE' &&
-                          selectedWebhookAction === 'TICKET' &&
+                          selectedWebhookAction === AppIncomingWebhookAction.TICKET &&
                           !selectedBoardId)
                       }
                     >
@@ -1592,10 +1653,12 @@ export const EditAppForm = ({
                         setWebhookName('');
                         setSelectedChannelId('');
                         setSelectedWebhookType('SLACK');
-                        setSelectedWebhookAction('MESSAGE');
+                        setSelectedWebhookAction(AppIncomingWebhookAction.MESSAGE);
                         setProjectBoards([]);
                         setSelectedBoardId('');
                       }}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='CANCEL_CREATE_WEBHOOK'
                     >
                       Cancel
                     </Button>
@@ -1662,10 +1725,12 @@ export const EditAppForm = ({
                           {webhook.name}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {webhook.type === 'SENTINELONE' ? 'SentinelOne' : 'Slack'}
+                          {WEBHOOK_TYPE_LABELS[webhook.type] ?? webhook.type}
                         </span>
                         <span className='text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wide'>
-                          {webhook.action === 'TICKET' ? 'Ticket' : 'Message'}
+                          {webhook.action === AppIncomingWebhookAction.TICKET
+                            ? 'Ticket'
+                            : 'Message'}
                         </span>
                         <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
                           <span className='w-3 flex-shrink-0 flex items-center justify-center'>
@@ -1722,6 +1787,8 @@ export const EditAppForm = ({
                       variant='outline'
                       size='sm'
                       onClick={() => handleCopyWebhookUrl(webhook.webhookUrl)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='COPY_WEBHOOK_URL'
                       className='shrink-0'
                     >
                       <Copy size={14} />
@@ -1743,6 +1810,8 @@ export const EditAppForm = ({
                       size='sm'
                       disabled={!hasPrev}
                       onClick={() => fetchWebhooks(webhookOffset - WEBHOOK_PAGE_SIZE)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='WEBHOOKS_PREV_PAGE'
                       className='h-7 w-7 p-0'
                     >
                       <ChevronLeft size={14} />
@@ -1753,6 +1822,8 @@ export const EditAppForm = ({
                       size='sm'
                       disabled={!hasNext}
                       onClick={() => fetchWebhooks(webhookOffset + WEBHOOK_PAGE_SIZE)}
+                      data-track-category='INCOMING_WEBHOOKS'
+                      data-track-name='WEBHOOKS_NEXT_PAGE'
                       className='h-7 w-7 p-0'
                     >
                       <ChevronRight size={14} />
@@ -1780,6 +1851,8 @@ export const EditAppForm = ({
                       setEditingCommand(null);
                       setShowCommandForm(true);
                     }}
+                    data-track-category='app-command'
+                    data-track-name='OPEN_CREATE_COMMAND_FORM'
                   >
                     <Plus size={12} /> Add Command
                   </Button>
@@ -1841,6 +1914,8 @@ export const EditAppForm = ({
                       setEditingShortcut(null);
                       setShowShortcutForm(true);
                     }}
+                    data-track-category='app-shortcut'
+                    data-track-name='OPEN_CREATE_SHORTCUT_FORM'
                   >
                     <Plus size={12} /> Add Shortcut
                   </Button>
@@ -1891,13 +1966,21 @@ export const EditAppForm = ({
               isInstalled={isInstallMode || isAppInstalled}
               editMode={editMode}
               installedAppId={installedAppId}
+              readOnly={!canEditInstallSettings}
             />
           )}
         </div>
       </div>
 
       <div className='flex gap-2 justify-end p-4 border-t border-border bg-background shrink-0'>
-        <Button variant='outline' onClick={onCancel} disabled={isLoading} type='button'>
+        <Button
+          variant='outline'
+          onClick={onCancel}
+          data-track-category='Apps'
+          data-track-name='CANCEL_APP_FORM'
+          disabled={isLoading}
+          type='button'
+        >
           {activeSection === 'basic' ? 'Cancel' : 'Close'}
         </Button>
         {/* Save Changes only persists the Basic info fields (description + webhook URL); the other
@@ -1905,7 +1988,7 @@ export const EditAppForm = ({
         {activeSection === 'basic' && (
           <Button
             type='submit'
-            disabled={isLoading}
+            disabled={isLoading || !canEditInstallSettings}
             data-track-category='Apps'
             data-track-name='EditApp'
           >
@@ -1934,6 +2017,8 @@ export const EditAppForm = ({
               variant='outline'
               size='sm'
               onClick={() => setRevokeTargetId(null)}
+              data-track-category='Apps'
+              data-track-name='CANCEL_REVOKE_INSTALL'
             >
               Cancel
             </Button>

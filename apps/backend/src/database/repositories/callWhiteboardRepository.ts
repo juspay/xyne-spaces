@@ -1,6 +1,12 @@
 import { DatabaseClient } from '../client';
-import { AttachmentEntityType, MessageAttachment, MessageType } from '@prisma/client';
-import { addReplyToData, parseRepliesMd, serializeRepliesMd } from '@xyne/shared';
+import { MessageAttachment } from '@prisma/client';
+import {
+  addReplyToData,
+  parseRepliesMd,
+  serializeRepliesMd,
+  AttachmentEntityType,
+  MessageType,
+} from '@xyne/shared';
 
 export interface SaveCallWhiteboardAttachmentInput {
   callId: string;

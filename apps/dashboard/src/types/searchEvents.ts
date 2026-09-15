@@ -158,6 +158,40 @@ export interface SearchTabClickEvent extends CommonEventFields {
 }
 
 /**
+ * Event: vespa_search_show_results
+ * Triggered when the user leaves the cmd+K palette for the full-screen results
+ * page via the "Show results for" row. Tells us how often the palette's inline
+ * results are not enough, split by how the row was reached.
+ */
+export interface SearchShowResultsEvent extends CommonEventFields {
+  query_text: string;
+  /**
+   * Number of words in the query text
+   */
+  query_text_length: number;
+  /**
+   * The tab the palette was on when the user jumped out
+   */
+  tab: string;
+  /**
+   * How the row was activated
+   * - click: User clicked (or tapped) the row
+   * - keyboard: User pressed Enter with the row selected
+   */
+  trigger: 'click' | 'keyboard';
+  /**
+   * Which palette the user came from
+   * - popup: the default cmd+K palette that renders results inline
+   * - screen: the top-bar search bar, which always routes to the results page
+   */
+  search_mode: 'popup' | 'screen';
+  /**
+   * Number of filter chips (from:/in:/assignee:/priority:) carried over
+   */
+  filters_used: number;
+}
+
+/**
  * Union type of all possible search metric events
  */
 export type SearchMetricEvent =
@@ -165,4 +199,5 @@ export type SearchMetricEvent =
   | SearchImpressionEvent
   | SearchClickEvent
   | SearchSessionEndEvent
-  | SearchTabClickEvent;
+  | SearchTabClickEvent
+  | SearchShowResultsEvent;

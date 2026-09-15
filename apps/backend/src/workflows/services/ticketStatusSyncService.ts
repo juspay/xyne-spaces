@@ -2,12 +2,11 @@
 // Implements "any success wins" logic for workflows within a ticket
 
 import { AI_STAGES } from '../types/workflow-enums';
+import { TicketStatusV2 } from '@xyne/shared';
 import { repositories } from '@/database/repositories'
 import { ticketService } from '@/services/ticketService';
 import { logger } from '@/utils/logger'
-import { TicketStatusV2 } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
-import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -117,15 +116,12 @@ export class TicketStatusSyncService {
       // 5. Update ticket status if needed
       if (newTicketStatus) {
         logger.info(`[DEBUG] Updating ticket ${ticketId} status to ${newTicketStatus}`)
-        const result = await prisma.ticket.update({
-          where: { id: ticketId },
-          data: {
-            statusV2: newTicketStatus,
-            updatedAt: new Date()
-          }
-        })
-        await syncConversationTicketMdFromPrismaTicket(prisma, result)
-        logger.info(`[DEBUG] Ticket update completed successfully:`, result)
+        await repositories.tickets.updateTicketFields(
+          ticketId,
+          { statusV2: newTicketStatus },
+          'BOT',
+        )
+        logger.info(`[DEBUG] Ticket update completed successfully`)
 
         logger.info(`Ticket ${ticketId} status updated to ${newTicketStatus}`, {
           triggerWorkflowId: workflowId,

@@ -33,7 +33,8 @@
  * Run via:  npx tsx backend/scripts/release-manager/seed-release-stages.ts
  */
 
-import { PrismaClient, BoardType, TicketStatusV2 } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { BoardType, TicketStatusV2 } from '@xyne/shared';
 
 const prisma = new PrismaClient();
 

@@ -1,5 +1,16 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Save, Users, Search, Shield, User, X, Loader2, AlertTriangle } from 'lucide-react';
+import {
+  Save,
+  Users,
+  Search,
+  Shield,
+  User,
+  X,
+  Loader2,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
 import { useSelf, useUsers, useUserSearch } from '../../hooks/useUsers';
@@ -20,6 +31,8 @@ import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
 import { usePlatform } from '../../hooks/usePlatform';
 import { WorkspaceChannelEmailCard } from '../../components/xyne-desk/WorkspaceChannelEmailCard/WorkspaceChannelEmailCard';
+
+const MEMBERS_PAGE_SIZE = 15;
 
 const Card = ({
   children,
@@ -134,6 +147,18 @@ export const GeneralAndMembersTab = ({
   const searchedUsers = useUserSearch(searchQuery, 100);
   const users = searchQuery ? searchedUsers : allUsers;
 
+  // Client-side pagination — batches of MEMBERS_PAGE_SIZE
+  const [currentPage, setCurrentPage] = useState(1);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+  const totalPages = Math.max(1, Math.ceil(users.length / MEMBERS_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedUsers = users.slice(
+    (safePage - 1) * MEMBERS_PAGE_SIZE,
+    safePage * MEMBERS_PAGE_SIZE,
+  );
+
   // Count admins for validation
   const adminCount = useMemo(() => {
     return allUsers.filter(u => u.role === WorkspaceRole.ADMIN).length;
@@ -193,6 +218,7 @@ export const GeneralAndMembersTab = ({
     if (user.role !== WorkspaceRole.ADMIN) return true;
     return adminCount > 1;
   };
+  const canManageMembers = self?.role === WorkspaceRole.ADMIN || self?.role === WorkspaceRole.OWNER;
 
   return (
     <div className='space-y-6'>
@@ -263,6 +289,8 @@ export const GeneralAndMembersTab = ({
             <div className='flex items-center gap-4 pt-2'>
               <Button
                 onClick={() => void handleSaveGeneral()}
+                data-track-category='workspace-management'
+                data-track-name='SAVE_WORKSPACE_GENERAL'
                 disabled={!hasChanges || !name.trim()}
                 className='gap-2'
               >
@@ -322,7 +350,7 @@ export const GeneralAndMembersTab = ({
             </div>
           ) : (
             <div className='divide-y divide-border'>
-              {users.map(user => (
+              {paginatedUsers.map(user => (
                 <div
                   key={user.id}
                   className='flex items-center justify-between p-4 hover:bg-muted/50 transition-colors'
@@ -359,70 +387,114 @@ export const GeneralAndMembersTab = ({
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className='flex items-center gap-2'>
-                    {/* Role Dropdown */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          disabled={processingUserId === user.id}
-                          className='gap-1'
-                        >
-                          {processingUserId === user.id ? (
-                            <Loader2 className='w-3 h-3 animate-spin' />
-                          ) : (
-                            <>
-                              Change Role
-                              <Shield className='w-3 h-3 ml-1' />
-                            </>
-                          )}
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='end'>
-                        {user.role !== WorkspaceRole.ADMIN && (
-                          <DropdownMenuItem
-                            onClick={() => handleUpdateRole(user.id, WorkspaceRole.ADMIN)}
+                  {/* Actions — only workspace admins/owners can change roles or remove members */}
+                  {canManageMembers && (
+                    <div className='flex items-center gap-2'>
+                      {/* Role Dropdown */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            disabled={processingUserId === user.id}
+                            className='gap-1'
                           >
-                            <Shield className='w-4 h-4 mr-2' />
-                            Admin
-                          </DropdownMenuItem>
-                        )}
-                        {user.role !== WorkspaceRole.MEMBER && (
-                          <DropdownMenuItem
-                            onClick={() => handleUpdateRole(user.id, WorkspaceRole.MEMBER)}
-                            disabled={!canRemoveAdmin(user)}
-                          >
-                            <User className='w-4 h-4 mr-2' />
-                            Member
-                            {!canRemoveAdmin(user) && (
-                              <span className='ml-2 text-xs text-muted-foreground'>
-                                (Last admin)
-                              </span>
+                            {processingUserId === user.id ? (
+                              <Loader2 className='w-3 h-3 animate-spin' />
+                            ) : (
+                              <>
+                                Change Role
+                                <Shield className='w-3 h-3 ml-1' />
+                              </>
                             )}
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end'>
+                          {user.role !== WorkspaceRole.ADMIN && (
+                            <DropdownMenuItem
+                              onClick={() => handleUpdateRole(user.id, WorkspaceRole.ADMIN)}
+                              data-track-category='workspace-management'
+                              data-track-name='SET_MEMBER_ROLE_ADMIN'
+                            >
+                              <Shield className='w-4 h-4 mr-2' />
+                              Admin
+                            </DropdownMenuItem>
+                          )}
+                          {user.role !== WorkspaceRole.MEMBER && (
+                            <DropdownMenuItem
+                              onClick={() => handleUpdateRole(user.id, WorkspaceRole.MEMBER)}
+                              data-track-category='workspace-management'
+                              data-track-name='SET_MEMBER_ROLE_MEMBER'
+                              disabled={!canRemoveAdmin(user)}
+                            >
+                              <User className='w-4 h-4 mr-2' />
+                              Member
+                              {!canRemoveAdmin(user) && (
+                                <span className='ml-2 text-xs text-muted-foreground'>
+                                  (Last admin)
+                                </span>
+                              )}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
 
-                    {/* Remove Button */}
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={() => handleRemoveMember(user.id, user.name)}
-                      disabled={processingUserId === user.id || !canRemoveAdmin(user)}
-                      className='text-destructive hover:text-destructive hover:bg-destructive/10'
-                    >
-                      {processingUserId === user.id ? (
-                        <Loader2 className='w-4 h-4 animate-spin' />
-                      ) : (
-                        <X className='w-4 h-4' />
-                      )}
-                    </Button>
-                  </div>
+                      {/* Remove Button */}
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => handleRemoveMember(user.id, user.name)}
+                        data-track-category='workspace-management'
+                        data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
+                        disabled={processingUserId === user.id || !canRemoveAdmin(user)}
+                        className='text-destructive hover:text-destructive hover:bg-destructive/10'
+                      >
+                        {processingUserId === user.id ? (
+                          <Loader2 className='w-4 h-4 animate-spin' />
+                        ) : (
+                          <X className='w-4 h-4' />
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {users.length > MEMBERS_PAGE_SIZE && (
+            <div className='flex items-center justify-between px-4 py-3 border-t border-border'>
+              <span className='text-xs text-muted-foreground'>
+                Showing {(safePage - 1) * MEMBERS_PAGE_SIZE + 1}-
+                {Math.min(safePage * MEMBERS_PAGE_SIZE, users.length)} of {users.length}
+              </span>
+              <div className='flex items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+                  aria-label='Previous page'
+                  data-track-category='workspace-management'
+                  data-track-name='members-pagination-prev'
+                >
+                  <ChevronLeft className='w-3.5 h-3.5' />
+                </button>
+                <span className='text-sm text-muted-foreground px-1'>
+                  {safePage} / {totalPages}
+                </span>
+                <button
+                  type='button'
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
+                  aria-label='Next page'
+                  data-track-category='workspace-management'
+                  data-track-name='members-pagination-next'
+                >
+                  <ChevronRight className='w-3.5 h-3.5' />
+                </button>
+              </div>
             </div>
           )}
         </Card>
@@ -455,6 +527,8 @@ export const GeneralAndMembersTab = ({
                 setShowRemoveDialog(false);
                 setUserToRemove(null);
               }}
+              data-track-category='workspace-management'
+              data-track-name='CANCEL_REMOVE_MEMBER'
               disabled={processingUserId === userToRemove?.id}
             >
               Cancel
@@ -462,6 +536,8 @@ export const GeneralAndMembersTab = ({
             <Button
               variant='destructive'
               onClick={confirmRemoveMember}
+              data-track-category='workspace-management'
+              data-track-name='CONFIRM_REMOVE_MEMBER'
               disabled={processingUserId === userToRemove?.id}
               className='gap-2'
             >

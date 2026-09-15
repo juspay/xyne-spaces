@@ -1,9 +1,9 @@
 import { BaseSideEffectHandler } from '../base-handler';
+import { DelayedMessageStatus } from '@xyne/shared';
 import type { SideEffectJobConfig, DelayedMessagePreviousValue } from '../types';
 import { db } from '@/database/client';
 import { delayedMessageQueue } from '@/queues/delayedMessageQueue';
 import { logger } from '@/utils/logger';
-import { DelayedMessageStatus } from '@prisma/client';
 import { deliverDelayedMessage } from '@/zero/utils/delayedMessageDelivery';
 import { cleanupDelayedMessageAttachmentsPrisma } from '@/zero/utils/attachmentEntityCleanup';
 

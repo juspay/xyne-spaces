@@ -1,10 +1,10 @@
 import { z } from 'zod';
+import { BoardType, ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
-import { BoardType, ActivityType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
 import { ActivitySource } from '@/types/ticket';

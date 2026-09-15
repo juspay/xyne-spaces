@@ -1,6 +1,8 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { ReactElement, useState } from 'react';
+import { ReactElement, useMemo, useState } from 'react';
+import type { VCSProviderType } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
+import { RepoDot, ProviderBadge, repoColor, repoShortName } from './repoVisual';
 
 /**
  * Shared rendering for env/migration change groups used by:
@@ -40,6 +42,7 @@ export type RenderableFileGroup = {
 export interface ChangeSectionsGroup {
   appName: string;
   repoUrl: string | null;
+  vcsProvider?: VCSProviderType | null;
   files: RenderableFileGroup[];
 }
 
@@ -68,24 +71,43 @@ const cleanDiff = (raw: string): string[] => {
   return raw.split('\n').filter(line => !drop.test(line));
 };
 
-// Build a Bitbucket file-browse URL for a given commit. Falls back to the
-// repo root when commitId isn't available.
+// github.com / GHE host → GitHub URLs; else Bitbucket. Rejects github.com.<lookalike>.
+const isGitHubRepoUrl = (repoUrl: string): boolean => {
+  try {
+    const host = new URL(repoUrl).hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host === 'www.github.com' ||
+      (host.startsWith('github.') && !host.startsWith('github.com.'))
+    );
+  } catch {
+    return false;
+  }
+};
+
+// Repo web base (strip trailing slash + .git).
+const repoWebBase = (repoUrl: string): string => repoUrl.replace(/\/$/, '').replace(/\.git$/, '');
+
+// File link for a commit — GitHub blob/<sha> or Bitbucket browse?at=<sha>.
 const buildFileUrl = (
   repoUrl: string | null,
   filePath: string,
   commitId: string | null,
 ): string | null => {
   if (!repoUrl) return null;
-  const trimmed = repoUrl.replace(/\/$/, '');
+  const base = repoWebBase(repoUrl);
   const path = filePath.startsWith('/') ? filePath.slice(1) : filePath;
-  return commitId ? `${trimmed}/browse/${path}?at=${commitId}` : `${trimmed}/browse/${path}`;
+  if (isGitHubRepoUrl(repoUrl)) {
+    return `${base}/blob/${commitId ?? 'HEAD'}/${path}`;
+  }
+  return commitId ? `${base}/browse/${path}?at=${commitId}` : `${base}/browse/${path}`;
 };
 
-// Bitbucket single-commit URL.
+// Single-commit URL per provider.
 const buildCommitUrl = (repoUrl: string | null, commitId: string | null): string | null => {
   if (!repoUrl || !commitId) return null;
-  const trimmed = repoUrl.replace(/\/$/, '');
-  return `${trimmed}/commits/${commitId}`;
+  const base = repoWebBase(repoUrl);
+  return isGitHubRepoUrl(repoUrl) ? `${base}/commit/${commitId}` : `${base}/commits/${commitId}`;
 };
 
 /**
@@ -101,6 +123,17 @@ export const ChangeSections = ({
   valuesByChangeId,
   hideDevTickets = false,
 }: ChangeSectionsProps): ReactElement => {
+  const byRepo = useMemo(() => {
+    const map = new Map<string, ChangeSectionsGroup[]>();
+    for (const g of groups) {
+      const key = g.repoUrl ?? '';
+      const arr = map.get(key);
+      if (arr) arr.push(g);
+      else map.set(key, [g]);
+    }
+    return [...map.entries()];
+  }, [groups]);
+
   if (groups.length === 0) {
     return (
       <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
@@ -110,23 +143,42 @@ export const ChangeSections = ({
   }
   return (
     <>
-      {groups.map(app => (
-        <section key={app.appName} className='space-y-3'>
-          <h3 className='text-base font-semibold text-foreground'>{app.appName}</h3>
-          <div className='space-y-3'>
-            {app.files.map(f => (
-              <ChangeCard
-                key={f.key}
-                file={f}
-                kind={kind}
-                repoUrl={app.repoUrl}
-                valuesByChangeId={valuesByChangeId}
-                hideDevTickets={hideDevTickets}
-              />
+      {byRepo.map(([repoKey, appGroups]) => {
+        const repoUrl = appGroups[0]?.repoUrl ?? null;
+        return (
+          <div key={repoKey || 'no-repo'} className='space-y-3'>
+            {byRepo.length > 1 && (
+              <div className='flex items-center gap-2.5 border-b border-border pb-2'>
+                <RepoDot color={repoColor(repoKey || repoUrl)} />
+                <span className='text-sm font-semibold text-foreground'>
+                  {repoShortName(repoUrl)}
+                </span>
+                <ProviderBadge vcsProvider={appGroups[0]?.vcsProvider ?? null} showLabel={false} />
+                <span className='ml-auto rounded-md bg-muted px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
+                  repo
+                </span>
+              </div>
+            )}
+            {appGroups.map(app => (
+              <section key={app.appName} className='space-y-3'>
+                <h3 className='text-base font-semibold text-foreground'>{app.appName}</h3>
+                <div className='space-y-3'>
+                  {app.files.map(f => (
+                    <ChangeCard
+                      key={f.key}
+                      file={f}
+                      kind={kind}
+                      repoUrl={app.repoUrl}
+                      valuesByChangeId={valuesByChangeId}
+                      hideDevTickets={hideDevTickets}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
-        </section>
-      ))}
+        );
+      })}
     </>
   );
 };
@@ -168,6 +220,8 @@ const ChangeCard = ({
       <button
         type='button'
         onClick={() => setOpen(prev => !prev)}
+        data-track-category='Release'
+        data-track-name='TOGGLE_CHANGE_CARD'
         className='w-full flex items-center gap-2 px-4 py-3 hover:bg-muted/40 transition-colors text-left'
       >
         <span className='text-xs text-muted-foreground w-3 shrink-0'>{open ? '▼' : '▶'}</span>

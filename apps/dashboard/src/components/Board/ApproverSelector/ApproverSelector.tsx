@@ -7,6 +7,7 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { ApproverEntry, ApproverSelectorProps } from './ApproverSelector.types';
+import { ApproverType } from '@xyne/shared';
 
 type Tab = 'USERS' | 'ROLES';
 
@@ -36,7 +37,7 @@ export const ApproverSelector = ({
     if (searchLower) return base;
     // No search query: show selected users (with tick) so they're visible on reopen.
     return selectedApprovers
-      .filter(a => a.approverType === 'USER')
+      .filter(a => a.approverType === ApproverType.USER)
       .map(a => usersMap.get(a.approverId))
       .filter((u): u is NonNullable<typeof u> => !!u);
   }, [searchResults, searchQuery, selectedApprovers, usersMap]);
@@ -49,12 +50,15 @@ export const ApproverSelector = ({
   }, [rolesPool, searchQuery]);
 
   const handleAddUser = (userId: string): void => {
-    onApproversChange([...selectedApprovers, { approverId: userId, approverType: 'USER' }]);
+    onApproversChange([
+      ...selectedApprovers,
+      { approverId: userId, approverType: ApproverType.USER },
+    ]);
   };
 
   const handleToggleUser = (userId: string): void => {
     const existing = selectedApprovers.find(
-      s => s.approverType === 'USER' && s.approverId === userId,
+      s => s.approverType === ApproverType.USER && s.approverId === userId,
     );
     if (existing) {
       handleRemove(existing);
@@ -64,12 +68,15 @@ export const ApproverSelector = ({
   };
 
   const handleAddRole = (roleId: string): void => {
-    onApproversChange([...selectedApprovers, { approverId: roleId, approverType: 'ROLE' }]);
+    onApproversChange([
+      ...selectedApprovers,
+      { approverId: roleId, approverType: ApproverType.ROLE },
+    ]);
   };
 
   const handleToggleRole = (roleId: string): void => {
     const existing = selectedApprovers.find(
-      s => s.approverType === 'ROLE' && s.approverId === roleId,
+      s => s.approverType === ApproverType.ROLE && s.approverId === roleId,
     );
     if (existing) {
       handleRemove(existing);
@@ -117,7 +124,7 @@ export const ApproverSelector = ({
             {availableUsersForSearch.length > 0 ? (
               availableUsersForSearch.map(user => {
                 const isSelected = selectedApprovers.some(
-                  s => s.approverType === 'USER' && s.approverId === user.id,
+                  s => s.approverType === ApproverType.USER && s.approverId === user.id,
                 );
                 return (
                   <button
@@ -153,7 +160,7 @@ export const ApproverSelector = ({
             {availableRolesForSearch.length > 0 ? (
               availableRolesForSearch.map(role => {
                 const isSelected = selectedApprovers.some(
-                  s => s.approverType === 'ROLE' && s.approverId === role.id,
+                  s => s.approverType === ApproverType.ROLE && s.approverId === role.id,
                 );
                 return (
                   <button

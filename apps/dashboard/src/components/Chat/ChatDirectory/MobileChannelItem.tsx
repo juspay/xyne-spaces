@@ -16,6 +16,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { ChannelScopeType } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
+import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
 
 interface MobileChannelItemProps {
   channel: VisibleChannel;
@@ -36,6 +37,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
   const isDM = isDMChannel(channel.scopeType);
 
   const hasActiveCall = useChannelHasActiveCall(channel.id);
+  const hasSlashCommandArtifactSideEffect = useChannelHasSlashCommandArtifactSideEffect(channel.id);
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
@@ -113,6 +115,12 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             )}
           >
             <span className='truncate'>{displayName}</span>
+            {hasSlashCommandArtifactSideEffect && (
+              <span className='relative flex size-2 shrink-0' aria-label='Active incident'>
+                <span className='absolute inline-flex size-full animate-ping rounded-full bg-orange-500 opacity-70' />
+                <span className='relative inline-flex size-2 rounded-full bg-orange-500' />
+              </span>
+            )}
             {is1on1DM && (
               <StatusIndicator
                 statusEmoji={dmUser?.statusEmoji}

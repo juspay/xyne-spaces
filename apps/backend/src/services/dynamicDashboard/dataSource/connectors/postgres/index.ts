@@ -1,4 +1,6 @@
 import { Pool, Client, type PoolConfig } from 'pg';
+import { checkServerIdentity as tlsCheckServerIdentity, type PeerCertificate } from 'node:tls';
+import { isIP } from 'node:net';
 import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { ConnectorBase } from '../ConnectorBase';
@@ -24,6 +26,35 @@ import type {
 } from '../types';
 import { pgNativeToCanonical } from './typeMapping';
 
+// Skip the hostname check only where it cannot succeed: an IP host whose cert lists no
+// IP SANs, as Cloud SQL never issues them. Certs that do list IPs are still enforced.
+function verifyServerIdentity(host: string, cert: PeerCertificate): Error | undefined {
+  const err = tlsCheckServerIdentity(host, cert);
+  if (!err) return undefined;
+  if (isIP(host) !== 0 && !cert.subjectaltname?.includes('IP Address:')) {
+    logger.warn('[PostgresConnector] hostname verification skipped: certificate has no IP SANs', {
+      host,
+      certSubject: cert.subject?.CN ?? null,
+      certSans: cert.subjectaltname ?? null,
+    });
+    return undefined;
+  }
+  return err;
+}
+
+function buildSslConfig(config: ConnectionConfig): PoolConfig['ssl'] {
+  if (!config.ssl) return false;
+
+  const verify = appConfig.env === 'production';
+
+  return {
+    ...(config.ca ? { ca: config.ca } : {}),
+    host: config.host,
+    rejectUnauthorized: verify,
+    checkServerIdentity: verifyServerIdentity,
+  };
+}
+
 export class PostgresConnector extends ConnectorBase {
   private readonly poolConfig: PoolConfig;
 
@@ -35,7 +66,7 @@ export class PostgresConnector extends ConnectorBase {
       user: config.user,
       password: config.password,
       database: config.database,
-      ssl: config.ssl ? { rejectUnauthorized: appConfig.env === 'production' } : false,
+      ssl: buildSslConfig(config),
       connectionTimeoutMillis: appConfig.dashboard.pgConnectionTimeoutMs,
       statement_timeout: appConfig.dashboard.pgStatementTimeoutMs,
       max: appConfig.dataSource.edaConcurrency,

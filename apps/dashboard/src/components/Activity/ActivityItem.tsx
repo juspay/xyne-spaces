@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
 import { KeywordMatchActivity } from './KeywordMatchActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
+import { isCanvasActivity } from './isCanvasActivity';
 import { MessageRepliedActivity } from './MessageRepliedActivity';
 import { MessageRepliedActivityV2 } from './MessageRepliedActivityV2';
 import { ReactionAddedActivity } from './ReactionAddedActivity';
@@ -16,7 +17,12 @@ import { ScheduledCallActivity } from './ScheduledCallActivity';
 import { EmailFetchActivity } from './EmailFetchActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
+import { RecordingSummaryActivity } from './RecordingSummaryActivity';
+import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
+import { KbIngestionActivity } from './KbIngestionActivity';
+import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
+import { MaxWorkloadActivity } from './MaxWorkloadActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -34,8 +40,11 @@ export const ActivityItem = memo(function ActivityItem({
   isExpanded,
 }: ActivityItemProps): ReactElement | null {
   switch (activity.actorAction) {
+    case 'slash_command_artifact':
+      return <SlashCommandArtifactActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'mentioned_user':
-      if (activity.canvasId) {
+      if (isCanvasActivity(activity)) {
         return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
       }
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
@@ -98,6 +107,11 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_pr_declined':
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
+    case 'ticket_release_started':
+    case 'ticket_release_completed':
+    case 'ticket_release_cancelled':
+    case 'ticket_release_paused':
+    case 'ticket_release_planning':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'scheduled_call':
@@ -120,10 +134,23 @@ export const ActivityItem = memo(function ActivityItem({
     case 'recording_access_revoked':
       return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'recording_summary_ready':
+      return <RecordingSummaryActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'summary_template_shared':
+    case 'summary_template_access_revoked':
+      return <SummaryTemplateSharedActivity activity={activity} isExpanded={isExpanded} />;
+
     case 'stage_approval_requested':
     case 'stage_approval_approved':
     case 'stage_approval_rejected':
       return <StageApprovalActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'kb_ingestion_completed':
+      return <KbIngestionActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'max_workload_reached':
+      return <MaxWorkloadActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

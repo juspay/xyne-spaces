@@ -5,6 +5,7 @@ import { queries } from '../zero/queries.js';
 import { QueryResultType } from '@rocicorp/zero';
 import type { Channel } from '../zero/schema.js';
 import { getSyncStorage } from '../platform/syncStorage.js';
+import type { AccessType } from '../zero/types.js';
 
 // Drafts persist through the platform sync-storage bridge:
 // - Dashboard: localStorage (via the default fallback)
@@ -58,13 +59,14 @@ export type UserGroup = QueryResultType<typeof queries.getAllUserGroups>[number]
 export type UserGroupMapping = QueryResultType<typeof queries.getUserGroupMappingsByUserId>[number];
 export type UserPermission = {
   resourceName: string;
-  accessType: 'READ' | 'WRITE' | 'ADMIN';
+  accessType: AccessType;
 };
 export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUserStatus>[number];
 
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
+export type TwinDraftDB = DraftMessageDB;
 export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
 export type UnreadActivity = QueryResultType<typeof queries.userUnreadActivities>[number];
 export type UserPreference = QueryResultType<typeof queries.getCurrentUserPreference>;
@@ -197,6 +199,7 @@ interface StateMachineContext {
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
+  twinDrafts: TwinDraftDB[];
   delayedMessages: DelayedMessageDB[];
   userPreference: UserPreference;
   allUserGroups: UserGroup[];
@@ -485,12 +488,19 @@ export const stateMachine = setup({
       draftMessages: ({ context, event }) => {
         if (event.type === 'ADD_USER_DRAFTS') {
           return event.draftMessages.filter(d => {
+            if (d.origin === 'twin') return false;
             const hasContent = d.content.trim() !== '';
             const hasAttachments = (d.attachments?.length ?? 0) > 0;
             return hasContent || hasAttachments;
           });
         }
         return context.draftMessages;
+      },
+      twinDrafts: ({ context, event }) => {
+        if (event.type === 'ADD_USER_DRAFTS') {
+          return event.draftMessages.filter(d => d.origin === 'twin');
+        }
+        return context.twinDrafts;
       },
     }),
     addUserDelayedMessages: assign({
@@ -689,6 +699,7 @@ export const stateMachine = setup({
       allUserGroups: [],
       userGroupMappings: [],
       draftMessages: [],
+      twinDrafts: [],
       delayedMessages: [],
       unreadActivities: [],
       filteredTicketIds: [],
@@ -741,6 +752,7 @@ export const stateMachine = setup({
     })(),
     drafts: JSON.parse(draftStorage().getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
+    twinDrafts: [],
     delayedMessages: [],
     userPreference: undefined,
     allUserGroups: [],

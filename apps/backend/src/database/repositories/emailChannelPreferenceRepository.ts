@@ -4,8 +4,8 @@
  */
 
 import { DatabaseClient } from '../client';
-import { EmailChannelPreference, EmailMergeMode, DeskType } from '@prisma/client';
-import { isDeskChannelType } from '@xyne/shared';
+import { EmailChannelPreference } from '@prisma/client';
+import { isDeskChannelType, EmailMergeMode, DeskType } from '@xyne/shared';
 
 export class EmailChannelPreferenceRepository {
   private db = DatabaseClient.getInstance();
@@ -40,6 +40,30 @@ export class EmailChannelPreferenceRepository {
     return await this.db.emailChannelPreference.findUnique({
       where: { channelId },
     });
+  }
+
+  /**
+   * Batch check which channels this user owns (desk owner)
+   * Returns a Set of channel IDs whose preference's ownerUserId matches
+   */
+  async findOwnedChannelIds(channelIds: string[], ownerUserId: string): Promise<Set<string>> {
+    if (channelIds.length === 0) {
+      return new Set<string>();
+    }
+
+    const preferences = await this.db.emailChannelPreference.findMany({
+      where: {
+        channelId: {
+          in: channelIds,
+        },
+        ownerUserId,
+      },
+      select: {
+        channelId: true,
+      },
+    });
+
+    return new Set(preferences.map(p => p.channelId));
   }
 
   /**

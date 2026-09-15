@@ -1,6 +1,6 @@
 import { redisService, PresenceEvent } from './redisService';
+import { UserPresenceStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
-import { UserPresenceStatus } from '@prisma/client';
 
 export interface OnlineUser {
   userId: string;
@@ -189,7 +189,7 @@ export class UserStatusService {
    */
   async getOnlineCount(): Promise<number> {
     try {
-      const onlineUsers = await this.getUsersByStatus('ONLINE');
+      const onlineUsers = await this.getUsersByStatus(UserPresenceStatus.ONLINE);
       return onlineUsers.length;
     } catch (error) {
       logger.error('❌ [USER-STATUS] Error getting online count:', error);

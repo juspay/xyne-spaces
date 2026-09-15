@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { AccessType } from '@xyne/shared';
 import {
   ResourceAccess,
   CreateResourceAccessInput,
@@ -8,7 +9,6 @@ import {
   PaginationOptions,
   PaginatedResult,
 } from '@/types/database';
-import { AccessType } from '@prisma/client';
 import { aclAuditService } from '@/services/aclAuditService';
 
 export class ResourceAccessRepository extends BaseRepository<ResourceAccess, CreateResourceAccessInput, UpdateResourceAccessInput> {
@@ -255,7 +255,7 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
     groupId?: string;
     resourceId: string;
     accessType: AccessType;
-    workspaceId?: string;
+    workspaceId: string;
   }, actorUserId?: string): Promise<ResourceAccess> {
     await this.validateEnum(data.accessType, 'accessType', Object.values(AccessType));
     await this.validateRequired(data.resourceId, 'resourceId');
@@ -269,30 +269,15 @@ export class ResourceAccessRepository extends BaseRepository<ResourceAccess, Cre
       throw new Error('Cannot provide both groupId and userId');
     }
 
-    const createData: any = {
+    const createData: CreateResourceAccessInput = {
       accessType: data.accessType,
+      workspaceId: data.workspaceId,
       resource: {
         connect: { id: data.resourceId }
-      }
+      },
+      ...(data.userId && { user: { connect: { id: data.userId } } }),
+      ...(data.groupId && { userGroup: { connect: { id: data.groupId } } }),
     };
-
-    // Explicit tenant key for background/webhook paths (mettle sync, CLI) that
-    // have no request-scoped context for the workspaceId stamper to read.
-    if (data.workspaceId) {
-      createData.workspaceId = data.workspaceId;
-    }
-
-    if (data.userId) {
-      createData.user = {
-        connect: { id: data.userId }
-      };
-    }
-
-    if (data.groupId) {
-      createData.userGroup = {
-        connect: { id: data.groupId }
-      };
-    }
 
     const resourceAccess = await this.db.resourceAccess.create({
       data: createData,

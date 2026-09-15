@@ -8,10 +8,10 @@
  */
 
 import express, { Request, Response } from 'express';
+import { ChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { ChannelType } from '@prisma/client';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';

@@ -13,6 +13,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { getAllCustomTools } from "xyne-claw-shared";
@@ -48,7 +49,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     const text = await tool.execute(args ?? {}, { config: { MICROSOFT_ACCESS_TOKEN: token } });
     return { content: [{ type: "text", text }] };
   } catch (e) {
-    return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
+    return { content: [{ type: "text", text: errMsg(e) }], isError: true };
   }
 });
 

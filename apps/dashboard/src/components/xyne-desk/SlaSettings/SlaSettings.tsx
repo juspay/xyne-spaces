@@ -4,10 +4,15 @@ import { cn } from '../../../utils/classNames';
 import { useBoardSlaPolicies, useUpsertBoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
-import type { TicketPriority } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 import * as Select from '@radix-ui/react-select';
 
-const PRIORITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
+const PRIORITIES = [
+  TicketPriority.CRITICAL,
+  TicketPriority.HIGH,
+  TicketPriority.MEDIUM,
+  TicketPriority.LOW,
+] as const;
 type Priority = (typeof PRIORITIES)[number];
 
 const PRIORITY_LABELS: Record<Priority, string> = {
@@ -251,6 +256,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='TOGGLE_SLA_PRIORITY'
                     data-track-metadata={JSON.stringify({ priority })}
+                    data-ph-capture-attribute-track-id='toggle_sla_priority'
                   >
                     <span
                       className={cn(
@@ -533,6 +539,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                       data-track-category='BOARD_SLA_SETTINGS'
                       data-track-name='SAVE_SLA_POLICY'
                       data-track-metadata={JSON.stringify({ priority })}
+                      data-ph-capture-attribute-track-id='save_sla_policy'
                     >
                       Save
                     </button>

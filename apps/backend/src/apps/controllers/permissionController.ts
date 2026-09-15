@@ -1,6 +1,6 @@
 import { type Request, type Response } from 'express';
+import { AppPermissionStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { AppPermissionStatus } from '@prisma/client';
 
 export class PermissionController {
   /**

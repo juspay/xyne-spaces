@@ -14,6 +14,7 @@ import type {
 	SlackConversationsRepliesResponse,
 	SlackFileObject,
 	SlackMessageObject,
+	SlackUsersConversationsResponse,
 } from "../types";
 import { deriveFiletype } from "./files";
 
@@ -151,6 +152,21 @@ export function transformListResponse(
 	result: ChannelListResponse,
 ): SlackConversationsListResponse {
 	const response: SlackConversationsListResponse = {
+		ok: true,
+		channels: result.items.map(transformChannel),
+	};
+
+	if (result.hasMore && result.nextCursor) {
+		response.response_metadata = { next_cursor: result.nextCursor };
+	}
+
+	return response;
+}
+
+export function transformUsersConversationsResponse(
+	result: ChannelListResponse,
+): SlackUsersConversationsResponse {
+	const response: SlackUsersConversationsResponse = {
 		ok: true,
 		channels: result.items.map(transformChannel),
 	};

@@ -7,7 +7,18 @@ import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 const EXCLUDED_MODEL_PATTERNS = /^(claude|gemini)/i;
 
 class ModelSyncService {
+  private isLiteLLMConfigured(): boolean {
+    return Boolean(config.litellm.apiKey && config.litellm.baseUrl);
+  }
+
   async syncWithLiteLLM(): Promise<void> {
+    if (!this.isLiteLLMConfigured()) {
+      logger.info(
+        'Skipping LiteLLM model sync: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
+      );
+      return;
+    }
+
     try {
       const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
         config.defaultWorkspaceId,

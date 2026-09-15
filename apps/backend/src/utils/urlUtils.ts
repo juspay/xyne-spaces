@@ -1,5 +1,6 @@
 // backend/src/utils/urlUtils.ts
 import { config } from '@/config/env';
+import { NodeType, parse, type HTMLElement, type Node } from 'node-html-parser';
 
 /**
  * URL detection utilities
@@ -34,6 +35,154 @@ const EXTRA_MULTI_PART_TLDS = ["co\\.uk", "co\\.in", "com\\.au", "com\\.br", "co
 const ALL_TLDS = [...TOP_TLDS.map(t => t.replace(/\./g, "\\.")), ...EXTRA_MULTI_PART_TLDS];
 const TLD_GROUP = ALL_TLDS.join("|");
 
+export function canonicalizeMessageLink(candidate: string): string | null {
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+
+  let absolute = trimmed;
+  try {
+    const direct = new URL(trimmed);
+    if (direct.protocol !== 'http:' && direct.protocol !== 'https:') return null;
+  } catch {
+    if (trimmed.startsWith('//')) {
+      absolute = `http:${trimmed}`;
+    } else {
+      return null;
+    }
+  }
+
+  try {
+    const parsed = new URL(absolute);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (!parsed.hostname) return null;
+
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+const RENDERED_AUTO_LINK_REGEX = /https?:\/\/[^\s<|]+[^<>|.,:;"')\]\s]/gi;
+const AUTO_LINK_EXCLUDED_TAGS = new Set(['a', 'code', 'pre', 'script', 'style']);
+
+function collectMessageLinks(node: Node, links: Set<string>): void {
+  if (node.nodeType === NodeType.TEXT_NODE) {
+    for (const match of node.text.matchAll(RENDERED_AUTO_LINK_REGEX)) {
+      const canonical = canonicalizeMessageLink(match[0]);
+      if (canonical) links.add(canonical);
+    }
+    return;
+  }
+
+  if (node.nodeType !== NodeType.ELEMENT_NODE) return;
+
+  const element = node as HTMLElement;
+  // node-html-parser represents the document root as an element without a tag name.
+  const tagName = (element.rawTagName || '').toLowerCase();
+  if (tagName === 'a') {
+    const href = element.getAttribute('href');
+    if (!href) return;
+    const canonical = canonicalizeMessageLink(href);
+    if (canonical) links.add(canonical);
+    return;
+  }
+
+  if (AUTO_LINK_EXCLUDED_TAGS.has(tagName)) return;
+  for (const child of element.childNodes) collectMessageLinks(child, links);
+}
+
+export function extractMessageLinks(content: string): string[] {
+  if (typeof content !== 'string' || !content) return [];
+
+  const links = new Set<string>();
+
+  try {
+    const root = parse(content);
+    collectMessageLinks(root, links);
+  } catch {
+    // Malformed imported HTML should not block message ingestion.
+  }
+
+  return [...links];
+}
+
+const FLOW_TEXT_LINK_REGEX =
+  /<(https?:[^|>]+)\|[^>]+>|<(https?:[^>\s]+)>|(https?:\/\/[^\s<>|]+[^\s<>|.,:;"')\]])/g;
+
+export function extractFlowTextLinks(text: string): string[] {
+  if (!text) return [];
+
+  const links = new Set<string>();
+  for (const match of text.matchAll(FLOW_TEXT_LINK_REGEX)) {
+    const candidate = match[1] ?? match[2] ?? match[3];
+    if (!candidate) continue;
+    const canonical = canonicalizeMessageLink(candidate);
+    if (canonical) links.add(canonical);
+  }
+
+  return [...links];
+}
+
+const FLOW_LINK_PROPS = ['href', 'url', 'detailsUrl'] as const;
+
+function collectFlowLinks(components: unknown[], links: Set<string>): void {
+  for (const comp of components) {
+    if (!comp || typeof comp !== 'object') continue;
+    const c = comp as Record<string, unknown>;
+
+    if (c['props'] && typeof c['props'] === 'object') {
+      const props = c['props'] as Record<string, unknown>;
+
+      for (const key of FLOW_LINK_PROPS) {
+        const value = props[key];
+        if (typeof value !== 'string' || !value.trim()) continue;
+        const canonical = canonicalizeMessageLink(value);
+        if (canonical) links.add(canonical);
+      }
+
+      const text = props['content'];
+      if (typeof text === 'string' && text) {
+        for (const link of extractFlowTextLinks(text)) links.add(link);
+      }
+    }
+
+    if (Array.isArray(c['children'])) {
+      collectFlowLinks(c['children'] as unknown[], links);
+    }
+  }
+}
+
+function extractFlowJsonLinks(content: string): string[] {
+  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
+  if (!attrMatch?.[1]) return [];
+
+  try {
+    const json = attrMatch[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&#10;/g, '\n')
+      .replace(/&#13;/g, '\r');
+    const flow = JSON.parse(json) as { components?: unknown[] };
+
+    const links = new Set<string>();
+    if (Array.isArray(flow.components)) collectFlowLinks(flow.components, links);
+    return [...links];
+  } catch {
+    return [];
+  }
+}
+
+export function extractLinksFromContent(content: string): string[] {
+  if (typeof content !== 'string' || !content) return [];
+
+  try {
+    return [
+      ...new Set([...extractFlowJsonLinks(content), ...extractMessageLinks(content)]),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Remove HTML tags and replace them with spaces (so adjacent words don't glue together).
  * Also performs a lightweight decode of common HTML entities and collapses whitespace.
@@ -44,6 +193,8 @@ export function stripAndDecodeHtml(input: string): string {
   // 1) Remove tags
   let s = input.replace(/<script[\s\S]*?<\/script>/gi, " ");
   s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  s = s.replace(/<pre[\s\S]*?<\/pre>/gi, " ");
+  s = s.replace(/<code[\s\S]*?<\/code>/gi, " ");
   s = s.replace(/<\/?[^>]+>/g, " "); // remove remaining tags
 
   // 2) Decode common entities (basic, covers majority cases)

@@ -6,6 +6,7 @@ import type { TicketCustomFormData } from '@/database/repositories/formsReposito
 export enum ChatEventType {
     MESSAGE_POSTED = 'MESSAGE_POSTED',
     MESSAGE_UPDATED = 'MESSAGE_UPDATED',
+    MESSAGE_DELETED = 'MESSAGE_DELETED',
 }
 
 /**
@@ -53,6 +54,10 @@ export interface AppEventAttachment {
  * Payload type for APP_MENTION events
  */
 export interface AppMentionEventPayload {
+    /** Additive trusted routing context for headless recipients such as Claw. */
+    workspaceId?: string;
+    orgId?: string;
+    orgMemberId?: string;
     conversationId: string;
     messageId: string;
     content: string;
@@ -70,6 +75,9 @@ export interface AppMentionEventPayload {
  * Payload type for DM events
  */
 export interface DMEventPayload {
+    workspaceId?: string;
+    orgId?: string;
+    orgMemberId?: string;
     conversationId: string;
     messageId: string;
     content: string;
@@ -88,6 +96,9 @@ export interface DMEventPayload {
  * in a channel where an app is a participant.
  */
 export interface UserMentionedEventPayload {
+    workspaceId?: string;
+    orgId?: string;
+    orgMemberId?: string;
     conversationId: string;
     messageId: string;
     content: string;
@@ -105,6 +116,8 @@ export interface UserMentionedEventPayload {
  * Payload type for EMAIL events
  */
 export interface EmailEventPayload {
+    workspaceId?: string;
+    orgId?: string;
     conversationId: string;
     subject: string;
     content: string;
@@ -133,6 +146,7 @@ export interface AdditionalFormFieldUpdatedPayload {
     previousValue?: string;
     updatedBy: string;
     workspaceId: string;
+    orgId?: string;
 }
 
 export interface DeskReplyAttachment {

@@ -1,4 +1,6 @@
 import { db } from '@/database/client';
+import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import { logger } from '@/utils/logger';
 
 /**
  * Fetch additional actor user IDs from board form fields of type USER.
@@ -21,8 +23,8 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
     const formMappings = await db.formContextMapping.findMany({
       where: {
         contextId: ticket.boardId,
-        contextType: 'BOARD',
-        entityType: 'TICKET',
+        contextType: FormContextType.BOARD,
+        entityType: FormEntityType.TICKET,
       },
       select: { formId: true },
     });
@@ -37,7 +39,7 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
     const userFields = await db.formFields.findMany({
       where: {
         formId: { in: formIds },
-        fieldType: 'USER',
+        fieldType: FormFieldType.USER,
       },
       select: { id: true },
     });
@@ -78,7 +80,7 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
 
     return [...new Set(userIds)];
   } catch (error) {
-    console.error(`[getFormFieldUserActors] Failed to fetch form field users for ticket ${ticketId}:`, error);
+    logger.error(`Failed to fetch form field users for ticket ${ticketId}`, error);
     return [];
   }
 }

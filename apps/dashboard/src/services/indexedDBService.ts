@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 /**
  * IndexedDB Service for persisting XState machine context
  * Uses Zero's schema version for cache invalidation
@@ -8,6 +9,7 @@
 const DB_PREFIX = 'xyne-state-machine';
 const STORE_NAME = 'state';
 const SCHEMA_VERSION_KEY = '_schemaVersion';
+const ENCRYPTION_KEYS_DB_NAME = 'xyne-encryption-keys';
 
 export const FINGERPRINT_FIELD = '__conversationFingerprint__';
 
@@ -246,6 +248,8 @@ class IndexedDBService {
    * This is useful when clearing data for logged-out users
    */
   async dropAllUserDatabases(): Promise<void> {
+    this.close();
+
     try {
       const databases = await indexedDB.databases();
 
@@ -254,7 +258,9 @@ class IndexedDBService {
       }
 
       const userDatabases = databases
-        .filter(db => db.name && db.name.startsWith(DB_PREFIX))
+        .filter(
+          db => db.name && (db.name.startsWith(DB_PREFIX) || db.name === ENCRYPTION_KEYS_DB_NAME),
+        )
         .map(db => db.name as string);
 
       const dropPromises = userDatabases.map(dbName => {
@@ -263,7 +269,10 @@ class IndexedDBService {
           dropRequest.onsuccess = () => res();
           dropRequest.onerror = () => res();
           dropRequest.onblocked = () => {
-            console.warn(`Database deletion blocked for ${dbName}, proceeding anyway`);
+            logger.warn(LogEvent.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String(`Database deletion blocked for ${dbName}, proceeding anyway`),
+            });
             res();
           };
         });
@@ -272,11 +281,18 @@ class IndexedDBService {
       await Promise.all(dropPromises);
 
       if (userDatabases.length > 0) {
-        console.log(`Dropped ${userDatabases.length} user-scoped databases`);
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_log',
+          message: String(`Dropped ${userDatabases.length} user-scoped databases`),
+        });
       }
     } catch (error) {
       // If we can't list databases, just proceed
-      console.warn('Failed to list user databases:', error);
+      logger.warn(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_warn',
+        message: String('Failed to list user databases:'),
+        context: [error],
+      });
     }
   }
 }

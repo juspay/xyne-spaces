@@ -1,18 +1,12 @@
 import type { Workflow } from '@xyne/shared';
+import { WorkflowEventType } from '@xyne/shared';
 import type { Automation, AutomationConfig, AutomationStatus } from './Automation.types';
 import { AutomationStatusValues } from './Automation.types';
 
 export const AUTOMATION_WORKFLOW_TYPE = 'Automations';
 
-const WORKFLOW_EVENT_TYPES = new Set([
-  'NO_OP',
-  'TICKET_CREATED',
-  'TICKET_UPDATED',
-  'TICKET_COMMENTED',
-  'EMAIL_RECEIVED',
-]);
-export function triggerTypeToEventType(triggerType: string): string {
-  return WORKFLOW_EVENT_TYPES.has(triggerType) ? triggerType : 'NO_OP';
+export function triggerTypeToEventType(triggerType: string): WorkflowEventType {
+  return isWorkflowEventType(triggerType) ? triggerType : WorkflowEventType.NO_OP;
 }
 
 interface AutomationMetadata {
@@ -61,7 +55,14 @@ export function workflowToAutomation(workflow: Workflow): Automation {
     createdAt: toIsoString(workflow.createdAt),
     updatedAt: toIsoString(workflow.updatedAt),
     automationSeriesId: workflow.automationSeriesId ?? null,
+    eventType: isWorkflowEventType(workflow.eventType)
+      ? workflow.eventType
+      : WorkflowEventType.NO_OP,
   };
+}
+
+function isWorkflowEventType(value: string | null | undefined): value is WorkflowEventType {
+  return !!value && (Object.values(WorkflowEventType) as string[]).includes(value);
 }
 
 export function isAutomationWorkflow(workflow: Workflow): boolean {

@@ -1,12 +1,21 @@
 import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { messageSchema } from '@/vespa/src/types';
+import { logger } from '@/utils/logger';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
   channelId: string;
   createdBy: string;
   initialMessageId: string;
+  /**
+   * Snapshot of the initial message, built with buildInitialMessageMd. The V3
+   * read path renders from this and has no join to fall back on, so a
+   * conversation created without it shows an empty message.
+   */
+  initial_message_md?: string | null;
   parentMessageId?: string;
   pinned?: boolean;
   doNotPostToChannel?: boolean;
@@ -29,6 +38,17 @@ export interface ConversationFilters {
   createdBy?: string;
   pinned?: boolean;
 }
+
+const MOVE_CHUNK_SIZE = 500;
+const REINDEX_ENQUEUE_BATCH_SIZE = 50;
+
+const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
 
 export class ConversationRepository extends BaseRepository<Conversation, CreateConversationInput, UpdateConversationInput> {
   constructor() {
@@ -59,6 +79,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         workspaceId: channel.workspaceId,
         createdBy: data.createdBy,
         initialMessageId: data.initialMessageId,
+        ...(data.initial_message_md !== undefined && {
+          initial_message_md: data.initial_message_md,
+        }),
         parentMessageId: data.parentMessageId,
         pinned: data.pinned || false,
         ...(data.doNotPostToChannel !== undefined && {
@@ -143,26 +166,101 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return await this.findMany({ channelId, pinned: true });
   }
 
-  async incrementReplyCount(conversationId: string, skipParticipantUpdate = false): Promise<Conversation> {
+  async incrementReplyCount(
+    conversationId: string,
+    replyCreatedAt?: Date | null,
+    markParticipantsRead = false,
+  ): Promise<Conversation> {
     const conversation = await this.findById(conversationId);
     if (!conversation) {
       throw new Error('Conversation not found');
     }
 
     const now = new Date();
+    const effectiveReplyCreatedAt = replyCreatedAt === undefined ? now : replyCreatedAt;
     const result = await this.update(conversationId, {
       replyCount: conversation.replyCount + 1,
       lastActivityAt: now,
     });
 
-    // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2).
-    // Skipped during migration — the value would be the migration run time, not the
-    // historical Slack timestamp, so it is incorrect anyway.
-    if (!skipParticipantUpdate) {
+    if (effectiveReplyCreatedAt) {
       await this.db.conversationParticipant.updateMany({
-        where: { conversationId },
-        data: { lastReplyAt: now },
+        where: {
+          conversationId,
+          OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: effectiveReplyCreatedAt } }],
+        },
+        data: { lastReplyAt: effectiveReplyCreatedAt },
       });
+
+      if (markParticipantsRead) {
+        await this.db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: effectiveReplyCreatedAt } }],
+          },
+          data: { lastReadAt: effectiveReplyCreatedAt },
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * One conversations write for a thread reply.
+   *
+   * The reply count bump, the replies_md append and the lastActivityAt patch
+   * used to be three separate commits against the same row. Each conversations write is replayed
+   * through every subscribed Zero pipeline, so collapsing them cuts the fan-out
+   * per reply by three. replyCount uses an atomic increment rather than the
+   * previous read-then-write, which also removes a lost-update race between
+   * concurrent replies.
+   */
+  async findRepliesMd(conversationId: string): Promise<string | null> {
+    const row = await this.db.conversation.findUnique({
+      where: { conversationId },
+      select: { replies_md: true },
+    });
+    return row?.replies_md ?? null;
+  }
+
+  async applyThreadReply(params: {
+    conversationId: string;
+    repliesMd: string | null;
+    lastActivityAt: Date;
+    replyCreatedAt?: Date | null;
+    markParticipantsRead?: boolean;
+  }): Promise<Conversation> {
+    const { conversationId, repliesMd, lastActivityAt, replyCreatedAt, markParticipantsRead } =
+      params;
+
+    const result = await this.db.conversation.update({
+      where: { conversationId },
+      data: {
+        replyCount: { increment: 1 },
+        lastActivityAt,
+        replies_md: repliesMd,
+      },
+    });
+
+    if (replyCreatedAt) {
+      await this.db.conversationParticipant.updateMany({
+        where: {
+          conversationId,
+          OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: replyCreatedAt } }],
+        },
+        data: { lastReplyAt: replyCreatedAt },
+      });
+
+      if (markParticipantsRead) {
+        await this.db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: replyCreatedAt } }],
+          },
+          data: { lastReadAt: replyCreatedAt },
+        });
+      }
     }
 
     return result;
@@ -253,26 +351,216 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
-  async migrateConversationsToChannel(
-    conversationIds: string[],
-    targetChannelId: string
-  ): Promise<number> {
-    if (conversationIds.length === 0) {
-      return 0;
-    }
-
-    const result = await this.db.conversation.updateMany({
+  async countHistoryPreview(channelId: string, createdAfter: Date | null): Promise<number> {
+    return await this.db.conversation.count({
       where: {
-        conversationId: {
-          in: conversationIds
-        }
-      },
-      data: {
-        channelId: targetChannelId
+        channelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       }
     });
+  }
 
-    return result.count;
+  async getHistoryPreview(
+    channelId: string,
+    createdAfter: Date | null,
+    limit: number
+  ): Promise<
+    Array<{
+      conversationId: string;
+      createdAt: Date;
+      initialMessage: { senderId: string; content: string } | null;
+      attachments: Array<{ id: string; originalFilename: string }>;
+    }>
+  > {
+    const conversations = await this.db.conversation.findMany({
+      where: {
+        channelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limit
+    });
+
+    if (conversations.length === 0) {
+      return [];
+    }
+
+    const initialMessages = await this.db.message.findMany({
+      where: {
+        messageId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { messageId: true, senderId: true, content: true }
+    });
+    const byId = new Map(initialMessages.map(m => [m.messageId, m]));
+
+    const attachments = await this.db.messageAttachment.findMany({
+      where: {
+        entityId: { in: conversations.map(c => c.initialMessageId) },
+        isDeleted: false
+      },
+      select: { id: true, entityId: true, originalFilename: true }
+    });
+    const attachmentsByMessage = new Map<string, Array<{ id: string; originalFilename: string }>>();
+    for (const attachment of attachments) {
+      const bucket = attachmentsByMessage.get(attachment.entityId) ?? [];
+      bucket.push({ id: attachment.id, originalFilename: attachment.originalFilename });
+      attachmentsByMessage.set(attachment.entityId, bucket);
+    }
+
+    return conversations.map(conversation => {
+      const initial = byId.get(conversation.initialMessageId);
+      return {
+        conversationId: conversation.conversationId,
+        createdAt: conversation.createdAt,
+        initialMessage: initial
+          ? { senderId: initial.senderId, content: initial.content }
+          : null,
+        attachments: attachmentsByMessage.get(conversation.initialMessageId) ?? []
+      };
+    });
+  }
+
+  /**
+   * Reparent a channel's conversations into another channel. Messages and attachments hang off
+   * `conversationId` so they follow automatically; `conversationParticipant.channelId` is
+   * denormalized and has to be moved explicitly. Threads move whole, keyed on when the thread
+   * started — one opened before the cutoff stays put even if it has replies after it.
+   */
+  async moveConversationsToChannel(
+    sourceChannelId: string,
+    targetChannelId: string,
+    createdAfter?: Date | null
+  ): Promise<{ moved: number; remaining: number }> {
+    const conversations = await this.db.conversation.findMany({
+      where: {
+        channelId: sourceChannelId,
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
+      },
+      select: { conversationId: true }
+    });
+
+    if (conversations.length === 0) {
+      return {
+        moved: 0,
+        remaining: await this.db.conversation.count({ where: { channelId: sourceChannelId } })
+      };
+    }
+
+    const conversationIds = conversations.map(c => c.conversationId);
+
+    let moved = 0;
+    for (const chunk of chunkArray(conversationIds, MOVE_CHUNK_SIZE)) {
+      moved += await this.reparentChunk(chunk, sourceChannelId, targetChannelId);
+    }
+
+    await this.reindexMovedMessages(conversationIds);
+
+    const remaining = await this.db.conversation.count({
+      where: { channelId: sourceChannelId }
+    });
+
+    return { moved, remaining };
+  }
+
+  private async reparentChunk(
+    conversationIds: string[],
+    sourceChannelId: string,
+    targetChannelId: string
+  ): Promise<number> {
+    const [movedConversations] = await this.db.$transaction([
+      this.db.conversation.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.conversationParticipant.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.conversationLabelMapping.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.draftMessage.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.surfaceNudgeCount.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.releaseEvent.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+    
+      this.db.activity.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.messageArtifact.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.executionItem.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.delayedMessage.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.prThreadLink.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.email.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.emailDraft.updateMany({
+        where: { conversationId: { in: conversationIds } },
+        data: { channelId: targetChannelId }
+      }),
+      // these point at a conversation that just left the channel
+      this.db.channelParticipant.updateMany({
+        where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
+        data: { lastViewedConversationId: null }
+      }),
+      this.db.channelUserStatus.updateMany({
+        where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
+        data: { lastViewedConversationId: null }
+      })
+    ]);
+
+    return movedConversations.count;
+  }
+
+  private async reindexMovedMessages(conversationIds: string[]): Promise<void> {
+    for (const chunk of chunkArray(conversationIds, MOVE_CHUNK_SIZE)) {
+      const messages = await this.db.message.findMany({
+        where: { conversationId: { in: chunk }, isDeleted: false },
+        select: { messageId: true }
+      });
+
+      for (const batch of chunkArray(messages, REINDEX_ENQUEUE_BATCH_SIZE)) {
+        await Promise.all(
+          batch.map(message =>
+            vespaQueue
+              .addJob({ schema: messageSchema, jobType: 'feed', docId: message.messageId })
+              .catch(error =>
+                logger.error(
+                  `Failed to queue Vespa re-index for moved message ${message.messageId}:`,
+                  error
+                )
+              )
+          )
+        );
+      }
+    }
   }
 
   /**

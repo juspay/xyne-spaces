@@ -20,6 +20,9 @@ export interface AutoDraftAgentPickerProps {
   clawAgents: ChannelClawAgent[];
   disabled?: boolean;
   compact?: boolean;
+  defaultLabel?: string;
+  /** Helper text under the picker when no Claw agents are on this channel yet. */
+  emptyStateHelperText?: string;
 }
 
 /**
@@ -31,6 +34,8 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
   clawAgents,
   disabled = false,
   compact = false,
+  defaultLabel = 'Xyne AI',
+  emptyStateHelperText = 'Add a Claw agent to this channel to use it for drafts. Until then, the built-in Xyne AI is used.',
 }) => {
   const [showAddAgent, setShowAddAgent] = useState(false);
 
@@ -52,14 +57,14 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
         data-track-category='DeskSettings'
         data-track-name='SelectAutoDraftAgent'
       >
-        <SelectValue placeholder='Default (Xyne AI)' />
+        <SelectValue placeholder={`Default (${defaultLabel})`} />
       </SelectTrigger>
       <SelectContent className='rounded-[10px]'>
         <SelectItem value={DEFAULT_AGENT_OPTION} className='rounded-[8px]'>
           <span className='flex items-center gap-2'>
             <Sparkles size={14} className='text-desk-accent' />
             <span>
-              Default <span className='text-desk-helper'>(Xyne AI)</span>
+              Default <span className='text-desk-helper'>({defaultLabel})</span>
             </span>
           </span>
         </SelectItem>
@@ -114,7 +119,7 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
       <p className='text-desk-helper'>
         {clawAgents.length > 0
           ? 'Choose which agent writes the draft. Claw agents added to this channel appear here.'
-          : 'Add a Claw agent to this channel to use it for drafts. Until then, the built-in Xyne AI is used.'}
+          : emptyStateHelperText}
         {value && !clawAgents.some(a => a.slug === value) && (
           <span className='block text-amber-600 dark:text-amber-500 mt-1'>
             The selected agent is no longer in this channel — drafts fall back to the default until

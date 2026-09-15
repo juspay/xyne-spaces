@@ -6,8 +6,7 @@
 import { Request, Response } from 'express';
 import { EmailClassificationService } from '../services/emailClassificationService.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
-import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
-import { ChannelRepository } from '../database/repositories/channelRepository.js';
+import { assertChannelMembership, assertDeskOwner } from '@/utils/channelMembership';
 import { AgentsConfig } from '../agents/config.js';
 import { logger } from '../utils/logger.js';
 import type { PriorityClassificationPreviewBody, SavePriorityClassificationConfigBody } from '../types/classification.js';
@@ -15,41 +14,19 @@ import type { PriorityClassificationPreviewBody, SavePriorityClassificationConfi
 export class PriorityClassificationController {
   private service = new EmailClassificationService();
   private repo = new EmailClassificationRepository();
-  private channelRepo = new ChannelRepository();
-  private channelParticipantRepo = new ChannelParticipantRepository();
 
   private async assertChannelAccess(
     req: Request,
     channelId: string,
-    requireManageAccess = false
+    requireManageAccess = false,
   ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-    const userId = req.user?.id;
-    const workspaceId = req.user?.workspaceId;
-
-    if (!userId || !workspaceId) {
-      return { ok: false, status: 401, error: 'Authentication required' };
-    }
-
-    const channel = await this.channelRepo.findById(channelId);
-    if (!channel || channel.workspaceId !== workspaceId) {
-      return { ok: false, status: 404, error: 'Channel not found' };
-    }
-
-    const isParticipant = await this.channelParticipantRepo.isParticipant(channelId, userId);
-    if (!isParticipant) {
-      return { ok: false, status: 403, error: 'Not a member of this channel' };
-    }
-
-    if (!requireManageAccess) {
-      return { ok: true };
-    }
+    const access = await assertChannelMembership(req, channelId);
+    if (!access.ok) return access;
+    if (!requireManageAccess) return { ok: true };
 
     const preference = await this.repo.findRawPreferenceByChannelId(channelId);
-    if (channel.createdBy === userId || preference?.ownerUserId === userId) {
-      return { ok: true };
-    }
-
-    return { ok: false, status: 403, error: 'Only the desk owner can manage priority settings' };
+    const owned = assertDeskOwner(access, preference?.ownerUserId, 'Only the desk owner can manage priority settings');
+    return owned.ok ? { ok: true } : owned;
   }
 
   /**

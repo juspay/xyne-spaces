@@ -1,5 +1,6 @@
 import { createMachine, createActor, fromPromise, assign } from 'xstate';
 import { fetchFile } from '../services/clients/fileFetchService';
+import { MessageType } from '@xyne/shared';
 
 export interface AttachmentRef {
   attachmentId: string;
@@ -22,7 +23,7 @@ export interface AttachmentRef {
     senderId: string;
     content: string;
     createdAt: number;
-    msgType: 'USER' | 'BOT' | 'SYSTEM' | 'FORWARDED';
+    msgType: MessageType;
     hasAttachment?: boolean;
     attachments?: readonly {
       id: string;
@@ -257,6 +258,17 @@ export const attachmentViewerMachine = createMachine(
       },
       error: {
         on: {
+          UPDATE: {
+            target: 'opening',
+            actions: assign({
+              attachments: ({ event }) => event.attachments,
+              currentIndex: ({ event }) => event.startIndex ?? 0,
+              fileData: null,
+              status: () => 'loading',
+              error: null,
+              retryCount: 0,
+            }),
+          },
           RETRY: {
             target: 'opening',
             actions: assign(({ context }) => ({

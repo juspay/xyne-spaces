@@ -10,18 +10,24 @@ import {
   IHeaderParams,
   RowClickedEvent,
   GridReadyEvent,
+  ValueGetterParams,
 } from 'ag-grid-community';
+import type { IRowNode } from 'ag-grid-community';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { BoardType, isDeskChannelType } from '@xyne/shared';
+import { isDeskChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
-import { queries } from '../../../zero/queries';
-import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
-import { Calendar, Check, User } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  CheckTickSingle as Check,
+  UserDefault as User,
+} from '@xyne/icons';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import {
   AssigneeCellEditor,
   StatusCellEditor,
@@ -31,13 +37,22 @@ import {
   TagsCellEditor,
 } from './CellEditor';
 import { BulkActionToolbar } from './BulkActionToolbar';
-import { StatusOptions } from './TicketTableHelper';
+import {
+  dueDateToEta,
+  MAX_BULK_TICKETS,
+  sharedChannelId,
+  useBulkAssignableUsers,
+  useBulkTicketActions,
+  type BulkTicketUpdates,
+} from './useBulkTicketActions';
+import { assigneeOptionToTicketUpdate, StatusOptions } from './TicketTableHelper';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -60,7 +75,26 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      params.api.selectAll();
+      // The grid holds every ticket the channel query returned — there is no page
+      // limit here as there is on the Desk list view — and the bulk bar fans out a
+      // mutation per selected row. Cap the SELECTION rather than the action so the
+      // toolbar's count stays honest about what will actually change.
+      const capped: IRowNode[] = [];
+      params.api.forEachNodeAfterFilterAndSort(node => {
+        if (capped.length < MAX_BULK_TICKETS) {
+          capped.push(node);
+        }
+      });
+      // Clear first: rows past the cap may already be selected by hand.
+      params.api.deselectAll();
+      params.api.setNodesSelected({ nodes: capped, newValue: true });
+
+      const total = params.api.getDisplayedRowCount();
+      if (total > MAX_BULK_TICKETS) {
+        toast.info(
+          `Selected the first ${MAX_BULK_TICKETS} of ${total} tickets — bulk actions apply to ${MAX_BULK_TICKETS} at a time.`,
+        );
+      }
     } else {
       params.api.deselectAll();
     }
@@ -71,8 +105,8 @@ const IndexHeaderRenderer = (params: IHeaderParams) => {
   useEffect(() => {
     const onSelectionChanged = () => {
       const selectedRows = params.api.getSelectedRows();
-      const totalRows = params.api.getDisplayedRowCount();
-      setAllSelected(selectedRows.length === totalRows && totalRows > 0);
+      const selectableRows = Math.min(params.api.getDisplayedRowCount(), MAX_BULK_TICKETS);
+      setAllSelected(selectedRows.length >= selectableRows && selectableRows > 0);
     };
 
     params.api.addEventListener('selectionChanged', onSelectionChanged);
@@ -162,7 +196,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   onSelectionChange,
 }) => {
   const zero = useZero();
-  const users = useUsers();
+  // Assignment dropdowns must not offer deactivated users — the server rejects them.
+  const activeUsers = useActiveUsers();
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
@@ -172,47 +207,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
 
-  // NON_LINEAR boards reject direct ticket.update — use the transition mutator instead.
-  const routeStageChange = useCallback(
-    async (
-      ticketId: string,
-      boardId: string | null | undefined,
-      toStageName: string,
-    ): Promise<void> => {
-      if (boardId) {
-        // No try/catch: Zero queries resolve through the cache and don't throw here.
-        const board = (await zero.run(queries.boardDetailById({ boardId }), {
-          type: 'complete',
-        })) as { boardType?: string } | null;
-        if (board?.boardType === BoardType.NON_LINEAR) {
-          const result = zero.mutate(
-            mutators.nonLinear.transition({ ticketId, toStageName, now: Date.now() }),
-          );
-          void (
-            result as {
-              server: Promise<{ type: string; error?: { message?: string } } | undefined>;
-            }
-          ).server.then(serverResult => {
-            if (serverResult?.type === 'error') {
-              toast.error(
-                serverResult.error?.message === 'This transition requires a form to be submitted'
-                  ? 'Open this ticket on its board to fill the required form for this stage'
-                  : (serverResult.error?.message ?? 'Unable to change stage'),
-              );
-            }
-          });
-          return;
-        }
-      }
-      zero.mutate(
-        mutators.ticket.update({ id: ticketId, stageName: toStageName, updatedAt: Date.now() }),
-      );
-    },
-    [zero],
-  );
+  // Board-aware stage routing and the bulk mutators are shared with the Desk list
+  // view's bulk bar, which selects the same tickets outside this grid.
+  const { routeStageChange, applyUpdates, applyTags } = useBulkTicketActions();
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
+  // Tracked off the selection so the bulk bar can offer that channel's members only.
+  const [bulkChannelId, setBulkChannelId] = useState<string | undefined>(undefined);
+  const bulkAssignableUsers = useBulkAssignableUsers(bulkChannelId);
 
   useEffect(() => {
     if (!gridApi || selectedIds === undefined) return;
@@ -226,6 +229,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const userGroups = useUserGroups();
 
   const theme = themeQuartz.withParams({
+    backgroundColor: 'hsl(var(--background))',
+    foregroundColor: 'hsl(var(--foreground))',
+    chromeBackgroundColor: 'hsl(var(--card))',
     headerBackgroundColor: 'hsl(var(--card))',
     headerTextColor: 'hsl(var(--muted-foreground))',
     headerFontWeight: '600',
@@ -265,6 +271,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         headerName: 'Ticket name',
         field: 'title',
         minWidth: isComfortView ? 340 : 300,
+        flex: 1,
         editable: true,
         cellEditor: 'agTextCellEditor',
         cellEditorParams: {
@@ -275,12 +282,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const oldValue = typeof params.oldValue === 'string' ? params.oldValue : '';
 
           if (newTitle && newTitle !== oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                title: newTitle,
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  title: newTitle,
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update title',
             );
           } else if (!newTitle) {
             params.node?.setDataValue('title', oldValue);
@@ -407,6 +417,27 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       },
 
       {
+        key: 'age',
+        colId: 'age',
+        headerName: 'Age',
+        minWidth: 80,
+        // Sorts on days elapsed, not createdAt — that would invert the order.
+        valueGetter: (params: ValueGetterParams<Ticket>) => {
+          const createdAt = params.data?.createdAt;
+          if (!createdAt) return null;
+          const created = new Date(createdAt);
+          if (Number.isNaN(created.getTime())) return null;
+          return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
+        },
+        cellRenderer: (params: ICellRendererParams<Ticket>) =>
+          typeof params.value === 'number' ? (
+            <span className='text-sm text-muted-foreground whitespace-nowrap'>{params.value}d</span>
+          ) : (
+            <span className='text-muted-foreground'>—</span>
+          ),
+      },
+
+      {
         key: 'assignee',
         headerName: 'Assignee',
         field: 'assignedTo',
@@ -415,16 +446,23 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         minWidth: 213,
         cellEditor: AssigneeCellEditor,
         cellEditorParams: {
-          users: users,
+          users: activeUsers,
         },
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                assignedTo: typeof params.newValue === 'string' ? params.newValue : undefined,
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  // The editor's options are encoded `user:<id>` / `group:<id>`;
+                  // the row stores a bare id, so translate before writing.
+                  ...(typeof params.newValue === 'string' && params.newValue
+                    ? assigneeOptionToTicketUpdate(params.newValue)
+                    : {}),
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update assignee',
             );
           }
         },
@@ -478,12 +516,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellEditor: StatusCellEditor,
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                statusV2: String(params.newValue),
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  statusV2: String(params.newValue),
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update status',
             );
           }
         },
@@ -517,12 +558,15 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         cellEditor: PriorityCellEditor,
         onCellValueChanged: params => {
           if (params.newValue !== params.oldValue && params.data) {
-            zero.mutate(
-              mutators.ticket.update({
-                id: params.data.id,
-                priority: params.newValue as Ticket['priority'],
-                updatedAt: Date.now(),
-              }),
+            void surfaceMutationError(
+              zero.mutate(
+                mutators.ticket.update({
+                  id: params.data.id,
+                  priority: params.newValue as Ticket['priority'],
+                  updatedAt: Date.now(),
+                }),
+              ),
+              'Failed to update priority',
             );
           }
         },
@@ -600,15 +644,18 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           const toRemove = oldTagNames.filter(t => !newTagNames.includes(t));
           toAdd.forEach(tagName => {
             if (params.data) {
-              zero.mutate(
-                mutators.ticketTagV2.create({
-                  ticketId: params.data.id,
-                  tagId: uuidv4(),
-                  projectTagId: uuidv4(),
-                  mappingId: uuidv4(),
-                  projectId: params.data.projectId,
-                  tagName,
-                }),
+              void surfaceMutationError(
+                zero.mutate(
+                  mutators.ticketTagV2.create({
+                    ticketId: params.data.id,
+                    tagId: uuidv4(),
+                    projectTagId: uuidv4(),
+                    mappingId: uuidv4(),
+                    projectId: params.data.projectId,
+                    tagName,
+                  }),
+                ),
+                'Failed to add tag',
               );
             }
           });
@@ -616,7 +663,10 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           toRemove.forEach(tagName => {
             const tag = oldTags.find(t => t.name === tagName);
             if (tag?.id) {
-              zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id }));
+              void surfaceMutationError(
+                zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id })),
+                'Failed to remove tag',
+              );
             }
           });
           return false;
@@ -657,7 +707,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     ticketTags,
     zero,
     visibleColumns,
-    users,
+    activeUsers,
     availableTags,
     onTitleClick,
     extraColumns,
@@ -665,71 +715,24 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   ]);
 
   const handleBulkUpdate = useCallback(
-    (updates: Partial<Ticket> = {}) => {
+    (updates: BulkTicketUpdates = {}) => {
       if (!gridApi) return;
-
       if (Object.keys(updates).length > 0) {
-        const selectedRows = gridApi.getSelectedRows();
-        selectedRows.forEach((row: unknown) => {
-          if (row && typeof row === 'object' && 'id' in row) {
-            const ticket = row as Ticket;
-            // Convert null eta to undefined for mutator
-            const { eta, stageName, ...otherUpdates } = updates as {
-              eta?: number | null;
-              stageName?: string;
-            };
-            if (stageName !== undefined) {
-              void routeStageChange(ticket.id, ticket.boardId, stageName);
-            }
-            const remaining = {
-              ...otherUpdates,
-              ...(eta !== undefined && { eta: eta ?? undefined }),
-            };
-            if (Object.keys(remaining).length > 0) {
-              zero.mutate(
-                mutators.ticket.update({
-                  id: ticket.id,
-                  ...remaining,
-                  updatedAt: Date.now(),
-                }),
-              );
-            }
-          }
-        });
+        applyUpdates(gridApi.getSelectedRows() as Ticket[], updates);
       }
-
       gridApi.deselectAll();
       setSelectedCount(0);
     },
-    [gridApi, zero],
+    [gridApi, applyUpdates],
   );
 
   const handleBulkTagUpdate = useCallback(
     (tagsToAdd: string[]) => {
       if (!gridApi) return;
-      const selectedRows = gridApi.getSelectedRows();
-
-      selectedRows.forEach(row => {
-        const ticket = row as Ticket;
-        tagsToAdd.forEach(tagName => {
-          const existing = ticketTags?.get(ticket.id) || [];
-          if (!existing.some(t => t.name === tagName)) {
-            zero.mutate(
-              mutators.ticketTagV2.create({
-                ticketId: ticket.id,
-                tagId: uuidv4(),
-                projectTagId: uuidv4(),
-                mappingId: uuidv4(),
-                projectId: ticket.projectId,
-                tagName,
-              }),
-            );
-          }
-        });
-      });
+      applyTags(gridApi.getSelectedRows() as Ticket[], tagsToAdd);
       gridApi.deselectAll();
     },
-    [gridApi, zero, ticketTags],
+    [gridApi, applyTags],
   );
 
   return (
@@ -756,6 +759,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             onSelectionChanged={params => {
               const selectedRows = params.api.getSelectedRows() as Ticket[];
               setSelectedCount(selectedRows.length);
+              setBulkChannelId(sharedChannelId(selectedRows));
               onSelectionChange?.(selectedRows);
             }}
             rowData={tickets}
@@ -786,13 +790,17 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           {selectedCount > 0 && (
             <BulkActionToolbar
               selectedCount={selectedCount}
-              users={users}
+              users={bulkAssignableUsers}
               userGroups={userGroups}
-              onAssigneeChange={val => handleBulkUpdate({ assignedTo: val })}
+              onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
               onStatusChange={val => handleBulkUpdate({ statusV2: val })}
               onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
-              onStageChange={val => handleBulkUpdate({ stageName: val })}
-              onDueDateChange={() => {}}
+              onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
+              onDueDateChange={date => {
+                // `ticket.update` has no way to null an eta, so only a picked
+                // date is applied — clearing in bulk isn't supported yet.
+                if (date) handleBulkUpdate({ eta: dueDateToEta(date) });
+              }}
               onClearSelection={() => handleBulkUpdate()}
               availableTags={availableTags}
               onTagsChange={handleBulkTagUpdate}
@@ -807,10 +815,19 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
   const ticket = params.data;
 
-  const assigneeType = ticket?.assignedTo?.startsWith('group:') ? 'group' : 'user';
-  const assigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
-  const assignedUser = useUser(assigneeId && assigneeType === 'user' ? assigneeId : '');
-  const assignedGroup = useUserGroupById(assigneeId && assigneeType === 'group' ? assigneeId : '');
+  // A user assignee wins over a group. Groups live in userGroupId; legacy rows
+  // still carry `group:<id>` in assignedTo, so both are resolved here.
+  const assignedUserId =
+    ticket?.assignedTo && !ticket.assignedTo.startsWith('group:')
+      ? ticket.assignedTo.replace(/^user:/, '')
+      : '';
+  const assignedGroupId = assignedUserId
+    ? ''
+    : ticket?.assignedTo?.startsWith('group:')
+      ? ticket.assignedTo.slice('group:'.length)
+      : ticket?.userGroupId || '';
+  const assignedUser = useUser(assignedUserId);
+  const assignedGroup = useUserGroupById(assignedGroupId);
 
   if (!ticket) return null;
 
@@ -818,7 +835,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
     <div className='flex items-center h-full'>
       {assignedUser ? (
         <div className='flex items-center gap-3'>
-          <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
+          <Tooltip content={getUserDisplayName(assignedUser)}>
             <Avatar
               userId={assignedUser.id}
               className='rounded-full size-6 flex items-center justify-center'
@@ -826,7 +843,7 @@ const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
             />
           </Tooltip>
           <span className='text-muted-foreground truncate font-medium'>
-            {assignedUser.name || assignedUser.email}
+            {getUserDisplayName(assignedUser)}
           </span>
         </div>
       ) : assignedGroup ? (

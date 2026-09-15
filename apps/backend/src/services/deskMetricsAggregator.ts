@@ -1,5 +1,13 @@
 import type {
+  DeskMetricKey,
   DeskMetricsAgentRow,
+  DeskMetricsAiCategoryCount,
+  DeskMetricsAiSubCategoryCount,
+  DeskMetricsCustomFieldBreakdown,
+  DeskMetricsCustomFieldSummary,
+  DeskMetricsPartial,
+  DeskMetricsPerDeskRow,
+  DeskMetricsQueryPerDeskRow,
   DeskMetricsResponse,
   DeskMetricsTicketRow,
 } from '@xyne/shared';
@@ -149,10 +157,193 @@ const mergeAgents = (contributions: DeskMetricsContribution[]): DeskMetricsAgent
     .sort((a, b) => b.assigned - a.assigned || b.emailReplies - a.emailReplies);
 };
 
+const mergeTagCategories = (contributions: DeskMetricsContribution[]): DeskMetricsResponse['tagCategories'] => {
+  const totals = new Map<string, number>();
+  for (const { metrics } of contributions) {
+    for (const row of metrics.tagCategories) {
+      totals.set(row.tagCategory, (totals.get(row.tagCategory) ?? 0) + row.count);
+    }
+  }
+  return [...totals.entries()].map(([tagCategory, count]) => ({ tagCategory, count })).sort((a, b) => b.count - a.count);
+};
+
+const mergeTagBreakdown = (contributions: DeskMetricsContribution[]): DeskMetricsResponse['tagBreakdown'] => {
+  const totals = new Map<string, { tag: string; tagCategory: string; count: number }>();
+  for (const { metrics } of contributions) {
+    for (const row of metrics.tagBreakdown) {
+      const key = `${row.tagCategory}::${row.tag}`;
+      const existing = totals.get(key);
+      totals.set(key, { tag: row.tag, tagCategory: row.tagCategory, count: (existing?.count ?? 0) + row.count });
+    }
+  }
+  return [...totals.values()].sort((a, b) => b.count - a.count);
+};
+
 const mergeTickets = (contributions: DeskMetricsContribution[]): DeskMetricsTicketRow[] =>
   contributions
     .flatMap(({ metrics }) => metrics.tickets)
     .sort((a, b) => b.createdAt - a.createdAt);
+
+export const fillDeskMetrics = (partial: DeskMetricsPartial): DeskMetricsResponse => ({
+  range: partial.range,
+  frt: partial.frt ?? { avgSeconds: null, respondedTickets: 0 },
+  rt: partial.rt ?? { avgSeconds: null, resolvedTickets: 0 },
+  csat: partial.csat ?? { avgScore: null, scoredResponses: 0, good: 0, bad: 0 },
+  counts: partial.counts ?? { openedInRange: 0, emailRepliesInRange: 0, stageCounts: [] },
+  priority: partial.priority ?? [],
+  trend: partial.trend ?? [],
+  tagCategories: partial.tagCategories ?? [],
+  tagBreakdown: partial.tagBreakdown ?? [],
+  tickets: partial.tickets ?? [],
+  agents: partial.agents ?? [],
+});
+
+
+export const mergeCustomFieldSlices = (
+  partials: DeskMetricsPartial[],
+): {
+  customFields?: DeskMetricsCustomFieldSummary[];
+  customFieldBreakdown?: DeskMetricsCustomFieldBreakdown[];
+} => {
+  const summaries = new Map<string, DeskMetricsCustomFieldSummary>();
+  let sawSummary = false;
+  for (const p of partials) {
+    if (!p.customFields) continue;
+    sawSummary = true;
+    for (const f of p.customFields) {
+      const existing = summaries.get(f.field);
+      if (!existing) {
+        summaries.set(f.field, { ...f });
+        continue;
+      }
+      existing.multiValue = existing.multiValue || f.multiValue;
+      existing.ticketsWithValue += f.ticketsWithValue;
+      existing.distinctValues = Math.max(existing.distinctValues, f.distinctValues);
+    }
+  }
+
+  const breakdowns = new Map<string, { multiValue: boolean; values: Map<string, number> }>();
+  let sawBreakdown = false;
+  for (const p of partials) {
+    if (!p.customFieldBreakdown) continue;
+    sawBreakdown = true;
+    for (const b of p.customFieldBreakdown) {
+      const entry = breakdowns.get(b.field) ?? { multiValue: false, values: new Map() };
+      entry.multiValue = entry.multiValue || b.multiValue;
+      for (const v of b.values) {
+        entry.values.set(v.value, (entry.values.get(v.value) ?? 0) + v.tickets);
+      }
+      breakdowns.set(b.field, entry);
+    }
+  }
+
+  return {
+    ...(sawSummary
+      ? {
+          customFields: [...summaries.values()].sort(
+            (a, b) => b.ticketsWithValue - a.ticketsWithValue || a.field.localeCompare(b.field),
+          ),
+        }
+      : {}),
+    ...(sawBreakdown
+      ? {
+          customFieldBreakdown: [...breakdowns.entries()]
+            .map(([field, e]) => ({
+              field,
+              multiValue: e.multiValue,
+              values: [...e.values.entries()]
+                .map(([value, tickets]) => ({ value, tickets }))
+                .sort((a, b) => b.tickets - a.tickets || a.value.localeCompare(b.value)),
+            }))
+            .sort((a, b) => a.field.localeCompare(b.field)),
+        }
+      : {}),
+  };
+};
+
+/**
+ * Merge the AI-classification slices across desks.
+ */
+export const mergeAiCategorySlices = (
+  partials: DeskMetricsPartial[],
+): {
+  aiCategoryCounts?: DeskMetricsAiCategoryCount[];
+  aiSubCategoryCounts?: DeskMetricsAiSubCategoryCount[];
+} => {
+  const categories = new Map<string, number>();
+  const subCategories = new Map<string, { cat: string; sub: string; count: number }>();
+  let sawCategories = false;
+  let sawSub = false;
+
+  for (const p of partials) {
+    if (p.aiCategoryCounts) {
+      sawCategories = true;
+      for (const r of p.aiCategoryCounts) {
+        categories.set(r.aiCategory, (categories.get(r.aiCategory) ?? 0) + r.count);
+      }
+    }
+    if (p.aiSubCategoryCounts) {
+      sawSub = true;
+      for (const r of p.aiSubCategoryCounts) {
+        const key = `${r.aiCategory}::${r.aiSubCategory}`;
+        const existing = subCategories.get(key);
+        subCategories.set(key, {
+          cat: r.aiCategory,
+          sub: r.aiSubCategory,
+          count: (existing?.count ?? 0) + r.count,
+        });
+      }
+    }
+  }
+
+  return {
+    ...(sawCategories
+      ? {
+          aiCategoryCounts: [...categories.entries()]
+            .map(([aiCategory, count]) => ({ aiCategory, count }))
+            .sort((a, b) => b.count - a.count || a.aiCategory.localeCompare(b.aiCategory)),
+        }
+      : {}),
+    ...(sawSub
+      ? {
+          aiSubCategoryCounts: [...subCategories.values()]
+            .map(v => ({ aiCategory: v.cat, aiSubCategory: v.sub, count: v.count }))
+            .sort(
+              (a, b) =>
+                b.count - a.count ||
+                a.aiCategory.localeCompare(b.aiCategory) ||
+                a.aiSubCategory.localeCompare(b.aiSubCategory),
+            ),
+        }
+      : {}),
+  };
+};
+
+/**
+ * Drop per-desk fields whose metric was never requested. fillDeskMetrics
+ * zero-fills those slices so aggregateDeskMetrics can run, and without this
+ * the placeholders reach the caller as real measurements.
+ */
+export const prunePerDesk = (
+  rows: DeskMetricsPerDeskRow[],
+  wanted: Set<DeskMetricKey>,
+): DeskMetricsQueryPerDeskRow[] =>
+  rows.map(row => ({
+    channelId: row.channelId,
+    channelName: row.channelName,
+    ...(wanted.has('frt')
+      ? { avgFrtSeconds: row.avgFrtSeconds, respondedTickets: row.respondedTickets }
+      : {}),
+    ...(wanted.has('rt')
+      ? { avgRtSeconds: row.avgRtSeconds, resolvedTickets: row.resolvedTickets }
+      : {}),
+    ...(wanted.has('csat')
+      ? { csatAvgScore: row.csatAvgScore, csatGood: row.csatGood, csatBad: row.csatBad }
+      : {}),
+    ...(wanted.has('counts')
+      ? { openedInRange: row.openedInRange, emailRepliesInRange: row.emailRepliesInRange }
+      : {}),
+  }));
 
 export const aggregateDeskMetrics = (
   contributions: DeskMetricsContribution[],
@@ -224,6 +415,8 @@ export const aggregateDeskMetrics = (
       'priority',
     ),
     trend: mergeTrend(contributions),
+    tagCategories: mergeTagCategories(contributions),
+    tagBreakdown: mergeTagBreakdown(contributions),
     tickets: mergeTickets(contributions),
     agents: mergeAgents(contributions),
     perDesk: contributions

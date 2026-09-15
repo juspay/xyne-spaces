@@ -1,11 +1,11 @@
 import { z } from 'zod';
+import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import type { Request, Response } from 'express';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
-import { TicketPriority, TicketStatusV2 } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 

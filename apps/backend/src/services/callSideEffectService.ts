@@ -7,8 +7,15 @@ import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
-import { InvitationResponse, NotificationType, ChannelScopeType, CallType, CallOrigin } from '@prisma/client';
-import { ActivityClassification, MessageType } from '@xyne/shared';
+import {
+  ActivityClassification,
+  MessageType,
+  InvitationResponse,
+  NotificationType,
+  ChannelScopeType,
+  CallType,
+  CallOrigin,
+} from '@xyne/shared';
 
 class CallSideEffectService {
     private logger = logger.child({ module: 'CallSideEffectService' });
@@ -230,7 +237,7 @@ class CallSideEffectService {
             this.logger.info(`Triggering FCM push for user ${recipientId}, call ${call.externalId}`);
 
             await notificationService.createFCMNotification(recipientId, {
-                title: `Incoming ${call.callType === 'VIDEO' ? 'Video' : 'Audio'} Call`,
+                title: `Incoming ${call.callType === CallType.VIDEO ? 'Video' : 'Audio'} Call`,
                 message: `${callerName} is calling you`,
                 type: NotificationType.INCOMING_CALL,
                 relatedEntityType: 'call',
@@ -448,7 +455,7 @@ class CallSideEffectService {
 
             const handler = new MessagesSideEffectHandler({
                 userID: bot.id,
-                workspaceId: bot.workspaceId ?? '',
+                workspaceId: bot.workspaceId,
                 role: bot.role ?? 'MEMBER',
                 orgRole: orgMember?.role ?? '',
                 memberId: orgMember?.memberId ?? '',

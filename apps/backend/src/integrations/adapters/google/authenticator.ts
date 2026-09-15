@@ -7,7 +7,6 @@ import { SHARED_GOOGLE_WEBHOOK_PATH } from '@/services/googleService';
 
 const TAG = '[GoogleAuthenticator]';
 const FAIL: AuthResult = { authenticated: false };
-const MAX_MESSAGE_AGE_MS = 10 * 60 * 1000; // 10 min — covers Pub/Sub ack deadline (600s)
 
 export class GoogleAuthenticator extends BaseAuthenticator {
   private oauth2Client = new OAuth2Client();
@@ -29,20 +28,11 @@ export class GoogleAuthenticator extends BaseAuthenticator {
         return this.fail('Missing or invalid credentials', { sourceName });
       }
 
-      // 1. Staleness check — return 200/skip so Pub/Sub acknowledges and stops retrying
-      if (payload.message.publishTime) {
-        const age = Date.now() - new Date(payload.message.publishTime).getTime();
-        if (age > MAX_MESSAGE_AGE_MS) {
-          logger.warn(`${TAG} Message too old (${Math.round(age / 1000)}s), skipping`, { sourceName });
-          return { authenticated: true, skipProcessing: true, reason: `Message too old (${Math.round(age / 1000)}s)` };
-        }
-      }
-
-      // 2. Verify OIDC JWT from Authorization header
+      // 1. Verify OIDC JWT from Authorization header
       const jwtError = await this.verifyJWT(headers);
       if (jwtError) return this.fail(jwtError, { sourceName });
 
-      // 3. Verify email matches credentials
+      // 2. Verify email matches credentials
       const emailError = this.verifyEmail(payload.message.data, credentials.email);
       if (emailError) return this.fail(emailError, { sourceName });
 

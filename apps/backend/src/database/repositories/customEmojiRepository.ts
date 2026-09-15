@@ -1,4 +1,5 @@
 import { DatabaseClient } from '../client';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { CustomEmoji, User } from '@prisma/client';
 
 export interface CreateCustomEmojiInput {
@@ -18,23 +19,28 @@ export class CustomEmojiRepository {
   private db = DatabaseClient.getInstance();
 
   async create(data: CreateCustomEmojiInput): Promise<CustomEmojiWithRelations> {
-    // Fetch creator (also source of the denormalized workspaceId) before insert.
+    // Not creator.workspaceId — that is only the user's HOME workspace, so a multi-workspace
+    // user adding an emoji elsewhere would file it in the wrong tenant.
+    const workspaceId = currentWorkspaceId();
+    if (!workspaceId) {
+      throw new Error('workspaceId required: no tenant context');
+    }
+
     const creator = await this.db.user.findUniqueOrThrow({
       where: { id: data.createdBy },
-      select: { id: true, name: true, email: true, picture: true, workspaceId: true },
+      select: { id: true, name: true, email: true, picture: true },
     });
 
     const emoji = await this.db.customEmoji.create({
       data: {
         name: data.name,
         url: data.url,
-        workspaceId: creator.workspaceId,
+        workspaceId,
         createdBy: data.createdBy,
       },
     });
 
-    const { workspaceId: _workspaceId, ...creatorPublic } = creator;
-    return { ...emoji, creator: creatorPublic };
+    return { ...emoji, creator };
   }
 
   async findAll(): Promise<CustomEmojiWithRelations[]> {

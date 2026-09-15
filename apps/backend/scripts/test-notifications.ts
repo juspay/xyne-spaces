@@ -14,6 +14,7 @@
 import { notificationService } from '../src/services/notificationService';
 import { notificationHooks } from '../src/hooks/notificationHooks';
 import { db } from '../src/database/client';
+import { AuthProvider, UserStatus } from '@xyne/shared';
 
 async function testNotificationSystem() {
   console.log('🧪 Starting notification system tests...\n');
@@ -27,9 +28,9 @@ async function testNotificationSystem() {
       create: {
         name: 'Test User',
         email: 'test@xyne.ai',
-        authProvider: 'GOOGLE',
+        authProvider: AuthProvider.GOOGLE,
         providerUserId: 'test-user-123',
-        status: 'ACTIVE'
+        status: UserStatus.ACTIVE
       }
     });
     console.log(`✅ Test user created/found: ${testUser.id}\n`);
@@ -111,7 +112,7 @@ async function testNotificationSystem() {
       limit: 10
     });
     console.log(`Found ${notifications.notifications.length} notifications for user`);
-    console.log('Latest notification:', notifications.notifications[0]?.title);
+    console.log('Latest notification:', notifications.notifications[0]?.id, notifications.notifications[0]?.type);
 
     const unreadCount = await notificationService.getUnreadCount(testUser.id);
     console.log(`Unread count: ${unreadCount}\n`);

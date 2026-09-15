@@ -1,10 +1,15 @@
 import { db } from '@/database/client';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
+import {
+  TeamIntelligenceOrgLeadershipSummarySchema,
+  type TeamIntelligenceOrgLeadershipSummary,
+} from '@/team-intelligence/org-leadership-summary.schema';
 import { logger } from '@/utils/logger';
 
 export interface OrgSummaryDateRangeFilters {
   from: Date;
   to: Date;
+  orgId?: string | null;
 }
 
 export interface AiUsageAggregate {
@@ -26,6 +31,7 @@ export interface OrgBulletsByDateFilters {
   to: Date;
   page: number;
   limit: number;
+  orgId?: string | null;
 }
 
 export interface OrgBulletsByDateResult {
@@ -41,6 +47,7 @@ export interface OrgBulletsByDateResult {
 export interface OrgTeamsDateRangeFilters {
   from: Date;
   to: Date;
+  orgId?: string | null;
 }
 
 export interface OrgTeamAggregate {
@@ -55,6 +62,19 @@ export interface OrgTeamsDateRangeResult {
   from: string;
   to: string;
   teams: OrgTeamAggregate[];
+}
+
+export interface OrgLeadershipSnapshotsResult {
+  from: string;
+  to: string;
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    source: string;
+    completedAt: string | null;
+    summary: TeamIntelligenceOrgLeadershipSummary;
+  }>;
 }
 
 const ORG_BULLET_CATEGORIES = new Set([
@@ -171,7 +191,7 @@ class TeamIntelligenceOrgRepository {
    * for all batches whose reportDate falls within [from, to] (inclusive).
    */
   async getDashboardSummary(filters: OrgSummaryDateRangeFilters): Promise<OrgDashboardSummary> {
-    const { from, to } = filters;
+    const { from, to, orgId } = filters;
 
     // Extend to to end-of-day so the "to" date is fully inclusive
     const toEndOfDay = new Date(to);
@@ -181,6 +201,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceOrgSummaryV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: { reportDate: 'desc' },
         select: {
@@ -190,6 +211,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: from, lte: toEndOfDay },
+          ...(orgId ? { orgId } : {}),
         },
         select: {
           contentUrl: true,
@@ -280,12 +302,83 @@ class TeamIntelligenceOrgRepository {
     return { orgSummary, prTotal, aiUsages: aiAgg };
   }
 
+  async getOrgLeadershipSnapshotsByDate(filters: {
+    orgId: string;
+    from: Date;
+    to: Date;
+  }): Promise<OrgLeadershipSnapshotsResult> {
+    const { orgId, from, to } = filters;
+    const toEndOfDay = new Date(to);
+    toEndOfDay.setUTCHours(23, 59, 59, 999);
+
+    const rows = await db.teamIntelligenceOrgSummaryV2.findMany({
+      where: {
+        orgId,
+        reportDate: { gte: from, lte: toEndOfDay },
+        status: 'COMPLETED',
+        contentUrl: { not: null },
+      },
+      orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
+      select: {
+        id: true,
+        batchId: true,
+        reportDate: true,
+        source: true,
+        completedAt: true,
+        contentUrl: true,
+      },
+    });
+
+    const hydrated = await this.mapWithConcurrency(
+      rows,
+      async (row) => {
+        const content =
+          await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+            orgSummary?: unknown;
+          }>(null, row.contentUrl);
+        const parsed = TeamIntelligenceOrgLeadershipSummarySchema.safeParse(
+          content?.orgSummary
+        );
+        if (!parsed.success) {
+          logger.warn(
+            '[TEAM-INTEL] Ignoring completed org summary with invalid structured content',
+            {
+              orgSummaryId: row.id,
+              error: parsed.error.message,
+            }
+          );
+          return null;
+        }
+        return {
+          id: row.id,
+          batchId: row.batchId,
+          reportDate: row.reportDate.toISOString().slice(0, 10),
+          source: row.source,
+          completedAt: row.completedAt?.toISOString() ?? null,
+          summary: parsed.data,
+        };
+      },
+      DEFAULT_HYDRATION_CONCURRENCY
+    );
+
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: toEndOfDay.toISOString().slice(0, 10),
+      snapshots: hydrated.filter(
+        (
+          snapshot
+        ): snapshot is NonNullable<(typeof hydrated)[number]> =>
+          snapshot !== null
+      ),
+    };
+  }
+
   /**
    * Returns all provenance.bullets from org summaries for a date range,
    * flattened into a single array and paginated.
    */
   async getOrgBulletsByDate(filters: OrgBulletsByDateFilters): Promise<OrgBulletsByDateResult> {
-    const { from, to, page, limit } = filters;
+    const { from, to, page, limit, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -296,6 +389,7 @@ class TeamIntelligenceOrgRepository {
     const orgSummaries = await db.teamIntelligenceOrgSummaryV2.findMany({
       where: {
         reportDate: { gte: rangeStart, lte: rangeEnd },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -358,7 +452,7 @@ class TeamIntelligenceOrgRepository {
   }
 
   async getOrgTeamsByDate(filters: OrgTeamsDateRangeFilters): Promise<OrgTeamsDateRangeResult> {
-    const { from, to } = filters;
+    const { from, to, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -370,6 +464,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceTeamSummaryV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: [{ teamName: 'asc' }, { reportDate: 'asc' }],
         select: {
@@ -381,6 +476,7 @@ class TeamIntelligenceOrgRepository {
       db.teamIntelligenceUserIngestionV2.findMany({
         where: {
           reportDate: { gte: rangeStart, lte: rangeEnd },
+          ...(orgId ? { orgId } : {}),
         },
         orderBy: [{ teamName: 'asc' }, { userEmail: 'asc' }],
         select: {
@@ -489,11 +585,13 @@ class TeamIntelligenceOrgRepository {
     to,
     page,
     limit,
+    workspaceId,
   }: {
     from: Date;
     to: Date;
     page: number;
     limit: number;
+    workspaceId: string;
   }) {
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -503,15 +601,24 @@ class TeamIntelligenceOrgRepository {
 
     const now = new Date();
 
-    const [total, recaps, channels, ticketRecords] = await Promise.all([
+    // Fetch workspace channels first so tickets can be scoped by channelId
+    const channels = await db.channel.findMany({
+      where: { workspaceId },
+      select: { id: true, name: true },
+    });
+    const workspaceChannelIds = channels.map((c) => c.id);
+
+    const [total, recaps, ticketRecords] = await Promise.all([
       db.recap.count({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
       }),
       db.recap.findMany({
         where: {
+          workspaceId,
           entityType: 'CHANNEL',
           recapDate: { gte: rangeStart, lte: rangeEnd },
         },
@@ -526,15 +633,15 @@ class TeamIntelligenceOrgRepository {
           userId: true,
         },
       }),
-      db.channel.findMany({
-        select: { id: true, name: true },
-      }),
-      db.ticket.findMany({
-        where: {
-          createdAt: { gte: rangeStart, lte: rangeEnd },
-        },
-        select: { statusV2: true, eta: true },
-      }),
+      workspaceChannelIds.length > 0
+        ? db.ticket.findMany({
+            where: {
+              channelId: { in: workspaceChannelIds },
+              createdAt: { gte: rangeStart, lte: rangeEnd },
+            },
+            select: { statusV2: true, eta: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const channelNameById = new Map(channels.map((c) => [c.id, c.name]));

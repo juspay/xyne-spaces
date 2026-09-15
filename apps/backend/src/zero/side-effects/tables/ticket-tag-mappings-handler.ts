@@ -1,5 +1,5 @@
-import { ActivityType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
+import { ActivityType } from '@xyne/shared';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -122,7 +122,7 @@ export class TicketTagMappingsSideEffectHandler extends BaseSideEffectHandler {
               conversationId: ticket!.conversationId!,
               senderId: this.ctx.userID,
               content,
-              activityType: 'TAGS',
+              activityType: ActivityType.TAGS,
               workspaceId: this.ctx.workspaceId,
               createdAt: now,
             }

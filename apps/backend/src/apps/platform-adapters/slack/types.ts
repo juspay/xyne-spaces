@@ -39,6 +39,11 @@ export interface SlackChatUpdateRequest {
 	attachments?: SlackAttachment[];
 }
 
+export interface SlackChatDeleteRequest {
+	channel: string;
+	ts: string;
+}
+
 export interface SlackConversationsHistoryRequest {
 	channel: string;
 	limit?: number;
@@ -134,6 +139,12 @@ export interface SlackChatUpdateResponse {
 	};
 }
 
+export interface SlackChatDeleteResponse {
+	ok: true;
+	channel: string;
+	ts: string;
+}
+
 export interface SlackConversationsHistoryResponse {
 	ok: true;
 	messages: SlackMessageObject[];
@@ -224,6 +235,25 @@ export interface SlackConversationsListRequest {
 }
 
 export interface SlackConversationsListResponse {
+	ok: true;
+	channels: SlackChannelObject[];
+	response_metadata?: {
+		next_cursor: string;
+	};
+}
+
+// ========== users.conversations ==========
+
+export interface SlackUsersConversationsRequest {
+	user?: string;
+	types?: string;
+	limit?: number;
+	cursor?: string;
+	exclude_archived?: boolean;
+	team_id?: string;
+}
+
+export interface SlackUsersConversationsResponse {
 	ok: true;
 	channels: SlackChannelObject[];
 	response_metadata?: {

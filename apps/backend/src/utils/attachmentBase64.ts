@@ -8,7 +8,8 @@
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
+import { MessageAttachment } from '@prisma/client';
+import { AttachmentEntityType } from '@xyne/shared';
 
 // ============================================================================
 // Types
@@ -151,7 +152,7 @@ function parseGcsUrl(url: string, attachment?: MessageAttachment): { bucketName:
  * const attachment = await db.messageAttachment.findUnique({ where: { id } });
  * const base64 = await convertToBase64(attachment);
  * if (base64) {
- *   console.log(base64.dataUri); // data:image/png;base64,...
+ *   useBase64Data(base64.dataUri);
  * }
  */
 export async function convertToBase64(
@@ -207,7 +208,7 @@ export async function convertToBase64(
                 originalFilename: attachment.originalFilename,
                 mimetype: attachment.mimetype,
                 mediaCategory,
-                entityType: attachment.entityType,
+                entityType: attachment.entityType as AttachmentEntityType,
                 entityId: attachment.entityId,
                 conversationId: attachment.conversationId,
                 base64Content: null,
@@ -236,7 +237,7 @@ export async function convertToBase64(
             originalFilename: attachment.originalFilename,
             mimetype: attachment.mimetype,
             mediaCategory,
-            entityType: attachment.entityType,
+            entityType: attachment.entityType as AttachmentEntityType,
             entityId: attachment.entityId,
             conversationId: attachment.conversationId,
             base64Content,

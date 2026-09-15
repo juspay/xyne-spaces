@@ -195,8 +195,9 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               <button
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className='p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-950 rounded transition-colors disabled:opacity-50'
+                className='h-auto p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-950 rounded transition-colors disabled:opacity-50'
                 title='Confirm delete'
+                data-ph-capture-attribute-track-id='memory_confirm_delete_document'
                 data-track-category='Memory'
                 data-track-name='ConfirmDeleteDocument'
               >
@@ -471,8 +472,9 @@ const EditableSection: React.FC<{
             <button
               onClick={onSave}
               disabled={isUpdating}
-              className='p-0.5 text-green-600 hover:text-green-700 rounded transition-colors disabled:opacity-50'
+              className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded transition-colors disabled:opacity-50'
               title='Save'
+              data-ph-capture-attribute-track-id='memory_save_field_edit'
               data-track-category='Memory'
               data-track-name='SaveEdit'
             >
@@ -566,8 +568,9 @@ const EditableMetadataRow: React.FC<{
             <button
               onClick={onSave}
               disabled={isUpdating}
-              className='p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
+              className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
               title='Save'
+              data-ph-capture-attribute-track-id='memory_save_metadata_edit'
               data-track-category='Memory'
               data-track-name='SaveMetadataEdit'
             >
@@ -676,8 +679,9 @@ const ReviewStatusRow: React.FC<{
             <button
               onClick={onSave}
               disabled={isUpdating}
-              className='p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
+              className='h-auto p-0.5 text-green-600 hover:text-green-700 rounded disabled:opacity-50'
               title='Save'
+              data-ph-capture-attribute-track-id='memory_save_status_edit'
               data-track-category='Memory'
               data-track-name='SaveStatusEdit'
             >

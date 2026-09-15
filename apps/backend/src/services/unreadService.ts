@@ -1,7 +1,7 @@
 import { DatabaseClient } from '@/database/client';
+import { NotificationType } from '@xyne/shared';
 import {logger} from '@/utils/logger';
 import { notificationService } from './notificationService';
-import { NotificationType } from '@prisma/client';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -38,7 +38,6 @@ export class UnreadService {
           isRead: false,
         }, data: {
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
 
@@ -108,7 +107,6 @@ export class UnreadService {
           isRead: false,
         }, data: {
           isRead: true,
-          updatedAt: new Date().toISOString(),
         }
       });
       const conversationSeenCutoffAt =

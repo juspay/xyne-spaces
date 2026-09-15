@@ -8,7 +8,8 @@
  */
 
 import { logger } from '@/utils/logger';
-import { CallOrigin, CallStatus, CallType, type Prisma } from '@prisma/client';
+import { type Prisma } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import {

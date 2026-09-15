@@ -11,21 +11,24 @@ import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
+import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
 import { cn } from '../../../utils/classNames';
 import type { ActivityWithRelated } from '../../../types/activity';
-import { ActivityClassification } from '@xyne/shared';
-import { groupActivities, type ActivityFeedItem } from '../activityGrouping';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
+import { ActivityClassification, UserType } from '@xyne/shared';
+import { Bot, ChevronUp, UserUser02 } from '@xyne/icons';
+import { ActivityActorPicker } from '../ActivityActorPicker';
+import { ActivityEmptyIcon } from '../../icons';
+import Avatar from '../../ui/Avatar/Avatar';
+import { useUsersById } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { groupActivities, insertDateSeparators, type ActivityFeedItem } from '../activityGrouping';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
+import { DatePill } from '../../Chat/DatePill';
 import { useShortcut } from '../../../shortcuts';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
@@ -120,6 +123,41 @@ export const isDirectUserMention = (messageContent: string, userId: string): boo
   return userMentions.includes(userId);
 };
 
+type ActorFilter = 'all' | 'user' | 'agent';
+
+// Agent covers both automated actor kinds; only USER is a human. `all` maps to
+// undefined so the query drops the actor filter entirely rather than matching
+// every type — the three orphan rows have an actorId that resolves to no user.
+const ACTOR_FILTER_TYPES: Record<ActorFilter, UserType[] | undefined> = {
+  all: undefined,
+  user: [UserType.USER],
+  agent: [UserType.BOT, UserType.APP],
+};
+
+const ACTOR_FILTER_OPTIONS: Array<{
+  value: ActorFilter;
+  label: string;
+  icon?: ComponentType<{ size?: number; className?: string }>;
+  anyoneLabel?: string;
+  searchPlaceholder?: string;
+}> = [
+  { value: 'all', label: 'All' },
+  {
+    value: 'user',
+    label: 'User',
+    icon: UserUser02,
+    anyoneLabel: 'Anyone',
+    searchPlaceholder: 'Search people',
+  },
+  {
+    value: 'agent',
+    label: 'Agent',
+    icon: Bot,
+    anyoneLabel: 'Any agent',
+    searchPlaceholder: 'Search agents',
+  },
+];
+
 const TABS: TabConfig[] = [
   { value: 'all', label: 'All', filter: isAllVisibleActivity },
   {
@@ -163,7 +201,7 @@ const TABS: TabConfig[] = [
       activity.actorAction === 'canvas_shared' ||
       activity.actorAction === 'canvas_role_changed' ||
       activity.actorAction === 'canvas_access_revoked' ||
-      (activity.actorAction === 'mentioned_user' && !!activity.canvasId),
+      (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity)),
   },
   {
     value: 'calls',
@@ -213,6 +251,14 @@ const ActivityListView = (): ReactElement => {
 
   // All hooks must be called before any conditional returns
   const [activeTab, setActiveTab] = useState<ActivityTab>('all');
+  const [actorFilter, setActorFilter] = useState<ActorFilter>(() => {
+    const stored = window.localStorage.getItem('activity_actor_filter');
+    return stored === 'all' || stored === 'user' || stored === 'agent' ? stored : 'all';
+  });
+  const [actorUserId, setActorUserId] = useState<string | null>(null);
+  const [actorPickerOpen, setActorPickerOpen] = useState(false);
+  const usersById = useUsersById();
+
   const [showUnreadOnly, setShowUnreadOnly] = useState<boolean>(() => {
     const unread = window.localStorage.getItem('activity_unread_toggle');
     return unread === 'true';
@@ -266,23 +312,22 @@ const ActivityListView = (): ReactElement => {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_TAB_CHANGED,
-        tab: value as ActivityTab,
-        showUnreadOnly: showUnreadOnly,
-      });
       setActiveTab(value as ActivityTab);
     },
     [showUnreadOnly],
   );
 
   const handleUnreadToggle = useCallback((checked: boolean): void => {
-    mixpanelService.track(EVENTS.INITIATE_ACTION, {
-      type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_UNREAD_TOGGLED,
-    });
     setShowUnreadOnly(checked);
     window.localStorage.setItem('activity_unread_toggle', String(checked));
     activityVirtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
+  }, []);
+
+  const handleActorFilterChange = useCallback((next: ActorFilter): void => {
+    setActorFilter(next);
+    setActorUserId(null);
+    setActorPickerOpen(false);
+    window.localStorage.setItem('activity_actor_filter', next);
   }, []);
 
   const handleActionableToggle = useCallback((checked: boolean): void => {
@@ -331,6 +376,11 @@ const ActivityListView = (): ReactElement => {
           'ticket_pr_declined',
           'ticket_pr_reviewer_assigned',
           'ticket_qa_assigned',
+          'ticket_release_started',
+          'ticket_release_completed',
+          'ticket_release_cancelled',
+          'ticket_release_paused',
+          'ticket_release_planning',
           'ticket_priority',
           'ticket_user_group',
           'ticket_title',
@@ -373,7 +423,7 @@ const ActivityListView = (): ReactElement => {
     setHasMore(true);
     setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
-  }, [activeTab, showUnreadOnly]);
+  }, [activeTab, showUnreadOnly, actorFilter, actorUserId]);
 
   const getClassificationFilter = (tab: ActivityTab): ActivityClassification[] | undefined => {
     switch (tab) {
@@ -397,8 +447,18 @@ const ActivityListView = (): ReactElement => {
         types: currentTypes,
         classification: classificationFilter,
         ...(showUnreadOnly ? { isRead: false } : {}),
+        ...(ACTOR_FILTER_TYPES[actorFilter] ? { actorTypes: ACTOR_FILTER_TYPES[actorFilter] } : {}),
+        ...(actorUserId ? { actorId: actorUserId } : {}),
       }),
-    [PAGE_SIZE, fetchCursor, currentTypes, classificationFilter, showUnreadOnly],
+    [
+      PAGE_SIZE,
+      fetchCursor,
+      currentTypes,
+      classificationFilter,
+      showUnreadOnly,
+      actorFilter,
+      actorUserId,
+    ],
   );
 
   const [activitiesPage, activitiesDetails, activitiesMeta] = useCachedQuery(activitiesQuery, {
@@ -531,7 +591,7 @@ const ActivityListView = (): ReactElement => {
   }, [activities, activeTab, visibleTabs]);
 
   const groupedActivities = useMemo(() => {
-    return groupActivities(filteredActivities);
+    return insertDateSeparators(groupActivities(filteredActivities));
   }, [filteredActivities]);
 
   const selectedActivityIdRef = useRef<string | null>(
@@ -576,11 +636,10 @@ const ActivityListView = (): ReactElement => {
     if (!container) return;
     const handler = (e: Event) => {
       const target = e.target as HTMLElement;
-      // Skip selection stamping if the click is on "Mark as read" or "Mark as unread"
-      // buttons — those should not highlight the row as "open".
       if (
         target.closest('[data-track-name="MARK_AS_READ"]') ||
-        target.closest('[data-track-name="MARK_AS_UNREAD"]')
+        target.closest('[data-track-name="MARK_AS_UNREAD"]') ||
+        target.closest('[data-track-name="VIEW_CHANNEL"]')
       ) {
         return;
       }
@@ -752,7 +811,7 @@ const ActivityListView = (): ReactElement => {
         activity.actorAction === 'canvas_shared' ||
         activity.actorAction === 'canvas_role_changed' ||
         activity.actorAction === 'canvas_access_revoked' ||
-        (activity.actorAction === 'mentioned_user' && activity.canvasId)
+        (activity.actorAction === 'mentioned_user' && isCanvasActivity(activity))
       ) {
         counts.canvas++;
       }
@@ -815,19 +874,33 @@ const ActivityListView = (): ReactElement => {
                   setFetchCursor(null);
                 }
               }}
-              computeItemKey={(_, item) =>
-                item.type === 'single' ? item.activity.id : `group:${item.activities[0]!.id}`
-              }
+              computeItemKey={(_, item) => {
+                if (item.type === 'date') return `date:${item.key}`;
+                return item.type === 'single'
+                  ? item.activity.id
+                  : `group:${item.activities[0]!.id}`;
+              }}
               increaseViewportBy={1000}
               minOverscanItemCount={{ top: 5, bottom: 10 }}
               components={{ Footer: () => <div className='h-16' aria-hidden='true' /> }}
               itemsRendered={restoreSelectedRow}
               itemContent={(_, item) => {
+                if (item.type === 'date') {
+                  return (
+                    <div className='px-3 pb-0.5 pt-1.5'>
+                      <DatePill
+                        dateText={item.dateText}
+                        staticRule
+                        className='border-transparent bg-muted text-[11px] font-medium text-muted-foreground'
+                      />
+                    </div>
+                  );
+                }
                 // px wraps each row (not the scroller) and pb creates the 8px
                 // row gap — padding is used instead of margin so Virtuoso's
                 // item measurement includes it.
                 return (
-                  <div className='px-3 pb-3'>
+                  <div className='px-3 pb-1.5'>
                     {item.type === 'single' ? (
                       <ActivityItem activity={item.activity} isExpanded={isExpanded} />
                     ) : (
@@ -880,7 +953,7 @@ const ActivityListView = (): ReactElement => {
             {/* Unread-only filter */}
             <label
               htmlFor='activity-unread-toggle'
-              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-accent'
+              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-foreground/[6%]'
             >
               <span className='text-sm font-medium text-muted-foreground'>Unread</span>
               <Switch.Root
@@ -893,20 +966,106 @@ const ActivityListView = (): ReactElement => {
                 data-testid='activity-unread-toggle'
                 className={cn(
                   'relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full',
-                  'bg-muted transition-colors duration-200',
+                  'bg-sidebar-border transition-colors duration-200',
                   'data-[state=checked]:bg-primary',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                 )}
               >
                 <Switch.Thumb
                   className={cn(
-                    'block size-2.5 rounded-full bg-background shadow-sm',
+                    'block size-2.5 rounded-full bg-white shadow-sm',
                     'transition-transform duration-200',
                     'translate-x-0.5 data-[state=checked]:translate-x-3',
                   )}
                 />
               </Switch.Root>
             </label>
+
+            {/* Agent / User actor filter */}
+            <div
+              role='radiogroup'
+              aria-label='Filter activity by actor'
+              className='flex items-center gap-0.5 rounded-xl bg-foreground/[6%] p-0.5'
+            >
+              {ACTOR_FILTER_OPTIONS.map(option => {
+                const isActive = option.value === actorFilter;
+                const Icon = option.icon;
+                const showLabel = isActive || !Icon;
+                const actorTypes = ACTOR_FILTER_TYPES[option.value];
+                const isPickable = isActive && actorTypes !== undefined;
+                const pickedActor =
+                  isPickable && actorUserId ? usersById.get(actorUserId) : undefined;
+
+                const button = (
+                  <button
+                    key={option.value}
+                    type='button'
+                    role='radio'
+                    aria-checked={isActive}
+                    aria-label={option.label}
+                    onClick={() => {
+                      if (!isPickable) handleActorFilterChange(option.value);
+                    }}
+                    className={cn(
+                      'flex items-center rounded-[10px] pl-2 pr-2.5 py-1',
+                      'transition-[background-color,color,box-shadow] duration-300 ease-in-out',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                      isActive
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    data-track-category='ACTIVITY'
+                    data-track-name='ACTOR_FILTER_TOGGLE'
+                    data-track-metadata={JSON.stringify({ filter_value: option.value })}
+                    data-testid={`activity-actor-filter-${option.value}`}
+                  >
+                    {pickedActor ? (
+                      <Avatar userId={pickedActor.id} size='xs' className='shrink-0' />
+                    ) : (
+                      Icon && <Icon size={14} className='shrink-0' />
+                    )}
+                    <span
+                      className={cn(
+                        'grid overflow-hidden transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out',
+                        Icon ? 'ml-1' : null,
+                        showLabel
+                          ? 'grid-cols-[1fr] opacity-100'
+                          : 'grid-cols-[0fr] opacity-0 ml-0',
+                      )}
+                    >
+                      <span className='min-w-0 max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium tracking-[-0.28px]'>
+                        {pickedActor ? getUserDisplayName(pickedActor) : option.label}
+                      </span>
+                    </span>
+                    {isPickable && (
+                      <ChevronUp
+                        size={12}
+                        className={cn(
+                          'ml-1 shrink-0 transition-transform duration-200 ease-in-out',
+                          !actorPickerOpen && 'rotate-180',
+                        )}
+                      />
+                    )}
+                  </button>
+                );
+
+                if (!isPickable || !actorTypes) return button;
+
+                return (
+                  <ActivityActorPicker
+                    key={option.value}
+                    open={actorPickerOpen}
+                    onOpenChange={setActorPickerOpen}
+                    userTypes={actorTypes}
+                    selectedUserId={actorUserId}
+                    onSelect={setActorUserId}
+                    anyoneLabel={option.anyoneLabel ?? 'Anyone'}
+                    searchPlaceholder={option.searchPlaceholder ?? 'Search'}
+                    trigger={button}
+                  />
+                );
+              })}
+            </div>
 
             {/* 3-dot menu with Actionable Toggle and View Toggle (Desktop & Mobile) */}
             <div className='relative' ref={mobileMenuRef}>
@@ -926,11 +1085,13 @@ const ActivityListView = (): ReactElement => {
                 <div className='absolute right-0 top-full mt-1 bg-popover border border-border rounded-lg shadow-lg py-1 min-w-[200px] z-50'>
                   {/* Mark as Read */}
                   <button
+                    data-ph-capture-attribute-track-id='mark_tab_as_read'
+                    data-ph-capture-attribute-tab={activeTab}
                     onClick={() => {
                       markActiveTabUnread();
                       setShowMobileMenu(false);
                     }}
-                    className='w-full px-4 py-2 flex items-center gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
+                    className='w-full px-4 py-2 flex items-center justify-start gap-2 text-sm text-muted-foreground hover:bg-accent transition-colors h-auto'
                     data-track-category='ACTIVITY'
                     data-track-name={`MARK_TAB_READ`}
                     data-track-metadata={JSON.stringify({
@@ -960,14 +1121,14 @@ const ActivityListView = (): ReactElement => {
                       data-testid='activity-actionable-toggle'
                       className={cn(
                         'relative inline-flex h-5 w-9 items-center rounded-full',
-                        'bg-muted transition-colors duration-200',
+                        'bg-sidebar-border transition-colors duration-200',
                         'data-[state=checked]:bg-primary',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                       )}
                     >
                       <Switch.Thumb
                         className={cn(
-                          'block h-4 w-4 rounded-full bg-background shadow-sm',
+                          'block h-4 w-4 rounded-full bg-white shadow-sm',
                           'transition-transform duration-200',
                           'translate-x-0.5 data-[state=checked]:translate-x-4',
                         )}
@@ -1179,7 +1340,7 @@ const ActivityListView = (): ReactElement => {
             <div className='flex-1 h-full overflow-hidden flex items-center justify-center'>
               {isOnIndexRoute ? (
                 <div className='flex flex-col items-center justify-center p-8 text-center'>
-                  <NotificationBellOn className='text-muted-foreground mb-4' size={64} />
+                  <ActivityEmptyIcon className='mb-6' />
                   <h3
                     className='text-xl font-medium text-foreground mb-2'
                     data-testid='select-activity-heading'

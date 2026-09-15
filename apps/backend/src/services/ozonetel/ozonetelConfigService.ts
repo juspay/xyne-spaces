@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
 import { encrypt, decrypt } from '@/services/encryptionService';
+import { ChannelType } from '@xyne/shared';
 
 export interface OzonetelAgent {
   agentId: string;
@@ -95,7 +96,7 @@ async function validateRoutingChannels(
     where: {
       workspaceId,
       id: { in: Array.from(referencedChannelIds) },
-      type: 'CALL',
+      type: ChannelType.CALL,
     },
     select: { id: true },
   });

@@ -36,8 +36,6 @@ interface UseDmsPaginatedMessagesReturn {
   loadMore: () => void;
   /** Virtuoso firstItemIndex — increases by N each time N items are prepended. */
   firstItemIndex: number;
-  /** Increments each time the selected channel moves to index 0. Use to trigger scroll-to-top. */
-  selectedChannelMovedVersion: number;
   /**
    * When called with a channelId: scrolls to an existing channel or fetches and jumps to it.
    * When called without arguments: loads the previous page (newer channels) — equivalent to
@@ -98,16 +96,12 @@ export const useDmsPaginatedMessages = (
   const [firstItemIndex, setFirstItemIndex] = useState(0);
   const isFetchingRef = useRef(false);
 
-  // ── Selected channel scroll tracking ─────────────────────────────────────────
-  const [selectedChannelMovedVersion, setSelectedChannelMovedVersion] = useState(0);
-  const prevSelectedIndexRef = useRef(-1);
-  const prevSelectedActivityRef = useRef(-1);
+  // Keep the selected channel available to the live page subscription without
+  // re-creating it whenever navigation changes.
   const selectedChannelIdRef = useRef(selectedChannelId);
 
   useEffect(() => {
     selectedChannelIdRef.current = selectedChannelId;
-    prevSelectedIndexRef.current = -1;
-    prevSelectedActivityRef.current = -1;
   }, [selectedChannelId]);
 
   // ── Page 1: always-live Zero subscription ─────────────────────────────────────
@@ -138,23 +132,6 @@ export const useDmsPaginatedMessages = (
     const page1Ids = new Set(page1.map(s => s.channelId));
     const deeperRows = rowsRef.current.filter(s => !page1Ids.has(s.channelId));
     const merged = sortDesc([...page1, ...deeperRows]);
-
-    // Fire scroll-to-top when the selected channel reaches index 0 or gets a new message there.
-    const selectedId = selectedChannelIdRef.current;
-    if (selectedId) {
-      const newIdx = merged.findIndex(s => s.channelId === selectedId);
-      const newActivity = newIdx >= 0 ? merged[newIdx]!.lastActivityAt : -1;
-
-      if (
-        newIdx === 0 &&
-        (prevSelectedIndexRef.current !== 0 || prevSelectedActivityRef.current !== newActivity)
-      ) {
-        setSelectedChannelMovedVersion(v => v + 1);
-      }
-
-      prevSelectedIndexRef.current = newIdx;
-      prevSelectedActivityRef.current = newActivity;
-    }
 
     commitRows(merged);
     setHasMore(page1.length === PAGE_SIZE);
@@ -340,7 +317,6 @@ export const useDmsPaginatedMessages = (
     hasMoreBefore,
     loadMore,
     firstItemIndex,
-    selectedChannelMovedVersion,
     jumpToChannel,
   };
 };

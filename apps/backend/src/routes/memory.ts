@@ -1,4 +1,5 @@
 import { Router} from 'express';
+import { AccessType } from '@xyne/shared';
 import multer from 'multer';
 import { memoryController } from '@/controllers/memoryController';
 import { documentController } from '@/controllers/documentController';
@@ -6,7 +7,6 @@ import { authMiddleware } from '@/middleware/auth';
 import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { authorize } from '@/middleware/authorize';
 import { validateZod } from '@/middleware/validation';
-import { AccessType } from '@prisma/client';
 import { z } from 'zod';
 
 const router = Router();

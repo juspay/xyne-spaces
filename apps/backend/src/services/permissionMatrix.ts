@@ -1,7 +1,9 @@
-import { AccessType, WorkspaceRole, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { db } from '../database/client';
+import { withWorkspaceScope } from '../database/tenant/context';
 import { aclAuditService } from './aclAuditService';
 
 /**
@@ -10,6 +12,7 @@ import { aclAuditService } from './aclAuditService';
  */
 export type ResourceName =
   | 'TICKETS'
+  | 'TICKET-REPORTS'
   | 'WORKFLOWS'
   | 'AGENTS'
   | 'MODELS'
@@ -24,6 +27,7 @@ export type ResourceName =
   | 'SUPPORT'
   | 'PRODUCT-INSIGHTS'
   | 'LISTPROJECTS'
+  | 'RELEASE-MANAGER'
   | 'CHANNELS'
   | 'CANVASES'
   | 'WORKSPACE'
@@ -31,7 +35,8 @@ export type ResourceName =
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION'
   | 'EXTERNAL-STEP-RESPONSE'
-  | 'VESPA';
+  | 'VESPA'
+  | 'SDLC';
 
 export interface PermissionEntry {
   resourceName: ResourceName;
@@ -62,6 +67,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+    { resourceName: 'SDLC', accessType: AccessType.WRITE },
   ],
   COMMUNITY_MEMBER: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
@@ -75,9 +81,11 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
     { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+    { resourceName: 'SDLC', accessType: AccessType.WRITE },
   ],
   ADMIN: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
+    { resourceName: 'TICKET-REPORTS', accessType: AccessType.ADMIN },
     { resourceName: 'WORKFLOWS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENTS', accessType: AccessType.ADMIN },
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },
@@ -98,9 +106,11 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
+    { resourceName: 'SDLC', accessType: AccessType.ADMIN },
   ],
   OWNER: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
+    { resourceName: 'TICKET-REPORTS', accessType: AccessType.ADMIN },
     { resourceName: 'WORKFLOWS', accessType: AccessType.ADMIN },
     { resourceName: 'AGENTS', accessType: AccessType.ADMIN },
     { resourceName: 'MODELS', accessType: AccessType.ADMIN },
@@ -121,6 +131,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'CONFLUENCE-MIGRATION', accessType: AccessType.ADMIN },
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
+    { resourceName: 'SDLC', accessType: AccessType.ADMIN },
   ],
   GUEST: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
@@ -138,13 +149,13 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
  * @param userId      The user to grant permissions to.
  * @param email       User email (for logging).
  * @param role        The workspace role determining which permissions to grant.
- * @param workspaceId Optional workspace ID (for logging context only).
+ * @param workspaceId Workspace ID used for resource access rows and log context.
  */
 export async function grantPermissionsForRole(
   userId: string,
   email: string,
   role: WorkspaceRole,
-  workspaceId?: string,
+  workspaceId: string,
 ): Promise<void> {
   const logPrefix = '[grantPermissionsForRole]';
   const wsContext = workspaceId ? ` (workspace: ${workspaceId})` : '';
@@ -238,6 +249,7 @@ export async function syncResourceAdminAccess(
   resourceName: ResourceName,
   shouldHaveAccess: boolean,
   actorUserId: string,
+  workspaceId: string,
 ): Promise<void> {
   const logPrefix = '[syncResourceAdminAccess]';
 
@@ -255,7 +267,7 @@ export async function syncResourceAdminAccess(
 
     if (shouldHaveAccess && !hasAdminAccess) {
       await repositories.resourceAccess.grantAccess(
-        { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+        { userId, resourceId: resource.id, accessType: AccessType.ADMIN, workspaceId },
         actorUserId,
       );
       logger.debug(`${logPrefix} Granted ADMIN access to ${resourceName} for user ${userId}.`);
@@ -300,23 +312,29 @@ export async function syncOrgResourceAdminAccess(
   const logPrefix = '[syncOrgResourceAdminAccess]';
 
   try {
-    const links = await db.workspaceOrganization.findMany({
-      where: { orgId, leftAt: null },
-      select: { workspaceId: true },
-    });
-    if (links.length === 0) return;
+    // Org-wide by design: this fans out across every workspace in the org, so it runs
+    // above the caller's own workspace scope.
+    await withWorkspaceScope(async () => {
+      const links = await db.workspaceOrganization.findMany({
+        where: { orgId, leftAt: null },
+        select: { workspaceId: true },
+      });
+      if (links.length === 0) return;
 
-    const users = await db.user.findMany({
-      where: {
-        workspaceId: { in: links.map(l => l.workspaceId) },
-        email: { equals: email, mode: 'insensitive' },
-      },
-      select: { id: true },
-    });
+      const users = await db.user.findMany({
+        where: {
+          workspaceId: { in: links.map(l => l.workspaceId) },
+          email: { equals: email, mode: 'insensitive' },
+        },
+        select: { id: true, workspaceId: true },
+      });
 
-    for (const user of users) {
-      await syncResourceAdminAccess(user.id, 'ORGANIZATIONS', shouldHaveAccess, actorUserId);
-    }
+      // A user may hold rows in several of the org's workspaces, so each grant uses that
+      // row's own workspaceId — already loaded here, rather than re-read per iteration.
+      for (const user of users) {
+        await syncResourceAdminAccess(user.id, 'ORGANIZATIONS', shouldHaveAccess, actorUserId, user.workspaceId);
+      }
+    });
   } catch (error) {
     logger.error(`${logPrefix} Failed to sync ORGANIZATIONS access for org ${orgId}, email ${email}:`, error);
   }

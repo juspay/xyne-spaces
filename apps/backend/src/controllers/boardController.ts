@@ -1,5 +1,13 @@
 import { Request, Response } from 'express';
-import { BoardType } from '@prisma/client';
+import {
+  BoardType,
+  FLOW_STAGE_NAMES,
+  FlowPlanSchema,
+  TicketStatusV2,
+  validateFlowPlan,
+  type FlowPlan,
+} from '@xyne/shared';
+import { validateFlowDecisionFieldsWithPrisma } from '@/services/flowDecisionFieldValidator';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { logger } from '@/utils/logger';
@@ -15,7 +23,7 @@ export class BoardController {
 
   createBoard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, description, projectId, stages, boardType, metadata } = req.body;
+      const { name, description, projectId, stages, boardType, metadata, flowPlan } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -61,6 +69,36 @@ export class BoardController {
         }
       }
 
+      let effectiveStages = stages;
+      let effectiveFlowPlan: FlowPlan | undefined;
+      if (boardType === BoardType.FLOW) {
+        if (stages && stages.length > 0) {
+          res.status(400).json({ error: 'Flow boards do not support custom stages' });
+          return;
+        }
+        const parsedPlan = FlowPlanSchema.safeParse(flowPlan);
+        if (!parsedPlan.success) {
+          res.status(400).json({ error: 'Flow boards require a valid flowPlan' });
+          return;
+        }
+        try {
+          validateFlowPlan(parsedPlan.data);
+          await validateFlowDecisionFieldsWithPrisma(parsedPlan.data);
+        } catch (error) {
+          res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid flow plan' });
+          return;
+        }
+        effectiveFlowPlan = parsedPlan.data;
+        effectiveStages = [
+          { name: FLOW_STAGE_NAMES.TODO, sequenceNumber: 1, defaultTicketStatusV2: TicketStatusV2.TODO },
+          { name: FLOW_STAGE_NAMES.STARTED, sequenceNumber: 2, defaultTicketStatusV2: TicketStatusV2.STARTED },
+          { name: FLOW_STAGE_NAMES.PAUSED, sequenceNumber: 3, defaultTicketStatusV2: TicketStatusV2.PAUSED },
+          { name: FLOW_STAGE_NAMES.BACKLOG, sequenceNumber: 4, defaultTicketStatusV2: TicketStatusV2.PAUSED },
+          { name: FLOW_STAGE_NAMES.COMPLETED, sequenceNumber: 5, defaultTicketStatusV2: TicketStatusV2.COMPLETED },
+          { name: FLOW_STAGE_NAMES.CANCELLED, sequenceNumber: 6, defaultTicketStatusV2: TicketStatusV2.CANCELLED },
+        ];
+      }
+
       // Check for duplicate name within the project
       const isDuplicate = await this.boardRepository.checkDuplicateName(name.trim(), projectId.trim());
       if (isDuplicate) {
@@ -74,9 +112,10 @@ export class BoardController {
         projectId: projectId.trim(),
         workspaceId: workspaceId,
         createdBy: userId,
-        stages: stages && stages.length > 0 ? stages : undefined,
+        stages: effectiveStages && effectiveStages.length > 0 ? effectiveStages : undefined,
         boardType: boardType || BoardType.DEFAULT,
         ...(metadata !== undefined && { metadata }),
+        ...(effectiveFlowPlan !== undefined && { flowPlan: effectiveFlowPlan }),
       });
 
       res.status(201).json({
@@ -91,6 +130,7 @@ export class BoardController {
           createdBy: board.createdBy,
           createdAt: board.createdAt,
           metadata: board.metadata,
+          flowPlan: board.flowPlan,
           stages: board.stages?.map((stage) => ({
             id: stage.id,
             name: stage.name,

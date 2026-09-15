@@ -1,13 +1,24 @@
-import {Prisma, PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
+import {
+  BoardType,
+  FLOW_STAGE_TRANSITIONS,
+  PRStatusEvent,
+  serializeFlowPlan,
+  TicketStatusV2,
+  mergeBoardEtaManagement,
+  defaultAutoRecomputeEnabled,
+  type FlowPlan,
+} from '@xyne/shared';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 
 
 export interface CreateStageInput {
   name: string;
-  eta: number;
+  eta?: number;
   sequenceNumber: number;
+  defaultTicketStatusV2?: TicketStatusV2;
   prStatuses?: PRStatusEvent[];
 }
 
@@ -19,6 +30,7 @@ export interface CreateBoardInput {
   workspaceId: string;
   boardType?: BoardType;
   metadata?: Record<string, unknown>;
+  flowPlan?: FlowPlan;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {
@@ -73,6 +85,17 @@ export class BoardRepository {
 
     // Use transaction to create board and stages together
     return await this.db.$transaction(async (tx) => {
+      const resolvedBoardType = data.boardType || BoardType.DEFAULT;
+      // Written explicitly (rather than left to the parse-time fallback) so a board's
+      // automation state is never ambiguous - but the VALUE comes from the same
+      // `defaultAutoRecomputeEnabled` a pre-existing board of this type falls back to at
+      // read time, so a new board and a pre-existing untouched board of the same type can
+      // never disagree.
+      const metadataWithEtaDefaults = mergeBoardEtaManagement(data.metadata ?? null, resolvedBoardType, {
+        autoRecomputeEnabled: defaultAutoRecomputeEnabled(resolvedBoardType),
+        standardPathStageIds: [],
+      });
+
       const board = await tx.board.create({
         data: {
           name: data.name,
@@ -80,8 +103,9 @@ export class BoardRepository {
           projectId: data.projectId,
           workspaceId: data.workspaceId,
           createdBy: data.createdBy,
-          boardType: data.boardType || BoardType.DEFAULT,
-          ...(data.metadata !== undefined && { metadata: data.metadata  as Prisma.InputJsonValue}),
+          boardType: resolvedBoardType,
+          metadata: metadataWithEtaDefaults as Prisma.InputJsonValue,
+          ...(data.flowPlan !== undefined && { flowPlan: serializeFlowPlan(data.flowPlan) }),
         },
       });
 
@@ -97,11 +121,14 @@ export class BoardRepository {
           currentMaxSequence = Math.max(currentMaxSequence, sequenceNumber);
           stagesToCreate.push({
             name: stage.name,
-            eta: stage.eta,
+            eta: stage.eta ?? 0,
             sequenceNumber,
             boardId: board.id,
             workspaceId: data.workspaceId,
             createdBy: data.createdBy,
+            ...(stage.defaultTicketStatusV2 && {
+              defaultTicketStatusV2: stage.defaultTicketStatusV2,
+            }),
           });
         }
 
@@ -126,13 +153,29 @@ export class BoardRepository {
           if (!prStatusMap.has(mapping.stageId)) {
             prStatusMap.set(mapping.stageId, []);
           }
-          prStatusMap.get(mapping.stageId)!.push(mapping.prStatus);
+          prStatusMap.get(mapping.stageId)!.push(mapping.prStatus as PRStatusEvent);
         }
 
         stages = rawStages.map(stage => ({
           ...stage,
           prStatuses: prStatusMap.get(stage.id) || [],
         }));
+
+        if (board.boardType === BoardType.FLOW) {
+          const stageByName = new Map(rawStages.map(stage => [stage.name, stage]));
+          await tx.stageTransition.createMany({
+            data: FLOW_STAGE_TRANSITIONS.map(([fromName, toName]) => ({
+              workspaceId: data.workspaceId,
+              boardId: board.id,
+              fromStageId: stageByName.get(fromName)!.id,
+              toStageId: stageByName.get(toName)!.id,
+              requiresApproval: false,
+              bypassApprovalForAutomation: true,
+              createdAt: new Date(),
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         // Sync PR status mappings for each stage (in case input had them)
         for (let i = 0; i < stages.length; i++) {
@@ -243,11 +286,12 @@ export class BoardRepository {
     return !!(existing && existing.id !== excludeId);
   }
 
-  async findBoardById(id: string): Promise<{ name: string } | null> {
-    return await this.db.board.findUnique({
+  async findBoardById(id: string): Promise<{ name: string; boardType: BoardType; projectId: string } | null> {
+    const board = await this.db.board.findUnique({
       where: { id },
-      select: { name: true },
+      select: { name: true, boardType: true, projectId: true },
     });
+    return board ? { ...board, boardType: board.boardType as BoardType } : null;
   }
 
   async findDefaultBoardIdForProject(projectId: string): Promise<string> {

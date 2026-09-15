@@ -12,6 +12,7 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
+import { getLocalVideoState, setLocalVideoMuted } from '../utils/recordingMedia';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
@@ -25,6 +26,27 @@ import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
+// `Room.disconnect()` emits Disconnected asynchronously. Mark a normal user
+// stop first so its callback cannot be mistaken for a server-side failure.
+const intentionallyDisconnectedRooms = new WeakSet<Room>();
+
+const PAGE_UNLOAD_GRACE_MS = 5000;
+let pageUnloading = false;
+let pageUnloadingReset: ReturnType<typeof setTimeout> | null = null;
+
+if (typeof window !== 'undefined') {
+  const markPageUnloading = (): void => {
+    pageUnloading = true;
+    if (pageUnloadingReset) clearTimeout(pageUnloadingReset);
+    pageUnloadingReset = setTimeout(() => {
+      pageUnloading = false;
+      pageUnloadingReset = null;
+    }, PAGE_UNLOAD_GRACE_MS);
+  };
+  for (const event of ['beforeunload', 'pagehide', 'freeze']) {
+    window.addEventListener(event, markPageUnloading);
+  }
+}
 
 export interface TranscriptEntry {
   id: number;
@@ -69,6 +91,12 @@ export interface RecordingState {
   sttModel: SttModel;
   pendingAutoStart: boolean;
   autoStartRequestedAt: number | null;
+  /** conversationId/channelId of the thread that triggered `requestAutoStart`,
+   * consumed by RecordingsScreen's auto-start effect and forwarded to
+   * recordingService.startRecording so the backend can post/update the
+   * thread's anchor message. Cleared as soon as the recording actually starts. */
+  pendingConversationId: string | null;
+  pendingChannelId: string | null;
   pendingStop: boolean;
   /** Canvas created as part of starting a headless recording. */
   notesCanvasId: string | null;
@@ -81,6 +109,8 @@ export interface RecordingState {
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
   agentLeft: boolean;
+  isCameraEnabled: boolean;
+  isScreenShareEnabled: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -94,11 +124,13 @@ const initialContext: RecordingState = {
   pauseStartedAt: null,
   accumulatedPausedMs: 0,
   error: null,
-  sttModel: 'azure',
+  sttModel: 'google',
   transcripts: [],
   markedMoments: [],
   pendingAutoStart: false,
   autoStartRequestedAt: null,
+  pendingConversationId: null,
+  pendingChannelId: null,
   pendingStop: false,
   notesCanvasId: null,
   notesCanvasViewAccessId: null,
@@ -107,24 +139,49 @@ const initialContext: RecordingState = {
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
   agentLeft: false,
+  isCameraEnabled: false,
+  isScreenShareEnabled: false,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
+
+/**
+ * Whether a recording session exists at all — including one still spinning up or
+ * winding down, where the mic is live or about to be.
+ *
+ * Broader than `ACTIVE_STATUSES`, which is about a session that has *started*.
+ * This is the test the start sites already use inline to refuse a second
+ * recording (ThreadPannel, ChatBubble, RecordingsV2Screen, useSlashCommands);
+ * named here so callers that need it stop re-spelling it.
+ */
+export function isRecordingSessionActive(status: RecordingStatus): boolean {
+  return status !== 'idle' && status !== 'error';
+}
 
 export const recordingStore = createStore({
   context: initialContext,
   on: {
     // Actions
-    requestAutoStart: (context): RecordingState => ({
-      ...context,
-      pendingAutoStart: true,
-      autoStartRequestedAt: Date.now(),
-    }),
+    requestAutoStart: (
+      context,
+      event: { conversationId?: string; channelId?: string } = {},
+    ): RecordingState => {
+      if (context.status === 'starting') return context;
+      return {
+        ...context,
+        pendingAutoStart: true,
+        autoStartRequestedAt: Date.now(),
+        pendingConversationId: event.conversationId ?? null,
+        pendingChannelId: event.channelId ?? null,
+      };
+    },
 
     clearAutoStart: (context): RecordingState => ({
       ...context,
       pendingAutoStart: false,
       autoStartRequestedAt: null,
+      pendingConversationId: null,
+      pendingChannelId: null,
     }),
 
     requestStop: (context): RecordingState => {
@@ -141,17 +198,28 @@ export const recordingStore = createStore({
 
     startRecording: (
       context,
-      event: { sttModel?: SttModel; defaultLayout?: RecordingLayout },
+      event: {
+        sttModel?: SttModel;
+        defaultLayout?: RecordingLayout;
+        conversationId?: string;
+        channelId?: string;
+      },
     ): RecordingState => {
       const sttModel = event.sttModel || context.sttModel;
       const defaultLayout = event.defaultLayout ?? 'transcript';
+      const conversationId = event.conversationId ?? context.pendingConversationId ?? undefined;
+      const threadChannelId = event.channelId ?? context.pendingChannelId ?? undefined;
 
       // Set starting status
       recordingStore.send({ type: 'setStatus', status: 'starting' });
 
       // Call API to start recording
       recordingService
-        .startRecording({ sttModel })
+        .startRecording({
+          sttModel,
+          ...(conversationId ? { conversationId } : {}),
+          ...(threadChannelId ? { channelId: threadChannelId } : {}),
+        })
         .then(async session => {
           // Create LiveKit room
           const room = new Room();
@@ -177,10 +245,9 @@ export const recordingStore = createStore({
             defaultLayout,
           });
 
-          toast.success('Recording started', {
-            description: 'Your voice is being recorded and transcribed',
-            duration: 3000,
-          });
+          if (recordingStore.getSnapshot().context.pendingStop) {
+            recordingStore.send({ type: 'stopRecording' });
+          }
         })
         .catch(error => {
           logger.error(Event.RECORDING_ERROR, {
@@ -202,6 +269,8 @@ export const recordingStore = createStore({
         sttModel,
         error: null,
         pendingAutoStart: false,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         activeLayout: defaultLayout,
       };
@@ -258,6 +327,44 @@ export const recordingStore = createStore({
         }
       };
 
+      const handleRoomDisconnected = (): void => {
+        if (intentionallyDisconnectedRooms.delete(room)) return;
+        if (pageUnloading) return;
+
+        const current = recordingStore.getSnapshot().context;
+        if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
+
+        const message =
+          'Recording stopped because its session was disconnected and could not be saved.';
+        logger.error(Event.RECORDING_ERROR, { error: message });
+        toast.error('Recording stopped', {
+          description: 'We could not save this recording. Please try again.',
+          duration: 6000,
+        });
+        recordingStore.send({ type: 'error', error: message });
+      };
+
+      const handleRoomMetadataChanged = (metadata: string): void => {
+        try {
+          const data = JSON.parse(metadata) as { recordingStartFailure?: unknown };
+          if (data.recordingStartFailure !== true) return;
+          if (pageUnloading) return;
+
+          const current = recordingStore.getSnapshot().context;
+          if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
+
+          const message = 'Recording could not be saved because its session could not be created.';
+          logger.error(Event.RECORDING_ERROR, { error: message });
+          toast.error('Recording stopped', {
+            description: 'We could not save this recording. Please try again.',
+            duration: 6000,
+          });
+          recordingStore.send({ type: 'error', error: message });
+        } catch {
+          // Ignore malformed room metadata.
+        }
+      };
+
       const handleDataReceived = (
         payload: Uint8Array,
         _participant?: unknown,
@@ -295,15 +402,27 @@ export const recordingStore = createStore({
         }
       };
 
+      const handleLocalTracksChanged = (): void => {
+        recordingStore.send({ type: 'syncLocalMedia', room });
+      };
+
       room.on(RoomEvent.DataReceived, handleDataReceived);
       room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+      room.on(RoomEvent.Disconnected, handleRoomDisconnected);
+      room.on(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+      room.on(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+      room.on(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
 
       transcriptUnsubscribe = (): void => {
         clearAgentLeftTimer();
         room.off(RoomEvent.DataReceived, handleDataReceived);
         room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
+        room.off(RoomEvent.Disconnected, handleRoomDisconnected);
+        room.off(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+        room.off(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+        room.off(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
       };
 
       playAudio(AUDIO_PATHS.RECORDING_START);
@@ -331,9 +450,10 @@ export const recordingStore = createStore({
       const pauseStartedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(false);
+        setLocalVideoMuted(context.room, true);
       }
       toast.info('Recording paused', {
-        description: 'Microphone is muted',
+        description: 'Microphone and video are muted',
         duration: 2000,
       });
       return {
@@ -349,6 +469,7 @@ export const recordingStore = createStore({
       const resumedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(true);
+        setLocalVideoMuted(context.room, false);
       }
       toast.success('Recording resumed', {
         duration: 2000,
@@ -363,7 +484,10 @@ export const recordingStore = createStore({
       };
     },
 
-    stopRecording: (context): RecordingState => {
+    syncLocalMedia: (context, event: { room: Room }): RecordingState =>
+      context.room === event.room ? { ...context, ...getLocalVideoState(event.room) } : context,
+
+    stopRecording: (context, event?: { silent?: boolean }): RecordingState => {
       const durationMs = context.startTime
         ? calculateRecordingElapsedMs(
             context.startTime,
@@ -374,6 +498,7 @@ export const recordingStore = createStore({
 
       // Cleanup room
       if (context.room) {
+        intentionallyDisconnectedRooms.add(context.room);
         void context.room.disconnect();
       }
 
@@ -388,12 +513,16 @@ export const recordingStore = createStore({
         playAudio(AUDIO_PATHS.RECORDING_END);
       }
 
-      // Show toast
-      const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
-      toast.success('Recording stopped', {
-        description: `Recording saved (${duration})`,
-        duration: 3000,
-      });
+      // A caller about to navigate away (workspace switch, reload) shows this
+      // toast itself once the destination page mounts — this one would just be
+      // torn down mid-display by the hard navigation before it's legible.
+      if (!event?.silent) {
+        const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
+        toast.success('Recording stopped', {
+          description: `Recording saved (${duration})`,
+          duration: 3000,
+        });
+      }
 
       // Reset state
       return {
@@ -412,6 +541,8 @@ export const recordingStore = createStore({
         markedMoments: [],
         pendingAutoStart: false,
         autoStartRequestedAt: null,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -420,6 +551,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -453,6 +586,8 @@ export const recordingStore = createStore({
         accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -477,6 +612,8 @@ export const recordingStore = createStore({
         markedMoments: [],
         pendingAutoStart: false,
         autoStartRequestedAt: null,
+        pendingConversationId: null,
+        pendingChannelId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -485,6 +622,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 

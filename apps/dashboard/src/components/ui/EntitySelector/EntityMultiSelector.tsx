@@ -1,6 +1,6 @@
 import * as Popover from '@radix-ui/react-popover';
 import { Check, Plus, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { EntitySelectorProps } from './EntitySelector.types';
 
@@ -31,11 +31,24 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   showSearch = false,
   collapseSelectedAfter,
   collapsedLabel = 'items',
+  matchTriggerWidth = false,
+  onOpenChange,
 }) => {
   // ==================== STATE ====================
   const [isOpen, setIsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Every open/close path must go through this, not setIsOpen directly: callers use
+  // onOpenChange to lazy-load options on first open, and the dropdown is opened by
+  // focusing the input rather than by Popover's own trigger.
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setIsOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange],
+  );
 
   const selectedOptions = useMemo(
     () => options.filter(opt => selectedValues.includes(opt.value)),
@@ -98,7 +111,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
           e.preventDefault();
           inputRef.current?.focus();
         }
-        setIsOpen(false);
+        handleOpenChange(false);
       }}
       className={cn(
         'relative flex items-center border border-border px-2 gap-1.5 rounded-[6px] h-7 transition-colors bg-background w-fit max-w-full overflow-hidden shadow-[0_1px_1px_0_rgba(5,5,6,0.04)] hover:bg-accent',
@@ -132,14 +145,14 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
           if (showSearch) return;
           setSearchValue(e.target.value);
           onSearchChange?.(e.target.value);
-          setIsOpen(true);
+          handleOpenChange(true);
         }}
         onClick={e => {
           e.stopPropagation();
           e.currentTarget.focus();
         }}
         onFocus={() => {
-          setIsOpen(true);
+          handleOpenChange(true);
         }}
         onKeyDown={e => {
           if (showSearch) return;
@@ -187,13 +200,15 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                 e.stopPropagation();
                 removeValue(opt.value);
               }}
+              data-track-category='ENTITY_PICKER'
+              data-track-name='REMOVE_SELECTED_VALUE'
               className='text-muted-foreground hover:text-muted-foreground'
             >
               <X className='size-2.5' strokeWidth={2.5} />
             </button>
           </span>
         ))}
-      <Popover.Root open={isOpen} onOpenChange={setIsOpen} modal={false}>
+      <Popover.Root open={isOpen} onOpenChange={handleOpenChange} modal={false}>
         {shouldCollapseSelected ? (
           <Popover.Trigger asChild>
             <span className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-pointer'>
@@ -213,6 +228,8 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                   e.stopPropagation();
                   onMultiSelect([]);
                 }}
+                data-track-category='ENTITY_PICKER'
+                data-track-name='CLEAR_ALL_SELECTED'
                 className='text-muted-foreground hover:text-muted-foreground'
               >
                 <X className='size-2.5' strokeWidth={2.5} />
@@ -240,6 +257,15 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
               e.stopPropagation();
             }}
             className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
+            // Never narrower than the trigger, matching EntitySelector. A compact
+            // trigger still lets the content size the popover as before.
+            style={{
+              minWidth: 'var(--radix-popover-trigger-width)',
+              ...(matchTriggerWidth && {
+                width: 'var(--radix-popover-trigger-width)',
+                maxWidth: 'var(--radix-popover-trigger-width)',
+              }),
+            }}
           >
             {/* Search input inside dropdown */}
             {showSearch && (
@@ -276,6 +302,8 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                             type='button'
                             className='flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-accent'
                             onClick={() => toggleValue(option.value)}
+                            data-track-category='ENTITY_PICKER'
+                            data-track-name='TOGGLE_OPTION'
                           >
                             <span
                               className={cn(
@@ -337,6 +365,8 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                           onCreateOption?.(searchValue.trim());
                           setSearchValue('');
                         }}
+                        data-track-category='ENTITY_PICKER'
+                        data-track-name='CREATE_OPTION'
                       >
                         <Plus className='size-3' strokeWidth={2.5} />
                         <span className='truncate text-xs'>

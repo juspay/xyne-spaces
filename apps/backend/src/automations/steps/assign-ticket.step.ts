@@ -1,11 +1,11 @@
 import { z } from 'zod';
+import { ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
-import { ActivityType } from '@prisma/client';
 
 const AssignTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),

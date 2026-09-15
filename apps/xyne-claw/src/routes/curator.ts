@@ -12,7 +12,7 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { classifyIngestSubsystem, distillSession, distillLargeTranscript } from "../curator.js";
-import { parseClaudeSession } from "../claude-session-parse.js";
+import { parseSession } from "../session-parsers/index.js";
 import type { SessionTranscriptForCurator } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
@@ -90,7 +90,7 @@ curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Requ
 });
 
 /**
- * Distill an uploaded Claude session file into subsystem-update candidates.
+ * Distill an uploaded session file (Claude, OpenCode, or Codex) into subsystem-update candidates.
  *
  * Body: { sessionId, agentSlug, userId, filename, rawSession }
  *   rawSession — the raw uploaded export (Claude Code JSONL or claude.ai JSON).
@@ -110,6 +110,7 @@ curatorRouter.post("/internal/curator/distill-session", validateS2SKey, async (r
       agentSlug?: string;
       userId?: string;
       filename?: string;
+      source?: string;
       rawSession?: string;
       bankId?: string;
       parseOnly?: boolean;
@@ -123,7 +124,7 @@ curatorRouter.post("/internal/curator/distill-session", validateS2SKey, async (r
       return;
     }
 
-    const parsed = parseClaudeSession(body.rawSession, body.filename ?? "");
+    const parsed = parseSession(body.rawSession, { source: body.source, filename: body.filename });
     if (parsed.turnCount === 0) {
       res.status(422).json({
         success: false,
@@ -134,6 +135,7 @@ curatorRouter.post("/internal/curator/distill-session", validateS2SKey, async (r
     }
 
     const meta = {
+      source: parsed.source,
       format: parsed.format,
       turnCount: parsed.turnCount,
       conversationCount: parsed.conversationCount,
