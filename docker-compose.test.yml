@@ -1,3 +1,8 @@
+# The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
+# hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
+x-test-stack-no-proxy: &test-stack-no-proxy
+  localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+
 services:
   # db:push + raw-SQL migration in a one-shot container so backend's healthcheck
   # window doesn't include schema-apply work (which slows under CI CPU throttling).
@@ -34,10 +39,8 @@ services:
     env_file:
       - ./apps/backend/.env.test   # Override with container hostnames
     environment:
-      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
-      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
-      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
-      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      NO_PROXY: *test-stack-no-proxy
+      no_proxy: *test-stack-no-proxy
     command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     depends_on:
       backend-migrate:
@@ -63,8 +66,8 @@ services:
   # LiveKit's Go HTTP client honours the CI-injected HTTP_PROXY for that host too.
   livekit:
     environment:
-      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
-      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      NO_PROXY: *test-stack-no-proxy
+      no_proxy: *test-stack-no-proxy
 
   dashboard:
     build:
@@ -74,10 +77,8 @@ services:
     env_file:
       - ./apps/dashboard/.env.test   # Override with container hostnames
     environment:
-      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
-      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
-      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
-      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      NO_PROXY: *test-stack-no-proxy
+      no_proxy: *test-stack-no-proxy
     ports:
       - "${DASHBOARD_BIND_PORT:-0}:5173"
     depends_on:
@@ -161,23 +162,21 @@ services:
     # Parallel Gauge workers each launch Chromium, all sharing this container's /dev/shm.
     shm_size: '4gb'
     environment:
-      - TEST_ENV=test
-      - BACKEND_URL=http://backend:3001
-      - DASHBOARD_URL=http://dashboard:5173
-      - BROWSER=chromium
+      TEST_ENV: test
+      BACKEND_URL: http://backend:3001
+      DASHBOARD_URL: http://dashboard:5173
+      BROWSER: chromium
       # Use the pre-baked image deps as-is: make pnpm non-interactive and stop it
       # re-verifying/reinstalling (a reinstall re-blocks @getgauge/cli's build script).
-      - CI=true
-      - NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
-      - NPM_CONFIG_CONFIRM_MODULES_PURGE=false
+      CI: true
+      NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: false
+      NPM_CONFIG_CONFIRM_MODULES_PURGE: false
       # Container-scoped log-noise suppression for the test run.
-      - NPM_CONFIG_LOGLEVEL=error
-      - NODE_NO_WARNINGS=1
-      - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-      # The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
-      # hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
-      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
-      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      NPM_CONFIG_LOGLEVEL: error
+      NODE_NO_WARNINGS: 1
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+      NO_PROXY: *test-stack-no-proxy
+      no_proxy: *test-stack-no-proxy
     depends_on:
       backend:
         condition: service_healthy
