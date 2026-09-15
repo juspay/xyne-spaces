@@ -1658,8 +1658,6 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  // The workflow UI owns every path below its mount and addresses
-                  // itself by sub-path, so this section needs a splat the others do not.
                   path: 'sdlc/:channelId/workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>

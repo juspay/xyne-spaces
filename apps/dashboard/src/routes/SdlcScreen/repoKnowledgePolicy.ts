@@ -1,8 +1,3 @@
-/**
- * Repo Knowledge is a workflow run, so its controls are the run's: start one, or stop
- * the one going. No refresh or retry — a second run updates what the first produced.
- */
-
 import { SDLC_ACTIVE_RUN_STATUSES } from '@xyne/shared';
 
 const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set(SDLC_ACTIVE_RUN_STATUSES);
@@ -28,7 +23,6 @@ export function repoKnowledgeState(input: {
 }): RepoKnowledgeState {
   if (!input.workflowId) return { phase: 'NOT_CONFIGURED' };
 
-  // Newest-first from the query. An older failure is history, not a problem.
   const latest = input.runs?.[0];
   if (!latest) return { phase: 'NOT_STARTED', workflowId: input.workflowId };
 
@@ -67,10 +61,3 @@ export const CANCEL_REPO_KNOWLEDGE: RepoKnowledgeAction = {
 export function repoKnowledgeAction(phase: RepoKnowledgePhase): RepoKnowledgeAction {
   return phase === 'RUNNING' ? CANCEL_REPO_KNOWLEDGE : RUN_REPO_KNOWLEDGE;
 }
-
-export type RepoSetupExecution = {
-  id: string;
-  status: string;
-  context: string | null;
-  updatedAt: number | null;
-};

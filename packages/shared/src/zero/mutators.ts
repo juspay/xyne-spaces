@@ -5955,8 +5955,7 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
-        // Repo Knowledge is identified by its folder now, not by an artifact type.
-        // The channel type is part of the test: the folder name alone is not SDLC's.
+        // By folder: legacy baseline rows share it. Channel type scopes the name to SDLC.
         const currentChannel = currentChannelId
           ? await tx.run(zql.channels.where('id', currentChannelId).one())
           : null;

@@ -8,9 +8,7 @@ export interface SdlcInteractiveGrantClaims {
   version: typeof GRANT_VERSION;
   agentSlug: typeof SDLC_AGENT_SLUG;
   workspaceId: string;
-  /** Single-repository grant. A hub-scoped run carries `repoIds` instead. */
   repoId?: string;
-  /** Hub-scoped grant: every repository this run may clone. */
   repoIds?: string[];
   actorUserId: string;
   conversationId: string;
@@ -18,7 +16,6 @@ export interface SdlcInteractiveGrantClaims {
   expiresAt: string;
 }
 
-/** A grant authorizes a repository through either claim; neither widens the other. */
 export function sdlcGrantCoversRepo(
   claims: SdlcInteractiveGrantClaims,
   repoId: string,

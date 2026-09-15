@@ -139,22 +139,11 @@ export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
 
 export const SDLC_ARTIFACT_REPOSITORY_RELATION = "CONTEXT";
 
-/**
- * The Repo Knowledge artifact type, as its canvas folder is named. Still "Baseline"
- * on disk — renaming it needs a migration across every hub.
- */
+/** Still "Baseline" on disk: renaming needs a migration across every hub. */
 export const SDLC_REPO_KNOWLEDGE_FOLDER = "Baseline";
 
-/**
- * A CHANNEL -> WORKFLOW edge, and the "seeded once" marker. `targetId` is polymorphic
- * so nothing cascades: a dangling edge means the workflow was deleted on purpose.
- */
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 
-/**
- * Run statuses the workflow engine still counts as in flight. Shared so the SDLC
- * page's status line and the backend's "one run at a time" guard cannot drift.
- */
 export const SDLC_ACTIVE_RUN_STATUSES = [
   "NEW",
   "PENDING",
@@ -165,10 +154,6 @@ export const SDLC_ACTIVE_RUN_STATUSES = [
   "PAUSED",
 ] as const;
 
-/**
- * The hub's workflow folder, under a workspace-level `SDLC` root. Derived, not
- * generated, so the backend can upsert it and the SDLC page can link straight to it.
- */
 export function sdlcHubWorkflowFolderId(channelId: string): string {
   return `sdlc-hub-${channelId}`;
 }
@@ -787,8 +772,6 @@ export const createSdlcClawArtifactSchema = z
         message: "Artifact creation requires a folderId (the artifact type)",
       });
     }
-    // "Artifacts require a track" lives in SdlcHubService now: it has the folder row
-    // and can exempt Repo Knowledge.
   });
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
@@ -992,7 +975,6 @@ export const sdlcAgentContextSchema = z
     projectId: z.string().min(1),
     channelId: z.string().min(1),
     actorUserId: z.string().min(1),
-    /** Absent on a hub-scoped run, which names its repositories per tool call. */
     repository: z
       .object({
         id: z.string().min(1),

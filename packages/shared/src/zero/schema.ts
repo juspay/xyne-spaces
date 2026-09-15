@@ -3391,7 +3391,6 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
-  // Only meaningful on WORKFLOW edges, where targetId is the seeded workflow.
   workflow: one({
     sourceField: ['targetId'],
     destField: ['id'],

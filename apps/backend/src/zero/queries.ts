@@ -4624,11 +4624,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       )
       .one(),
   ),
-  /**
-   * The hub's seeded Repo Knowledge workflow and its recent runs. Separate from
-   * `getSdlcChannelById` because that one already claims `sdlcEntityLinks` for the
-   * membership edges, and a second alias cannot carry a different filter.
-   */
   getSdlcHubWorkflow: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) =>
@@ -4637,11 +4632,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('sourceType', 'CHANNEL')
         .where('targetType', 'WORKFLOW')
         .where('relationType', SDLC_WORKFLOW_RELATION)
-        .related('workflow', workflow =>
-          workflow.related('workflowExecutions', execution =>
-            execution.orderBy('createdAt', 'desc').limit(5),
-          ),
-        )
+        .related('workflow')
         .one(),
   ),
   /**

@@ -4060,11 +4060,6 @@ export const queries = defineQueries({
         .where(helpers => helpers.cmp('targetType', 'IN', [...SDLC_TREE_TARGET_TYPES]))
         .orderBy('createdAt', 'asc'),
   ),
-  /**
-   * The hub's seeded Repo Knowledge workflow and its recent runs. Separate from
-   * `getSdlcChannelById` because that one already claims `sdlcEntityLinks` for the
-   * membership edges, and a second alias cannot carry a different filter.
-   */
   getSdlcHubWorkflow: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) =>
@@ -4073,11 +4068,7 @@ export const queries = defineQueries({
         .where('sourceType', 'CHANNEL')
         .where('targetType', 'WORKFLOW')
         .where('relationType', SDLC_WORKFLOW_RELATION)
-        .related('workflow', workflow =>
-          workflow.related('workflowExecutions', execution =>
-            execution.orderBy('createdAt', 'desc').limit(5),
-          ),
-        )
+        .related('workflow')
         .one(),
   ),
   /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */

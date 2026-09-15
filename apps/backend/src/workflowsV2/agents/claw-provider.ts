@@ -125,12 +125,6 @@ export class ClawAgentProvider
   }
 }
 
-/**
- * Unwrap a claw callback envelope into a run result.
- *
- * Shared with the SDLC artifact provider, which dispatches differently but reads
- * back the same envelope over the same callback route.
- */
 export async function collectClawResult(
   payload: ResumePayload,
   record: AgentDispatchRecord,
@@ -150,17 +144,12 @@ export async function collectClawResult(
     );
   }
 
-  // A non-string result is not a failure in itself — hand it over as JSON and
-  // let the step's classifier and repair loop decide.
   const text = typeof envelope.result === 'string'
     ? envelope.result
     : JSON.stringify(envelope.result ?? '');
 
   return {
     text,
-    // Claw runs its own tool loop and reports neither tool calls nor token
-    // accounting in the callback envelope, so this reports none rather than
-    // inventing numbers. Both are visible in claw's own run history.
     toolCalls: [],
     turnCount: 1,
     usage: { inputTokens: 0, outputTokens: 0 },

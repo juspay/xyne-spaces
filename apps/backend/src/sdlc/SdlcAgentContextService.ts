@@ -45,11 +45,6 @@ export interface SdlcAgentContext {
   projectId: string;
   channelId: string;
   actorUserId: string;
-  /**
-   * The repository claw clones and binds its SDLC tools to. Claw drops every
-   * trusted tool binding and refuses `sandbox-repo-setup` without it, so a hub
-   * run names one even though the grant covers the whole hub.
-   */
   repository?: { id: string; name: string; url: string; baseBranch: string };
   permissions: { repositoryRole: 'ADMIN' | 'MEMBER' };
   gates: {
@@ -182,14 +177,7 @@ export class SdlcAgentContextService {
     };
   }
 
-  /**
-   * Context for a run spanning a whole hub. A hub run has no execution row for
-   * `bootstrapSandboxCredential` to check, so the grant carries the scope instead:
-   * every repository in the hub, read-only.
-   *
-   * One repository is still named: a sandbox clones exactly one, and claw binds
-   * its SDLC tools to `repository.id` rather than to anything the agent passes.
-   */
+  /** Pins one hub repository: a sandbox clones one, and claw binds SDLC tools to it. */
   async buildForHub(
     actor: SdlcActor,
     channelId: string,

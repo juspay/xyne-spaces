@@ -11,7 +11,6 @@ import type { SdlcActor } from './types';
 
 const WORKFLOW_NAME = 'Generate Repo Knowledge';
 
-/** Workspace-level parent every hub folder hangs under. */
 function sdlcRootFolderId(workspaceId: string): string {
   return `sdlc-${workspaceId}`;
 }
@@ -29,9 +28,8 @@ function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
       artifactTitle: definition.title,
       sections: definition.sections.map((section) => ({
         title: section.title,
-        instructions: section.instructions,
+        description: section.instructions,
       })),
-      // The type's standing policy is prepended by the step at dispatch.
       task: definition.instructions,
       outputType: 'json',
       outputSchema: {
@@ -49,7 +47,6 @@ function buildSteps(input: RepoKnowledgeInput): WorkflowStepConfig[] {
 
 interface RepoKnowledgeInput {
   channelId: string;
-  /** Empty means the whole hub at run time. */
   repoIds: string[];
 }
 
@@ -60,10 +57,7 @@ export function buildRepoKnowledgeConfig(input: RepoKnowledgeInput): WorkflowCon
   };
 }
 
-/**
- * The hub's CHANNEL -> WORKFLOW edge. Its presence — dangling included — is what
- * "seeded once" means, so a deliberately deleted workflow does not come back.
- */
+/** Presence, dangling included, means "seeded once": a deleted workflow stays deleted. */
 export async function findHubWorkflowLink(
   channelId: string,
 ): Promise<{ id: string; targetId: string; workspaceId: string } | null> {
@@ -78,10 +72,6 @@ export async function findHubWorkflowLink(
   });
 }
 
-/**
- * Find-or-create `SDLC / <hub name>`. Refreshing the name here is the only thing
- * that tracks a renamed hub.
- */
 async function ensureHubFolder(
   actor: SdlcActor,
   channelId: string,
@@ -119,7 +109,6 @@ async function ensureHubFolder(
   return hubId;
 }
 
-/** Everything about the hub that gets baked into its workflow definition. */
 async function hubTargets(
   channelId: string,
 ): Promise<{ hubName: string; repoIds: string[] }> {
@@ -136,10 +125,7 @@ export interface SeedHubWorkflowResult {
   workflowId?: string;
 }
 
-/**
- * Must run after `createChannel` commits — `createWorkflow` writes through the SDK's
- * own adapter and cannot join an outer Prisma transaction.
- */
+/** Call after createChannel commits: createWorkflow cannot join a Prisma transaction. */
 export async function seedHubWorkflow(
   actor: SdlcActor,
   channelId: string,
@@ -154,7 +140,6 @@ export async function seedHubWorkflow(
       name: WORKFLOW_NAME,
       config: buildRepoKnowledgeConfig({ channelId, repoIds }),
       folderId,
-      // Metadata, not attributes: `createdByUserId` is consumed at create, never stored.
       metadata: { [SDLC_AUTHOR_METADATA_KEY]: actor.userId },
       attributes: { workspaceId: actor.workspaceId, createdByUserId: actor.userId },
     },
@@ -177,12 +162,6 @@ export async function seedHubWorkflow(
   return { status: 'seeded', workflowId };
 }
 
-/**
- * Put a hub's workflow back to the seeded definition, discarding builder edits.
- *
- * Rewritten in place, not recreated, so the workflow id — and with it the entity
- * edge and the run history — survives.
- */
 export async function resetHubWorkflow(
   actor: SdlcActor,
   channelId: string,
@@ -190,8 +169,7 @@ export async function resetHubWorkflow(
   const link = await findHubWorkflowLink(channelId);
   if (!link) return seedHubWorkflow(actor, channelId);
 
-  // Only a genuinely missing workflow earns a replacement. Dropping the edge on any
-  // other error would orphan a live workflow and its run history.
+  // Replace only a missing workflow: dropping the edge on other errors orphans its runs.
   const existing = await db.workflow.findUnique({
     where: { id: link.targetId },
     select: { id: true },
@@ -227,7 +205,6 @@ export interface BackfillResult {
   failed: Array<{ channelId: string; error: string }>;
 }
 
-/** Run one hub action across the workspace, or against a single hub. */
 async function walkHubs(
   actor: SdlcActor,
   channelId: string | undefined,
@@ -257,7 +234,6 @@ async function walkHubs(
   return result;
 }
 
-/** How hubs created before seeding existed get a workflow. A second run is a no-op. */
 export async function backfillHubWorkflows(
   actor: SdlcActor,
   channelId?: string,
@@ -265,7 +241,6 @@ export async function backfillHubWorkflows(
   return walkHubs(actor, channelId, seedHubWorkflow);
 }
 
-/** `backfillHubWorkflows`, but overwriting the hubs that already have a workflow. */
 export async function resetHubWorkflows(
   actor: SdlcActor,
   channelId?: string,

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SDLC_AGENT_SLUG, SDLC_REPO_KNOWLEDGE_FOLDER } from '@xyne/shared';
+import { SDLC_AGENT_SLUG, SDLC_REPO_KNOWLEDGE_FOLDER, sdlcRepoIdsSchema } from '@xyne/shared';
 import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
 import type {
   AgentDispatchRecord,
@@ -16,22 +16,9 @@ import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { buildCallbackUrl, buildTask, collectClawResult } from './claw-provider';
 import type { XyneResourceAttrs } from '../types';
 
-/**
- * Runs one SDLC artifact through the SDLC agent — {@link ClawAgentProvider}'s
- * transport, plus the `executionProfile: 'sdlc'` + agent slug + s2s key trio claw
- * requires before it grants the SDLC tool palette.
- *
- * The agent is pinned in code: `HostAgentStep` surfaces every provider config field
- * in the builder, so an editable `agentSlug` would silently drop that grant.
- */
-
 /** Not `attributes.createdByUserId` — the router consumes that at create and never persists it. */
 export const SDLC_AUTHOR_METADATA_KEY = 'sdlcAuthorUserId';
 
-/**
- * Claw rejects ids outside `[A-Za-z0-9_-]` (`apps/xyne-claw/src/safe-id.ts`): they
- * become directory names and URL segments. Step ids reach here as the admin typed them.
- */
 function safeClawId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 128);
 }
@@ -43,25 +30,15 @@ function readAuthorUserId(metadata: Record<string, unknown>): string | undefined
 
 const SectionSchema = z.object({
   title: z.string().min(1),
-  instructions: z.string().min(1),
+  description: z.string().optional(),
 });
 
-/**
- * Artifact types this step can write, each mapped to the canvas folder it lands in.
- * One for now. Adding a type is an entry here — the folder is resolved per hub at
- * dispatch, so nothing else has to know about it.
- */
 const ARTIFACT_TYPE_FOLDERS = {
   'Repo Knowledge': SDLC_REPO_KNOWLEDGE_FOLDER,
 } as const;
 
 export type SdlcArtifactType = keyof typeof ARTIFACT_TYPE_FOLDERS;
 
-/**
- * Repo Knowledge is standing context, not a report: `sdlcAskAiContext.ts` pastes
- * every document into the prompt of every SDLC agent call for the hub. That is what
- * makes durability and brevity the whole job, so the policy says it outright.
- */
 const REPO_KNOWLEDGE_POLICY = `This document is standing context. The SDLC agent receives it verbatim, ahead of
 the user's question, on every request about this hub. Write for an agent that has
 not seen the code, is about to act on it, and pays for every token you spend.
@@ -80,23 +57,17 @@ Where a Wiki page already covers something, point at it and say how fresh it is
 instead of restating it. If something does not exist in this hub, say so in one
 line with the evidence rather than inventing a plausible section.`;
 
-/**
- * Standing instructions per type, prepended to the step's own task. Here rather
- * than baked into the seeded task so an admin cannot edit them away, and a step
- * added by hand gets them too. A new type brings its own entry.
- */
 const ARTIFACT_TYPE_POLICY: Record<SdlcArtifactType, string> = {
   'Repo Knowledge': REPO_KNOWLEDGE_POLICY,
 };
 
-/** Tuple, not Object.keys: z.enum needs the literals to type the field. */
 const ARTIFACT_TYPES = ['Repo Knowledge'] as const satisfies readonly SdlcArtifactType[];
 
 /** Key order is form order: the builder renders properties as they are declared. */
 export const SdlcArtifactConfigSchema = z.object({
   channelId: z.string().min(1)
     .describe('SDLC hub this artifact belongs to'),
-  repoIds: z.array(z.string().min(1)).max(50).default([])
+  repoIds: sdlcRepoIdsSchema.unwrap().default([])
     .describe('Repositories this document covers. Empty means every repository in the hub.'),
   artifactType: z.enum(ARTIFACT_TYPES).default('Repo Knowledge')
     .describe('What kind of document this step writes'),
@@ -142,18 +113,13 @@ export class SdlcArtifactAgentProvider
       stepConfig.artifactType,
     );
 
-    // Per attempt, so a repair re-run is its own run in claw's history.
     const attempt = input.repair?.attempt ?? 0;
     const sessionId = safeClawId(
       `wf-${ctx.runtime.executionId}-${ctx.runtime.stepName}`
       + (attempt > 0 ? `-retry-${String(attempt)}` : ''),
     );
 
-    // `interactive`, not `baseline`, and deliberately without the execution ids:
-    // claw only mints a sandbox credential from an execution when that row is an
-    // SDLC one carrying agentSlug/repoId/sessionId in its context. A workflows-v2
-    // execution carries none of that, so the signed hub grant is the only path
-    // that works. Correlation still rides on the callback URL, not on this.
+    // No execution ids: claw mints sandbox credentials only from SDLC execution rows.
     const agentContext = await sdlcAgentContext.buildForHub(
       { userId: user.id, workspaceId: attrs.workspaceId },
       stepConfig.channelId,
@@ -173,6 +139,7 @@ export class SdlcArtifactAgentProvider
 
     const response = await runS2SClawAgent({
       sessionId,
+      // Pinned, not step config: the builder exposes config, and another slug loses the SDLC tools.
       agentSlug: SDLC_AGENT_SLUG,
       task: buildTask({ ...input, task: buildArtifactTask(stepConfig, folderId, input.task) }),
       workspaceId: attrs.workspaceId,
@@ -207,11 +174,6 @@ export class SdlcArtifactAgentProvider
   }
 }
 
-/**
- * An artifact type names a canvas folder; each hub has its own row for it. Resolved
- * here rather than stored in the step so a workflow survives the folder being
- * recreated, and so the builder never asks an admin for a raw id.
- */
 async function resolveArtifactFolderId(
   channelId: string,
   artifactType: SdlcArtifactType,
@@ -229,10 +191,6 @@ async function resolveArtifactFolderId(
   return folder.id;
 }
 
-/**
- * Idempotency is prompt-driven by design: the agent already has list/read/mutate, and
- * title-within-folder is the only thing telling two generic artifacts apart.
- */
 function buildArtifactTask(
   cfg: SdlcArtifactConfig,
   folderId: string,
@@ -251,8 +209,6 @@ function buildArtifactTask(
     cfg.repoIds.length > 0
       ? `Cover only these repositories: ${cfg.repoIds.join(', ')}`
       : 'Cover every repository in this hub. List them with spaces-sdlc-list-repositories first.',
-    // spaces-sdlc-list-tracks tells the agent to create a track when none fits, and
-    // mutate-artifact's exemption is a trailing parenthetical. Say it plainly here.
     'This artifact type belongs to no track: it describes the hub itself. Pass no '
     + 'trackId, and do not call spaces-sdlc-list-tracks or spaces-sdlc-create-track.',
   ];
@@ -260,7 +216,7 @@ function buildArtifactTask(
   if (cfg.sections?.length) {
     parts.push('', 'Use exactly these sections, in this order:');
     for (const section of cfg.sections) {
-      parts.push(`- ${section.title}: ${section.instructions}`);
+      parts.push(`- ${section.title}${section.description ? `: ${section.description}` : ''}`);
     }
   }
 

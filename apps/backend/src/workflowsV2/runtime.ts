@@ -80,9 +80,6 @@ if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
   );
   logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
 
-  // Same transport, but the dispatch carries the SDLC profile and hub context that
-  // unlock claw's SDLC tool palette. Its agent is pinned, so it is a separate step
-  // rather than a mode of RUN_AGENT.
   steps.register(
     new HostAgentStep(new SdlcArtifactAgentProvider(), {
       type: 'CREATE_SDLC_ARTIFACT',

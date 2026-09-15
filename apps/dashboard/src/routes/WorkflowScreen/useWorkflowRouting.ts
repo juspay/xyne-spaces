@@ -28,9 +28,6 @@ export interface WorkflowRouting {
  * `/:workspaceId`, so a bare `/workflows/w/123` is parsed with `workflows` as the
  * workspace segment and lands nowhere. Every path has to be re-prefixed, the same way
  * AppSidebar's `prefixWs` does.
- *
- * `base` overrides that prefix for a second mount of the same UI — see
- * SdlcScreen/useSdlcWorkflowRouting.
  */
 export const useWorkflowRouting = (base?: string): WorkflowRouting => {
   const params = useParams<{ workspaceId?: string; '*'?: string }>();

@@ -581,8 +581,7 @@ export class SdlcVcsService implements SdlcVcs {
       } catch {
         throw new AppError('Invalid or expired SDLC interactive grant', 403);
       }
-      // Single-repo claim only: `repoIds` is for read-only clones and must never
-      // authorize a write across a whole hub.
+      // Single-repo claim only: repoIds must never authorize a write.
       if (
         grant.repoId !== repo.id ||
         grant.workspaceId !== repo.workspaceId ||

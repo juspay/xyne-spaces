@@ -27,7 +27,6 @@ import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
 import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
-// import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
@@ -72,8 +71,6 @@ router.post(
     const input = createSdlcChannelSchema.parse(req.body);
     const actor = actorFromRequest(req);
     const channel = await sdlcHub.createChannel(actor, input);
-    // Outside the transaction: createWorkflow uses the SDK's own adapter. A failure
-    // here still leaves a usable hub — the backfill endpoint gives it a workflow later.
     try {
       await seedHubWorkflow(actor, channel.id);
     } catch (error) {
@@ -83,8 +80,6 @@ router.post(
   })
 );
 
-// Workspace-wide, so gated on SDLC admin rather than the per-hub requireChannelRole
-// used everywhere else here. Optional `channelId` narrows either to one hub.
 router.post(
   '/admin/backfill-workflows',
   authorize('SDLC', AccessType.ADMIN),
@@ -96,8 +91,6 @@ router.post(
   })
 );
 
-// Separate endpoint, not a flag: this overwrites an admin's builder edits, so it must
-// not be reachable by mistyping the safe call.
 router.post(
   '/admin/reset-workflows',
   authorize('SDLC', AccessType.ADMIN),
@@ -274,17 +267,6 @@ router.get(
   route(async (req, res) => {
     const run = await wikiPipeline.getStatus(actorFromRequest(req), req.params.repoId);
     res.status(200).json({ success: true, run });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/setup-execution',
-  route(async (req, res) => {
-    const execution = await sdlcHub.getRepositorySetupExecution(
-      actorFromRequest(req),
-      req.params.repoId
-    );
-    res.status(200).json({ success: true, execution });
   })
 );
 

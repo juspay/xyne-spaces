@@ -444,7 +444,6 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  /** Claw transcript for any SDLC execution — used by the wiki run debugger. */
   async getExecutionDebug(
     actor: SdlcActor,
     repoId: string,
@@ -508,8 +507,6 @@ export class SdlcHubService implements SdlcHub {
         });
     if (!folder) throw new AppError('Artifact type folder not found', 409);
 
-    // Every artifact type needs a track except Repo Knowledge, which describes the
-    // hub itself. Here, not in the shared schema, because only here is the folder known.
     if (input.kind !== 'BASELINE' && !input.trackId && folder.name !== SDLC_REPO_KNOWLEDGE_FOLDER) {
       throw new AppError('Artifacts require a track', 400);
     }
@@ -633,9 +630,6 @@ export class SdlcHubService implements SdlcHub {
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
-                // The hub being written to, matching the containment edge above.
-                // A repository can sit in several hubs, so its own channelId is
-                // not necessarily this one — and a hub-scoped write has no repo.
                 channelId,
                 sourceType: 'TRACK',
                 sourceId: input.trackId,

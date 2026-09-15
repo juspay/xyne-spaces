@@ -302,22 +302,6 @@ export default function SdlcScreen(): ReactElement {
     [selectedRepo, channel],
   );
   const repoId = repo?.id;
-  const setupExecutionQuery = useQuery({
-    queryKey: ['sdlc-setup-execution', repoId, repo?.sdlcSetupExecutionId ?? null],
-    queryFn: async () => {
-      const response = await apiInstance.get<{
-        success: boolean;
-        execution: RepoSetupExecution | null;
-      }>(`/sdlc/repositories/${encodeURIComponent(repoId!)}/setup-execution`);
-      return response.data.execution;
-    },
-    enabled: Boolean(repoId),
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchInterval: query =>
-      isRepoKnowledgeRunning(repoKnowledgeState(query.state.data).phase) ? 2_000 : false,
-  });
-  const setupExecution = setupExecutionQuery.data ?? null;
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
@@ -526,8 +510,6 @@ export default function SdlcScreen(): ReactElement {
     if (!channel) return [];
     return (channel.canvasFolders ?? []).flatMap(folder => folder.canvases ?? []);
   }, [channel]);
-  // The Repo Knowledge folder is the artifact type; documents in it are no longer
-  // distinguished by a baselineKind enum.
   const knowledgeFolderId = useMemo(
     () =>
       (channel?.canvasFolders ?? []).find(folder => folder.name === SDLC_REPO_KNOWLEDGE_FOLDER)
@@ -1017,9 +999,25 @@ export default function SdlcScreen(): ReactElement {
     queries.getSdlcHubWorkflow({ channelId: channelId || '' }),
     { enabled: Boolean(channelId) },
   );
+  const hubWorkflowId = hubWorkflowLink?.workflow?.id ?? null;
+  const knowledgeRunsQuery = useQuery({
+    queryKey: ['sdlc-knowledge-runs', hubWorkflowId],
+    queryFn: async () => {
+      const response = await apiInstance.get<{
+        items: { id: string; status: string; updatedAt?: string }[];
+      }>('/workflows-v2/executions', { params: { workflowId: hubWorkflowId, limit: 5 } });
+      return response.data.items.map(run => ({
+        id: run.id,
+        status: run.status,
+        updatedAt: run.updatedAt ? Date.parse(run.updatedAt) : null,
+      }));
+    },
+    enabled: Boolean(hubWorkflowId),
+    refetchInterval: 5 * 60_000,
+  });
   const state = repoKnowledgeState({
-    workflowId: hubWorkflowLink?.workflow?.id ?? null,
-    runs: hubWorkflowLink?.workflow?.workflowExecutions ?? null,
+    workflowId: hubWorkflowId,
+    runs: knowledgeRunsQuery.data ?? null,
   });
   const knowledgeRunning = state.phase === 'RUNNING';
 
@@ -1129,18 +1127,22 @@ export default function SdlcScreen(): ReactElement {
     callWikiAction('wiki-generate', 'generate', input, 'Wiki generation started');
   const refreshWiki = (input: Pick<SdlcWikiStartInput, 'chunkSize' | 'quality'>): Promise<void> =>
     callWikiAction('wiki-refresh', 'refresh', input, 'Wiki refresh started');
-  // The workflow surface owns run control, so these go straight to it rather than
-  // through an SDLC endpoint that would only forward them.
   const runKnowledge = (): Promise<void> =>
     call(
       RUN_REPO_KNOWLEDGE.key,
-      () => apiInstance.post(`/workflows-v2/workflows/${state.workflowId!}/trigger`, {}),
+      async () => {
+        await apiInstance.post(`/workflows-v2/workflows/${state.workflowId!}/trigger`, {});
+        await knowledgeRunsQuery.refetch();
+      },
       RUN_REPO_KNOWLEDGE.success,
     );
   const cancelKnowledge = (): Promise<void> =>
     call(
       CANCEL_REPO_KNOWLEDGE.key,
-      () => apiInstance.post(`/workflows-v2/executions/${state.runId!}/cancel`, {}),
+      async () => {
+        await apiInstance.post(`/workflows-v2/executions/${state.runId!}/cancel`, {});
+        await knowledgeRunsQuery.refetch();
+      },
       CANCEL_REPO_KNOWLEDGE.success,
     );
   const callWikiExecutionAction = (action: 'retry' | 'cancel', success: string): Promise<void> => {
@@ -1381,8 +1383,6 @@ export default function SdlcScreen(): ReactElement {
 
   const renderRepoKnowledgeControls = (compact = false): ReactElement | undefined => {
     if (!isAdmin || !repo) return undefined;
-    // A hub whose workflow was never seeded has nothing to run. The backfill
-    // endpoint gives it one; showing a dead button would just fail on click.
     if (state.phase === 'NOT_CONFIGURED') return undefined;
 
     const action = repoKnowledgeAction(state.phase);
@@ -1394,10 +1394,6 @@ export default function SdlcScreen(): ReactElement {
           size={compact ? 'sm' : 'default'}
           variant={knowledgeRunning ? 'destructive' : 'default'}
           loading={busy === action.key}
-          // Not gated on the selected repository's READ capability any more: the run
-          // covers the whole hub, and each clone is authorized per repository at
-          // sandbox-repo-setup. A broken repo fails that step with a real error,
-          // which beats a button that cannot be pressed and does not say why.
           disabled={busy !== null}
           onClick={() => void (knowledgeRunning ? cancelKnowledge() : runKnowledge())}
           data-track-category='SdlcHub'
@@ -2986,6 +2982,10 @@ export default function SdlcScreen(): ReactElement {
                     showAskAiAction={false}
                   />
                 </div>
+              ) : section === 'workflows' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <SdlcWorkflowsSection />
+                </div>
               ) : (
                 <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
                   {section === 'overview' && (
@@ -3174,11 +3174,6 @@ export default function SdlcScreen(): ReactElement {
                   {section === 'tickets' && repo.channelId && (
                     <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
                       <KanbanBoardScreen channelId={repo.channelId} />
-                    </div>
-                  )}
-                  {section === 'workflows' && (
-                    <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                      <SdlcWorkflowsSection />
                     </div>
                   )}
                 </div>

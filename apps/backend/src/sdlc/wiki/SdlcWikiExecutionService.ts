@@ -77,7 +77,7 @@ export class SdlcWikiExecutionService {
       ).contentAudit(input);
     },
     private readonly refreshHubKnowledge: (
-      repoId: string,
+      channelId: string,
       actorUserId: string
     ) => Promise<string | null> = triggerHubKnowledgeRun
   ) {}
@@ -979,8 +979,10 @@ export class SdlcWikiExecutionService {
       where: { id: executionId },
       select: { createdBy: true },
     });
-    if (execution?.createdBy) {
-      await this.refreshHubKnowledge(context.repoId, execution.createdBy);
+    const channelId =
+      context.channelId ?? (await resolveSdlcChannelId(this.prisma, context.repoId));
+    if (execution?.createdBy && channelId) {
+      await this.refreshHubKnowledge(channelId, execution.createdBy);
     }
   }
 

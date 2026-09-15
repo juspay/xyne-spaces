@@ -11,16 +11,10 @@ const notify = (kind: 'success' | 'error', message: string): void => {
   else toast.error(message);
 };
 
-/**
- * The whole workflow surface, mounted under the hub. `WorkflowApp` addresses itself
- * by sub-path, so a second host costs a routing adapter and nothing else.
- */
 const SdlcWorkflowsSection = (): ReactElement => {
   const { channelId, path, search, navigate } = useSdlcWorkflowRouting();
 
-  // Land in the hub's folder rather than the workspace root. Once per mount only:
-  // the root IS the empty path, so redirecting every time would trap the user here —
-  // the breadcrumb and the back arrow both navigate to it.
+  // Once per mount: the root is the empty path, so redirecting every time traps the user.
   const landed = useRef(false);
   useEffect(() => {
     if (landed.current || path !== '' || !channelId) return;
@@ -29,15 +23,18 @@ const SdlcWorkflowsSection = (): ReactElement => {
   }, [path, channelId, navigate]);
 
   return (
-    <WorkflowUIProvider client={workflowClient} queryClient={queryClient}>
-      <WorkflowApp
-        className='xyne-workflow-ui h-full'
-        path={path}
-        search={search}
-        onNavigate={navigate}
-        onToast={notify}
-      />
-    </WorkflowUIProvider>
+    // The builder's side panel grows to its content's min width, which overflows next to the hub sidebar.
+    <div className='h-full overflow-hidden [&_.flex.h-full.w-full>*]:min-w-0'>
+      <WorkflowUIProvider client={workflowClient} queryClient={queryClient} className='h-full'>
+        <WorkflowApp
+          className='xyne-workflow-ui h-full'
+          path={path}
+          search={search}
+          onNavigate={navigate}
+          onToast={notify}
+        />
+      </WorkflowUIProvider>
+    </div>
   );
 };
 
