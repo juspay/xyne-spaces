@@ -278,6 +278,7 @@ export const createSdlcChannelSchema = z.object({
   name: z.string().trim().min(1).max(120),
   // At least one: a hub with no repositories has no screen to render.
   repoIds: z.array(z.string().min(1)).min(1).max(100),
+  visibility: z.enum(["PUBLIC", "PRIVATE"]).default("PRIVATE"),
 });
 export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
 

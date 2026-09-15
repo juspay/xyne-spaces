@@ -8,6 +8,7 @@ import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMu
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import Input from '../../components/ui/Input';
+import RadioGroup, { Radio } from '../../components/ui/RadioGroup';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { apiInstance } from '../../services/clients/apiClient';
 import { queries } from '../../zero/queries';
@@ -58,6 +59,7 @@ export function SdlcHubDialog({
   const [name, setName] = useState('');
   const [repoIds, setRepoIds] = useState<string[]>([]);
   const [pickedProjectId, setPickedProjectId] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState<'PRIVATE' | 'PUBLIC'>('PRIVATE');
   const [busy, setBusy] = useState(false);
   // Seeded from the current hub's project when there is one, but still a picker: a
   // new hub need not live in the same project.
@@ -68,6 +70,7 @@ export function SdlcHubDialog({
     setName('');
     setRepoIds(hub?.repoIds ?? []);
     setPickedProjectId(projectId ?? null);
+    setVisibility('PRIVATE');
   }, [open, hub?.repoIds, projectId]);
 
   const [projectRows] = useCachedQuery(queries.getAllProjectsList(), {
@@ -143,6 +146,7 @@ export function SdlcHubDialog({
           projectId: activeProjectId,
           name: name.trim(),
           repoIds,
+          visibility,
         });
         toast.success('Hub created');
         onSaved(response.data.channel.id);
@@ -169,7 +173,7 @@ export function SdlcHubDialog({
         <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
           {editing
             ? 'Repositories this hub covers. A hub always keeps at least one.'
-            : 'A private workspace covering one or more repositories. It never appears in Chat.'}
+            : 'A workspace covering one or more repositories. It never appears in Chat.'}
         </p>
 
         <div className='mt-6 space-y-5'>
@@ -210,6 +214,34 @@ export function SdlcHubDialog({
                 className='mt-2 h-10'
                 placeholder='e.g. Payments platform'
               />
+            </div>
+          )}
+
+          {!editing && (
+            <div>
+              <p className='mb-2 text-sm font-medium'>Visibility</p>
+              <RadioGroup
+                name='sdlc-hub-visibility'
+                value={visibility}
+                onChange={value => setVisibility(value === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE')}
+              >
+                <Radio
+                  value='PRIVATE'
+                  subtext='Only invited members can view and join'
+                  data-track-category='SdlcHub'
+                  data-track-name='HubVisibilityPrivate'
+                >
+                  Private
+                </Radio>
+                <Radio
+                  value='PUBLIC'
+                  subtext='Anyone in the workspace can view and join'
+                  data-track-category='SdlcHub'
+                  data-track-name='HubVisibilityPublic'
+                >
+                  Public
+                </Radio>
+              </RadioGroup>
             </div>
           )}
 
