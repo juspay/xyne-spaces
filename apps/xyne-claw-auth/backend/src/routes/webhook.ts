@@ -143,7 +143,6 @@ import {
   prScreenId,
   isTwinDelivery,
   isUiWidget,
-  SDLC_REQUIRED_TOOLS,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
@@ -2673,15 +2672,6 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
-    sdlcOperation?: "baseline" | "work" | "wiki";
-    sdlcWikiRole?:
-      | "BOOTSTRAP_SURVEY"
-      | "BOOTSTRAP_PAGE"
-      | "BOOTSTRAP_EDITOR"
-      | "BOOTSTRAP"
-      | "GENERATOR"
-      | "ARCHITECTURE_VALIDATOR"
-      | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
 
@@ -2950,99 +2940,6 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-  const wikiValidator =
-    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
-    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
-  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
-  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
-  const sdlcOutputFormat =
-    payload.sdlcOperation === "wiki" && wikiSurvey
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              repositorySummary: { type: "string" },
-              pages: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    path: { type: "string" },
-                    purpose: { type: "string" },
-                    concepts: { type: "array", items: { type: "string" } },
-                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
-                    archetype: {
-                      type: "string",
-                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
-                    },
-                    sourceAreas: { type: "array", items: { type: "string" } },
-                    relatedPages: { type: "array", items: { type: "string" } },
-                    tableCandidates: { type: "array", items: { type: "string" } },
-                    diagramCandidates: { type: "array", items: { type: "string" } },
-                  },
-                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
-                },
-              },
-            },
-            required: ["repositorySummary", "pages"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
-        }
-      : payload.sdlcOperation === "wiki" && wikiValidator
-        ? {
-            type: "json",
-            schema: {
-              type: "object",
-              properties: {
-                complete: { type: "boolean" },
-                missingTopics: { type: "array", items: { type: "string" } },
-                issues: { type: "array", items: { type: "string" } },
-                suggestions: { type: "array", items: { type: "string" } },
-              },
-              required: ["complete", "missingTopics", "issues", "suggestions"],
-            },
-          }
-        : payload.sdlcOperation === "wiki"
-          ? {
-              type: "json",
-              schema: {
-                type: "object",
-                properties: { completed: { type: "boolean" } },
-                required: ["completed"],
-              },
-          requireToolsBeforeSubmit: wikiPageWriter
-            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
-            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
-            }
-    : payload.sdlcOperation === "work"
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              summary: { type: "string" },
-              branchName: { type: "string" },
-              commitHash: { type: "string" },
-              pullRequestUrl: { type: "string" },
-            },
-            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
-        }
-      : {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              created: { type: "boolean" },
-              canvasId: { type: "string" },
-              artifactKind: { type: "string" },
-            },
-            required: ["created", "canvasId", "artifactKind"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
-        };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
@@ -3060,7 +2957,6 @@ export async function handleAutomationWebhook(
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
                   ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
-                outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
               }
             : {}),
