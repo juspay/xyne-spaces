@@ -91,6 +91,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -549,6 +550,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 

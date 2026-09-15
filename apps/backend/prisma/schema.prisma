@@ -867,6 +867,7 @@ model User {
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
   calendarVisibility String             @default("PUBLIC")
+  activityStatus String?
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
@@ -915,6 +916,7 @@ model User {
   @@index([providerUserId])
 
   @@index([workspaceId, id])
+  @@index([activityStatus])
   @@map("users")
   @@schema("public")
 }

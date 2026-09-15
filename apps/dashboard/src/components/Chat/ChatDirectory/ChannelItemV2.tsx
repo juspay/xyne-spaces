@@ -219,6 +219,7 @@ const ChannelItemV2 = memo(
                 statusEmoji={dmUser?.statusEmoji}
                 statusContent={dmUser?.statusContent}
                 statusExpiryAt={dmUser?.statusExpiryAt}
+                activityStatus={dmUser?.activityStatus}
                 size='sm'
                 showOnHover={true}
               />
