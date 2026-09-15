@@ -82,7 +82,7 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
         ? `/attachments/${file.attachmentId}/thumbnail`
         : file.attachmentId || file.fileUrl;
 
-    createPreviewUrl(source)
+    createPreviewUrl(source, { mimeType: file.mimeType })
       .then(blob => {
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
@@ -96,7 +96,14 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
         urlRef.current = null;
       }
     };
-  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo]);
+  }, [
+    file.attachmentId,
+    file.fileUrl,
+    file.mimeType,
+    file.thumbnailUrl,
+    isImage,
+    isVideo,
+  ]);
 
   if (blobUrl) {
     return (
