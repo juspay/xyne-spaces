@@ -1,223 +1,179 @@
-# Performance Testing: Beginner Implementation Runbook
+# Performance Testing: Beginner Runbook
 
-This runbook explains how to start performance testing in Xyne Spaces from zero experience. It follows the decisions in [the performance and load testing plan](./performance-load-testing-plan.md).
+This guide explains how to operate the XYNE-63166 performance framework from zero experience. The
+architecture and module priority are documented in
+[the design](./superpowers/specs/2026-09-10-xyne-63166-performance-testing-design.md) and
+[the priority decision](./performance-testing-priority-decision.md).
 
-## 1. The simple idea
-
-Performance testing means asking the application to behave as though several users are using it at the same time, then measuring:
-
-- whether requests succeed;
-- how long they take; and
-- which backend component becomes slow.
-
-For Xyne, use **k6** as the traffic generator. k6 sends HTTP and WebSocket requests from a JavaScript test script. Grafana shows the backend evidence: API, database, Redis, Vespa, queue, CPU, and memory behaviour.
-
-You do **not** need to build a big new “framework” first. Start with this lightweight structure:
+## 1. Understand the four moving parts
 
 ```text
-performance/
-  k6/
-    scenarios/          # One file per user journey
-    lib/                # Reusable config, auth, test-data helpers
-    reports/            # Generated locally; ignored by Git
-  README.md             # How to run each scenario
+Jenkins parameterized stage
+          |
+          v
+pnpm perf:run -> pinned k6 container -> Xyne sandbox/preprod
+          |                 |
+          |                 +-> VictoriaMetrics -> Grafana live dashboard
+          +-> HTML + JSON files -> Jenkins archived artifacts/release evidence
 ```
 
-The first scenario can be one file. Create reusable helpers only after two scenarios need the same logic.
+- **k6** simulates virtual users and applies checks/thresholds.
+- **VictoriaMetrics** stores time-series results. Xyne already uses it, so no InfluxDB is added.
+- **Grafana** shows load-generator and application metrics together.
+- **Jenkins** selects the safe environment/profile, binds secrets, runs one repository command, and
+  archives reports. Performance workload logic does not live in Jenkins.
 
-## 2. Learn five words before starting
+Playwright/Gauge continues to answer “does the UI journey work?” k6 answers “does the API remain
+correct and fast under concurrent traffic?” Do not use Playwright browsers as the main load source.
 
-| Word | Simple meaning |
+## 2. Learn these five terms
+
+| Term | Simple meaning |
 | --- | --- |
-| Virtual user (VU) | One simulated person using Xyne. |
-| Scenario | The actions that virtual users perform, for example open workspace → list tickets → search. |
-| Ramp | Increase users gradually instead of sending all traffic at once. |
-| p95 latency | 95 out of 100 requests finished within this time. It reveals slow requests that averages hide. |
-| Threshold | The pass/fail rule, for example “p95 search must be below 1.5 seconds.” |
+| Virtual user (VU) | One simulated user repeatedly performing the scenario. |
+| Scenario | The user action, currently readiness or text-message send. |
+| Profile | The traffic shape: smoke, release, load, stress, or soak. |
+| p95 | 95 of 100 samples complete at or below this time. |
+| Threshold | A rule that changes the command to pass or fail. |
 
-## 3. What to test first
+## 3. One-time setup owned by the team
 
-Start with one safe, common journey. Recommended first journey:
+Before sending load, ask the platform/backend owners for:
 
-```text
-Login as a test user
-  -> check readiness
-  -> load workspace/dashboard data
-  -> list tickets or conversations
-  -> search
-  -> create one test-only record
-  -> verify the record
+1. Sandbox and pre-production base URLs reachable from the Jenkins agent.
+2. A dedicated performance workspace that can be reset without touching customer data.
+3. Several test identities, short-lived bearer tokens, and writable conversation IDs.
+4. The safe workspace reset/seed command and its owner.
+5. The VictoriaMetrics Remote Write URL and protected credentials.
+6. Access to the **Xyne k6 Performance Testing** Grafana dashboard.
+7. The release owner who records **Go**, **Investigate**, or **Approved waiver**.
+
+These are deployment dependencies, not npm dependencies. Never solve a missing test identity by
+using an employee or customer token.
+
+## 4. First local learning run
+
+From the repository root:
+
+```bash
+pnpm perf:validate
+docker version
+PERF_BASE_URL=https://sandbox.example.com \
+PERF_RELEASE_VERSION=local-learning \
+pnpm perf:smoke
 ```
 
-This is better than starting with AI, imports, attachments, integrations, or real-time collaboration because it is easier to make safe and repeatable.
+Expected result: k6 calls `/api/health/readiness`, then writes `report.html`, `summary.json`, and
+`metadata.json` into a timestamped folder under `performance/reports/`.
 
-## 4. Where tests are allowed to run
+If this fails, do not add users. Check DNS/TLS, Docker networking, the URL, deployment readiness,
+and whether the Jenkins/local machine is allowed to reach the environment.
 
-| Environment | Allowed test | Never do |
+## 5. Prepare the first messaging run
+
+1. Copy `performance/test-data/users.example.json` to
+   `performance/test-data/users.sandbox.json`.
+2. Add dedicated identity records supplied by the environment owner.
+3. Confirm every conversation belongs to the performance workspace.
+4. Confirm how the workspace will be reset after generated `PERF-<run-id>` messages.
+5. Keep the real JSON file untracked; the repository ignore rules protect it.
+
+Run only five VUs for two steady minutes while learning. Start with `zero-query-transform`, the read-only
+scenario covering the Zero query-transform step — it needs no workspace reset:
+
+```bash
+PERF_BASE_URL=https://sandbox.example.com \
+PERF_RELEASE_VERSION=1.298.0 \
+PERF_USERS_FILE=performance/test-data/users.sandbox.json \
+pnpm perf:run -- --environment sandbox --profile release --scenario zero-query-transform --vus 5 --duration 2m
+```
+
+Read the console first, then open the HTML report. Verify request count, HTTP failures, check pass
+rate, Zero query-transform p95, and whether the application remained ready.
+
+`rest-messaging` is the same command with `--scenario rest-messaging` plus
+`PERF_ALLOW_WRITE_SCENARIOS=true`, without which the runner refuses it. It writes a message row per
+iteration, so reset the workspace afterward — and note step 4 above is still an open question, not
+a solved one. The Zero endpoints are also rate limited per identity (300 requests / 60s), so the
+runner refuses a `zero-query-transform` run whose fixture is too small; see
+`performance/test-data/README.md` for the sizing table.
+
+## 6. Jenkins release procedure
+
+The performance stage belongs **after deployment and readiness**, not in compile/build jobs:
+
+```text
+build and test artifact
+  -> deploy selected environment
+  -> readiness succeeds
+  -> RUN_PERFORMANCE_TESTS?
+       false: skip with no extra build time
+       true: reset fixtures -> run k6 -> archive reports -> record decision
+  -> promotion/release decision
+```
+
+For the first 3–5 stable releases:
+
+- use the `release` profile in pre-production;
+- leave `PERF_ENFORCE_THRESHOLDS=false`;
+- fail on readiness or response correctness;
+- compare p50/p95/p99 and error trends between unchanged releases; and
+- agree final blocking thresholds only after variance is understood.
+
+Load, stress, and soak profiles are pre-production-only and should be manually selected, not run on
+every ordinary release. Production load is not part of this framework.
+
+## 7. How to read a result
+
+| Signal | Healthy meaning | Investigate when |
 | --- | --- | --- |
-| Local machine | One or a few users against local/test data | Infer production capacity from it. |
-| Sandbox | 2–3 minute smoke performance test | Use customer data or real provider credentials. |
-| Pre-production | 10–15 minute release-critical-path test; scheduled capacity test | Use production secrets. |
-| Production | Low-volume synthetic health/user journey only | Routine load, stress, or soak test. |
+| Checks | All expected status/body checks pass | Any repeated authentication, readiness, or message response failure |
+| HTTP failure rate | Near zero | Sustained 4xx/5xx during steady traffic |
+| Message p95/p99 | Stable compared with approved baseline | Tail latency climbs with VUs or release version |
+| VUs and request rate | Match the selected profile | Generator cannot create expected traffic |
+| API p95 | Tracks k6 latency without a large unexplained gap | Route latency rises while traffic is steady |
+| DB/Redis/queue/Zero | No saturation or growing backlog | Connections, lag, queue age, errors, or memory keep rising |
 
-Production load testing is not the starting point. It can slow or harm real customer activity and increases cloud cost.
+The load generator proves **that** the system slowed down. Application metrics help determine
+**why**. If PostgreSQL, Redis, queue, or Zero metrics are missing, report the root cause as unknown
+instead of guessing.
 
-## 5. First-time setup checklist
-
-Complete these items in order. Do not start writing a test until items 1–4 are true.
-
-1. **Choose an owner.** One engineer owns the first scenario; one release owner reads the result.
-2. **Choose a target environment.** Start with sandbox, then pre-production.
-3. **Create a dedicated test workspace and user.** The account must have only test data. Never reuse an employee or customer account.
-4. **Choose a reset method.** Before each run, either restore known fixtures or use an endpoint/job that clears only the test workspace.
-5. **Install a runner locally.** On macOS: `brew install k6`. Check it with `k6 version`.
-6. **Confirm monitoring.** Open Grafana and find dashboards for backend, Postgres, Redis/Bull, Vespa, and any relevant realtime service.
-7. **Record baseline information.** Release version, environment URL, test-user identifier, start time, and expected traffic level.
-
-The repository already has helpful test foundations: backend health endpoints, test-only routes, and `apps/backend/scripts/generate-load-test-tokens.ts`. Reuse them only in the dedicated test environment—do not expose test helpers in production.
-
-## 6. Build the first test in small steps
-
-### Step A — prove the runner works
-
-Create a temporary k6 test that calls the sandbox readiness endpoint with one user. Its only job is to prove:
-
-- k6 can reach the environment;
-- TLS/DNS/network access works; and
-- a report is produced.
-
-Do not add authentication or concurrency yet. A failed first run should be easy to diagnose.
-
-### Step B — add authentication
-
-Use an environment variable such as `K6_TEST_TOKEN`; do not put a token in a JavaScript file or commit it to Git.
-
-Test with one request first. If authentication fails, fix the test account or token generation before adding load.
-
-### Step C — add the read-only journey
-
-Add workspace load, ticket/conversation list, and search. For each request, record:
-
-- expected status code;
-- endpoint name/tag; and
-- response-time measurement.
-
-Keep this first version read-only. Read-only tests are easier to repeat while learning.
-
-### Step D — add one safe write
-
-Add one create/update action that is restricted to the dedicated test workspace. Give every created item a predictable prefix such as `PERF-<run-id>` so cleanup is safe.
-
-Immediately add cleanup or reset before raising user counts. A performance test that keeps creating records becomes slower every time it is run and eventually stops measuring the real product behaviour.
-
-### Step E — add a small ramp
-
-Use this beginner traffic profile:
-
-```text
-1 minute: ramp from 0 to 5 users
-3 minutes: hold at 5 users
-1 minute: ramp from 5 to 10 users
-1 minute: ramp down to 0
-```
-
-Run this three times against the same deployed version. If the results vary widely, fix environment/data/monitoring issues before changing thresholds.
-
-### Step F — add thresholds
-
-Start with these candidate rules:
-
-| Check | Candidate rule |
-| --- | --- |
-| Readiness | 100% success |
-| Authenticated requests | >= 99% success |
-| Critical API p95 | < 800 ms |
-| Search p95 | < 1.5 s |
-| HTTP request failures | < 1% |
-
-These are guardrails, not final promises. Baseline them for 3–5 releases and then agree on final SLOs with product/platform owners.
-
-## 7. How to run after a release deployment
-
-This is the routine your team should follow.
-
-### After sandbox deployment
-
-1. Confirm the deployment is healthy with `/api/health/readiness`.
-2. Reset/seed the dedicated performance workspace.
-3. Run the 2–3 minute smoke scenario.
-4. Save the k6 result and note the Grafana time window.
-5. Post a short report in the release group.
-6. If it fails, stop and investigate before relying on sandbox for further validation.
-
-### After pre-production deployment
-
-1. Confirm the exact release version/commit SHA deployed.
-2. Reset/seed the performance workspace.
-3. Start the 10–15 minute critical-path scenario.
-4. During the test, observe Grafana for API, Postgres, Redis/Bull, Vespa, CPU, memory, and queue depth.
-5. Save the result to the release record.
-6. Release owner records one decision: **Go**, **Investigate**, or **Approved waiver**.
-
-### After production deployment
-
-1. Do not run load traffic.
-2. Run a low-volume synthetic check: health, authentication, and a simple read/search journey.
-3. Watch error rate, latency, CPU, memory, DB/Redis/Vespa metrics for the agreed observation window.
-4. Attach the production verification link to release notes.
-
-## 8. What a release report looks like
-
-Copy this into the release group or existing release notes:
+## 8. Release evidence template
 
 ```text
 Performance test report
 Release / commit: <version or SHA>
-Environment: sandbox | pre-production
-Scenario: smoke | release-critical-path
-Start / finish: <UTC timestamps>
-Traffic: <virtual-user ramp>
-Result: PASS | FAIL | ENVIRONMENT ISSUE
-Thresholds: <summary>
-Grafana: <dashboard link with time range>
-k6 artifact: <report link>
+Environment: sandbox | preprod
+Run ID: <metadata.json runId>
+Scenario / profile: messaging / release
+Traffic: <peak VUs and duration>
+Result: PASS | PRODUCT_FAILURE | TEST_FAILURE | ENVIRONMENT_FAILURE | OBSERVABILITY_FAILURE
+Checks / error rate / p95: <short values>
+Grafana: <dashboard link and time window>
+Jenkins artifacts: <build artifact link>
 Decision: Go | Investigate | Approved waiver
 Owner / approver: <name>
 ```
 
-## 9. When to add automation
+## 9. Common mistakes to avoid
 
-Begin manually. Once the team can run and interpret the test reliably, add a manual GitHub Actions workflow or Jenkins job. It should:
+- Do not run `load`, `stress`, or `soak` against sandbox or production.
+- Do not put tokens in Jenkins string parameters, commands, Git, HTML, JSON, or Grafana labels.
+- Do not use one shared identity if it hides real session/concurrency behaviour.
+- Do not compare runs with different data size, infrastructure, or traffic shape as if equivalent.
+- Do not retry a genuine threshold failure until it passes; record and investigate it.
+- Do not enforce the provisional 300 ms p95 until owners approve it from baseline evidence.
 
-1. Ask for environment (`sandbox` or `preprod`) and release version.
-2. Load URL/token from protected secrets.
-3. Run the same version-controlled k6 scenario in a pinned Docker image.
-4. Upload the report even when it fails.
-5. Optionally post the result to the release channel.
+## 10. Your practical learning order
 
-This is **manual automation**: one button starts a repeatable job, but it does not add time to every CI build.
+1. Run `pnpm perf:validate` and read the validation tests.
+2. Dry-run the launcher and inspect the secret-safe Docker command.
+3. Run readiness smoke against sandbox.
+4. Run messaging with 1 VU, then 5 VUs.
+5. Find the same run ID in Grafana.
+6. Explain one HTML report to your senior.
+7. Trigger the Jenkins stage with `RUN_PERFORMANCE_TESTS=true`.
+8. After 3–5 comparable runs, help propose the blocking p95/error criteria.
 
-Only after several successful releases should the team consider an automatic promotion gate.
-
-## 10. What to build later, not now
-
-Do not begin with these. Add them after the first scenario is trusted:
-
-- WebSocket/Zero/Y-Sweet collaboration scenario;
-- queue and ingestion scenario;
-- attachment upload scenario;
-- AI workflow scenario using mocks;
-- nightly capacity test;
-- stress/spike test; and
-- long soak test.
-
-## 11. Your first practical task
-
-Before any code, answer these four questions in the release ticket or document:
-
-1. What sandbox URL will be used?
-2. Which dedicated test workspace and user can be safely reset?
-3. Which first journey should we test: **tickets**, **conversations**, or **search**?
-4. Who will read the report and decide whether a result is acceptable?
-
-Once those are answered, create the first one-user readiness test. That is the correct first implementation milestone—not a large framework or a 100-user load test.
+That order teaches framework, application behavior, observability, and release decision-making
+without beginning with unsafe high load.

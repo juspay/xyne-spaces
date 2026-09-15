@@ -5,6 +5,8 @@ import {
   ENVIRONMENTS,
   K6_IMAGE,
   resolveRunConfig,
+  SCENARIOS,
+  WRITE_SCENARIOS,
 } from '../config/catalog.mjs';
 
 test('defaults to a safe sandbox smoke execution', () => {
@@ -17,8 +19,22 @@ test('defaults to a safe sandbox smoke execution', () => {
   });
 });
 
-test('uses messaging as the default scenario for non-smoke profiles', () => {
-  assert.equal(resolveRunConfig({ profile: 'release' }).scenario, 'messaging');
+test('defaults non-smoke profiles to the Zero query-transform read path', () => {
+  assert.equal(resolveRunConfig({ profile: 'release' }).scenario, 'zero-query-transform');
+});
+
+test('offers the Zero and REST scenarios under explicit names', () => {
+  assert.deepEqual(
+    [...SCENARIOS].sort(),
+    ['rest-messaging', 'smoke', 'zero-query-transform'],
+  );
+});
+
+test('no longer accepts the ambiguous messaging scenario name', () => {
+  assert.throws(
+    () => resolveRunConfig({ profile: 'release', scenario: 'messaging' }),
+    /unknown scenario/i,
+  );
 });
 
 test('pins the k6 image and defines environment caps', () => {
@@ -32,6 +48,16 @@ test('rejects production and unknown environments', () => {
   assert.throws(() => resolveRunConfig({ environment: 'local' }), /not allowed/i);
 });
 
+test('allows only short profiles in sandbox', () => {
+  assert.doesNotThrow(() => resolveRunConfig({ environment: 'sandbox', profile: 'release' }));
+  for (const profile of ['load', 'stress', 'soak']) {
+    assert.throws(
+      () => resolveRunConfig({ environment: 'sandbox', profile }),
+      /preprod/i,
+    );
+  }
+});
+
 test('rejects unknown profiles and scenarios', () => {
   assert.throws(() => resolveRunConfig({ profile: 'maximum' }), /unknown profile/i);
   assert.throws(() => resolveRunConfig({ scenario: 'attachments' }), /unknown scenario/i);
@@ -42,14 +68,14 @@ test('accepts bounded VU and duration overrides', () => {
     resolveRunConfig({
       environment: 'preprod',
       profile: 'load',
-      scenario: 'messaging',
+      scenario: 'zero-query-transform',
       vusOverride: '250',
       durationOverride: '45m',
     }),
     {
       environment: 'preprod',
       profile: 'load',
-      scenario: 'messaging',
+      scenario: 'zero-query-transform',
       vusOverride: 250,
       durationOverride: '45m',
     },
@@ -77,4 +103,31 @@ test('rejects invalid or excessive duration overrides', () => {
     () => resolveRunConfig({ environment: 'sandbox', durationOverride: '61m' }),
     /maximum 1h/i,
   );
+});
+
+test('names the scenarios that write rows', () => {
+  assert.deepEqual([...WRITE_SCENARIOS], ['rest-messaging']);
+});
+
+test('refuses a write scenario while no fixture reset exists', () => {
+  assert.throws(
+    () => resolveRunConfig({ profile: 'release', scenario: 'rest-messaging' }),
+    /writes rows and no reset is implemented/i,
+  );
+});
+
+test('allows a write scenario only on an explicit opt-in', () => {
+  assert.equal(
+    resolveRunConfig({
+      profile: 'release',
+      scenario: 'rest-messaging',
+      allowWriteScenarios: true,
+    }).scenario,
+    'rest-messaging',
+  );
+});
+
+test('the read scenarios need no opt-in', () => {
+  assert.equal(resolveRunConfig({ profile: 'release' }).scenario, 'zero-query-transform');
+  assert.equal(resolveRunConfig({ profile: 'smoke' }).scenario, 'smoke');
 });
