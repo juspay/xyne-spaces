@@ -1307,6 +1307,10 @@ export class EmailService {
     }
     const { conversation, ticket, email } = txResult;
 
+    // Direct DB ticket create bypasses Zero side-effects — invalidate the
+    // channel's label unread counts so sidebar badges refresh.
+    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+
     // --- Side effects (outside transaction) ---
 
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
@@ -1570,6 +1574,7 @@ export class EmailService {
         }
 
         await syncTicketEmailCount(this.prisma, conversationId);
+        websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },
@@ -1762,6 +1767,8 @@ export class EmailService {
         }
       });
     });
+
+    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
 
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
@@ -2508,6 +2515,11 @@ export class EmailService {
         };
       }
       throw error;
+    }
+
+    // Post-commit so refetched label unread counts see the new emails.
+    if (txResult.ticketId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(channelId);
     }
 
     const insertedIdSet = new Set(txResult.insertedEmailIds);

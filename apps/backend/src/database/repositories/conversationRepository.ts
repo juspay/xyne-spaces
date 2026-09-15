@@ -4,6 +4,7 @@ import { QueryOptions } from '@/types/database';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { websocketService } from '@/services/websocketService';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -535,6 +536,11 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         data: { lastViewedConversationId: null }
       })
     ]);
+
+    if (movedConversations.count > 0) {
+      websocketService.broadcastLabelUnreadCountsUpdate(sourceChannelId);
+      websocketService.broadcastLabelUnreadCountsUpdate(targetChannelId);
+    }
 
     return movedConversations.count;
   }

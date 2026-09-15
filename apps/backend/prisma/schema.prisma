@@ -2193,6 +2193,7 @@ model ConversationLabelMapping {
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
+  @@index([channelId, workspaceId]) // per-channel label unread-count scans
   @@map("conversation_label_mappings")
   @@schema("public")
 }

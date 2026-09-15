@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { Loader2, Tag, Plus, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,10 +13,15 @@ import { cn } from '../../../utils/classNames';
 import {
   deleteConversationLabel,
   fetchConversationLabelDeleteImpact,
-  fetchConversationLabelUnreadCounts,
   type ConversationLabelDeleteImpact,
+  type LabelUnreadFilters,
 } from '../../../api/conversationLabelsApi';
 import { deskLabelRulesQueryKey } from '../AutoLabelWizard/AutoLabelRules';
+import {
+  normalizeLabelUnreadFilters,
+  useFilteredLabelUnreadCount,
+  useLabelUnreadCounts,
+} from './useLabelUnreadCounts';
 
 /**
  * Gmail-style "Labels" section for the desk sidebar. The "Labels" heading is not
@@ -48,6 +53,7 @@ interface DeskLabelsSidebarProps {
   activeLabelId: string | null;
   onSelectLabel: (labelId: string, labelName: string) => void;
   onDeletedLabel?: (labelId: string) => void;
+  labelUnreadFilters?: LabelUnreadFilters;
 }
 
 export const DeskLabelsSidebar = ({
@@ -56,6 +62,7 @@ export const DeskLabelsSidebar = ({
   activeLabelId,
   onSelectLabel,
   onDeletedLabel,
+  labelUnreadFilters,
 }: DeskLabelsSidebarProps): ReactElement => {
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -63,13 +70,17 @@ export const DeskLabelsSidebar = ({
     queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
     { enabled: !!channelId },
   );
-  const { data: unreadCounts } = useQuery({
-    queryKey: ['conversation-label-unread-counts', channelId],
-    queryFn: () => fetchConversationLabelUnreadCounts(channelId),
-    enabled: !!channelId && isMember,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
+  const { data: unreadCounts } = useLabelUnreadCounts(channelId, isMember);
+  const normalizedLabelFilters = useMemo(
+    () => normalizeLabelUnreadFilters(labelUnreadFilters),
+    [labelUnreadFilters],
+  );
+  const hasActiveFilters = normalizedLabelFilters !== undefined;
+  const { data: filteredUnreadCount } = useFilteredLabelUnreadCount({
+    channelId,
+    labelId: activeLabelId,
+    filters: normalizedLabelFilters,
+    enabled: hasActiveFilters,
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -173,8 +184,11 @@ export const DeskLabelsSidebar = ({
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
             const active = activeLabelId === label.id;
-            const count = unreadCounts?.[label.id] ?? 0;
-            const showUnread = count > 0 && !active;
+            const count =
+              active && hasActiveFilters
+                ? (filteredUnreadCount?.unreadCount ?? 0)
+                : (unreadCounts?.[label.id] ?? 0);
+            const showUnread = count > 0 && (!active || hasActiveFilters);
             return (
               <div
                 key={label.id}

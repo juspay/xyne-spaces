@@ -124,6 +124,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           id: fullTicket.id,
           workspaceId: fullTicket.workspaceId,
           boardId: fullTicket.boardId,
+          channelId: fullTicket.channelId,
           projectId: fullTicket.projectId,
           stageName: fullTicket.stageName,
           statusV2: fullTicket.statusV2,
@@ -152,6 +153,11 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             assignedTo: prev.assignedTo,
           },
         });
+        // Ticket field changes (stage/priority/assignee/...) change which
+        // conversations match desk filter payloads, so label badges invalidate too.
+        if (snapshot.channelId) {
+          websocketService.broadcastLabelUnreadCountsUpdate(snapshot.channelId);
+        }
       }
     }
 
