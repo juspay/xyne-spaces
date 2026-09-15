@@ -33,6 +33,8 @@ export interface BulkCreateTicketsModalProps {
   projectId?: string | undefined;
   boardId?: string | undefined;
   boardName?: string | undefined;
+  /** Set by the tickets tab so channels can keep those tickets out of chat. */
+  fromTicketsTab?: boolean;
   mode?: BulkTicketMode;
   parentTitle?: string | undefined;
   subTitleTitles?: string[] | undefined;
@@ -90,6 +92,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   channelId: propChannelId,
   projectId: propProjectId,
   boardId: propBoardId,
+  fromTicketsTab = false,
   mode = BulkTicketMode.PARENT_SUB,
   parentTitle,
   subTitleTitles,
@@ -312,8 +315,20 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
 
   const filledRows = rows.filter(r => r.title.trim().length > 0);
   const validCount = filledRows.filter(r => r.description.trim().length > 0).length;
-  const allValid =
-    validCount > 0 && filledRows.every(r => r.description.trim().length > 0) && !!projectId;
+  const minimumRows = isAllParentsMode || hasExistingParent ? 1 : 2;
+  const blockingReason = ((): string | null => {
+    if (!projectId) return 'Pick a channel to set the project';
+    if (filledRows.length < minimumRows) {
+      return minimumRows === 1
+        ? 'Add at least one ticket'
+        : 'Add at least one sub-ticket under the main ticket';
+    }
+    if (filledRows.some(r => !r.description.trim())) return 'Every ticket needs a description';
+    if (filledRows.some(r => !r.channelId)) return 'Every ticket needs a channel';
+    if (filledRows.some(r => !r.boardId)) return 'Every ticket needs a board';
+    return null;
+  })();
+  const allValid = blockingReason === null;
 
   const handleSubmit = async (): Promise<void> => {
     if (!allValid || !user || filledRows.length === 0) return;
@@ -349,6 +364,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           tickets,
           projectId,
           channelId: propChannelId,
+          ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as {
@@ -390,6 +406,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           projectId,
           subTickets,
           ...(sourceMessageId ? { sourceMessageId } : {}),
+          ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as {
@@ -441,6 +458,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         boardId?: string;
         subTickets: unknown[];
         sourceConversationId?: string;
+        fromTicketsTab?: boolean;
       } = {
         mode: BulkTicketMode.PARENT_SUB,
         channelId: parent.channelId,
@@ -460,6 +478,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           ticketType: parent.ticketType,
         },
         subTickets,
+        ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
       };
       if (sourceConversationId) {
         body.sourceConversationId = sourceConversationId;
@@ -740,7 +759,9 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
 
         {/* Footer */}
         <div className='flex items-center justify-between px-5 py-3 border-t border-border shrink-0'>
-          {isAllParentsMode ? (
+          {blockingReason ? (
+            <p className='text-[12px] text-destructive truncate'>{blockingReason}</p>
+          ) : isAllParentsMode ? (
             <p className='text-[12px] text-muted-foreground truncate'>
               {validCount} ticket{validCount !== 1 ? 's' : ''} ready
             </p>
@@ -769,6 +790,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
                 void handleSubmit();
               }}
               disabled={!allValid || isSubmitting}
+              {...(blockingReason ? { title: blockingReason } : {})}
               className={cn(
                 'text-[13px] font-medium text-primary-foreground bg-primary px-3 py-1.5 rounded-lg flex items-center gap-1 transition',
                 (!allValid || isSubmitting) && 'opacity-50 cursor-not-allowed',

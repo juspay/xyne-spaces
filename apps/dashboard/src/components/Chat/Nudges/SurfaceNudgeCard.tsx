@@ -485,6 +485,19 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       {/* Action buttons for BULK_TICKET_CREATION_FAILED */}
       {isBulkTicketFailure && (
         <div className='mt-3 flex items-center justify-end gap-3'>
+          {canDismiss && (
+            <Button
+              size='sm'
+              variant='ghost'
+              disabled={isActing}
+              onClick={handleDismiss}
+              data-track-category='NUDGES'
+              data-track-name='DISMISS_BULK_TICKET_FAILURE_NUDGE'
+              className='text-muted-foreground'
+            >
+              Dismiss
+            </Button>
+          )}
           {isActionable && (
             <Button
               size='sm'
