@@ -769,5 +769,28 @@
       "repoUrlPlaceholder": "https://bitbucket.example.com/scm/PROJECT/repo.git",
       "searchSelectChannel": "Buscar y seleccionar un canal..."
     }
+  },
+  "resourceAccess": {
+    "searchResources": "Buscar recursos..."
+  },
+  "roles": {
+    "detailHeader": {
+      "namePlaceholder": "ej. XYNE_PM",
+      "descriptionPlaceholder": "¿Para qué es este rol?"
+    }
+  },
+  "scheduledMessage": {
+    "filters": {
+      "allChannels": "Todos los canales",
+      "allCreators": "Todos los creadores"
+    },
+    "modal": {
+      "selectChannel": "Seleccionar un canal",
+      "titlePlaceholder": "ej., Mensaje diario de standup",
+      "messagePlaceholder": "El mensaje que se publicará en el canal"
+    }
+  },
+  "teamIntelligence": {
+    "selectRange": "Seleccionar rango"
   }
 }

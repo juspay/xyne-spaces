@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Filter, X } from 'lucide-react';
 import { Button } from '../ui/Button/Button';
 import { FilterMultiSelect } from '../ui/Select/FilterMultiSelect';
@@ -26,6 +27,7 @@ export const ScheduledMessageFilters = ({
   filters,
   onFiltersChange,
 }: ScheduledMessageFiltersProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const channelOptions = useMemo(() => {
     const uniqueChannelIds = [...new Set(messages.map(m => m.channelId))];
     return uniqueChannelIds
@@ -66,14 +68,14 @@ export const ScheduledMessageFilters = ({
           options={channelOptions}
           selectedValues={filters.channelIds}
           onChange={channelIds => onFiltersChange({ ...filters, channelIds })}
-          placeholder='All channels'
+          placeholder={t('scheduledMessage.filters.allChannels')}
         />
 
         <FilterMultiSelect
           options={creatorOptions}
           selectedValues={filters.createdByIds}
           onChange={createdByIds => onFiltersChange({ ...filters, createdByIds })}
-          placeholder='All creators'
+          placeholder={t('scheduledMessage.filters.allCreators')}
         />
 
         {hasActiveFilters && (

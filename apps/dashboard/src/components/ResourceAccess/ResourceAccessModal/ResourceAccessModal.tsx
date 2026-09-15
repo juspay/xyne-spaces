@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useZero } from '../../../hooks/useZero';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
@@ -53,6 +54,7 @@ export const ResourceAccessModal = ({
   isOpen,
   onClose,
 }: ResourceAccessModalProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const zero = useZero();
   const selectedUser = useUser(userId ?? '');
   const { isMobile } = usePlatform();
@@ -365,7 +367,7 @@ export const ResourceAccessModal = ({
             <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10' />
             <Input
               type='text'
-              placeholder='Search resources...'
+              placeholder={t('resourceAccess.searchResources')}
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className='w-full pl-10 pr-4 h-9 text-sm'

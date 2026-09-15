@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight, PanelLeftOpenIcon } from 'lucide-react';
 import Button from '../ui/Button';
@@ -22,6 +23,7 @@ const TeamIntelligenceHeader = ({
   timeRange: TimeRange;
   setTimeRange: React.Dispatch<React.SetStateAction<TimeRange>>;
 }): ReactElement => {
+  const { t } = useTranslation('placeholders');
   const { teamId, memberEmail } = useParams<{ teamId?: string; memberEmail?: string }>();
 
   const { data: teams } = useTeams();
@@ -104,7 +106,7 @@ const TeamIntelligenceHeader = ({
       {/* Time range — Select dropdown on mobile, pill buttons on sm+ */}
       <Select value={timeRange} onValueChange={(value: string) => setTimeRange(value as TimeRange)}>
         <SelectTrigger className='w-[130px] h-8 text-xs'>
-          <SelectValue placeholder='Select range' />
+          <SelectValue placeholder={t('teamIntelligence.selectRange')} />
         </SelectTrigger>
         <SelectContent>
           {timeRangeOptions.map(option => (
