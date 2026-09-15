@@ -51,6 +51,8 @@ export interface BulkTicketCreationJobData {
   subTickets: BulkTicketCreationInput[];
   /** Optional source message, for failure nudge tracking. */
   sourceMessageId?: string;
+  /** Batch came from the tickets tab, which decides chat posting per channel. */
+  fromTicketsTab?: boolean;
   /** Source type for nudge persistence. */
   sourceType?: string;
   /** Channel context. */
