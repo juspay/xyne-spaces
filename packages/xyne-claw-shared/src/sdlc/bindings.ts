@@ -14,7 +14,9 @@ export function trustedSdlcToolBindings(
 ): TrustedMcpToolBindings | undefined {
   const context = record(sdlcContext);
   const repository = record(context?.["repository"]);
-  const repoId = repository?.["id"];
+  const rawRepoId = repository?.["id"];
+  const repoId = typeof rawRepoId === "string" ? rawRepoId : undefined;
+  const repoBinding = repoId ? { repoId } : {};
   const contextChannelId = context?.["channelId"];
   const channelId =
     typeof contextChannelId === "string" && contextChannelId
@@ -22,7 +24,7 @@ export function trustedSdlcToolBindings(
       : runChannelId;
   const channelBinding = channelId ? { channelId } : {};
 
-  if (typeof context?.["operation"] !== "string" || typeof repoId !== "string") {
+  if (typeof context?.["operation"] !== "string") {
     return channelId
       ? { [SDLC_TOOL_NAMES.listRepositories]: { channelId } }
       : undefined;
@@ -52,7 +54,7 @@ export function trustedSdlcToolBindings(
       bindings[capability.name] = {
         executionId,
         sessionId,
-        repoId,
+        ...repoBinding,
         ...channelBinding,
         ...(hasRepositoryIdentity ? { workspaceId, actorUserId } : {}),
       };
@@ -64,13 +66,15 @@ export function trustedSdlcToolBindings(
     }
     if (capability.trustedBinding === "repository" && hasRepositoryIdentity) {
       bindings[capability.name] = {
-        repoId,
+        ...repoBinding,
         workspaceId,
         actorUserId,
         ...channelBinding,
       };
       continue;
     }
+    // Single-repository tools, createPullRequest included: a hub run gets none.
+    if (!repoId) continue;
     if (
       hasExecution &&
       (capability.trustedBinding === "execution" ||
