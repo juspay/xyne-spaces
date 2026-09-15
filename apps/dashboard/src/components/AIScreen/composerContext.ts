@@ -97,32 +97,41 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
 }
 
 /**
- * The FULL context set for DISPLAY on the sent message's pills — channels,
- * tickets, canvases, calls PLUS the KB scopes (collections, folders, files)
- * with their titles. This mirrors what the Spaces backend merges into
- * attachedContext and persists (xyneAIControllerV2.ts), so the just-sent
- * message shows the same pills a reload will. Distinct from the `attachedContext`
- * actually SENT (channels/tickets/canvases/calls only) — the KB items ride as
- * collectionIds/fileIds/folderIds and the backend resolves+merges them, so
- * sending them here too would double-count.
+ * KB scopes (collections, folders) shared by the sent `attachedContext` and
+ * the richer display set below. Collections/folders carry their cuid + name
+ * already, so they ride as ordinary attachedContext entries — unlike files,
+ * which need the backend's fileId(UUID)-or-id(cuid) resolution (see
+ * `fileIds` in {@link toStreamOverrides} and xyneAIControllerV2.ts).
+ */
+function toBaseAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
+  return toAttachedContext({
+    channels: ctx.channels,
+    tickets: ctx.tickets,
+    canvases: ctx.canvases,
+    transcripts: ctx.transcripts,
+    recordings: ctx.recordings,
+    folders: ctx.folderScopes,
+    collections: ctx.collections,
+  });
+}
+
+/**
+ * The FULL context set for DISPLAY on the sent message's pills — adds file
+ * items (with their client-known titles) on top of {@link toBaseAttachedContext}
+ * so the just-sent message's pills match what reload shows once the backend
+ * resolves and persists the file's attached_context entry.
  */
 export function toDisplayAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
-  return [
-    ...toAttachedContext({
-      channels: ctx.channels,
-      tickets: ctx.tickets,
-      canvases: ctx.canvases,
-      transcripts: ctx.transcripts,
-      recordings: ctx.recordings,
-    }),
-    ...ctx.collections.map(
-      (c): AttachedContextItem => ({ type: 'collection', id: c.id, title: c.name }),
-    ),
-    ...ctx.folderScopes.map(
-      (f): AttachedContextItem => ({ type: 'folder', id: f.id, title: f.name }),
-    ),
-    ...ctx.fileScopes.map((f): AttachedContextItem => ({ type: 'file', id: f.id, title: f.name })),
-  ];
+  return toAttachedContext({
+    channels: ctx.channels,
+    tickets: ctx.tickets,
+    canvases: ctx.canvases,
+    transcripts: ctx.transcripts,
+    recordings: ctx.recordings,
+    files: ctx.fileScopes,
+    folders: ctx.folderScopes,
+    collections: ctx.collections,
+  });
 }
 
 /**
@@ -134,21 +143,15 @@ export function toDisplayAttachedContext(ctx: ComposerContext): AttachedContextI
 export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
   return {
     channelIds: ctx.channels.map(c => c.id),
-    collectionIds: ctx.collections.map(c => c.id),
+    // Sent as bare ids, not attachedContext — see toBaseAttachedContext's doc.
     fileIds: ctx.fileScopes.map(f => f.id),
-    folderIds: ctx.folderScopes.map(f => f.id),
     ticketIds: ctx.tickets.map(t => t.id),
     canvasIds: ctx.canvases.map(c => c.id),
     callIds: [...ctx.transcripts.map(t => t.id), ...ctx.recordings.map(r => r.id)],
-    attachedContext: toAttachedContext({
-      channels: ctx.channels,
-      tickets: ctx.tickets,
-      canvases: ctx.canvases,
-      transcripts: ctx.transcripts,
-      recordings: ctx.recordings,
-    }),
-    // Display-only richer set (adds KB pills with titles) so the just-sent
-    // message matches the post-reload persisted pills. NOT sent to the backend.
+    attachedContext: toBaseAttachedContext(ctx),
+    // Display-only richer set (adds a file pill with its title) so the
+    // just-sent message matches the post-reload persisted pills. NOT sent to
+    // the backend.
     displayAttachedContext: toDisplayAttachedContext(ctx),
     webSearchEnabled: ctx.webSearchEnabled,
     deepResearchEnabled: ctx.deepResearchEnabled,

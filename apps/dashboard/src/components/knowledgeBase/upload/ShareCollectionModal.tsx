@@ -1025,7 +1025,9 @@ export const ShareCollectionModal = ({
                           {visibility === 'public' && <Check size={14} className='text-blue-600' />}
                         </div>
                         <p className='text-xs text-muted-foreground'>
-                          Anyone in the channel can access.
+                          {channelId
+                            ? 'Anyone in the channel can view.'
+                            : 'Anyone in the workspace can view.'}
                         </p>
                       </div>
                     </DropdownMenuItem>
@@ -1044,7 +1046,8 @@ export const ShareCollectionModal = ({
                           )}
                         </div>
                         <p className='text-xs text-muted-foreground'>
-                          Only invited users can access.
+                          Only invited users can access — sending someone the link directly grants
+                          them viewer access too.
                         </p>
                       </div>
                     </DropdownMenuItem>
@@ -1052,8 +1055,10 @@ export const ShareCollectionModal = ({
                 </DropdownMenu>
                 <p className='mt-0.5 text-xs text-muted-foreground'>
                   {visibility === 'public'
-                    ? 'Anyone in the channel can view and edit this collection.'
-                    : 'Only people you invite below can access this collection.'}
+                    ? channelId
+                      ? 'Anyone in the channel can view this collection. Editing still requires an explicit Editor invite.'
+                      : 'Anyone in the workspace can view this collection. Editing still requires an explicit Editor invite.'
+                    : 'Only people you invite below can access this collection — sending someone the link directly grants them viewer access too.'}
                 </p>
               </div>
             </div>

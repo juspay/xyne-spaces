@@ -15,10 +15,12 @@ interface ShareLinkModalProps {
 
 /**
  * Lightweight share dialog for individual files/folders — copy-link only, no
- * per-user access management. Folders/files have no ACL of their own; access
- * is entirely inherited from the owning collection (see buildEntryLink in
- * KnowledgeBaseV2Screen.tsx), so unlike ShareCollectionModal there's nothing
- * to grant here — just the link.
+ * per-user access management UI. Folders/files have no ACL of their own;
+ * access is entirely inherited from the owning collection (see buildEntryLink
+ * in KnowledgeBaseV2Screen.tsx). Unlike ShareCollectionModal there's no
+ * invite picker here — but the link itself still grants access: the first
+ * authenticated workspace member to open it is lazily added as a VIEWER on
+ * the owning collection (see CollectionController.getCollectionOrRole).
  */
 export const ShareLinkModal = ({
   isOpen,
@@ -65,7 +67,8 @@ export const ShareLinkModal = ({
             <div className='flex-1 min-w-0'>
               <div className='text-sm font-medium text-foreground'>Anyone with the link</div>
               <p className='mt-0.5 text-xs text-muted-foreground'>
-                Anyone with access to the collection this belongs to can open it via the link.
+                Anyone in the workspace who opens this link gets viewer access, even if they
+                weren&apos;t invited.
               </p>
             </div>
           </div>

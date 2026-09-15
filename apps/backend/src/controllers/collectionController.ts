@@ -461,7 +461,18 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             isPrivate: collection.isPrivate,
             permissions: collection.permissions as Parameters<typeof resolveCollectionAccess>[1]['permissions'],
         });
-        return { role, collection };
+        if (role) return { role, collection };
+
+        // No access via owner/group/channel/public — but this method is only ever
+        // called with a specific collectionId a caller already has (a URL param,
+        // never from enumerating a list — see listAccessibleRootCollections, which
+        // calls resolveCollectionAccess directly and must NOT auto-grant). Treat
+        // knowing the id as the access credential, matching "anyone with the link
+        // can view" — grants VIEWER only, so edit-only actions still 403 right
+        // after this via the caller's own role check.
+        await this.collectionRepository.grantViewerAccessViaLink(collectionId, userId, workspaceId);
+        logger.info(`[COLLECTION-ACCESS] Auto-granted VIEWER to user ${userId} on collection ${collectionId} via direct link access`);
+        return { role: CollectionRole.VIEWER, collection };
     }
 
     /**
