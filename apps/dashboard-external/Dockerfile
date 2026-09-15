@@ -46,10 +46,12 @@ COPY package.json /package.json
 ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
-# Target domain — overridable at build time with --build-arg
-ARG API_BASE_URL=https://spaces.xyne.juspay.net/api
-ARG CALL_INVITE_BASE_URL=https://call.xyne.juspay.net/external
-ARG INTERNAL_DASHBOARD_BASE_URL=https://spaces.xyne.juspay.net
+# Target domains — overridable at build time with --build-arg (the Makefile
+# forwards them; CI exports the deployment values). Localhost defaults so a
+# public build never targets a specific deployment.
+ARG API_BASE_URL=http://localhost:3001/api
+ARG CALL_INVITE_BASE_URL=http://localhost:3001/external
+ARG INTERNAL_DASHBOARD_BASE_URL=http://localhost:3001
 ENV VITE_API_BASE_URL=$API_BASE_URL
 ENV VITE_CALL_INVITE_BASE_URL=$CALL_INVITE_BASE_URL
 ENV VITE_INTERNAL_DASHBOARD_BASE_URL=$INTERNAL_DASHBOARD_BASE_URL

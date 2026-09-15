@@ -27,16 +27,23 @@ export type AnchorTargetProps = Pick<
   'target' | 'rel'
 >;
 
-const INTERNAL_XYNE_HOSTS = new Set([
-  'spaces.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'app.spaces.sandbox.xyne.juspay.net',
-  'call.xyne.juspay.net',
-  'call.sandbox.xyne.juspay.net',
+// Hosts whose links the app's internal router handles. The serving host is
+// always internal, plus localhost and the public web-app host. Additional
+// deployment hosts (prod, sandbox, call) are injected at build time via
+// VITE_INTERNAL_LINK_HOSTS (comma-separated) so self-hosted builds are not
+// pinned to a specific deployment.
+const EXTRA_INTERNAL_HOSTS = (
+  (import.meta.env['VITE_INTERNAL_LINK_HOSTS'] as string | undefined) || ''
+)
+  .split(',')
+  .map(host => host.trim())
+  .filter(Boolean);
+const INTERNAL_XYNE_HOSTS = new Set<string>([
+  window.location.hostname,
   'xyne-spaces.web.app',
   'localhost',
   '127.0.0.1',
+  ...EXTRA_INTERNAL_HOSTS,
 ]);
 
 /** Paths that should be treated as external (no internal router handling) */

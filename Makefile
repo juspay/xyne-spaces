@@ -20,6 +20,23 @@ SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short
 VITE_POSTHOG_KEY ?=
 VITE_POSTHOG_HOST ?=
 
+# Deployment URLs forwarded as docker build-args into the dashboard and
+# external-dashboard bundles. Localhost / same-origin defaults so public builds
+# never target a specific deployment; CI (private overlay) exports the real
+# values. See apps/dashboard/src/config.ts.
+VITE_API_URL ?= http://localhost:3001/api
+VITE_ELECTRON_PROD_BACKEND_URL ?= http://localhost:3001
+VITE_ELECTRON_SANDBOX_BACKEND_URL ?= $(VITE_ELECTRON_PROD_BACKEND_URL)
+VITE_APPS_PUBLIC_BASE_URL ?=
+VITE_APPS_SANDBOX_BASE_URL ?=
+VITE_INTERNAL_LINK_HOSTS ?=
+VITE_TRUSTED_ORIGINS ?=
+API_BASE_URL ?= http://localhost:3001/api
+CALL_INVITE_BASE_URL ?= http://localhost:3001/external
+INTERNAL_DASHBOARD_BASE_URL ?= http://localhost:3001
+DASHBOARD_BUILD_ARGS = --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_ELECTRON_PROD_BACKEND_URL=$(VITE_ELECTRON_PROD_BACKEND_URL)" --build-arg "VITE_ELECTRON_SANDBOX_BACKEND_URL=$(VITE_ELECTRON_SANDBOX_BACKEND_URL)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_APPS_SANDBOX_BASE_URL=$(VITE_APPS_SANDBOX_BASE_URL)" --build-arg "VITE_INTERNAL_LINK_HOSTS=$(VITE_INTERNAL_LINK_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)"
+EXTERNAL_BUILD_ARGS = --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "API_BASE_URL=$(API_BASE_URL)" --build-arg "CALL_INVITE_BASE_URL=$(CALL_INVITE_BASE_URL)" --build-arg "INTERNAL_DASHBOARD_BASE_URL=$(INTERNAL_DASHBOARD_BASE_URL)"
+
 #temp2
 # Backend targets 3s
 build-backend:
@@ -61,11 +78,11 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(DASHBOARD_BUILD_ARGS) --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(DASHBOARD_BUILD_ARGS) --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:
@@ -103,11 +120,11 @@ clean-dashboard-edge:
 build-external-dashboard:
 	$(info Building $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard-external/Dockerfile -t $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
+	docker buildx build -f apps/dashboard-external/Dockerfile -t $(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(EXTERNAL_BUILD_ARGS) --load .
 
 push-external-dashboard:
 	$(info Pushing to registry: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard-external/Dockerfile -t $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
+	docker buildx build -f apps/dashboard-external/Dockerfile -t $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) $(EXTERNAL_BUILD_ARGS) --push .
 	$(info Successfully pushed: $(NS)/$(EXTERNAL_DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-external-dashboard:
