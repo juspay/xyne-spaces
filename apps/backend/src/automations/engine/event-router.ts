@@ -44,6 +44,10 @@ class EventRouter {
           string,
           unknown
         >;
+        // Edits only matter to automations that opted in — skip before enqueue.
+        if ((payload as { isEdit?: boolean }).isEdit && !triggerConfig.fireOnEdit) {
+          continue;
+        }
         const data =
           triggerImpl?.projectPayload?.(triggerConfig, payload as unknown as Record<string, unknown>) ??
           payload;

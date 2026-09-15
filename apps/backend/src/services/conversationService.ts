@@ -35,6 +35,8 @@ import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { emitTicketCommented } from '@/automations/triggers/ticket-commented.trigger';
 import { emitMessageReceived } from '@/automations/triggers/message-received.trigger';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { buildUserQueryContext } from '@/utils/queryContext';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 
 interface UserInfo {
@@ -956,6 +958,32 @@ export class ConversationService {
     logger.info(
       `[ConversationService] Updated message ${messageId} in conversation ${conversation.conversationId}`
     );
+
+    // Service-path edits (app chat, Slack, commit analysis, release reports) bypass
+    // the Zero mutation processor, so dispatch the messages onUpdate here.
+    if (updateData.content !== undefined) {
+      buildUserQueryContext(message.senderId)
+        .then(ctx =>
+          new MessagesSideEffectHandler(ctx).onUpdate({
+            entityId: messageId,
+            entityType: 'messages',
+            operation: 'update',
+            previousValue: {
+              messageId,
+              conversationId: message.conversationId,
+              senderId: message.senderId,
+              msgType: message.msgType,
+              content: message.content,
+              isDeleted: message.isDeleted,
+              channelId: conversation.channelId,
+              isThreadReply: conversation.initialMessageId !== messageId,
+            },
+          }),
+        )
+        .catch(err =>
+          logger.error(`[ConversationService] onUpdate dispatch failed for ${messageId}:`, err),
+        );
+    }
 
     if (conversation.initialMessageId === messageId) {
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);

@@ -2175,6 +2175,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       );
     }
 
+    // App/service rewrites never set `edited`, so key the emit off the content diff.
     if (
       !currentMessage.isDeleted &&
       previousValue.content !== undefined &&
