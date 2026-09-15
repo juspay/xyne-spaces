@@ -24,6 +24,8 @@
  */
 
 import type { ReactElement, ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { IconPicker } from '../../AppIcon/IconPicker';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -83,13 +85,13 @@ const Section = ({
  * because a row cap is the difference between "the open tickets" and "some
  * tickets".
  */
-function sourceLabel(requirement: ReactArtifactDataRequirement): string {
+function sourceLabel(requirement: ReactArtifactDataRequirement, t: TFunction): string {
   const { source } = requirement;
-  if (!source) return 'Source not declared — this build cannot load it';
-  if (source.kind === 'query') return `Named query · ${source.query}`;
+  if (!source) return t('artifactAppSettings.sourceNotDeclared');
+  if (source.kind === 'query') return t('artifactAppSettings.namedQuery', { query: source.query });
   const parts = [source.model, source.operation ?? 'findMany'];
-  if (source.take) parts.push(`up to ${source.take} rows`);
-  return `Direct read · ${parts.join(' · ')}`;
+  if (source.take) parts.push(t('artifactAppSettings.upToRows', { count: source.take }));
+  return t('artifactAppSettings.directRead', { parts: parts.join(' · ') });
 }
 
 export interface ArtifactAppSettingsProps {
@@ -113,6 +115,7 @@ export const ArtifactAppSettings = ({
   versions,
   onIconChange,
 }: ArtifactAppSettingsProps): ReactElement | null => {
+  const { t } = useTranslation('common');
   if (!app || !viewing) return null;
 
   const manifest = viewing.manifest;
@@ -129,21 +132,20 @@ export const ArtifactAppSettings = ({
   return (
     <div className='mx-auto flex w-full max-w-xl flex-col gap-6 px-5 py-6'>
       <div className='flex flex-col gap-1'>
-        <h2 className='text-sm font-medium text-foreground'>App settings</h2>
+        <h2 className='text-sm font-medium text-foreground'>
+          {t('artifactAppSettings.settingsTitle')}
+        </h2>
         <p className='text-xs text-muted-foreground'>
           {canEditIcon
-            ? 'Only you can change these. Everyone who opens the app sees them.'
-            : 'Only the app’s owner can change these.'}
+            ? t('artifactAppSettings.onlyYouCanChange')
+            : t('artifactAppSettings.onlyOwnerCanChange')}
         </p>
       </div>
 
       <div className='flex items-start justify-between gap-6 border-t border-border pt-4'>
         <div className='flex min-w-0 flex-col gap-0.5'>
-          <span className='text-sm text-foreground'>Icon</span>
-          <span className='text-xs text-muted-foreground'>
-            Shown in the sidebar and the app library. The agent picks one when it first builds the
-            app; your choice replaces it for good.
-          </span>
+          <span className='text-sm text-foreground'>{t('artifactAppSettings.iconLabel')}</span>
+          <span className='text-xs text-muted-foreground'>{t('artifactAppSettings.iconHint')}</span>
         </div>
         {canEditIcon && onIconChange ? (
           <IconPicker value={app.icon} onChange={onIconChange} size={20} className='shrink-0' />
@@ -157,9 +159,9 @@ export const ArtifactAppSettings = ({
         )}
       </div>
 
-      <Section title='About'>
+      <Section title={t('artifactAppSettings.aboutSectionTitle')}>
         <div className='flex flex-col gap-2.5'>
-          <Fact label='Created by'>
+          <Fact label={t('artifactAppSettings.createdByLabel')}>
             <span className='flex min-w-0 items-center gap-1.5'>
               <UserAvatar
                 userId={app.ownerUserId}
@@ -167,59 +169,79 @@ export const ArtifactAppSettings = ({
                 shape={AvatarShape.CIRCULAR}
                 showActiveStatus={false}
               />
-              <span className='truncate'>{app.ownerName ?? (isOwner ? 'You' : 'Unknown')}</span>
+              <span className='truncate'>
+                {app.ownerName ??
+                  (isOwner
+                    ? t('artifactAppSettings.youLabel')
+                    : t('artifactAppSettings.unknownLabel'))}
+              </span>
             </span>
           </Fact>
           <Fact
-            label='Visibility'
+            label={t('artifactAppSettings.visibilityLabel')}
             hint={
               isPublished
-                ? `Published${publishedVersion ? ` v${publishedVersion.versionNumber}` : ''}${
-                    app.publishedAt ? ` on ${formatDate(new Date(app.publishedAt))}` : ''
+                ? `${t('artifactAppSettings.published')}${publishedVersion ? ` v${publishedVersion.versionNumber}` : ''}${
+                    app.publishedAt
+                      ? ` ${t('artifactAppSettings.onDate', { date: formatDate(new Date(app.publishedAt)) })}`
+                      : ''
                   }`
-                : 'Only you can open it'
+                : t('artifactAppSettings.onlyYouCanOpen')
             }
           >
-            {isPublished ? 'Anyone in this workspace' : 'Private'}
+            {isPublished
+              ? t('artifactAppSettings.anyoneInWorkspace')
+              : t('artifactAppSettings.privateLabel')}
           </Fact>
-          <Fact label='Created'>{formatDate(new Date(app.createdAt))}</Fact>
-          <Fact label='Last updated'>{formatRelativeTime(new Date(app.updatedAt))}</Fact>
+          <Fact label={t('artifactAppSettings.createdLabel')}>
+            {formatDate(new Date(app.createdAt))}
+          </Fact>
+          <Fact label={t('artifactAppSettings.lastUpdatedLabel')}>
+            {formatRelativeTime(new Date(app.updatedAt))}
+          </Fact>
           {app.description && (
-            <Fact label='Description'>
+            <Fact label={t('artifactAppSettings.descriptionLabel')}>
               <span className='whitespace-pre-wrap'>{app.description}</span>
             </Fact>
           )}
         </div>
       </Section>
 
-      <Section title='Versions'>
+      <Section title={t('artifactAppSettings.versionsSectionTitle')}>
         <div className='flex flex-col gap-2.5'>
           <Fact
-            label='Current'
-            hint={head ? `Built ${formatRelativeTime(new Date(head.createdAt))}` : undefined}
+            label={t('artifactAppSettings.currentFactLabel')}
+            hint={
+              head
+                ? t('artifactAppSettings.builtHint', {
+                    time: formatRelativeTime(new Date(head.createdAt)),
+                  })
+                : undefined
+            }
           >
             {head ? `v${head.versionNumber}` : '—'}
           </Fact>
           {/* Owners see the whole history; a non-owner's list is the pin alone,
               so counting it would report "1 build" for an app with twenty. */}
           {isOwner && (
-            <Fact label='Saved builds'>
-              {versions.length === 1 ? '1 build' : `${versions.length} builds`}
+            <Fact label={t('artifactAppSettings.savedBuildsLabel')}>
+              {t('artifactAppSettings.buildCount', { count: versions.length })}
             </Fact>
           )}
           <Fact
-            label='Viewing'
-            hint={
-              viewing.id === head?.id ? undefined : 'An earlier build — the app has not changed'
-            }
+            label={t('artifactAppSettings.viewingLabel')}
+            hint={viewing.id === head?.id ? undefined : t('artifactAppSettings.earlierBuildHint')}
           >
-            {`v${viewing.versionNumber} · ${formatDate(new Date(viewing.createdAt))}`}
+            {t('artifactAppSettings.viewingValue', {
+              number: viewing.versionNumber,
+              date: formatDate(new Date(viewing.createdAt)),
+            })}
           </Fact>
         </div>
       </Section>
 
       <Section
-        title='What this build can do'
+        title={t('artifactAppSettings.whatBuildCanDoTitle')}
         aside={<span className='text-[11px] text-muted-foreground'>v{viewing.versionNumber}</span>}
       >
         {/* Declarations, not enforcement. The host passes `canWrite` and
@@ -230,34 +252,38 @@ export const ArtifactAppSettings = ({
             The reads below are the opposite: nothing undeclared can be fetched. */}
         <div className='flex flex-col gap-2.5'>
           <Fact
-            label='Changes data'
+            label={t('artifactAppSettings.changesDataLabel')}
             hint={
               manifest.writes
-                ? 'Writes are immediate and cannot be undone'
-                : 'Not declared by this build — not a guarantee it makes none'
+                ? t('artifactAppSettings.writesImmediateHint')
+                : t('artifactAppSettings.notDeclaredNoGuaranteeHint')
             }
           >
-            {manifest.writes ? 'Declared — it can edit your workspace' : 'Not declared'}
+            {manifest.writes
+              ? t('artifactAppSettings.declaredCanEdit')
+              : t('artifactAppSettings.notDeclared')}
           </Fact>
           <Fact
-            label='Runs AI agents'
+            label={t('artifactAppSettings.runsAgentsLabel')}
             hint={
               manifest.invokesAgents
                 ? manifest.agents?.length
                   ? manifest.agents.join(', ')
-                  : 'Runs as you; your own access still applies'
-                : 'Not declared by this build'
+                  : t('artifactAppSettings.runsAsYouHint')
+                : t('artifactAppSettings.notDeclaredByBuild')
             }
           >
-            {manifest.invokesAgents ? 'Declared' : 'Not declared'}
+            {manifest.invokesAgents
+              ? t('artifactAppSettings.declared')
+              : t('artifactAppSettings.notDeclared')}
           </Fact>
         </div>
 
         <div className='flex flex-col gap-2'>
           <span className='text-xs text-muted-foreground'>
             {reads.length === 0
-              ? 'Reads no workspace data — everything it shows is in its own code.'
-              : `Reads ${reads.length === 1 ? '1 dataset' : `${reads.length} datasets`} from your workspace, with your own access:`}
+              ? t('artifactAppSettings.readsNoData')
+              : t('artifactAppSettings.readsDatasets', { count: reads.length })}
           </span>
           {reads.map(r => (
             <div
@@ -269,25 +295,30 @@ export const ArtifactAppSettings = ({
                 <span className='text-[11px] text-muted-foreground'>{r.description}</span>
               )}
               <span className='truncate font-mono text-[11px] text-muted-foreground'>
-                {sourceLabel(r)}
+                {sourceLabel(r, t)}
               </span>
             </div>
           ))}
         </div>
       </Section>
 
-      <Section title='Build'>
+      <Section title={t('artifactAppSettings.buildSectionTitle')}>
         <div className='flex flex-col gap-2.5'>
-          <Fact label='Size'>{formatFileSize(viewing.sizeBytes)}</Fact>
-          <Fact label='Files' hint={`Entry ${manifest.entry}`}>
-            {manifest.fileCount === 1 ? '1 file' : `${manifest.fileCount} files`}
+          <Fact label={t('artifactAppSettings.sizeLabel')}>
+            {formatFileSize(viewing.sizeBytes)}
+          </Fact>
+          <Fact
+            label={t('artifactAppSettings.filesLabel')}
+            hint={t('artifactAppSettings.entryHint', { entry: manifest.entry })}
+          >
+            {t('artifactAppSettings.fileCount', { count: manifest.fileCount })}
           </Fact>
         </div>
         <div className='flex flex-col gap-1.5'>
           <span className='text-xs text-muted-foreground'>
             {packages.length === 0
-              ? 'No packages beyond React and the Xyne runtime.'
-              : 'Packages it pulls in:'}
+              ? t('artifactAppSettings.noPackages')
+              : t('artifactAppSettings.packagesPullIn')}
           </span>
           {packages.length > 0 && (
             <div className='flex flex-wrap gap-1'>

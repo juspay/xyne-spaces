@@ -19,6 +19,7 @@
  */
 
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown } from 'lucide-react';
 import { RotateLeft } from '@xyne/icons';
 import { AppIcon } from '../../AppIcon/AppIcon';
@@ -39,6 +40,7 @@ interface ArtifactAppPaneProps {
 }
 
 export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | null => {
+  const { t } = useTranslation('common');
   const {
     appId,
     viewing,
@@ -80,7 +82,9 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
           aria-hidden='true'
         />
       )}
-      <span className='truncate text-sm font-medium text-foreground'>{title ?? 'App'}</span>
+      <span className='truncate text-sm font-medium text-foreground'>
+        {title ?? t('artifactAppPane.appFallback')}
+      </span>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -91,8 +95,8 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
             }`}
             title={
               isHead
-                ? 'Showing the current version'
-                : 'Showing an earlier version — the app itself has not changed'
+                ? t('artifactAppPane.showingCurrentTitle')
+                : t('artifactAppPane.showingEarlierTitle')
             }
             data-track-category='AskAI'
             data-track-name='ArtifactAppPaneVersionMenu'
@@ -109,9 +113,13 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
                   className={`h-3.5 w-3.5 ${v.id === viewing.id ? 'opacity-100' : 'opacity-0'}`}
                   aria-hidden='true'
                 />
-                <span className='flex-1'>Version {v.versionNumber}</span>
+                <span className='flex-1'>
+                  {t('artifactAppPane.versionLabel', { number: v.versionNumber })}
+                </span>
                 {v.id === headVersionId ? (
-                  <span className='text-[11px] text-muted-foreground'>current</span>
+                  <span className='text-[11px] text-muted-foreground'>
+                    {t('artifactAppPane.currentLabel')}
+                  </span>
                 ) : (
                   // Restore MOVES HEAD on the server; selecting the row only
                   // previews. Two verbs, one row — hence the nested control and
@@ -125,12 +133,14 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
                       restoreVersion(v.id);
                     }}
                     className='flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
-                    title={`Make version ${v.versionNumber} current — the agent's next update builds on it`}
+                    title={t('artifactAppPane.restoreCurrentWithNumber', {
+                      number: v.versionNumber,
+                    })}
                     data-track-category='AskAI'
                     data-track-name='ArtifactAppRestoreVersion'
                   >
                     <RotateLeft size={12} aria-hidden='true' />
-                    Restore
+                    {t('artifactAppPane.restoreButton')}
                   </button>
                 )}
               </span>
@@ -145,7 +155,7 @@ export const ArtifactAppPane = ({ mode }: ArtifactAppPaneProps): ReactElement | 
     <div className='flex h-full min-h-0 flex-col'>
       {restoreError && (
         <p className='shrink-0 border-b border-border bg-destructive/10 px-3 py-1.5 text-xs text-destructive'>
-          Could not restore that version. {restoreError}
+          {t('artifactAppPane.couldNotRestore', { error: restoreError })}
         </p>
       )}
       <div className='min-h-0 flex-1'>
