@@ -379,5 +379,22 @@
     "fileCount_other": "{{count}} archivos",
     "noPackages": "Sin paquetes más allá de React y el runtime de Xyne.",
     "packagesPullIn": "Paquetes que incluye:"
+  },
+  "reactArtifactView": {
+    "defaultExpandLabel": "Abrir en pantalla completa",
+    "previewTabLabel": "vista previa",
+    "codeTabLabel": "código",
+    "settingsTabLabel": "configuración",
+    "usesAiAgentsTitle": "Esta app puede ejecutar un agente de IA en tu nombre. Las ejecuciones continúan aunque cierres la app.",
+    "usesAiAgentsLabel": "Usa agentes de IA",
+    "canMakeChangesTitle": "Esta app puede modificar datos en tu espacio de trabajo. Los cambios son inmediatos y no se pueden deshacer.",
+    "canMakeChangesLabel": "Puede hacer cambios",
+    "refreshDataLabel": "Actualizar datos",
+    "savedLabel": "Guardada",
+    "saveAppLabel": "Guardar app",
+    "savedToAppsTitle": "Guardada en tus apps",
+    "closeLabel": "Cerrar",
+    "couldNotOpenApp": "No se pudo abrir esta app",
+    "failedToLoadArtifact": "Error al cargar este artefacto."
   }
 }

@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
   type ReactElement,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Check,
   Code2,
@@ -195,13 +196,15 @@ export const ReactArtifactView = ({
   artifact,
   fill = false,
   onExpand,
-  expandLabel = 'Open full screen',
+  expandLabel,
   onClose,
   titleSlot,
   settingsSlot,
   onSave,
   saveState = 'idle',
 }: ReactArtifactViewProps): ReactElement => {
+  const { t } = useTranslation('common');
+  const resolvedExpandLabel = expandLabel ?? t('reactArtifactView.defaultExpandLabel');
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
@@ -238,13 +241,18 @@ export const ReactArtifactView = ({
         if (cancelled) return;
         setState({
           status: 'error',
-          message: err instanceof Error ? err.message : 'Failed to load this artifact.',
+          message: err instanceof Error ? err.message : t('reactArtifactView.failedToLoadArtifact'),
         });
       });
 
     return (): void => {
       cancelled = true;
     };
+    // Intentionally excludes `t`: re-running this effect on a language switch
+    // would restart the load (and tear down Sandpack) for no reason — the
+    // catch-branch fallback message just reads whichever `t` was in scope
+    // when the (one-shot) load happened to fail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachmentId, inlineData, savedAppId, versionId]);
 
   const shellClass = fill
@@ -263,12 +271,14 @@ export const ReactArtifactView = ({
             // Same mark the sandbox overlay uses, so fetching the payload and
             // booting the bundler read as one wait instead of two loaders
             // swapping places.
-            <div role='status' aria-label='Loading app'>
+            <div role='status' aria-label={t('reactArtifact.bootOverlay.loadingAppAriaLabel')}>
               <AppLoaderMark size={fill ? 'md' : 'sm'} />
             </div>
           ) : (
             <>
-              <p className='text-sm font-medium text-foreground'>Could not open this app</p>
+              <p className='text-sm font-medium text-foreground'>
+                {t('reactArtifactView.couldNotOpenApp')}
+              </p>
               <p className='text-xs text-muted-foreground'>{state.message}</p>
             </>
           )}
@@ -309,13 +319,15 @@ export const ReactArtifactView = ({
               {/* eslint-disable-next-line @typescript-eslint/naming-convention -- JSX component refs must be PascalCase */}
               {(
                 [
-                  ['preview', Play],
-                  ['code', Code2],
+                  ['preview', Play, 'reactArtifactView.previewTabLabel'],
+                  ['code', Code2, 'reactArtifactView.codeTabLabel'],
                   // Only when a caller supplied settings — the inline card and
                   // the dialog have no app behind them to configure.
-                  ...(settingsSlot ? ([['settings', Settings2]] as const) : []),
+                  ...(settingsSlot
+                    ? ([['settings', Settings2, 'reactArtifactView.settingsTabLabel']] as const)
+                    : []),
                 ] as const
-              ).map(([value, Icon]) => (
+              ).map(([value, Icon, labelKey]) => (
                 <button
                   key={value}
                   type='button'
@@ -330,7 +342,7 @@ export const ReactArtifactView = ({
                   data-track-metadata={JSON.stringify({ tab: value })}
                 >
                   <Icon className='h-3.5 w-3.5' aria-hidden='true' />
-                  {value}
+                  {t(labelKey)}
                 </button>
               ))}
             </div>
@@ -338,19 +350,19 @@ export const ReactArtifactView = ({
           {payload.invokesAgents && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:text-violet-400'
-              title='This app can run an AI agent as you. Runs continue if you close the app.'
+              title={t('reactArtifactView.usesAiAgentsTitle')}
             >
               <Sparkles className='h-3 w-3' aria-hidden='true' />
-              Uses AI agents
+              {t('reactArtifactView.usesAiAgentsLabel')}
             </span>
           )}
           {payload.writes && (
             <span
               className='flex shrink-0 items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400'
-              title='This app can change data in your workspace. Changes are immediate and cannot be undone.'
+              title={t('reactArtifactView.canMakeChangesTitle')}
             >
               <Pencil className='h-3 w-3' aria-hidden='true' />
-              Can make changes
+              {t('reactArtifactView.canMakeChangesLabel')}
             </span>
           )}
           {savedAppId && (
@@ -366,8 +378,8 @@ export const ReactArtifactView = ({
               }}
               disabled={refreshingData}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60'
-              aria-label='Refresh data'
-              title='Refresh data'
+              aria-label={t('reactArtifactView.refreshDataLabel')}
+              title={t('reactArtifactView.refreshDataLabel')}
               data-track-category='AskAI'
               data-track-name='ReactArtifactRefreshData'
             >
@@ -384,8 +396,16 @@ export const ReactArtifactView = ({
               onClick={() => onSave(artifact)}
               disabled={saveState !== 'idle'}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60'
-              aria-label={saveState === 'saved' ? 'Saved' : 'Save app'}
-              title={saveState === 'saved' ? 'Saved to your apps' : 'Save app'}
+              aria-label={
+                saveState === 'saved'
+                  ? t('reactArtifactView.savedLabel')
+                  : t('reactArtifactView.saveAppLabel')
+              }
+              title={
+                saveState === 'saved'
+                  ? t('reactArtifactView.savedToAppsTitle')
+                  : t('reactArtifactView.saveAppLabel')
+              }
               data-track-category='AskAI'
               data-track-name='ReactArtifactSave'
             >
@@ -403,8 +423,8 @@ export const ReactArtifactView = ({
               type='button'
               onClick={() => onExpand(artifact)}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              aria-label={expandLabel}
-              title={expandLabel}
+              aria-label={resolvedExpandLabel}
+              title={resolvedExpandLabel}
               data-track-category='AskAI'
               data-track-name='ReactArtifactExpand'
             >
@@ -416,7 +436,7 @@ export const ReactArtifactView = ({
               type='button'
               onClick={onClose}
               className='shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              aria-label='Close'
+              aria-label={t('reactArtifactView.closeLabel')}
               data-track-category='AskAI'
               data-track-name='ReactArtifactClose'
             >

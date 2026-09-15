@@ -379,5 +379,22 @@
     "fileCount_other": "{{count}} files",
     "noPackages": "No packages beyond React and the Xyne runtime.",
     "packagesPullIn": "Packages it pulls in:"
+  },
+  "reactArtifactView": {
+    "defaultExpandLabel": "Open full screen",
+    "previewTabLabel": "preview",
+    "codeTabLabel": "code",
+    "settingsTabLabel": "settings",
+    "usesAiAgentsTitle": "This app can run an AI agent as you. Runs continue if you close the app.",
+    "usesAiAgentsLabel": "Uses AI agents",
+    "canMakeChangesTitle": "This app can change data in your workspace. Changes are immediate and cannot be undone.",
+    "canMakeChangesLabel": "Can make changes",
+    "refreshDataLabel": "Refresh data",
+    "savedLabel": "Saved",
+    "saveAppLabel": "Save app",
+    "savedToAppsTitle": "Saved to your apps",
+    "closeLabel": "Close",
+    "couldNotOpenApp": "Could not open this app",
+    "failedToLoadArtifact": "Failed to load this artifact."
   }
 }
