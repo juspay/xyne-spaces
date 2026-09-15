@@ -23,6 +23,8 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { activityService } from '@/services/activity/activityService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -113,12 +115,10 @@ class LiveKitWebhookController {
 
     try {
       // Global routing: NOTE_TAKER (HEADLESS / "Xyne Oats") rooms never have a
-      // channel/message/conversation, so every event type for them is handled
-      // entirely by noteTakerWebhookController instead of the channel-based
-      // handlers below. This check must run before the switch so no event type
-      // (room_finished, participant_left, track_published, egress_*, etc.) ever
-      // falls through to the channel-based DB operations, which don't apply.
-      if (await this.isNoteTakerRoom(event)) {
+      // channel/message/conversation, so their events go to noteTakerWebhookController.
+      // Egress events are shared: callRecordingService handles them by egressId.
+      const isEgressEvent = event.event === 'egress_started' || event.event === 'egress_ended';
+      if (!isEgressEvent && (await this.isNoteTakerRoom(event))) {
         await noteTakerWebhookController.handleEvent(event);
         res.status(200).json({ success: true });
         return;
@@ -258,6 +258,10 @@ class LiveKitWebhookController {
       numParticipants: event.room?.numParticipants,
     });
 
+    // Tear down this room's redispatch retry chain — without this it survives the call it
+    // exists for, sleeping up to 10 minutes before rediscovering the room is already gone.
+    livekitService.cancelRedispatchWatch(callId);
+
     try {
       const now = new Date();
 
@@ -350,9 +354,19 @@ class LiveKitWebhookController {
       name: participant?.name,
     });
 
-    // Skip agent participants
+    // Skip agent participants — but record that this call's dispatched agent actually
+    // joined, so dispatchStatus reflects reality (and the ~9s unclaimed-job check
+    // doesn't fire a needless redispatch for a dispatch that in fact succeeded).
     if (participant.identity.startsWith('agent-')) {
       logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      const existingCall = await repositories.calls.findByExternalId(roomName).catch(() => null);
+      if (existingCall) {
+        await repositories.calls.update(existingCall.id, {
+          metadata: { ...(existingCall.metadata as Record<string, unknown> ?? {}), dispatchStatus: 'joined' },
+        }).catch((error) => {
+          logger.warn(`[LiveKit Webhook] dispatch_status_update_failed | room=${roomName}, error=${error}`);
+        });
+      }
       return;
     }
 
@@ -392,6 +406,7 @@ class LiveKitWebhookController {
         const existingConversationId = roomMetadata.conversationId;
         const artifactMessageId = roomMetadata.artifactMessageId;
         const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
+        const agentName = typeof roomMetadata.agentName === 'string' ? roomMetadata.agentName : undefined;
 
         if (!channelId) {
           logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
@@ -479,6 +494,8 @@ class LiveKitWebhookController {
           now,
           callOrigin,
           ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
+          agentName,
+          dispatchStatus: agentName ? 'dispatched' : undefined,
         }).catch((txError) => {
           logger.error('[LiveKit Webhook] call_record_creation_failed', {
             stage: 'call_record_creation',
@@ -504,17 +521,13 @@ class LiveKitWebhookController {
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
         const sdlcLink = (roomMetadata as {
-          sdlcLink?: { repoId?: string; ownerType?: string; ownerId?: string };
+          sdlcLink?: { ownerType?: string; ownerId?: string };
         }).sdlcLink;
-        if (sdlcLink?.repoId && sdlcLink.ownerType && sdlcLink.ownerId) {
+        if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
-            const sdlcRepo = await this.db.repo.findFirst({
-              where: { id: sdlcLink.repoId, channelId },
-              select: { id: true, workspaceId: true },
-            });
-            const linkWorkspaceId = channelRecord?.workspaceId ?? sdlcRepo?.workspaceId ?? null;
-            const ownerValid = sdlcRepo
-              ? sdlcLink.ownerType === 'CANVAS'
+            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
+            const ownerValid =
+              sdlcLink.ownerType === 'CANVAS'
                 ? Boolean(
                     await this.db.canvas.findFirst({
                       where: { id: sdlcLink.ownerId, channelId },
@@ -522,20 +535,14 @@ class LiveKitWebhookController {
                     }),
                   )
                 : sdlcLink.ownerType === 'TRACK'
-                  ? Boolean(
-                      await this.db.sdlcTrack.findFirst({
-                        where: { id: sdlcLink.ownerId, repoId: sdlcRepo.id },
-                        select: { id: true },
-                      }),
-                    )
-                  : false
-              : false;
-            if (sdlcRepo && linkWorkspaceId && ownerValid) {
+                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
+                  : false;
+            if (linkWorkspaceId && ownerValid) {
               await this.db.sdlcEntityLink.createMany({
                 data: [
                   {
                     workspaceId: linkWorkspaceId,
-                    repoId: sdlcRepo.id,
+                    channelId,
                     sourceType: sdlcLink.ownerType,
                     sourceId: sdlcLink.ownerId,
                     targetType: 'CALL',
@@ -545,7 +552,7 @@ class LiveKitWebhookController {
                   },
                   {
                     workspaceId: linkWorkspaceId,
-                    repoId: sdlcRepo.id,
+                    channelId,
                     sourceType: sdlcLink.ownerType,
                     sourceId: sdlcLink.ownerId,
                     targetType: 'CONVERSATION',
@@ -556,8 +563,11 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              if (existingConversationId) {
+                await activityService.fillSdlcOwner(conversationId, channelId);
+              }
               logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId} repo=${sdlcRepo.id}`,
+                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
             }
           } catch (sdlcLinkError) {
@@ -723,9 +733,24 @@ class LiveKitWebhookController {
       name: participant?.name,
     });
 
-    // Skip agent participants early
+    // Skip agent participants early — but trigger recovery: the agent leaving mid-call
+    // needs a redispatch to the SAME pinned agent, not a silent skip. This is what keeps
+    // a call transcribed through a worker crash once explicit dispatch has replaced the
+    // ambient automatic-dispatch pool.
     if (participant.identity.startsWith('agent-')) {
       logger.info(`[LiveKit Webhook] Skipping agent participant: ${participant.identity}`);
+      const leftCall = await repositories.calls.findByExternalId(callId).catch(() => null);
+      const pinnedAgentName = (leftCall?.metadata as { agentName?: string } | null)?.agentName;
+      if (pinnedAgentName) {
+        livekitService.ensureTranscriptionAgent(callId, pinnedAgentName, {
+          excludeIdentity: participant.identity,
+          reason: 'participant_left',
+        }).catch((error) => {
+          logger.error(`[LiveKit Webhook] ensure_transcription_agent_failed | room=${callId}, error=${error}`);
+        });
+      } else {
+        logger.warn(`[LiveKit Webhook] agent_left_no_pinned_agent_name | room=${callId}, cannot_redispatch`);
+      }
       return;
     }
 

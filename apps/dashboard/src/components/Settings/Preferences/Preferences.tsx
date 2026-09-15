@@ -74,7 +74,6 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
-import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -279,6 +278,7 @@ const NotificationKeywordsCard: FC = () => {
               <button
                 type='button'
                 onClick={() => removeKeyword(keyword)}
+                data-ph-capture-attribute-track-id='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
@@ -338,6 +338,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_desktop_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -364,6 +366,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_mobile_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -665,6 +669,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -804,6 +809,21 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
         />
       </div>
       <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
@@ -947,6 +967,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >
@@ -1060,8 +1081,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
       <div className='flex flex-col gap-1.5'>
         {items.map(item => {
           const Icon = item.icon;
-          const required = isRequiredToolbarPath(item.path);
-          const checked = required || toolbarPaths.has(item.path);
+          const checked = toolbarPaths.has(item.path);
           return (
             <div
               key={item.path}
@@ -1074,11 +1094,9 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
               </div>
               <div className='flex items-center gap-2.5 shrink-0'>
-                {required && <span className='text-xs text-muted-foreground'>Always on</span>}
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  disabled={required}
                   onCheckedChange={value => setInToolbar(item.path, value)}
                 />
               </div>

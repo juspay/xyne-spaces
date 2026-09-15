@@ -8,6 +8,7 @@ import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Dialog } from '../../ui/Dialog/Dialog';
+
 import { cn } from '../../../utils/classNames';
 import {
   deleteConversationLabel,
@@ -73,7 +74,7 @@ export const DeskLabelsSidebar = ({
     const trimmed = newName.trim();
     if (!trimmed) return;
     if (list.some(l => l.name.toLowerCase() === trimmed.toLowerCase())) {
-      toast.error('A label with this name already exists');
+      toast.error('You already have a label with this name in this channel.');
       return;
     }
     // Close optimistically; the mutation applies locally first and we surface
@@ -266,6 +267,7 @@ export const DeskLabelsSidebar = ({
               type='button'
               onClick={() => void handleCreate()}
               disabled={!newName.trim()}
+              data-ph-capture-attribute-track-id='create_desk_label'
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
@@ -313,6 +315,7 @@ export const DeskLabelsSidebar = ({
                 type='button'
                 onClick={() => void confirmDelete()}
                 disabled={deleteSubmitting}
+                data-ph-capture-attribute-track-id='delete_desk_label'
                 className='inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:pointer-events-none transition-colors'
                 data-track-category='Support'
                 data-track-name='ConfirmDeleteLabel'

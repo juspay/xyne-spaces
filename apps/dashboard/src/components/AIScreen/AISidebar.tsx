@@ -53,7 +53,7 @@ const LIST_ROW_IDLE_CLASS =
 
 type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
-interface AINavItem {
+export interface AINavItem {
   key: string;
   label: string;
   icon: NavIcon;
@@ -68,7 +68,7 @@ interface AINavItem {
   dailyBriefOnly?: boolean;
 }
 
-const NAV_ITEMS: AINavItem[] = [
+export const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
   { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
@@ -310,6 +310,7 @@ function SessionHistory({
               </Button>
               <Button
                 variant='destructive'
+                trackId='ai_delete_session'
                 loading={isDeleting}
                 onClick={() => void confirmDelete()}
                 data-track-category='XyneAI'

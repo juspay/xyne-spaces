@@ -29,6 +29,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
@@ -66,6 +67,7 @@ export interface HoverActionsToolbarProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onCreateSubTicket?: () => void;
   onEditMessage?: () => void;
@@ -124,6 +126,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  showSubscription,
   onCreateTicket,
   onCreateSubTicket,
   onEditMessage,
@@ -186,7 +189,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onRemindMeOption ||
     onForwardMessage ||
     (messageShortcuts && messageShortcuts.length > 0) ||
-    (onReplyInThread && conversationId);
+    (showSubscription && conversationId);
 
   // Keep toolbar visible if dropdown is open, even if parent says to hide
   if (!isVisible && !isDropdownOpen) return null;
@@ -383,7 +386,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) ||
+                (showSubscription && conversationId) ||
                 onMarkAsUnread ||
                 onBookmark ||
                 onRemindMeOption ||
@@ -406,6 +409,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <EditMessageIcon className='w-4 h-4' />
                       </span>
                       Edit
+                      <ShortcutHint shortcut='message.edit' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -428,7 +432,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {isDropdownOpen && onReplyInThread && conversationId && (
+                  {isDropdownOpen && showSubscription && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}
@@ -471,6 +475,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Bookmark className='w-4 h-4' />
                       </span>
                       {isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                      <ShortcutHint shortcut='message.bookmark' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -543,6 +548,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         {isPinned ? <UnpinIcon className='w-4 h-4' /> : <Pin className='w-4 h-4' />}
                       </span>
                       {isPinned ? 'Unpin message' : 'Pin message'}
+                      <ShortcutHint shortcut='message.pin' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -562,6 +568,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Link className='w-4 h-4' />
                       </span>
                       Copy link
+                      <ShortcutHint shortcut='message.copyLink' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -667,6 +674,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         <Trash2 className='w-4 h-4' />
                       </span>
                       Delete
+                      <ShortcutHint shortcut='message.delete' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
                 </>

@@ -19,8 +19,10 @@ import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
+import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 
 const router = Router();
+const channelEmailAliasService = new ChannelEmailAliasService();
 
 router.use(
   express.json({
@@ -154,7 +156,9 @@ router.post(
       if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
         return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
       }
-      let source = await new ExternalSourceRepository().findByChannelId(channelId);
+      let source = await new ExternalSourceRepository().findChannelSource(channelId, {
+        sourceTypes: ['google', 'microsoft', 'zoho'],
+      });
       let targetChannelId: string | undefined;
       let dlEmail: string | undefined;
 
@@ -170,6 +174,32 @@ router.post(
             dlEmail = pref.dlEmail;
           } else {
             source = null;
+          }
+        }
+      }
+
+      if (!source) {
+        const channel = await db.channel.findUnique({
+          where: { id: channelId },
+          select: { workspaceId: true },
+        });
+        if (channel?.workspaceId) {
+          const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
+            channel.workspaceId,
+          );
+          const alias =
+            channelEmailSource?.isActive && channelEmailSource.displayName
+              ? channelEmailAliasService.getChannelEmailAlias(channelId, channelEmailSource.displayName)
+              : null;
+          if (channelEmailSource && alias) {
+            const channelEmailFullSource = await db.externalSource.findUnique({
+              where: { id: channelEmailSource.id },
+            });
+            if (channelEmailFullSource?.isActive) {
+              source = channelEmailFullSource;
+              targetChannelId = channelId;
+              dlEmail = alias;
+            }
           }
         }
       }

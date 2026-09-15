@@ -1489,7 +1489,7 @@ const BoardEditScreen = ({
               variant='ghost'
               size='iconSm'
               className='w-[16px] h-[16px] text-foreground hover:opacity-70'
-              data-track-category='BOARD_EDIT'
+              data-track-category='board_edit'
               data-track-name='NAVIGATE_BACK'
             >
               <ChevronLeft size={16} />
@@ -2049,7 +2049,7 @@ const BoardEditScreen = ({
           {/* Right Panel - Preview */}
           <TicketPreviewPanel
             onClose={() => {}}
-            trackCategory='BOARD_EDIT'
+            trackCategory='board_edit'
             ticketPreviewContent={
               <TicketPreviewContent
                 boardId={boardId || ''}

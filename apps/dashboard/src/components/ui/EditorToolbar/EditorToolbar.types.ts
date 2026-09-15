@@ -21,3 +21,25 @@ export interface MobileEditorToolbarProps {
   isSending: boolean;
   disabled: boolean;
 }
+
+export interface LinkDialogState {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  linkUrl: string;
+  setLinkUrl: (url: string) => void;
+  linkText: string;
+  setLinkText: (text: string) => void;
+  hasSelection: boolean;
+  isExistingLink: boolean;
+  openDialog: () => void;
+  applyLink: () => void;
+  removeLink: () => void;
+}
+
+export interface LinkDialogProps extends LinkDialogState {
+  trigger?: React.ReactNode;
+}
+
+export interface LinkPopoverProps {
+  editor: Editor | null;
+}

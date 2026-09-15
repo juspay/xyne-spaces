@@ -15,6 +15,7 @@ interface SelectorProps {
   placeholder?: string;
   isLoading?: boolean;
   icon?: React.ReactElement;
+  getItemIcon?: (item: StatusItem) => React.ReactElement;
   noBorder?: boolean;
   isItemDisabled?: (item: StatusItem) => boolean;
   onOpenChange?: (isOpen: boolean) => void;
@@ -30,6 +31,7 @@ export const Selector: React.FC<SelectorProps> = ({
   placeholder = 'Select...',
   isLoading = false,
   icon,
+  getItemIcon,
   noBorder,
   isItemDisabled,
   onOpenChange,
@@ -38,10 +40,10 @@ export const Selector: React.FC<SelectorProps> = ({
     return items.map(item => ({
       value: item.name, // Using name as value to match your handleStageChange logic
       label: item.name,
-      icon: icon,
+      icon: getItemIcon ? getItemIcon(item) : icon,
       disabled: isItemDisabled?.(item) ?? false,
     }));
-  }, [items, icon, isItemDisabled]);
+  }, [items, icon, getItemIcon, isItemDisabled]);
 
   const [isOpen, setIsOpen] = useState(false);
 

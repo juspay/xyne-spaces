@@ -5,8 +5,8 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
-import { CallType, CallVisibility } from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess } from '@xyne/shared';
+import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
@@ -58,6 +58,11 @@ export interface SummaryTemplateSection {
   id: string;
   title: string;
   description: string;
+  /**
+   * Only meaningful on the reserved Decisions / Action Items sections. A Scribe admin can
+   * switch one off; it stays on the template but is dropped from summary generation.
+   */
+  disabled?: boolean;
 }
 
 export type SummaryTemplateInput = Pick<
@@ -122,7 +127,8 @@ export type SummaryTemplatePublicationAction =
   | 'publish'
   | 'withdraw'
   | 'approve'
-  | 'deny';
+  | 'deny'
+  | 'unpublish';
 
 export interface RecordingSharingResult {
   action: 'grant' | 'revoke' | 'link_ticket' | 'unlink_ticket' | 'set_visibility';
@@ -131,12 +137,16 @@ export interface RecordingSharingResult {
   shares?: Array<{ id: string; target: RecordingShareTarget; access: string }>;
   visibility?: CallVisibility;
 }
+export type DetailedSummaryStatus = 'pending' | 'ready' | 'failed' | null;
 
+/**
+ * The regenerate endpoint returns 202 immediately; generation runs in the
+ * background. Completion is observed through the Zero-replicated
+ * `detailedSummaryStatus` on the recording ('pending' → 'ready' | 'failed'),
+ * and the owner also receives a RECORDING_SUMMARY_READY notification.
+ */
 export interface RegenerateRecordingSummaryResult {
-  summaryTemplateId: string;
-  detailedSummaryCanvasId: string | null;
-  detailedSummaryReady: boolean;
-  summaryModelUsed?: 'fast' | 'thinking';
+  status: 'pending';
 }
 
 /** A Google Doc created from this recording's summary, as stored on call metadata. */
@@ -202,12 +212,17 @@ export interface RecordingDetail extends Recording {
   notesCanvasId: string | null;
   detailedSummaryCanvasId: string | null;
   detailedSummaryReady: boolean | null;
+  detailedSummaryStatus: DetailedSummaryStatus;
   summaryModelUsed: 'fast' | 'thinking' | null;
   citationSegments: CitationSegment[];
   visibility?: CallVisibility;
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
   googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
+  /** Null until a recording has been uploaded. */
+  recordingType?: RecordingType | null;
+  /** Streamable attachment for the recording; null for recordings uploaded before streaming. */
+  attachmentId?: string | null;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
 }
@@ -268,6 +283,9 @@ interface RecordingDetailResponse {
   recording: RecordingDetail;
 }
 
+export const callScopedPath = (callId: string, isRecording: boolean): string =>
+  isRecording ? `recordings/${callId}` : callId;
+
 class RecordingService {
   /**
    * Start a headless recording session
@@ -286,6 +304,7 @@ class RecordingService {
       {
         isHeadless: true,
         callType: CallType.AUDIO,
+        recordingType: RecordingType.AUDIO_SCREEN,
         sttModel: params?.sttModel || 'google',
         // Ferry the browser-local summary tier onto the recording so the
         // headless call-end auto-generation can honour a 'thinking' default;
@@ -372,17 +391,24 @@ class RecordingService {
   }
 
   /** `title` names the new doc; omitted, the backend falls back to the recording title. */
-  async exportGoogleDoc(callId: string, title?: string): Promise<ExportRecordingGoogleDocResult> {
+  async exportGoogleDoc(
+    callId: string,
+    title?: string,
+    isRecording = true,
+  ): Promise<ExportRecordingGoogleDocResult> {
     const response = await apiInstance.post<{ success: true } & ExportRecordingGoogleDocResult>(
-      `/calls/recordings/${callId}/export-google-doc`,
+      `/calls/${callScopedPath(callId, isRecording)}/export-google-doc`,
       title ? { title } : {},
     );
     return response.data;
   }
 
-  async getGoogleDocComposeContext(callId: string): Promise<RecordingGoogleDocComposeContext> {
+  async getGoogleDocComposeContext(
+    callId: string,
+    isRecording = true,
+  ): Promise<RecordingGoogleDocComposeContext> {
     const response = await apiInstance.get<{ success: true } & RecordingGoogleDocComposeContext>(
-      `/calls/recordings/${callId}/google-doc-compose-context`,
+      `/calls/${callScopedPath(callId, isRecording)}/google-doc-compose-context`,
     );
     return response.data;
   }

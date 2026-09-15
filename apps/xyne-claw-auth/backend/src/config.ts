@@ -136,6 +136,10 @@ export const CONFIG = {
   // + instructions are stored under the fixed logical "daily-brief" slug,
   // independent of this, so switching the executing agent never moves user data.
   dailyBriefAgentSlug: process.env["DAILY_BRIEF_AGENT_SLUG"] ?? "ask-ai",
+  webhookHistoryWordLimit: Math.max(1, Number(process.env["WEBHOOK_HISTORY_WORD_LIMIT"] ?? 1500)),
+  attachmentDownloadTimeoutMs: Math.max(1_000, Number(process.env["ATTACHMENT_DOWNLOAD_TIMEOUT_MS"] ?? 60_000)),
+  runAttachmentRefs: process.env["XYNE_RUN_ATTACHMENT_REFS"] === "1",
+  runQueueMaxAttempts: Math.max(1, Number(process.env["RUN_QUEUE_MAX_ATTEMPTS"] ?? 4)),
   dailyBriefConcurrency: Number(process.env["DAILY_BRIEF_CONCURRENCY"] ?? 8),
   // CLUSTER-GLOBAL cap on concurrent brief LLM runs (Redis semaphore), independent
   // of replica count — this, not per-worker concurrency, is the real provider-rate
@@ -370,3 +374,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

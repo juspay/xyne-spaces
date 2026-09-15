@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { FileSpreadsheet } from 'lucide-react';
 import {
   AlertCircle,
   ArrowLeft,
-  Download,
-  FileSpreadsheet,
-  Loader2,
-  RotateCcw,
-  SlidersHorizontal,
-} from 'lucide-react';
+  DownloadDown as Download,
+  Spinner as Loader2,
+  RotateLeft as RotateCcw,
+  FilterHorizontal as SlidersHorizontal,
+} from '@xyne/icons';
 import {
   ticketReportsApi,
   type TicketExportFilters,

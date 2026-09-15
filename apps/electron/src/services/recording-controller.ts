@@ -7,6 +7,7 @@ import {
   isPillWindow,
   isRecordingPillEnabled,
   persistRecordingPillEnabled,
+  prewarmRecordingPill,
 } from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
@@ -141,13 +142,12 @@ function clearFocusRequested(): void {
   focusRequestTimer = null;
 }
 
-export function focusMainWindow(pathname?: string): BrowserWindow | null {
+export function focusMainWindow(): BrowserWindow | null {
   const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   markFocusRequested();
   mainWindow.show();
   mainWindow.focus();
-  if (pathname) mainWindow.webContents.send('navigate-to', pathname);
   return mainWindow;
 }
 
@@ -175,9 +175,14 @@ function cancelPendingPillSync(): void {
 
 function syncPillVisibility(): void {
   cancelPendingPillSync();
-  if (active && isRecordingPillEnabled() && (minimized || !isMainWindowFocused())) {
+  const wantsPill =
+    (active || startingRecording) &&
+    isRecordingPillEnabled() &&
+    (minimized || !isMainWindowFocused());
+  if (wantsPill) {
     showRecordingPill({
-      startTime: startTime ?? Date.now(),
+      starting: !active,
+      startTime: active ? (startTime ?? Date.now()) : null,
       paused,
       pauseStartedAt,
       accumulatedPausedMs,
@@ -197,6 +202,7 @@ function scheduleSyncPillVisibility(): void {
 
 export function setRecordingPillEnabled(enabled: boolean): void {
   persistRecordingPillEnabled(enabled);
+  if (enabled) prewarmRecordingPill();
   syncPillVisibility();
   log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
@@ -212,6 +218,8 @@ export function setOverlayMinimized(next: boolean): void {
 }
 
 export function initRecordingPillVisibility(): void {
+  if (isRecordingPillEnabled()) prewarmRecordingPill();
+
   const handleWindowFocus = (_event: Electron.Event, window: BrowserWindow): void => {
     if (isPillWindow(window)) return;
     if (window === getMainWindow()) clearFocusRequested();
@@ -262,7 +270,9 @@ function markExternalStartPending(): void {
 }
 
 export async function startRecordingFromOutside(trigger: RecordingTrigger): Promise<void> {
-  if (active) return;
+  if (active || startingRecording) return;
+
+  setRecordingStarting(true);
 
   let mainWindow = getMainWindow();
   let createdMainWindow = false;
@@ -274,12 +284,16 @@ export async function startRecordingFromOutside(trigger: RecordingTrigger): Prom
       createdMainWindow = true;
     } catch (error) {
       log.error(`[RecordingController] Failed to create window for ${trigger} start:`, error);
+      setRecordingStarting(false);
       return;
     }
   }
 
   mainWindow = getMainWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    setRecordingStarting(false);
+    return;
+  }
 
   if (
     !rendererReady &&
@@ -289,18 +303,28 @@ export async function startRecordingFromOutside(trigger: RecordingTrigger): Prom
   }
 
   mainWindow = getMainWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    setRecordingStarting(false);
+    return;
+  }
 
   log.info(`[RecordingController] Start requested from ${trigger}`);
   markExternalStartPending();
-  mainWindow.webContents.send('navigate-to', '/recordings');
+
+  if (!rendererReady) {
+    log.warn(`[RecordingController] Renderer not ready for ${trigger} start`);
+    setRecordingStarting(false);
+  }
+
+  if (!isRecordingPillEnabled()) focusMainWindow();
   mainWindow.webContents.send('meeting:start-recording');
 }
 
 export function stopRecording(trigger: RecordingTrigger): void {
   minimized = false;
   cancelPendingPillSync();
-  focusMainWindow('/recordings')?.webContents.send('meeting:stop-recording');
+  setRecordingStarting(false);
+  focusMainWindow()?.webContents.send('meeting:stop-recording');
   hideRecordingPill();
   log.info(`[RecordingController] Stop requested from ${trigger}`);
 }
@@ -360,7 +384,9 @@ export function setRecordingStarting(next: boolean): void {
     clearTimeout(startingRecordingExpiry);
     startingRecordingExpiry = null;
   }
+  const changed = startingRecording !== next;
   startingRecording = next;
+  if (changed) syncPillVisibility();
   if (!next) return;
 
   // The renderer is the only thing that clears this, and a hung start never
@@ -369,6 +395,7 @@ export function setRecordingStarting(next: boolean): void {
   startingRecordingExpiry = setTimeout(() => {
     startingRecordingExpiry = null;
     startingRecording = false;
+    syncPillVisibility();
     log.warn('[RecordingController] Recording start was not confirmed by the renderer');
   }, STARTING_RECORDING_TIMEOUT_MS);
 }

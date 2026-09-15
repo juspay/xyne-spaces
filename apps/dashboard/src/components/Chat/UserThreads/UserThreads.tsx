@@ -335,6 +335,7 @@ const UserThreads = (): ReactElement => {
             <button
               className='text-sm text-primary hover:underline'
               onClick={retryLoad}
+              data-ph-capture-attribute-track-id='retry_thread_list_page'
               data-track-category='USER_THREADS'
               data-track-name='RETRY_THREAD_LIST_PAGE'
             >
@@ -401,6 +402,7 @@ const UserThreads = (): ReactElement => {
               <button
                 className='text-sm text-primary hover:underline'
                 onClick={retryLoad}
+                data-ph-capture-attribute-track-id='retry_thread_list'
                 data-track-category='USER_THREADS'
                 data-track-name='RETRY_THREAD_LIST'
               >

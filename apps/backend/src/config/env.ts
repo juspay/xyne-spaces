@@ -6,12 +6,6 @@ dotenv.config();
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
-  // Legacy AES-256-CBC key used for unversioned ciphertext.
-  ENCRYPTION_KEY: Joi.string().allow('').optional(),
-  // Ordered JSON key ring. The final entry is the active writer;
-  // all entries remain available for decryption.
-  ENCRYPTION_KEYS: Joi.string().allow('').optional(),
-
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
@@ -76,7 +70,7 @@ const envSchema = Joi.object({
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
-  SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
+  SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // AWS S3 Configuration
@@ -92,11 +86,8 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
-  MIGRATION_SLACK_PAGE_DELAY_MS: Joi.number().default(1000),      // pause between paged Slack calls during collection
-  MIGRATION_SLACK_FILE_TIMEOUT_MS: Joi.number().default(200000),  // per-attachment download timeout
-  MIGRATION_SLACK_REQUEST_TIMEOUT_MS: Joi.number().default(30000),// per Slack API request timeout (aborts hung pages)
-  MIGRATION_SLACK_STALL_LIMIT_MS: Joi.number().default(600000),   // no forward progress despite a live heartbeat ⇒ wedged (10 min)
-  MIGRATION_INGEST_MESSAGE_DELAY_MS: Joi.number().default(2),     // pause between messages at ingest (~500 msg/s cap)
+  MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
+  MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -120,9 +111,36 @@ const envSchema = Joi.object({
   // sync engine materializes as a single unfenced owner (correct for exactly one replica); ON
   // is required before running >1 sync-engine replica. Needs a non-evicting Redis (asserted).
   ENABLE_SYNC_ENGINE_MULTIPOD: Joi.boolean().default(false),
+  ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  // One switch for the whole feature, read by both processes: the API gates
+  // its producer on it, the worker gates its drain loop on it. A separate
+  // worker flag only bought states that are a no-op or actively bad (enqueuing
+  // with nothing draining), and idling the worker alone is a replicas:0
+  // decision, not a config one. Toggling loses nothing — watermarks persist,
+  // so the next enqueue replays everything above them.
+  ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
+  RADAR_PARSER_MODEL: Joi.string().default('open-fast-sa'),
+  RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
+  RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Kept as a knob deliberately: this is the hard ceiling on how much text can
+  // enter one parse, so it is the emergency brake on parser spend.
+  RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).max(200).default(60),
+  RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
+  RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
+  RADAR_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(30_000),
+  // Longer than a thread's. A DM has no threading convention, so once its gate
+  // opens every message reaches the parser — the debounce is the only thing
+  // bounding that, and one job per minute per active DM is the ceiling.
+  RADAR_DM_DEBOUNCE_MS: Joi.number().integer().min(1_000).max(600_000).default(60_000),
+  RADAR_MAX_CONSECUTIVE_FAILURES: Joi.number().integer().min(1).max(20).default(3),
+  RADAR_MAX_MESSAGE_TEXT_CHARS: Joi.number().integer().min(100).max(20_000).default(5_000),
+  RADAR_RATE_LIMIT_MAX_RETRIES: Joi.number().integer().min(0).max(3).default(3),
+  RADAR_BOOTSTRAP_LOOKBACK_MINUTES: Joi.number().integer().min(1).max(10_080).default(120),
+  RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(1),
+  RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).max(365).default(3),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
   TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
@@ -215,10 +233,12 @@ const envSchema = Joi.object({
   APNS_P8_BASE64: Joi.string().allow('').default(''),
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
+  Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
-  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(true),
+  // OFF by default — entity extraction is an opt-in LLM cost per thread.
+  ENABLE_ENTITY_EXTRACTION: Joi.boolean().default(false),
   ENTITY_EXTRACTION_MODEL: Joi.string().default('open-fast'),
   ENTITY_EXTRACTION_CONCURRENCY: Joi.number().default(2),
   // How long a thread's job sits delayed before it runs. This is the debounce
@@ -266,6 +286,12 @@ const envSchema = Joi.object({
   MESSAGE_CLASSIFIER_MODEL: Joi.string().default('open-fast'),
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
+
+  // @xyne/workflow-sdk
+  ENABLE_WORKFLOWS_WORKER: Joi.boolean().default(false),
+  WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
+  WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
+  WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -405,7 +431,9 @@ const envSchema = Joi.object({
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
-  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
+    .allow('')
+    .default(''),
   JIRA_MIGRATION_ISSUE_PAGE_SIZE: Joi.number().integer().min(1).max(500).default(25),
   // Default to a conservative delay to avoid accidental Jira API hammering in environments
   // where `JIRA_MIGRATION_BATCH_DELAY_MS` isn't explicitly set.
@@ -513,6 +541,12 @@ const envSchema = Joi.object({
   // (lower = higher; delete=1, so 1 puts it at the top).
   FILE_NAME_ONLY_FEED_ENABLED: Joi.boolean().default(true),
   FILE_NAME_ONLY_FEED_PRIORITY: Joi.number().default(1),
+  // Slack-migration attachment content. OFF by default: migrated attachments are fed
+  // METADATA-ONLY (name/mime/size/permissions with empty chunks), so a bulk import skips
+  // the GCS download + parse/OCR/embed entirely and files are still searchable by name.
+  // Set to true to restore full-content feeds for migrated attachments. Only consulted on
+  // the Slack migration paths — live uploads and KB/collections are unaffected.
+  FILE_CONTENT_ENABLED: Joi.boolean().default(false),
   // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
@@ -556,6 +590,15 @@ const envSchema = Joi.object({
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
+  // 'shadow' records what archive inspection would refuse without blocking it;
+  // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
+  UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
+  // When true (default), the webhook SSRF guard allows private / internal
+  // destinations but still refuses loopback and link-local / cloud-metadata
+  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
+  // are unaffected either way (always strict).
+  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
+  SDK_API_ENABLED: Joi.boolean().default(false),
 
 }).unknown();
 
@@ -588,9 +631,20 @@ export const config = {
     : '',
   host: envVars.HOST,
   cors: {
-    origin: envVars.CORS_ORIGIN.split(',')
-      .map((origin: string) => origin.trim())
-      .filter(Boolean),
+    // The CORS allow-list (CORS_ORIGIN) plus the app's own frontend origin
+    // (FRONTEND_URL). The frontend is always a legitimate client for both HTTP and
+    // WebSockets, so it is accepted even when CORS_ORIGIN does not list it — e.g.
+    // when the frontend and API share a host and never needed a CORS entry.
+    origin: (() => {
+      const list = envVars.CORS_ORIGIN.split(',')
+        .map((origin: string) => origin.trim())
+        .filter(Boolean);
+      try {
+        const own = new URL(envVars.FRONTEND_URL as string).origin;
+        if (own && !list.includes(own)) list.push(own);
+      } catch { /* FRONTEND_URL unset or not a URL: nothing to add */ }
+      return list;
+    })(),
     allowedMediaOrigins: envVars.ALLOWED_MEDIA_ORIGINS.split(',')
       .map((origin: string) => origin.trim())
       .filter(Boolean),
@@ -611,6 +665,18 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
+  },
+  sdk: {
+    /** Master switch. The router is not mounted at all when false. */
+    enabled: envVars.SDK_API_ENABLED,
+    /**
+     * Development escape hatch: run reads against the primary pool when no read
+     * replica is configured. Tied to `NODE_ENV` rather than its own flag — the
+     * replica exists to keep SDK read traffic off the write path, and that
+     * matters precisely in production, so there is nothing a separate switch
+     * would let a deployment opt out of that `NODE_ENV` does not already decide.
+     */
+    allowPrimaryForReads: envVars.NODE_ENV !== 'production',
   },
   commonDatabase: {
     url: envVars.COMMON_DATABASE_URL,
@@ -666,11 +732,8 @@ export const config = {
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
   slackMigration: {
-    pageDelayMs: envVars.MIGRATION_SLACK_PAGE_DELAY_MS,
-    fileTimeoutMs: envVars.MIGRATION_SLACK_FILE_TIMEOUT_MS,
-    requestTimeoutMs: envVars.MIGRATION_SLACK_REQUEST_TIMEOUT_MS,
-    stallLimitMs: envVars.MIGRATION_SLACK_STALL_LIMIT_MS,
-    ingestMessageDelayMs: envVars.MIGRATION_INGEST_MESSAGE_DELAY_MS,
+    ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
+    workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
@@ -697,8 +760,38 @@ export const config = {
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableSyncEngine: envVars.ENABLE_SYNC_ENGINE,
   enableSyncEngineMultiPod: envVars.ENABLE_SYNC_ENGINE_MULTIPOD,
+  enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
+  // Radar execution engine. Two switches: enqueue on message insert, and run
+  // the drain worker. A gated window always goes to the parser and a valid
+  // transition is always applied — there is no separate dry-run mode.
+  radar: {
+    enabled: envVars.ENABLE_RADAR_EXECUTION as boolean,
+    // Required once radar is enabled — a blank model throws at parse time.
+    parserModel: envVars.RADAR_PARSER_MODEL as string,
+    // At concurrency 1 this is the drain's maximum stall, not just one call's.
+    parserTimeoutMs: envVars.RADAR_PARSER_TIMEOUT_MS as number,
+    // Blank falls back to the shared LITELLM_API_KEY. A dedicated key keeps
+    // radar's rate limit and spend off the quota other features draw on.
+    litellmApiKey: envVars.RADAR_EXECUTION_LITELLM_API_KEY as string,
+    maxWindowMessages: envVars.RADAR_MAX_WINDOW_MESSAGES as number,
+    contextMessages: envVars.RADAR_CONTEXT_MESSAGES as number,
+    // Open items grow with a thread's life and every parse carries all of
+    // them, so an ownerless item nobody resolves would sit in the prompt
+    // forever.
+    maxOpenItems: envVars.RADAR_MAX_OPEN_ITEMS as number,
+    debounceMs: envVars.RADAR_DEBOUNCE_MS as number,
+    dmDebounceMs: envVars.RADAR_DM_DEBOUNCE_MS as number,
+    maxConsecutiveFailures: envVars.RADAR_MAX_CONSECUTIVE_FAILURES as number,
+    maxMessageTextChars: envVars.RADAR_MAX_MESSAGE_TEXT_CHARS as number,
+    rateLimitMaxRetries: envVars.RADAR_RATE_LIMIT_MAX_RETRIES as number,
+    bootstrapLookbackMinutes: envVars.RADAR_BOOTSTRAP_LOOKBACK_MINUTES as number,
+    workerConcurrency: envVars.RADAR_EXECUTION_WORKER_CONCURRENCY as number,
+    // execution_run_logs is the fastest-growing table here — one row per
+    // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
+    runLogRetentionDays: envVars.RADAR_RUN_LOG_RETENTION_DAYS as number,
+  },
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   teamIntelligence: {
     model: envVars.TEAM_INTELLIGENCE_LLM_MODEL as string,
@@ -814,6 +907,7 @@ export const config = {
   },
   ysweet: {
     url: envVars.Y_SWEET_URL,
+    serverToken: envVars.Y_SWEET_SERVER_TOKEN,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,
@@ -930,6 +1024,13 @@ export const config = {
   },
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
+
+  workflows: {
+    workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
+    workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
+    lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
+    baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
@@ -1089,6 +1190,9 @@ export const config = {
     enabled: envVars.FILE_NAME_ONLY_FEED_ENABLED as boolean,
     queuePriority: envVars.FILE_NAME_ONLY_FEED_PRIORITY as number,
   },
+  fileContentFeed: {
+    enabled: envVars.FILE_CONTENT_ENABLED as boolean,
+  },
   doclingScheduler: {
     enabled: envVars.DOCLING_ASYNC_SCHEDULER_ENABLED as boolean,
     routePdfs: envVars.DOCLING_ROUTE_PDFS_TO_SCHEDULER as boolean,
@@ -1156,5 +1260,11 @@ export const config = {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,
     edaConcurrency: envVars.DATA_SOURCE_EDA_CONCURRENCY as number,
     allowPrivateHosts: envVars.DATA_SOURCE_ALLOW_PRIVATE_HOSTS as boolean,
+  },
+  uploads: {
+    archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
+  },
+  webhooks: {
+    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
 };

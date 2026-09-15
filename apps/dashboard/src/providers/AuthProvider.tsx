@@ -11,8 +11,6 @@ import {
 import { setupElectronAuthListeners } from '../utils/electronAuth';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
-import { mixpanelService } from '../services/Analytics/mixpanelService';
-import { EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanel.types';
 import {
   registerNativePushToken,
   unregisterNativePushToken,
@@ -119,17 +117,35 @@ const handleNativeSignInResult = (
     return;
   }
 
-  if (payload.workspaces && payload.workspaces.length > 0 && payload.email) {
+  // Zero workspaces still goes to the machine when the backend reported a domain conflict, so
+  // the enterprise request-to-join UI renders instead of falling through to the session bootstrap.
+  const nativeHasDomainConflict = !!(payload.domainConflictError || payload.publicEmailDomainError);
+  if (
+    payload.email &&
+    ((payload.workspaces && payload.workspaces.length > 0) || nativeHasDomainConflict)
+  ) {
     authActor.send({
       type: 'OAUTH_CALLBACK_COMPLETE',
       output: {
-        workspaces: payload.workspaces as Workspace[],
+        workspaces: (payload.workspaces ?? []) as Workspace[],
         pendingUserData: {
           email: payload.email,
           name: payload.name ?? '',
           ...(payload.picture ? { picture: payload.picture } : {}),
         },
         userExistsButRemoved: payload.userExistsButRemoved || false,
+        ...(payload.domainConflictError
+          ? { domainConflictError: payload.domainConflictError }
+          : {}),
+        ...(payload.publicEmailDomainError
+          ? { publicEmailDomainError: payload.publicEmailDomainError }
+          : {}),
+        ...(payload.enterpriseJoinOrgName
+          ? { enterpriseJoinOrgName: payload.enterpriseJoinOrgName }
+          : {}),
+        ...(payload.enterpriseJoinWorkspaces
+          ? { enterpriseJoinWorkspaces: payload.enterpriseJoinWorkspaces }
+          : {}),
       },
     });
     return;
@@ -249,11 +265,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (user?.id) {
           authActor.send({ type: 'SESSION_VALIDATED', user });
 
-          mixpanelService.track(EVENTS.APP_REFRESH, {
-            trigger: EVENT_PROPERTIES.REFRESH_TRIGGERS.AUTH_SUCCESS_REDIRECT,
-            url: window.location.href,
-          });
-
           logger.info(LoggerEvent.APP_REFRESH, {
             url: window.location.href,
             trigger: 'AUTH_SUCCESS_REDIRECT',
@@ -285,6 +296,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 ...(data.picture ? { picture: data.picture } : {}),
               },
               userExistsButRemoved: data.userExistsButRemoved || false,
+              ...(data.domainConflictError
+                ? { domainConflictError: data.domainConflictError }
+                : {}),
+              ...(data.publicEmailDomainError
+                ? { publicEmailDomainError: data.publicEmailDomainError }
+                : {}),
+              ...(data.enterpriseJoinOrgName
+                ? { enterpriseJoinOrgName: data.enterpriseJoinOrgName }
+                : {}),
+              ...(data.enterpriseJoinWorkspaces
+                ? { enterpriseJoinWorkspaces: data.enterpriseJoinWorkspaces }
+                : {}),
             },
           });
         } else {

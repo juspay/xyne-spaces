@@ -17,6 +17,7 @@
     "paths": {
       "#zql/*": ["./node_modules/@rocicorp/zero/out/zql/src/*"]
     },
+    "isolatedModules": true,
     "sourceMap": true,
     "types": ["node", "react", "uuid"]
   },

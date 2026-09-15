@@ -136,6 +136,7 @@ export const AddSectionForm = ({
               size='default'
               type='submit'
               loading={loading}
+              trackId='save_section'
               disabled={!!nameError}
               className={cn(
                 'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90',

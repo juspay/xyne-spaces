@@ -198,6 +198,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   className='flex items-center gap-1.5 rounded-[8px] bg-desk-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60'
                   data-track-category='DeskReport'
                   data-track-name='GenerateNow'
+                  data-ph-capture-attribute-track-id='desk_report_generate'
                 >
                   <RefreshCw
                     size={14}

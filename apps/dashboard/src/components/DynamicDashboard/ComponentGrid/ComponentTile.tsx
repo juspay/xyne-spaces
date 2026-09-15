@@ -322,6 +322,7 @@ const ComponentTile = ({
               onClick={() => {
                 void handleDelete();
               }}
+              trackId='delete_component'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Confirm_Delete_Component'
             >

@@ -116,6 +116,27 @@ export interface HostMutateResultMessage {
 }
 
 /**
+ * Finished, display-ready names — never raw rows. Resolved host-side with the
+ * same helpers the rest of Spaces uses, because two of the rules are not
+ * guessable: `displayName` is usually null (fall back to name, then email), and
+ * a DM channel's `name` column holds participant ids rather than a name.
+ */
+export interface ArtifactDirectory {
+  /** userId -> display name. */
+  users: Record<string, string>;
+  /** channelId -> channel name, with DMs already resolved to participant names. */
+  channels: Record<string, string>;
+}
+
+/** Host -> app. Idempotent, last write wins - same contract as a data snapshot. */
+export interface HostDirectoryMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'directory';
+  directory: ArtifactDirectory;
+}
+
+/**
  * Host → app: one event from a running agent, forwarded off the live
  * conversation stream. Fire-and-forget; the app accumulates them.
  */
@@ -160,21 +181,55 @@ export interface HostAgentStateMessage {
   };
 }
 
+/**
+ * Host → app, answering a `request`: the result of running the app's backend
+ * fetch as the current viewer (same-origin, the viewer's httpOnly cookie). Keyed
+ * by `requestId`, request/response like `mutate-result`.
+ */
+export interface HostRequestResultMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'request-result';
+  requestId: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  error?: string;
+}
+
 /** App → host. */
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
   v: number;
-  type: 'ready' | 'refresh' | 'mutate' | 'agent-run' | 'agent-cancel' | 'agent-attach';
+  type:
+    | 'ready'
+    | 'refresh'
+    | 'mutate'
+    | 'agent-run'
+    | 'agent-cancel'
+    | 'agent-attach'
+    | 'error'
+    | 'request';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
-  /** `mutate` only. */
+  /** `mutate` and `request`. */
   requestId?: string;
   args?: unknown;
+  /** `request` only: a backend fetch to run as the viewer (see useArtifactRequestBridge). */
+  method?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  body?: string;
   /** Agent messages: which conversation thread this concerns. */
   runKey?: string;
   /** `agent-run` only. */
   prompt?: string;
   agentSlug?: string;
+  /** `error` only: an uncaught failure inside the app, reported so the host can
+   *  show it and offer a fix. `componentStack` comes from the root boundary. */
+  message?: string;
+  stack?: string;
+  componentStack?: string;
 }
 
 export function isAppArtifactMessage(value: unknown): value is AppArtifactMessage {
@@ -182,12 +237,20 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
   const msg = value as Partial<AppArtifactMessage>;
   if (msg.source !== 'xyne-artifact') return false;
   if (msg.type === 'ready' || msg.type === 'refresh') return true;
+  if (msg.type === 'error') return typeof msg.message === 'string';
   if (msg.type === 'agent-attach' || msg.type === 'agent-cancel') {
     return typeof msg.runKey === 'string';
   }
   if (msg.type === 'agent-run') {
     return (
       typeof msg.runKey === 'string' && typeof msg.prompt === 'string' && msg.prompt.length > 0
+    );
+  }
+  if (msg.type === 'request') {
+    return (
+      typeof msg.requestId === 'string' &&
+      typeof msg.method === 'string' &&
+      typeof msg.url === 'string'
     );
   }
   return msg.type === 'mutate' && typeof msg.requestId === 'string' && typeof msg.name === 'string';

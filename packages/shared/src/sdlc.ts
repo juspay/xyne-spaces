@@ -117,12 +117,72 @@ export const SDLC_ENTITY_TYPES = [
   "REPOSITORY",
   "WORKFLOW_EXECUTION",
   "TRACK",
+  "FOLDER",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
 export type SdlcEntityType = z.infer<typeof sdlcEntityTypeSchema>;
 
-export const SDLC_RELATION_TYPES = [
+/**
+ * A CHANNEL -> REPOSITORY edge: the repository belongs to that hub. It shares a
+ * table with the content graph, so every read of that graph excludes it — grep
+ * this constant for those call sites. Written only by the hub endpoints.
+ */
+export const SDLC_MEMBERSHIP_RELATION = "REPOSITORY";
+
+/**
+ * A CHANNEL -> TRACK edge: the track belongs to that hub. Tracks carry no scope
+ * column of their own, so this edge is the only thing that places one.
+ */
+export const SDLC_TRACK_MEMBERSHIP_RELATION = "TRACK";
+
+/**
+ * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
+ * holds on the target. Shares its name with track membership because a root-level
+ * item's containment edge *is* its track membership; nesting only changes which
+ * parent is on the source side.
+ */
+export const SDLC_CONTAINMENT_RELATION = "TRACK_ITEM";
+
+/**
+ * What the folder tree renders. Tickets ride the same relationType from a track
+ * but belong to their own section, so the tree filters rather than assuming
+ * everything a track holds is a tree node.
+ */
+export const SDLC_TREE_TARGET_TYPES = ["FOLDER", "CANVAS"] as const;
+
+/**
+ * A TRACK -> item edge kept alongside the containment edge, so "everything in
+ * this track" is one indexed lookup rather than a walk down the folder tree.
+ * Derived: written and removed with the item it mirrors, never on its own.
+ */
+export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
+
+/**
+ * Edges no user may write or delete through the generic link API. Derived or
+ * structural: the app maintains them with the thing they describe.
+ */
+export const SDLC_STRUCTURAL_RELATIONS = [
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+] as const;
+
+/**
+ * Edges a hub's link graph leaves out: they place things in the hub rather than
+ * relate them, so readers of the graph would double-count them.
+ *
+ * Narrower than SDLC_STRUCTURAL_RELATIONS on purpose. The flat track edge is not
+ * user-writable, but the client does need to read it — excluding it here is what
+ * made a track's artifact count read zero.
+ */
+export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
+  SDLC_MEMBERSHIP_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+] as const;
+
+/** Relation types a user may create or delete through the generic link API. */
+export const SDLC_CONTENT_RELATION_TYPES = [
   "TICKET",
   "CONTEXT",
   "PULL_REQUEST",
@@ -132,13 +192,19 @@ export const SDLC_RELATION_TYPES = [
   "CALL",
 ] as const;
 
+export const SDLC_RELATION_TYPES = [
+  ...SDLC_CONTENT_RELATION_TYPES,
+  ...SDLC_STRUCTURAL_RELATIONS,
+] as const;
+
 export const sdlcRelationTypeSchema = z.enum(SDLC_RELATION_TYPES);
+export const sdlcContentRelationTypeSchema = z.enum(SDLC_CONTENT_RELATION_TYPES);
 export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
   .object({
     repoId: z.string().min(1),
-    ownerType: z.enum(["CANVAS", "TRACK"]),
+    ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
     surfaceId: z.string().min(1).optional(),
@@ -157,6 +223,28 @@ export const sdlcDiscussionSchema = z
   });
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
+export const entityLinkContextSchema = z.object({
+  sourceType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
+  sourceId: z.string().min(1),
+  linkId: z.string().min(1),
+  /**
+   * A folder's conversation is filed on its track as well, so the track's list
+   * shows everything discussed anywhere inside it. The flat relation, not a
+   * second DISCUSSION row: DISCUSSION has to stay one per conversation or
+   * resolveInheritedOwner picks between owners arbitrarily.
+   */
+  trackRollUp: z
+    .object({ trackId: z.string().min(1), linkId: z.string().min(1) })
+    .optional(),
+});
+export type EntityLinkContextInput = z.infer<typeof entityLinkContextSchema>;
+
+export const entityLinkOwnerSchema = entityLinkContextSchema.omit({
+  linkId: true,
+  trackRollUp: true,
+});
+export type EntityLinkOwner = z.infer<typeof entityLinkOwnerSchema>;
+
 export const SDLC_TRACK_STATUSES = ["ACTIVE", "COMPLETED", "ARCHIVED"] as const;
 export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
 
@@ -166,7 +254,6 @@ export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
  * OWNER -> CALL [CALL] and OWNER -> CONVERSATION [DISCUSSION] links.
  */
 export const sdlcCallLinkSchema = z.object({
-  repoId: z.string().min(1),
   ownerType: z.enum(["CANVAS", "TRACK"]),
   ownerId: z.string().min(1),
 });
@@ -185,6 +272,21 @@ export const SDLC_SETUP_STATUSES = [
 
 export const sdlcSetupStatusSchema = z.enum(SDLC_SETUP_STATUSES);
 export type SdlcSetupStatus = z.infer<typeof sdlcSetupStatusSchema>;
+
+export const createSdlcChannelSchema = z.object({
+  projectId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  // At least one: a hub with no repositories has no screen to render.
+  repoIds: z.array(z.string().min(1)).min(1).max(100),
+});
+export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
+
+export const addSdlcChannelRepositoriesSchema = z.object({
+  repoIds: z.array(z.string().min(1)).min(1).max(100),
+});
+export type AddSdlcChannelRepositoriesInput = z.infer<
+  typeof addSdlcChannelRepositoriesSchema
+>;
 
 export const attachSdlcRepositorySchema = z.object({
   projectId: z.string().min(1),
@@ -210,12 +312,6 @@ export const configureSdlcVcsCredentialSchema = z.object({
       /^github_pat_[A-Za-z0-9_]+$/,
       "Enter a GitHub fine-grained personal access token",
     ),
-  resourceOwner: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .regex(/^[A-Za-z0-9_.-]+$/),
 });
 export type ConfigureSdlcVcsCredentialInput = z.infer<
   typeof configureSdlcVcsCredentialSchema
@@ -588,6 +684,8 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
 export const createSdlcClawArtifactSchema = z
   .object({
     repoId: z.string().min(1),
+    // The hub to write into. A repository sits in several, so it cannot be inferred.
+    channelId: z.string().min(1).optional(),
     kind: sdlcArtifactKindSchema.optional(),
     folderId: z.string().min(1).optional(),
     title: z.string().trim().min(1).max(255),
@@ -678,12 +776,14 @@ export const createSdlcLinkSchema = z.object({
   sourceId: z.string().min(1),
   targetType: sdlcEntityTypeSchema,
   targetId: z.string().min(1),
-  relationType: sdlcRelationTypeSchema,
+  // Content relations only: membership is not a link a caller may forge.
+  relationType: sdlcContentRelationTypeSchema,
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
 export const createSdlcTrackSchema = z.object({
   repoId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).optional(),
 });
@@ -691,6 +791,7 @@ export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
 export const createSdlcArtifactTypeSchema = z.object({
   repoId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
   name: z.string().trim().min(1).max(80),
 });
 export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
@@ -712,3 +813,174 @@ export function inferRepositoryNameFromUrl(raw: string): string | null {
     .filter(Boolean);
   return segments.length >= 3 ? segments.at(-1)! : null;
 }
+
+export const SDLC_SECTIONS = [
+  "overview",
+  "wiki",
+  "baseline",
+  "tracks",
+  "tickets",
+  "artifacts",
+] as const;
+export type SdlcSection = (typeof SDLC_SECTIONS)[number];
+
+/** A schema because it crosses the wire. */
+export const sdlcNavTargetSchema = z.object({
+  channelId: z.string().min(1),
+  section: z.enum(SDLC_SECTIONS),
+  canvasId: z.string().min(1).optional(),
+  folderId: z.string().min(1).optional(),
+  trackId: z.string().min(1).optional(),
+  ticketId: z.string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
+  messageId: z.string().min(1).optional(),
+  blockId: z.string().min(1).optional(),
+  commentThreadId: z.string().min(1).optional(),
+});
+export type SdlcNavTarget = z.infer<typeof sdlcNavTargetSchema>;
+
+export function parseSdlcNavTarget(value: unknown): SdlcNavTarget | null {
+  const parsed = sdlcNavTargetSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Baselines and the wiki get their own sections; every other artifact a folder. */
+export function sdlcSectionForCanvas(
+  artifactType: string | null | undefined,
+  folderId: string | null | undefined,
+): { section: SdlcSection; folderId?: string } {
+  if (isBaselineCanvasType(artifactType)) return { section: "baseline" };
+  if (artifactType === "WIKI") return { section: "wiki" };
+  return { section: "artifacts", ...(folderId ? { folderId } : {}) };
+}
+
+function messageAnchor(target: SdlcNavTarget): string {
+  if (!target.conversationId) return "";
+  const anchor = new URLSearchParams({ origin: target.conversationId });
+  if (target.messageId) anchor.set("messageId", target.messageId);
+  return `#${anchor.toString()}`;
+}
+
+/** The repository is chosen inside the screen; the workspace prefix by the caller. */
+export function buildSdlcPath(target: SdlcNavTarget): string {
+  const hub = `/sdlc/${encodeURIComponent(target.channelId)}`;
+  if (target.ticketId) {
+    return `${hub}/tickets/${encodeURIComponent(target.ticketId)}${messageAnchor(target)}`;
+  }
+
+  const search = new URLSearchParams();
+  if (target.canvasId) search.set("canvas", target.canvasId);
+  if (target.folderId) search.set("type", target.folderId);
+  if (target.trackId) search.set("track", target.trackId);
+  if (target.blockId) search.set("blockId", target.blockId);
+  if (target.commentThreadId) search.set("commentThreadId", target.commentThreadId);
+
+  // Opens on any artifact or track, showing that owner's threads when none is named.
+  if (target.conversationId || target.canvasId || target.trackId) {
+    search.set("discussion", "1");
+    search.set("chat", "conversations");
+  }
+  if (target.conversationId) search.set("conversation", target.conversationId);
+  const hash = messageAnchor(target);
+
+  const query = search.toString();
+  return `${hub}/${target.section}${query ? `?${query}` : ""}${hash}`;
+}
+
+const nullableNonEmpty = z.string().min(1).nullable();
+
+export const SDLC_AGENT_OPERATIONS = [
+  "interactive",
+  "baseline",
+  "artifact",
+  "work",
+  "wiki",
+] as const;
+export const sdlcAgentOperationSchema = z.enum(SDLC_AGENT_OPERATIONS);
+export type SdlcAgentOperation = z.infer<typeof sdlcAgentOperationSchema>;
+
+export const SDLC_WIKI_AGENT_ROLES = [
+  "BOOTSTRAP_SURVEY",
+  "BOOTSTRAP_PAGE",
+  "BOOTSTRAP_EDITOR",
+  "BOOTSTRAP",
+  "GENERATOR",
+  "ARCHITECTURE_VALIDATOR",
+  "CORRECTOR",
+] as const;
+export const sdlcWikiAgentRoleSchema = z.enum(SDLC_WIKI_AGENT_ROLES);
+export type SdlcWikiAgentRole = z.infer<typeof sdlcWikiAgentRoleSchema>;
+
+
+export const sdlcAgentContextSchema = z
+  .object({
+    version: z.literal(1),
+    operation: sdlcAgentOperationSchema,
+    workspaceId: z.string().min(1),
+    projectId: z.string().min(1),
+    channelId: z.string().min(1),
+    actorUserId: z.string().min(1),
+    repository: z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      url: z.string().min(1),
+      baseBranch: z.string().min(1),
+    }),
+    permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
+    gates: z.object({
+      capabilities: z.array(z.unknown()),
+      allBaselinesApproved: z.boolean(),
+    }),
+    execution: z.object({
+      workflowExecutionId: nullableNonEmpty,
+      sessionId: nullableNonEmpty,
+      conversationId: nullableNonEmpty,
+    }),
+    interactiveGrant: nullableNonEmpty.optional(),
+    artifact: z.object({
+      kind: nullableNonEmpty,
+      id: nullableNonEmpty,
+      sourceType: nullableNonEmpty,
+      sourceId: nullableNonEmpty,
+    }),
+    ticketId: nullableNonEmpty.optional(),
+    setupExecutionId: nullableNonEmpty.optional(),
+    baselineKind: sdlcBaselineKindSchema.nullable().optional(),
+    generationCommit: nullableNonEmpty.optional(),
+    wiki: z
+      .object({
+        role: sdlcWikiAgentRoleSchema.nullable(),
+        assignedCommitShas: z.array(z.string()),
+        bootstrapRef: z.string().nullable(),
+        targetHeadSha: z.string().nullable(),
+      })
+      .optional(),
+  })
+  .superRefine((context, ctx) => {
+    const fail = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    const hasExecution =
+      Boolean(context.execution.workflowExecutionId) && Boolean(context.execution.sessionId);
+
+    switch (context.operation) {
+      case "baseline":
+        if (!context.setupExecutionId) fail("setupExecutionId is required for baseline runs");
+        if (!context.baselineKind) fail("baselineKind is required for baseline runs");
+        if (!hasExecution) fail("baseline runs require a bound execution");
+        break;
+      case "artifact":
+        if (!hasExecution) fail("artifact runs require a bound execution");
+        break;
+      case "work":
+        if (!context.ticketId) fail("ticketId is required for work runs");
+        if (!hasExecution) fail("work runs require a bound execution");
+        break;
+      case "interactive":
+        if (!context.execution.conversationId) fail("interactive runs require a conversationId");
+        if (!context.interactiveGrant) fail("interactive runs require an interactiveGrant");
+        break;
+      case "wiki":
+        break;
+    }
+  });
+export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;

@@ -1,7 +1,9 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Loader2, FileText } from 'lucide-react';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
+import { Hashtag, EnvelopeDefault, File02Text } from '@xyne/icons';
+import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { useCallPRD } from '../../hooks/useCallPRD';
@@ -17,10 +19,30 @@ import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
 import { CallParticipantsPopover } from './CallParticipantsPopover';
 import { CallSummaryTemplatePicker } from './CallSummaryTemplatePicker';
+import { useCallSummaryGeneration } from './useCallSummaryGeneration';
 import { useAuth } from '../../hooks/useAuth';
 import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
-import { formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
+import { callSummaryFormat, formatCallHeldOn, formatCallLength } from './CallDetailScreen.utils';
+import { CallLabelPicker } from './CallLabelPicker';
+import { callService } from '../../services/Call/callService';
+import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { CallShareModal } from './CallShareModal';
+import { Button } from '../../components/ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../components/ui/dropdown-menu';
+import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components/PostRecordingToEmailModal';
+import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
+import { useCallGoogleDocExport } from './useCallGoogleDocExport';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+
+/** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
+const POST_BUTTON_CLASS =
+  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -29,11 +51,30 @@ const getCanvasIdFromUrl = (url: unknown): string | null => {
   return url.split('/').filter(Boolean).pop() ?? null;
 };
 
+const EMPTY_LABEL_SUGGESTIONS: string[] = [];
+
 export default function CallDetailScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
-  const call = (location.state as { call: Call } | null)?.call;
+  const { callId: callIdParam } = useParams<{ callId: string }>();
+  const navState = location.state as { call: Call; labelSuggestions?: string[] } | null;
+  // The labels the history screen had loaded when this call was opened. Only the
+  // picker's suggestion list — a deep link arrives without them and just offers
+  // whatever is already on the call.
+  const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
   const { isMobile } = usePlatform();
+
+  // Calls Home hands the row over in navigation state. A call reached by link —
+  // from a share posted to a channel, or a pasted URL — has none, so fall back to
+  // resolving it by the id in the route.
+  const navigationCall = navState?.call;
+  const [fetchedCall, fetchedCallDetails] = useCachedQuery(
+    queries.callById({ callId: callIdParam ?? '' }),
+    { enabled: Boolean(callIdParam) },
+  );
+  const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
+  const isResolvingCall =
+    !navigationCall && Boolean(callIdParam) && fetchedCallDetails.type !== 'complete';
 
   // Hoist derived values so they're available to all hooks below
   const callConversationId =
@@ -102,13 +143,18 @@ export default function CallDetailScreen(): ReactElement {
   }, [conversationMessages, call?.externalId]);
 
   const callMessageId = callMessage?.messageId ?? null;
-
   const detailedSummaryCanvasId = useMemo<string | null>(() => {
     const meta = callMessage?.metadata as Record<string, unknown> | null | undefined;
-    return getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
-  }, [callMessage]);
+    const fromMessage = getCanvasIdFromUrl(meta?.['detailedSummaryCanvasUrl']);
+    if (fromMessage) return fromMessage;
+    const callMeta = call?.metadata as Record<string, unknown> | null | undefined;
+    const stamped = callMeta?.['detailedSummaryCanvasId'];
+    return typeof stamped === 'string' && stamped.length > 0 ? stamped : null;
+  }, [callMessage, call?.metadata]);
 
   const hasDetailedSummaryTab = Boolean(detailedSummaryCanvasId);
+  const summaryFormat = callSummaryFormat(call?.aiSummary);
+  const isOwner = Boolean(user?.id && call?.createdByUserId === user.id);
 
   const hasRecording = useMemo<boolean>(() => {
     if (!conversationMessages || !call?.externalId) return false;
@@ -147,6 +193,24 @@ export default function CallDetailScreen(): ReactElement {
     selectedTab && availableTabIds.includes(selectedTab)
       ? selectedTab
       : (availableTabIds[0] ?? null);
+
+  // "Someone actually read the summary" is the payoff signal for the whole
+  // transcription pipeline, and it is the one call event with no click behind it
+  // — the detailed summary is the default tab and renders unprompted. Emit it
+  // once per call per mount, when the summary is genuinely on screen.
+  const summaryViewLogged = useRef<string | null>(null);
+  useEffect(() => {
+    const callExternalId = call?.externalId;
+    if (activeTab !== 'detailed-summary' || !detailedSummaryCanvasId || !callExternalId) return;
+    if (summaryViewLogged.current === callExternalId) return;
+    summaryViewLogged.current = callExternalId;
+    globalClickTracker.trackManualEvent('CALLS', 'VIEW_CALL_DETAILED_SUMMARY', undefined, {
+      callId: callExternalId,
+      hoursSinceCallEnded: call?.endedAt
+        ? Math.round((Date.now() - new Date(call.endedAt).getTime()) / 3600000)
+        : null,
+    });
+  }, [activeTab, detailedSummaryCanvasId, call?.externalId, call?.endedAt]);
 
   // Tabs come out of the call's conversation messages, so an unresolved query means
   // "not known yet" rather than "this call has nothing".
@@ -207,6 +271,99 @@ export default function CallDetailScreen(): ReactElement {
     };
   }, [call, isMobile, openAI]);
 
+  // The call's host, anyone who took part, or a member of the channel it happened
+  // in. Mirrors isCallAudience on the backend, which gates the same two actions.
+  const isCallAudience = Boolean(
+    user?.id &&
+    call &&
+    (call.createdByUserId === user.id ||
+      call.participants?.some(p => p.userId === user.id) ||
+      (call.channelId && visibleChannels.some(c => c.id === call.channelId))),
+  );
+  // Labels are editable by that same audience.
+  const canEditLabels = isCallAudience;
+
+  // `call` usually comes off navigation state, which never re-resolves from Zero,
+  // so labels are held here and reseeded when a different call is opened.
+  const [labels, setLabels] = useState<string[]>(call?.labels ?? []);
+  const labelsUpdateSeqRef = useRef(0);
+  useEffect(() => {
+    setLabels(call?.labels ?? []);
+    // Keyed on the call alone: re-running on the labels array would undo an
+    // optimistic edit, since navigation state keeps the pre-edit value forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.id]);
+
+  /** Labels apply optimistically and roll back if the call rejects the write. */
+  const handleLabelsChange = async (next: string[]): Promise<void> => {
+    if (!call) return;
+    const previousLabels = labels;
+    const seq = ++labelsUpdateSeqRef.current;
+    setLabels(next);
+
+    try {
+      // Raw text typed in the picker becomes a real Tag server-side, so swap in
+      // the ids the response returns rather than keeping the optimistic strings.
+      const resolved = await callService.updateCallLabels(call.externalId, next);
+      if (labelsUpdateSeqRef.current === seq) setLabels(resolved);
+    } catch {
+      toast.error('Failed to update labels');
+      if (labelsUpdateSeqRef.current === seq) setLabels(previousLabels);
+    }
+  };
+
+  const summary = useCallSummaryGeneration(call, fetchedCall);
+
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showGoogleDocModal, setShowGoogleDocModal] = useState(false);
+  const [emailModalNonce, setEmailModalNonce] = useState(0);
+  const [googleDocModalNonce, setGoogleDocModalNonce] = useState(0);
+  const closeGoogleDocModal = useCallback(() => setShowGoogleDocModal(false), []);
+  const googleDocExport = useCallGoogleDocExport(
+    call?.externalId ?? '',
+    call?.metadata,
+    closeGoogleDocModal,
+  );
+
+  // Connecting Google sends the browser away and back with these params. Reopen
+  // the modal it came from, remounted so it refetches what it can now do.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const email = params.get('recordingEmailConnected') === 'true';
+    const emailError = params.get('recordingEmailError');
+    const doc = params.get('recordingGoogleDocConnected') === 'true';
+    const docError = params.get('recordingGoogleDocError');
+    if (!email && !emailError && !doc && !docError) return;
+
+    if (email || emailError) {
+      if (email) toast.success('Google email connected');
+      else toast.error(emailError as string);
+      setEmailModalNonce(nonce => nonce + 1);
+      setShowEmailModal(true);
+    }
+    if (doc || docError) {
+      if (doc) toast.success('Google Docs connected');
+      else toast.error('Google Docs connection failed. Please try again.');
+      setGoogleDocModalNonce(nonce => nonce + 1);
+      setShowGoogleDocModal(true);
+    }
+
+    for (const key of [
+      'recordingEmailConnected',
+      'recordingEmailError',
+      'recordingGoogleDocConnected',
+      'recordingGoogleDocError',
+    ]) {
+      params.delete(key);
+    }
+    const search = params.toString();
+    void navigate(
+      { pathname: location.pathname, ...(search ? { search: `?${search}` } : {}) },
+      { replace: true, state: (location.state as { call: Call } | null) ?? null },
+    );
+  }, [location.pathname, location.search, location.state, navigate]);
+
   const title = call?.title ?? 'Untitled Call';
   const heldOn = formatCallHeldOn(call?.startedAt);
   const callLength = formatCallLength(durationMs);
@@ -214,9 +371,13 @@ export default function CallDetailScreen(): ReactElement {
   if (!call) {
     return (
       <div className='flex items-center justify-center h-full'>
-        <p className='text-sm text-muted-foreground'>
-          Call not found. Please go back and try again.
-        </p>
+        {isResolvingCall ? (
+          <Loader2 className='size-5 animate-spin text-muted-foreground' />
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            Call not found, or you do not have access to it.
+          </p>
+        )}
       </div>
     );
   }
@@ -327,8 +488,18 @@ export default function CallDetailScreen(): ReactElement {
               )}
             </div>
 
-            {/* Participants */}
-            <CallParticipantsPopover call={call} currentUserId={user?.id} className='mt-3.5' />
+            {/* Participants + labels — one row, as on the recording detail header */}
+            <div className='mt-3.5 flex flex-wrap items-center gap-2'>
+              <CallParticipantsPopover call={call} currentUserId={user?.id} />
+              {(canEditLabels || labels.length > 0) && (
+                <CallLabelPicker
+                  labels={labels}
+                  canEdit={canEditLabels}
+                  suggestions={labelSuggestions}
+                  onChange={next => void handleLabelsChange(next)}
+                />
+              )}
+            </div>
 
             {/* Recording */}
             {hasRecording && (
@@ -364,9 +535,13 @@ export default function CallDetailScreen(): ReactElement {
               >
                 {hasDetailedSummaryTab && (
                   <CallSummaryTemplatePicker
-                    selectedTemplateId={call.summaryTemplateId}
+                    selectedTemplateId={summary.selectedTemplateId}
                     isActive={activeTab === 'detailed-summary'}
                     onSelect={() => setSelectedTab('detailed-summary')}
+                    {...(isCallAudience ? { onRegenerate: summary.regenerate } : {})}
+                    isRegenerating={summary.isGenerating}
+                    regeneratingTemplateId={summary.request?.templateId}
+                    regeneratingTemplateName={summary.request?.templateName}
                     className={pillClassName(activeTab === 'detailed-summary')}
                   />
                 )}
@@ -400,6 +575,84 @@ export default function CallDetailScreen(): ReactElement {
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {isCallAudience && hasDetailedSummaryTab && (
+                <DropdownMenu>
+                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setShowShareModal(true)}
+                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_modal'
+                    >
+                      <Hashtag className='size-3.5' />
+                      Post to channel
+                    </Button>
+                    {isOwner && (
+                      <>
+                        <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='iconSm'
+                            aria-label='More actions'
+                            className={POST_BUTTON_CLASS}
+                            data-track-category='CallDetail'
+                            data-track-name='open_call_actions_menu'
+                          >
+                            <ChevronDown className='size-3.5' />
+                          </Button>
+                        </DropdownMenuTrigger>
+                      </>
+                    )}
+                  </div>
+                  <DropdownMenuContent
+                    align='end'
+                    sideOffset={6}
+                    className='w-60 rounded-xl p-1.5 shadow-xl'
+                  >
+                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                      Send this summary to
+                    </p>
+                    <DropdownMenuItem
+                      onSelect={() => setShowShareModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_channel_from_menu'
+                    >
+                      <Hashtag className='size-4 text-muted-foreground' />
+                      Post to channel
+                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+                        Default
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowEmailModal(true)}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='open_post_to_email_modal'
+                    >
+                      <EnvelopeDefault className='size-4 text-muted-foreground' />
+                      Draft follow-up email
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => setShowGoogleDocModal(true)}
+                      disabled={googleDocExport.isExporting}
+                      className='rounded-lg px-2.5 py-2'
+                      data-track-category='CallDetail'
+                      data-track-name='export_call_google_doc'
+                    >
+                      <File02Text className='size-4 text-muted-foreground' />
+                      {googleDocExport.isExporting
+                        ? 'Creating Google Doc…'
+                        : 'Export to Google Docs'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
 
             {/* Tab content */}
@@ -410,7 +663,10 @@ export default function CallDetailScreen(): ReactElement {
                   Loading...
                 </div>
               ) : activeTab === 'detailed-summary' && detailedSummaryCanvasId ? (
-                <DetailedSummaryCanvasTab canvasId={detailedSummaryCanvasId} />
+                <DetailedSummaryCanvasTab
+                  key={`${detailedSummaryCanvasId}:${summary.canvasNonce}`}
+                  canvasId={detailedSummaryCanvasId}
+                />
               ) : (
                 (() => {
                   const prd = prdEntries.find(e => e.id === activeTab);
@@ -438,6 +694,72 @@ export default function CallDetailScreen(): ReactElement {
           </div>
         </div>
       </div>
+
+      {showShareModal && (
+        <Dialog
+          open={showShareModal}
+          onOpenChange={open => !open && setShowShareModal(false)}
+          title='Post to channel'
+          data-testid='post-call-to-channel-modal'
+          onOpenAutoFocus={event => event.preventDefault()}
+        >
+          <CallShareModal
+            callId={call.id}
+            externalId={call.externalId}
+            createdByUserId={call.createdByUserId}
+            onClose={() => setShowShareModal(false)}
+          />
+        </Dialog>
+      )}
+
+      {isOwner && showEmailModal && hasDetailedSummaryTab && (
+        <Dialog
+          open={showEmailModal}
+          onOpenChange={open => !open && setShowEmailModal(false)}
+          title='Review draft email'
+          description='Review the call recap before sending it by email.'
+          className='max-w-[1120px] overflow-hidden rounded-xl p-0'
+          testId='post-call-to-email-dialog'
+        >
+          <PostRecordingToEmailModal
+            key={emailModalNonce}
+            recording={{
+              externalId: call.externalId,
+              title: call.title ?? '',
+              aiSummary: call.aiSummary,
+              aiSummaryFormat: summaryFormat,
+            }}
+            onClose={() => setShowEmailModal(false)}
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
+
+      {isOwner && showGoogleDocModal && hasDetailedSummaryTab && (
+        <Dialog
+          open={showGoogleDocModal}
+          onOpenChange={open => !open && setShowGoogleDocModal(false)}
+          title='Preview Google Doc'
+          description='Review the call summary before creating a Google Doc.'
+          className='max-w-[720px] overflow-hidden rounded-[18px] p-0'
+          testId='call-google-doc-preview-dialog'
+        >
+          <GoogleDocPreviewModal
+            key={googleDocModalNonce}
+            recording={{
+              externalId: call.externalId,
+              title: call.title ?? '',
+              googleDocs: googleDocExport.documents,
+            }}
+            onClose={() => setShowGoogleDocModal(false)}
+            onExport={googleDocExport.exportDoc}
+            isExporting={googleDocExport.isExporting}
+            isRecording={false}
+            trackCategory='CallDetail'
+          />
+        </Dialog>
+      )}
     </div>
   );
 }

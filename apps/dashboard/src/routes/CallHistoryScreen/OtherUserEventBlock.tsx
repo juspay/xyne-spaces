@@ -60,7 +60,7 @@ export function OtherUserEventBlock({
         backgroundColor: `${color}26`,
         borderLeft: `3px solid ${color}`,
       }}
-      data-track-category='calendar'
+      data-track-category='CALENDAR'
       data-track-name='other-user-event-block'
       onClick={onClick}
       onKeyDown={

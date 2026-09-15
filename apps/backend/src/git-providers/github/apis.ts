@@ -8,7 +8,7 @@ const GITHUB_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 // Abbreviated or full git object id.
 const GIT_SHA_PATTERN = /^[0-9a-f]{7,64}$/i;
 // Strip control characters (incl. CR/LF) so user-derived text can't forge log lines.
-const sanitizeForLog = (value: string): string =>
+export const sanitizeForLog = (value: string): string =>
   value.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 200);
 
 export class GithubManager implements IGitProvider {
@@ -150,6 +150,36 @@ export class GithubManager implements IGitProvider {
         message: axiosError.message,
       });
       throw error;
+    }
+  }
+
+  /** Never throws: on failure it reports false, so a lookup problem cannot post
+   *  a status we did not intend. */
+  async hasCommitStatus(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    context: string,
+  ): Promise<boolean> {
+    if (!GITHUB_NAME_PATTERN.test(owner) || !GITHUB_NAME_PATTERN.test(repo)) return false;
+    if (!GIT_SHA_PATTERN.test(commitSha)) return false;
+
+    const url = `${this.config.apiUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}/commits/${encodeURIComponent(commitSha)}/statuses`;
+    try {
+      const response = await axios.get<Array<{ context?: string }>>(url, {
+        headers: this.getHeaders(),
+        // Newest first; a commit will not have more contexts than this.
+        params: { per_page: 100 },
+      });
+      return response.data.some(status => status.context === context);
+    } catch (error) {
+      logger.warn('[GitHub-API] Could not read commit statuses', {
+        sha: encodeURIComponent(commitSha),
+        error: error instanceof AxiosError ? error.message : String(error),
+      });
+      return false;
     }
   }
 

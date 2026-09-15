@@ -1,8 +1,10 @@
 name: CI-pr
 
-# Runs the full CI suite (ci.yml) on every pull request.
+# Runs the full CI suite (ci.yml) on every pull request and on merge queue
+# entries (merge_group) — the queue's required checks come from this workflow.
 on:
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -11,9 +13,10 @@ permissions:
 # pushed. Do NOT cancel for protected branches (main/master/staging/release*)
 # so their builds always run to completion.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: >-
-    ${{ github.head_ref != 'main'
+    ${{ github.event_name == 'pull_request'
+        && github.head_ref != 'main'
         && github.head_ref != 'master'
         && github.head_ref != 'staging'
         && !startsWith(github.head_ref, 'release') }}

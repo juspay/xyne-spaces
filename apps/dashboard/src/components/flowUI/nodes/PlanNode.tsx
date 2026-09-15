@@ -180,6 +180,7 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_APPROVE'
+        data-ph-capture-attribute-track-id='plan_approve'
       >
         {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
         {approveLabel}
@@ -196,6 +197,7 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_REJECT'
+        data-ph-capture-attribute-track-id='plan_reject'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {rejectLabel}

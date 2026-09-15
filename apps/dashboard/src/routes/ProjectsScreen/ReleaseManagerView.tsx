@@ -1,12 +1,17 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { BoardType } from '@xyne/shared';
+import { BoardType, type Project } from '@xyne/shared';
+import { Button as BlendButton, ButtonType, Modal } from '@juspay/blend-design-system';
 import { ProjectCard } from '../../components/Project';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
+import ReleaseRepoConfigModal from './ReleaseRepoConfigModal';
 
 const ReleaseManagerView = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [configuringProject, setConfiguringProject] = useState<Project | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState('');
   const { isMobile } = usePlatform();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -26,13 +31,20 @@ const ReleaseManagerView = (): ReactElement => {
       })
     : releaseProjects;
 
+  const attachableProjects = (projects ?? [])
+    .filter(p => !p.boards?.some(b => b.boardType === BoardType.RELEASE))
+    .filter(p => {
+      const q = pickerQuery.trim().toLowerCase();
+      return !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q);
+    });
+
   useEffect((): (() => void) | undefined => {
-    if (isMobile) return;
+    if (isMobile || showCreateModal) return;
     const rafId = requestAnimationFrame(() => {
       searchInputRef.current?.focus();
     });
     return () => cancelAnimationFrame(rafId);
-  }, [isMobile]);
+  }, [isMobile, showCreateModal]);
 
   if (loading) {
     return (
@@ -51,8 +63,15 @@ const ReleaseManagerView = (): ReactElement => {
         <div className='mb-6'>
           <div className='flex items-center justify-between mb-2'>
             <h2 className='text-lg font-bold text-foreground'>Release Manager</h2>
+            <BlendButton
+              buttonType={ButtonType.PRIMARY}
+              text='New release project'
+              onClick={() => setShowCreateModal(true)}
+              data-track-category='ReleaseManager'
+              data-track-name='CreateReleaseProject'
+            />
           </div>
-          <p className='text-xs text-muted-foreground'>Projects with release boards</p>
+          <p className='text-xs text-muted-foreground'>Projects with repositories</p>
           <div className='mt-3'>
             <input
               ref={searchInputRef}
@@ -69,7 +88,12 @@ const ReleaseManagerView = (): ReactElement => {
 
         <div className='space-y-3' data-testid='release-project-list'>
           {filteredProjects.map(project => (
-            <ProjectCard key={project.id} project={project} initialDetailTab='release' />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              initialDetailTab='release'
+              onConfigureRelease={setConfiguringProject}
+            />
           ))}
         </div>
 
@@ -88,16 +112,80 @@ const ReleaseManagerView = (): ReactElement => {
             ) : (
               <>
                 <h3 className='text-sm font-semibold text-foreground mb-1'>
-                  No projects with release boards yet
+                  No projects with repositories yet
                 </h3>
                 <p className='text-xs text-muted-foreground'>
-                  Configure a release board inside a project to see it here
+                  Configure a repository inside a project to see it here
                 </p>
               </>
             )}
           </div>
         )}
       </div>
+
+      {showCreateModal && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setShowCreateModal(false);
+            setPickerQuery('');
+          }}
+          title='Add a release project'
+          showCloseButton={true}
+          closeOnBackdropClick={false}
+        >
+          <div data-testid='add-release-project-dialog' className='w-[420px] max-w-full'>
+            <p className='mb-3 text-xs text-muted-foreground'>
+              Pick an existing project to attach repositories to. It appears here once a repository
+              is configured.
+            </p>
+            <input
+              type='text'
+              value={pickerQuery}
+              onChange={e => setPickerQuery(e.target.value)}
+              placeholder='Search projects...'
+              className='mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              data-track-category='ReleaseManager'
+              data-track-name='SearchAttachableProjects'
+            />
+            {attachableProjects.length === 0 ? (
+              <p className='py-6 text-center text-sm text-muted-foreground'>
+                No projects available — every project is already a release project.
+              </p>
+            ) : (
+              <div className='max-h-[50vh] space-y-1.5 overflow-y-auto'>
+                {attachableProjects.map(p => (
+                  <button
+                    key={p.id}
+                    type='button'
+                    onClick={() => {
+                      setConfiguringProject(p);
+                      setShowCreateModal(false);
+                      setPickerQuery('');
+                    }}
+                    className='flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5 text-left transition-colors hover:bg-muted'
+                    data-track-category='ReleaseManager'
+                    data-track-name='SelectProjectForRelease'
+                  >
+                    <span className='truncate text-sm font-semibold text-foreground'>{p.name}</span>
+                    <span className='ml-2 shrink-0 rounded-md bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground'>
+                      {p.code}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {configuringProject && (
+        <ReleaseRepoConfigModal
+          project={configuringProject}
+          isOpen={true}
+          onClose={() => setConfiguringProject(null)}
+        />
+      )}
     </div>
   );
 };

@@ -44,6 +44,5 @@ export {
   UserGroupsACL,
   UserPresenceACL,
   UsersACL,
-  WorkflowExecutionsACL,
   WorkflowsACL,
 } from './tables';

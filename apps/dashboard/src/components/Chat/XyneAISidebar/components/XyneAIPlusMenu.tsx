@@ -1,5 +1,14 @@
-import type { ReactElement, ReactNode } from 'react';
-import { ChevronRight, FilePlus, FocusTarget, Globe, Notebook, PaperclipSlant } from '@xyne/icons';
+import { useCallback, useRef, type ReactElement, type ReactNode } from 'react';
+import {
+  Bot,
+  ChevronRight,
+  FilePlus,
+  FocusTarget,
+  Globe,
+  Notebook,
+  PaperclipSlant,
+  SparkleAi01,
+} from '@xyne/icons';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +36,18 @@ const NOOP = (): void => {};
 const ReadonlySwitch = ({ checked }: { checked: boolean }): ReactElement => (
   <div className='pointer-events-none' aria-hidden>
     <Switch checked={checked} onCheckedChange={NOOP} />
+  </div>
+);
+
+/** Trailing "current value ›" for a row that opens another picker. */
+const ValueChevron = ({ value }: { value: string | undefined }): ReactElement => (
+  <div className='flex items-center gap-1'>
+    {value && (
+      <span className='max-w-[96px] truncate text-xs font-normal text-muted-foreground'>
+        {value}
+      </span>
+    )}
+    <ChevronRight className={ICON_CLASS} />
   </div>
 );
 
@@ -61,6 +82,18 @@ export interface XyneAIPlusMenuProps {
   deepResearchEnabled?: boolean;
   deepResearchAccessible?: boolean;
 
+  /** Agent / model rows. The /ai composer passes these only once its toolbar is
+   *  too narrow to keep both pills beside the send button; the sidebar, whose
+   *  toolbar wraps instead, never does. Each opens that selector's own popover
+   *  once this menu has closed — see the handoff note below. */
+  onOpenAgentSelector?: () => void;
+  agentLabel?: string;
+  onOpenModelSelector?: () => void;
+  modelLabel?: string;
+  /** Greys out the agent/model rows — the composer sets this while a run is
+   *  streaming, matching what the pills do when they are visible. */
+  selectorsDisabled?: boolean;
+
   /** The trigger — rendered as the menu's anchor. */
   children: ReactNode;
 }
@@ -84,12 +117,45 @@ export const XyneAIPlusMenu = ({
   onDeepResearchToggle,
   deepResearchEnabled = false,
   deepResearchAccessible = false,
+  onOpenAgentSelector,
+  agentLabel,
+  onOpenModelSelector,
+  modelLabel,
+  selectorsDisabled = false,
   children,
 }: XyneAIPlusMenuProps): ReactElement => {
   const hasSearchRow = !!onWebSearchToggle || !!onDeepResearchToggle;
+  const hasSelectorRow = !!onOpenAgentSelector || !!onOpenModelSelector;
+
+  // Rows that hand off to another popover can't just call their callback from
+  // `onSelect`: the menu closes right after and Radix returns focus to the "+"
+  // trigger, which the popover — non-modal, so it dismisses on focus-outside —
+  // reads as a click away and closes itself immediately. So park the callback,
+  // suppress the focus restore, and run it a frame later, once the menu's
+  // layer teardown (including the body pointer-events lock) has flushed.
+  const handoffRef = useRef<(() => void) | null>(null);
+  const handoff = useCallback(
+    (action: (() => void) | undefined) => (): void => {
+      handoffRef.current = action ?? null;
+    },
+    [],
+  );
+  const runHandoff = useCallback((event: Event): void => {
+    const action = handoffRef.current;
+    if (!action) return;
+    handoffRef.current = null;
+    event.preventDefault();
+    requestAnimationFrame(action);
+  }, []);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={open => {
+        // Drop anything parked by a close that never ran it (dismissed by an
+        // outside click, say) so it can't fire on some later close.
+        if (open) handoffRef.current = null;
+      }}
+    >
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       {/* Anchored above the composer, which sits at the bottom of the sidebar. */}
       <DropdownMenuContent
@@ -97,7 +163,40 @@ export const XyneAIPlusMenu = ({
         side='top'
         sideOffset={8}
         className='min-w-[232px] rounded-2xl p-2 shadow-lg'
+        onCloseAutoFocus={runHandoff}
       >
+        {onOpenAgentSelector && (
+          <DropdownMenuItem
+            className={`${ITEM_CLASS} justify-between`}
+            disabled={selectorsDisabled}
+            onSelect={handoff(onOpenAgentSelector)}
+            data-track-category='XyneAI'
+            data-track-name='OPEN_AGENT_SELECTOR'
+          >
+            <SplitRow trailing={<ValueChevron value={agentLabel} />}>
+              <Bot className={ICON_CLASS} />
+              Agent
+            </SplitRow>
+          </DropdownMenuItem>
+        )}
+
+        {onOpenModelSelector && (
+          <DropdownMenuItem
+            className={`${ITEM_CLASS} justify-between`}
+            disabled={selectorsDisabled}
+            onSelect={handoff(onOpenModelSelector)}
+            data-track-category='XyneAI'
+            data-track-name='OPEN_MODEL_SELECTOR'
+          >
+            <SplitRow trailing={<ValueChevron value={modelLabel} />}>
+              <SparkleAi01 className={ICON_CLASS} />
+              Model
+            </SplitRow>
+          </DropdownMenuItem>
+        )}
+
+        {hasSelectorRow && <DropdownMenuSeparator />}
+
         <DropdownMenuItem
           className={ITEM_CLASS}
           onSelect={onAttachFiles}
@@ -112,7 +211,7 @@ export const XyneAIPlusMenu = ({
 
         <DropdownMenuItem
           className={`${ITEM_CLASS} justify-between`}
-          onSelect={onOpenCollections}
+          onSelect={handoff(onOpenCollections)}
           data-track-category='XyneAI'
           data-track-name='OPEN_COLLECTION_SELECTOR'
         >

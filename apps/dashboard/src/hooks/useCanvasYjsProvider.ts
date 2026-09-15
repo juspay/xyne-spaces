@@ -65,6 +65,8 @@ export interface CanvasYjsProviderState {
   connectionStatus: 'offline' | 'connecting' | 'error' | 'handshaking' | 'connected';
   hasLocalChanges: boolean;
   isReadOnly: boolean;
+  connectionFailed: boolean;
+  reconnect: () => void;
 }
 
 export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasYjsProviderState {
@@ -92,11 +94,20 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     prefetchedCanvas?.provider.awareness ?? null,
   );
 
+  const prefetchedProviderDestroyedRef = useRef(false);
+
+  useEffect(() => {
+    return (): void => {
+      doc.destroy();
+    };
+  }, [doc]);
+
   const hasConnectedOnceRef = useRef(false);
   const lastNotificationStatusRef = useRef<string>('');
   const localChangesTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasLocalChangesRef = useRef(false);
   const errorCountRef = useRef(0);
+  const latestAuthTokenRef = useRef<YSweetAuthToken | undefined>(undefined);
   const permissionReadOnlyRef = useRef(false);
 
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
@@ -105,6 +116,8 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   >('offline');
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
+  const [connectionFailed, setConnectionFailed] = useState(false);
+  const [reconnectNonce, setReconnectNonce] = useState(0);
 
   useEffect(() => {
     hasLocalChangesRef.current = hasLocalChanges;
@@ -192,12 +205,31 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     }
   }, [authError]);
 
-  // Update read-only state when auth token changes
+  // Update read-only state when auth token changes. Only flip the visible
+  // isReadOnly flag while a provider actually exists — otherwise a token
+  // refresh that lands after the provider was torn down (e.g. by the
+  // authError effect above) would make the editor look editable while
+  // nothing is actually connected. permissionReadOnlyRef still always
+  // updates so a freshly (re)created provider picks up the right value.
   useEffect(() => {
     if (authTokenData) {
       const readOnly = authTokenData.authorization === 'read-only';
       permissionReadOnlyRef.current = readOnly;
-      setIsReadOnly(readOnly);
+      if (providerRef.current) {
+        setIsReadOnly(readOnly);
+      }
+    }
+  }, [authTokenData]);
+
+  latestAuthTokenRef.current = authTokenData;
+  // Derived, not effect-driven state: gate on token presence, not on
+  // docId === canvasId — a legacy share-link canvas (viewAccessId/
+  // editAccessId in the URL) legitimately gets back a canonical docId that
+  // differs from canvasId, and that canvas must still connect.
+  const hasAuthToken = authTokenData !== undefined;
+  useEffect(() => {
+    if (authTokenData && !providerRef.current && hasConnectedOnceRef.current) {
+      setReconnectNonce(n => n + 1);
     }
   }, [authTokenData]);
 
@@ -213,7 +245,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
   }, [refetch]);
 
   useEffect(() => {
-    if (prefetchedCanvas?.provider) {
+    if (prefetchedCanvas?.provider && !prefetchedProviderDestroyedRef.current) {
       const provider = prefetchedCanvas.provider;
       providerRef.current = provider;
       setAwareness(provider.awareness);
@@ -248,6 +280,8 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
             provider.destroy();
             providerRef.current = null;
             setAwareness(null);
+            setConnectionFailed(true);
+            prefetchedProviderDestroyedRef.current = true;
           }
           if (lastNotificationStatusRef.current !== 'error') {
             lastNotificationStatusRef.current = 'error';
@@ -303,9 +337,13 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       };
     }
 
-    if (!authTokenData) return;
+    if (!hasAuthToken || !latestAuthTokenRef.current) return;
+    const authTokenData = latestAuthTokenRef.current;
 
     const actualDocId = authTokenData.docId || canvasId;
+
+    errorCountRef.current = 0;
+    setConnectionFailed(false);
 
     const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
       offlineSupport: true,
@@ -342,6 +380,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
           provider.destroy();
           providerRef.current = null;
           setAwareness(null);
+          setConnectionFailed(true);
         }
         if (lastNotificationStatusRef.current !== 'error') {
           lastNotificationStatusRef.current = 'error';
@@ -400,9 +439,17 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       }
 
       setAwareness(null);
-      doc.destroy();
     };
-  }, [doc, canvasId, authTokenData, getAuthToken]);
+  }, [doc, canvasId, hasAuthToken, getAuthToken, reconnectNonce]);
+
+  const reconnect = useCallback((): void => {
+    errorCountRef.current = 0;
+    lastNotificationStatusRef.current = '';
+    setConnectionFailed(false);
+    void refetch().then(() => {
+      setReconnectNonce(n => n + 1);
+    });
+  }, [refetch]);
 
   useEffect(() => {
     const handleDynamicHeadersChanged = (): void => {
@@ -426,5 +473,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     connectionStatus,
     hasLocalChanges,
     isReadOnly,
+    connectionFailed,
+    reconnect,
   };
 }

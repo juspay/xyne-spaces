@@ -38,9 +38,13 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
+import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
+import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { sdlcWorker } from '@/workers/sdlcWorker';
@@ -51,6 +55,7 @@ import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
+import { workflowsWorker } from '@/workers/workflowsWorker';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -97,6 +102,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
@@ -191,6 +197,11 @@ class WorkerService {
         logger.info('Starting social media review sync worker...');
         socialMediaSyncWorker.start();
       }
+
+      if (workflowsEnabled) {
+        logger.info('Starting workflows worker...');
+        await workflowsWorker.start();
+      }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
@@ -266,6 +277,12 @@ class WorkerService {
         logger.info('Starting automation schedule worker...');
         await automationScheduleWorker.start();
 
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        logger.info('Starting desk auto-label backfill worker...');
+        await deskLabelBackfillWorker.start();
+
         const { cleanupUnreferencedAutomationTemplates } = await import(
           '@/automations/services/automation-template.service'
         );
@@ -290,6 +307,22 @@ class WorkerService {
         await emailFetchWorker.start();
       }
 
+      // Calendar sync consumers. The API owns the Google/Microsoft webhook
+      // endpoints and only enqueues; the paging, upserts and cursor bookkeeping
+      // run here so a webhook burst never lands on the request path.
+      if (appConfig.enableCalendarSyncWorker) {
+        logger.info('Starting Google Calendar sync worker...');
+        await googleCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting Microsoft Calendar sync worker...');
+        await microsoftCalendarSyncQueue.startProcessing();
+
+        logger.info('Starting call calendar push worker...');
+        await callCalendarPushQueue.startProcessing();
+      } else {
+        logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         logger.info('Starting team intelligence worker...');
         await teamIntelligenceWorker.start();
@@ -298,6 +331,21 @@ class WorkerService {
       if (appConfig.enableEmailClassificationWorker) {
         logger.info('Starting email classification worker...');
         await emailClassificationWorker.start();
+      }
+
+      if (appConfig.radar.enabled) {
+        logger.info('Starting radar execution worker...');
+        // Guarded, unlike its neighbours: an unguarded throw reaches the outer
+        // catch, which exits the process — taking unrelated workers down with
+        // a dark-launched feature none of them depend on.
+        try {
+          await radarExecutionWorker.start();
+        } catch (error) {
+          logger.error(
+            '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
+            error,
+          );
+        }
       }
 
       if (appConfig.enableAiProvisioningWorker) {
@@ -410,6 +458,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = process.env.ENABLE_SOCIAL_MEDIA_SYNC_WORKER === 'true'
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
       const workflowType = process.env.WORKFLOW_TYPE
@@ -471,6 +520,12 @@ class WorkerService {
         await messageClassificationQueue.shutdown()
       }
 
+      if (workflowsEnabled) {
+        await workflowsWorker.stop()
+        const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
+        await shutdownWorkflows()
+      }
+
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
@@ -496,6 +551,12 @@ class WorkerService {
         await emailFetchWorker.shutdown();
       }
 
+      if (appConfig.enableCalendarSyncWorker) {
+        await googleCalendarSyncQueue.close();
+        await microsoftCalendarSyncQueue.close();
+        await callCalendarPushQueue.close();
+      }
+
       if (appConfig.enableTeamIntelligenceWorker) {
         await teamIntelligenceWorker.shutdown();
       }
@@ -504,8 +565,19 @@ class WorkerService {
         await emailClassificationWorker.shutdown();
       }
 
+      if (appConfig.radar.enabled) {
+        await radarExecutionWorker.shutdown();
+      }
+
       if (appConfig.enableAiProvisioningWorker) {
         await aiProvisioningWorker.shutdown();
+      }
+
+      if (appConfig.enableAutomationWorker) {
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        await deskLabelBackfillWorker.shutdown();
       }
 
       await autoDraftWorker.shutdown();

@@ -134,6 +134,8 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
             ${isSending ? '[&_.ProseMirror]:caret-transparent' : ''}
           `}
           onClick={handleEditorClick}
+          data-track-category='CHAT_INPUT'
+          data-track-name='FOCUS_MOBILE_EDITOR'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               // Don't intercept when editor has focus — let Enter insert newline, Space insert space

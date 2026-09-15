@@ -1,6 +1,6 @@
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
-import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
+import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
 import {
   INITIAL_WIZARD_STATE,
   type WizardState,
@@ -12,6 +12,7 @@ interface ConfigShape {
     direct?: unknown;
     custom?: unknown;
     gateway?: unknown;
+    callableAgents?: unknown;
   };
   product_id?: unknown;
   repository_id?: unknown;
@@ -20,13 +21,14 @@ interface ConfigShape {
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 
-export function readToolSelection(config: Record<string, unknown>): Required<ToolboxSelection> {
+export function readToolSelection(config: Record<string, unknown>): AgentToolboxSelection {
   const tools = (config as ConfigShape).tools ?? {};
   return {
     subagents: strings(tools.subagents),
     direct: strings(tools.direct),
     custom: strings(tools.custom),
     gateway: strings(tools.gateway),
+    callableAgents: strings(tools.callableAgents),
   };
 }
 

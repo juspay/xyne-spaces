@@ -129,6 +129,7 @@ export const DashboardVariablesBar = ({
             <Button
               variant='destructive'
               onClick={confirmDelete}
+              trackId='delete_dashboard_variable'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Confirm_Delete_Variable'
             >
@@ -405,6 +406,7 @@ const VariableEditor = ({
         </Button>
         <Button
           onClick={handleSave}
+          trackId='save_dashboard_variable'
           data-track-category='DYNAMIC_DASHBOARD'
           data-track-name='SAVE_DASHBOARD_VARIABLES'
         >

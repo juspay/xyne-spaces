@@ -34,11 +34,11 @@ export function getBoardEditLabel(
     return 'Edit';
   }
   if (applicationBoardIds) {
-    return applicationBoardIds.has(board.id) ? 'Edit Application Config' : 'Edit Release Board';
+    return applicationBoardIds.has(board.id) ? 'Edit Service Config' : 'Edit Repository';
   }
   const apps = board.applications;
   if (apps === undefined || apps instanceof Error || !Array.isArray(apps) || apps.length === 0) {
-    return 'Edit Main Board';
+    return 'Edit Repository';
   }
-  return 'Edit Release Config';
+  return 'Edit Repository Config';
 }

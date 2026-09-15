@@ -11,9 +11,11 @@ import {
   baseUrlPlaceholder,
   REASONING_OPTIONS,
   supportsAuthType,
+  supportsOauth,
   supportsReasoning,
   type CredentialForm,
 } from './credentialForm';
+import { CredentialOauthFlow } from './CredentialOauthFlow';
 
 const FIELD =
   'h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
@@ -40,57 +42,27 @@ interface CredentialFormFieldsProps {
   form: CredentialForm;
   onChange: (next: CredentialForm) => void;
   editing: boolean;
+  slug: string;
+  onOauthConnected: () => void;
 }
 
 export function CredentialFormFields({
   form,
   onChange,
   editing,
+  slug,
+  onOauthConnected,
 }: CredentialFormFieldsProps): ReactElement {
   const set = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]): void =>
     onChange({ ...form, [key]: value });
 
+  // OAuth stores the token bundle server-side through its own exchange, so the
+  // key field would have nothing to collect.
+  const oauthProvider =
+    form.authType === 'oauth_token' && supportsOauth(form.provider) ? form.provider : null;
+
   return (
     <div className='flex w-full flex-col gap-3'>
-      <Field label='API key' optional={editing}>
-        <input
-          value={form.apiKey}
-          onChange={e => set('apiKey', e.target.value)}
-          type='password'
-          placeholder={editing ? 'Leave blank to keep the stored key' : 'sk-…'}
-          aria-label='API key'
-          autoComplete='off'
-          autoFocus
-          data-track-category='Claw Agents'
-          data-track-name='Agent detail v2: credential api key'
-          className={FIELD}
-        />
-      </Field>
-
-      <Field label='Model' optional>
-        <input
-          value={form.model}
-          onChange={e => set('model', e.target.value)}
-          placeholder='Provider default'
-          aria-label='Model'
-          data-track-category='Claw Agents'
-          data-track-name='Agent detail v2: credential model'
-          className={FIELD}
-        />
-      </Field>
-
-      <Field label='Base URL' optional>
-        <input
-          value={form.baseUrl}
-          onChange={e => set('baseUrl', e.target.value)}
-          placeholder={baseUrlPlaceholder(form.provider)}
-          aria-label='Base URL'
-          data-track-category='Claw Agents'
-          data-track-name='Agent detail v2: credential base url'
-          className={FIELD}
-        />
-      </Field>
-
       {supportsAuthType(form.provider) && (
         <Field label='Auth type'>
           <Select
@@ -116,6 +88,49 @@ export function CredentialFormFields({
           </Select>
         </Field>
       )}
+
+      {oauthProvider ? (
+        <CredentialOauthFlow slug={slug} provider={oauthProvider} onConnected={onOauthConnected} />
+      ) : (
+        <Field label='API key' optional={editing}>
+          <input
+            value={form.apiKey}
+            onChange={e => set('apiKey', e.target.value)}
+            type='password'
+            placeholder={editing ? 'Leave blank to keep the stored key' : 'sk-…'}
+            aria-label='API key'
+            autoComplete='off'
+            autoFocus
+            data-track-category='Claw Agents'
+            data-track-name='Agent detail v2: credential api key'
+            className={FIELD}
+          />
+        </Field>
+      )}
+
+      <Field label='Model' optional>
+        <input
+          value={form.model}
+          onChange={e => set('model', e.target.value)}
+          placeholder='Provider default'
+          aria-label='Model'
+          data-track-category='Claw Agents'
+          data-track-name='Agent detail v2: credential model'
+          className={FIELD}
+        />
+      </Field>
+
+      <Field label='Base URL' optional>
+        <input
+          value={form.baseUrl}
+          onChange={e => set('baseUrl', e.target.value)}
+          placeholder={baseUrlPlaceholder(form.provider)}
+          aria-label='Base URL'
+          data-track-category='Claw Agents'
+          data-track-name='Agent detail v2: credential base url'
+          className={FIELD}
+        />
+      </Field>
 
       {supportsReasoning(form.provider) && (
         <Field label='Reasoning effort' optional>

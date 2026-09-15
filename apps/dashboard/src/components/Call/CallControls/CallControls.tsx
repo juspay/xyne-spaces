@@ -37,14 +37,16 @@ import {
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
-import { InvitationResponse, type RecordingType } from '@xyne/shared';
+import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
 import {
+  buildCallInviteText,
   getAiButtonColorClass,
   getAiButtonDisabled,
   getAiButtonTitle,
   handleAiButtonClick,
 } from '../../../utils/callControls';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,13 +54,24 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
+
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
-interface ActiveCallForControls {
-  externalId: string;
-  createdByUserId?: string;
-  participants?: Array<{ response?: string | null }>;
-}
+type ActiveCallForControls = Pick<
+  Call,
+  | 'externalId'
+  | 'createdByUserId'
+  | 'title'
+  | 'status'
+  | 'startsAt'
+  | 'endsAt'
+  | 'startedAt'
+  | 'endedAt'
+  | 'timezone'
+> & {
+  participants?: Array<{ userId: string; displayName?: string | null; response?: string | null }>;
+};
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -161,8 +174,7 @@ export function CallControls({
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
-  const { isMobile, isMac } = usePlatform();
-  const modKey = isMac ? '⌘' : 'Ctrl';
+  const { isMobile } = usePlatform();
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
@@ -187,13 +199,19 @@ export function CallControls({
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
   const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
+
+  const hostName = useMemo(() => {
+    const hostId = currentCall?.createdByUserId;
+    if (!hostId) return null;
+    return currentCall?.participants?.find(p => p.userId === hostId)?.displayName ?? null;
+  }, [currentCall?.createdByUserId, currentCall?.participants]);
+  // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
-    if (!isHost) return 0;
     return (
       currentCall?.participants?.filter(p => p.response === InvitationResponse.REQUESTED).length ??
       0
     );
-  }, [currentCall?.participants, isHost]);
+  }, [currentCall?.participants]);
   const audioTurnedOffByHost = !isHost && hostControls.turnOffAudio;
   const cameraTurnedOffByHost = !isHost && hostControls.turnOffCamera;
   const screenShareTurnedOffByHost = !isHost && hostControls.turnOffScreenShare;
@@ -201,13 +219,13 @@ export function CallControls({
   const micTooltip = audioTurnedOffByHost
     ? "The host turned off everyone's audio"
     : isMicEnabled
-      ? `Mute microphone (${modKey}D)`
-      : `Unmute microphone (${modKey}D, or press spacebar to speak)`;
+      ? 'Mute microphone'
+      : 'Unmute microphone (or press spacebar to speak)';
   const cameraTooltip = cameraTurnedOffByHost
     ? "The host turned off everyone's camera"
     : isCameraEnabled
-      ? `Turn off camera (${modKey}E)`
-      : `Turn on camera (${modKey}E)`;
+      ? 'Turn off camera'
+      : 'Turn on camera';
   const screenShareTooltip = screenShareBlockedByWhiteboard
     ? 'Close the shared whiteboard to start screen sharing.'
     : screenShareTurnedOffByHost
@@ -324,7 +342,18 @@ export function CallControls({
 
   const handleCopyInviteLink = (): void => {
     if (!roomLink) return;
-    void navigator.clipboard.writeText(roomLink).then(() => {
+    const text = buildCallInviteText({
+      title: currentCall?.title,
+      hostName,
+      roomLink,
+      status: currentCall?.status,
+      startsAt: currentCall?.startsAt,
+      endsAt: currentCall?.endsAt,
+      startedAt: currentCall?.startedAt,
+      endedAt: currentCall?.endedAt,
+      timezone: currentCall?.timezone,
+    });
+    void copyTextToClipboard(text).then(() => {
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
     });
@@ -421,7 +450,15 @@ export function CallControls({
         <div className='relative' ref={micMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <Tooltip
-              content={micTooltip}
+              content={
+                audioTurnedOffByHost ? (
+                  micTooltip
+                ) : (
+                  <span>
+                    {micTooltip} <ShortcutHint shortcut='huddle.toggleMute' />
+                  </span>
+                )
+              }
               side='top'
               sideOffset={8}
               collisionPadding={8}
@@ -478,7 +515,7 @@ export function CallControls({
                 onClick={() => setShowMicMenu(!showMicMenu)}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Mic_Menu'
                 data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
               >
@@ -532,7 +569,15 @@ export function CallControls({
         <div className='relative' ref={cameraMenuRef}>
           <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <Tooltip
-              content={cameraTooltip}
+              content={
+                cameraTurnedOffByHost ? (
+                  cameraTooltip
+                ) : (
+                  <span>
+                    {cameraTooltip} <ShortcutHint shortcut='huddle.toggleVideo' />
+                  </span>
+                )
+              }
               side='top'
               sideOffset={8}
               collisionPadding={8}
@@ -589,7 +634,7 @@ export function CallControls({
                 }}
                 className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
-                data-track-category='Calls'
+                data-track-category='CALLS'
                 data-track-name='Toggle_Camera_Menu'
                 data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
               >
@@ -850,11 +895,11 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={
             roomLink
-              ? 'Copy invite link — works for teammates and guests'
+              ? 'Copy invite message — works for teammates and guests'
               : 'Preparing invite link…'
           }
           aria-label={
-            roomLink ? 'Copy invite link for teammates and guests' : 'Preparing invite link'
+            roomLink ? 'Copy invite message for teammates and guests' : 'Preparing invite link'
           }
           data-track-category='CALLS'
           data-track-name='SHARE_CALL_LINK'
@@ -868,7 +913,7 @@ export function CallControls({
           />
           {showCopied && (
             <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-              Copied!
+              Invite copied!
             </span>
           )}
         </button>
@@ -917,6 +962,7 @@ export function CallControls({
                     }}
                     className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
+                    data-ph-capture-attribute-track-id='send_reaction'
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
                     data-track-metadata={JSON.stringify({ emoji, callId })}
@@ -1116,6 +1162,7 @@ export function CallControls({
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Leave call'
           data-testid='end-call-button'
+          data-ph-capture-attribute-track-id='end_call'
           data-track-category='CALLS'
           data-track-name='END_CALL'
           data-track-metadata={JSON.stringify({ callId })}

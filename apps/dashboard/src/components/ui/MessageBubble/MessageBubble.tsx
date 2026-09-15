@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
+import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -59,9 +60,11 @@ import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes'
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
+import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
+import { RunOriginChip } from './RunOriginChip';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { MicOn } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
@@ -76,6 +79,7 @@ import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { RecordingBubble } from './RecordingBubble';
+import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
 import { TicketSuggestions } from './TicketSuggestions';
@@ -96,6 +100,7 @@ import { isPreviewableDocument } from '../../../services/documentThumbnailServic
 import { ChannelEmailCard } from './ChannelEmailCard';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { recordingService } from '../../../services/Recording/recordingService';
+import { InlineVideoPreview } from './InlineVideoPreview';
 import { loadEmojiData } from '../../../utils/emojiLookup';
 import { RecordingShareContent } from './RecordingShareContent';
 import { useRecordingShareMessage } from './recordingShareMessage';
@@ -129,50 +134,6 @@ const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
 const isHtmlAttachment = (attachment: AttachmentType): boolean => {
   return attachment.mimetype === 'text/html' || /\.html?$/i.test(attachment.originalFilename);
 };
-
-function InlineVideoPreview({
-  callId,
-  recordingId,
-}: {
-  callId: string;
-  recordingId?: string;
-}): React.ReactElement {
-  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
-  const blobUrlRef = React.useRef<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    // Per-recording download when we have a recordingId; fall back to the legacy
-    // latest-recording path for older messages that predate the field.
-    const fetchBlob = recordingId
-      ? recordingService.downloadCallRecordingBlob(callId, recordingId)
-      : recordingService.downloadRecordingBlob(callId);
-    fetchBlob
-      .then(blob => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        blobUrlRef.current = url;
-        setBlobUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    };
-  }, [callId, recordingId]);
-
-  if (!blobUrl) return <></>;
-  return (
-    <video
-      src={blobUrl}
-      controls
-      className='mt-2 rounded-md max-w-sm w-full'
-      style={{ maxHeight: '240px' }}
-    >
-      <track kind='captions' />
-    </video>
-  );
-}
 
 /**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
@@ -535,6 +496,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelId,
   conversation,
   contentOnly = false,
+  disableLinks = false,
   onClick,
   threadInfo,
   channelScopeType,
@@ -547,6 +509,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   headerContent,
   onUserClick,
 }) => {
+  const renderConversationBadge = useContext(ConversationBadgeContext);
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
@@ -613,6 +576,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // picks up call-only behavior (transcript dimming, forwarding-as-call, PRD
   // buttons, etc).
   const isRecordingMessage = metadata?.['isRecordingMessage'] === true;
+  const isCallShareMessage = metadata?.['isCallShareMessage'] === true;
   // Only live recording anchors use the system-style sender.
   const isHeadlessRecordingAnchor =
     isRecordingMessage && metadata?.['isHeadlessRecording'] === true;
@@ -628,6 +592,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'transcript' ||
       (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
   );
+  // The recording message carries its own attachment row (filtered out of the
+  // attachments block below). Its id lets InlineVideoPreview stream the file
+  // through the range-request endpoint instead of downloading it whole.
+  const recordingAttachmentId =
+    metadata?.messageSubtype === 'recording'
+      ? attachments.find(a => {
+          const attMeta = a.metadata as { type?: string; recordingId?: string } | null;
+          if (attMeta?.type !== 'recording' || !a.mimetype.startsWith('video/')) return false;
+          // Older messages predate recordingId on the metadata — match on type alone there.
+          return !metadata?.recordingId || attMeta.recordingId === String(metadata.recordingId);
+        })?.id
+      : undefined;
   const isCallNoTranscript =
     isCallMessage && !isActiveCall && !isForwardedMessage && !hasTranscript;
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
@@ -779,7 +755,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
 
-  if (isMobile && isMe && !isSlashCommandArtifact) {
+  const isSharedAgentTranscript = metadata?.['sharedAgentTranscript'] === true;
+
+  if (isMobile && isMe && !isSlashCommandArtifact && !isSharedAgentTranscript) {
     return (
       <MobileMessageMyBubble
         message={message}
@@ -850,6 +828,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         data-component='MessageBubble'
         className={messageBubbleClassName}
         onClick={onClick}
+        {...(onClick
+          ? {
+              'data-track-category': 'MESSAGE',
+              'data-track-name': 'OPEN_MESSAGE_BUBBLE',
+              // Static label: the auto-label would capture message content.
+              'data-track-label': 'message_bubble',
+            }
+          : {})}
         onKeyDown={
           onClick
             ? (e): void => {
@@ -1187,6 +1173,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     : formatTimeAmPm(message.createdAt)}
                 </h3>
               </Tooltip>
+              {metadata?.['clawRunOrigin'] ? (
+                <RunOriginChip origin={metadata['clawRunOrigin']} />
+              ) : null}
+              {/* Host-supplied mark for where this conversation belongs. Null in
+                  every surface that does not provide one. */}
+              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
               {headerContent}
             </div>
           )}
@@ -1213,7 +1205,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isRecordingMessage && metadata?.callId && !isForwardedMessage && !message.isDeleted ? (
+          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+            <CallShareBubble message={{ content: message.content, metadata }} />
+          ) : isRecordingMessage &&
+            metadata?.callId &&
+            !isForwardedMessage &&
+            !message.isDeleted ? (
             <RecordingBubble
               message={{
                 messageId: message.messageId,
@@ -1271,6 +1268,50 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   emailId={message.messageId}
                   attachments={attachments}
                 />
+              ) : isSharedAgentTranscript ? (
+                <div className='flex flex-col gap-2'>
+                  {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
+                    <div
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                    >
+                      {isMobile ? (
+                        <ExpandableMessage
+                          message={metadata['shareNote']}
+                          showEdited={message.edited}
+                          maxHeight={500}
+                        />
+                      ) : (
+                        <div className='jp-message-html inline-block'>
+                          <RenderMessageWithHTML
+                            message={DOMPurify.sanitize(metadata['shareNote'])}
+                            showEdited={message.edited}
+                            preserveThreadRoute={context === 'thread'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <SharedTranscriptCard
+                    content={citationContent}
+                    agentName={
+                      typeof metadata?.['agentName'] === 'string'
+                        ? metadata['agentName']
+                        : typeof metadata?.['agentSlug'] === 'string'
+                          ? metadata['agentSlug']
+                          : 'agent'
+                    }
+                    {...(typeof metadata?.['messageCount'] === 'number'
+                      ? { messageCount: metadata['messageCount'] }
+                      : {})}
+                    defaultCollapsed
+                    renderBody={content => (
+                      <MarkdownMessageRenderer
+                        content={content}
+                        markdownComponents={markdownComponents}
+                      />
+                    )}
+                  />
+                </div>
               ) : recordingShare && !isForwardedMessage ? (
                 <RecordingShareContent
                   recordingShare={recordingShare}
@@ -1279,6 +1320,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <RenderMessageWithHTML
+                        disableLinks={disableLinks}
                         message={noteHtml}
                         showEdited={message.edited}
                         messageId={message.messageId}
@@ -1304,6 +1346,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {...(metadata?.recordingId
                           ? { recordingId: String(metadata.recordingId) }
                           : {})}
+                        {...(recordingAttachmentId ? { attachmentId: recordingAttachmentId } : {})}
                       />
                     ) : (
                       <div className='mt-2'>
@@ -1361,6 +1404,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={DOMPurify.sanitize(forwardedMessageData.optionalText)}
                             showEdited={message.edited}
                             preserveThreadRoute={context === 'thread'}
@@ -1423,6 +1467,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                               />
                             ) : (
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1463,6 +1508,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           ) : (
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
+                                disableLinks={disableLinks}
                                 message={resolvedForwardedContent}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
@@ -1522,6 +1568,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       ) : (
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
+                            disableLinks={disableLinks}
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}
@@ -1894,6 +1941,8 @@ export const ReactionView = ({
                 type='button'
                 className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
                 onClick={e => e.stopPropagation()}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_EMOJI_PICKER'
               >
                 <span className='text-sm font-medium'>+</span>
               </button>

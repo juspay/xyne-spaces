@@ -20,6 +20,9 @@ export const MAX_PINNED_ARTIFACT_APPS = 8;
 export interface PinnedArtifactApp {
   id: string;
   title: string;
+  /** Snapshot of the app's icon at pin time, refreshed whenever this device
+   *  changes it. A stale value on another device only means the old mark. */
+  icon?: string | null;
 }
 
 const listeners = new Set<() => void>();
@@ -73,6 +76,8 @@ export const usePinnedArtifactApps = (): {
   pinApp: (app: PinnedArtifactApp) => void;
   unpinApp: (id: string) => void;
   togglePin: (app: PinnedArtifactApp) => void;
+  /** Refresh a pinned app's snapshot (e.g. after its icon changes). No-op if not pinned. */
+  updatePinnedApp: (id: string, patch: Partial<Omit<PinnedArtifactApp, 'id'>>) => void;
   isFull: boolean;
 } => {
   const pinnedApps = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -83,7 +88,13 @@ export const usePinnedArtifactApps = (): {
     const current = getSnapshot();
     if (current.some(a => a.id === app.id)) return;
     if (current.length >= MAX_PINNED_ARTIFACT_APPS) return;
-    write([...current, { id: app.id, title: app.title }]);
+    write([...current, { id: app.id, title: app.title, ...(app.icon ? { icon: app.icon } : {}) }]);
+  };
+
+  const updatePinnedApp = (id: string, patch: Partial<Omit<PinnedArtifactApp, 'id'>>): void => {
+    const current = getSnapshot();
+    if (!current.some(a => a.id === id)) return;
+    write(current.map(a => (a.id === id ? { ...a, ...patch } : a)));
   };
 
   const unpinApp = (id: string): void => {
@@ -103,6 +114,7 @@ export const usePinnedArtifactApps = (): {
     pinApp,
     unpinApp,
     togglePin,
+    updatePinnedApp,
     isFull: pinnedApps.length >= MAX_PINNED_ARTIFACT_APPS,
   };
 };

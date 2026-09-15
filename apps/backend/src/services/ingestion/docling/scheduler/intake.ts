@@ -5,6 +5,14 @@
  *   - CHAT_ATTACHMENT     (docId = messageAttachment.id)
  *   - TICKET_ATTACHMENT   (docId = messageAttachment.id)
  *
+ * Also handles PPTX/PPT the same way: the scheduler (and the LightOnOCR
+ * model behind it) only ever operates on PDF bytes, so a pptx/ppt
+ * attachment is converted to PDF first (the same LibreOffice conversion
+ * the viewer uses, GCS-cached by content hash) and the *converted* PDF is
+ * what actually gets staged/split -- otherwise pptx would only ever reach
+ * the synchronous FileProcessor path's plain generic Docling endpoint,
+ * never the dedicated OCR model real PDFs get here.
+ *
  * Called from the file worker when config.doclingScheduler.routePdfs is on.
  * Inserts the pending_split row; the splitter takes over.
  */
@@ -14,12 +22,24 @@ import { runAsServiceActor } from '@/database/tenant/context';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { storageService } from '@/services/storage';
+import { convertToPdf, getConvertedPdfGcsPath } from '@/services/officeConversionService';
 import { getRuntimeConfig } from '../runtime/config';
 import { inferDoclingSourcePriority, upsertDoclingAsyncFileForSplit } from './store';
 
 const isPdf = (mime: string | null | undefined, name: string | null | undefined): boolean =>
   (mime || '').toLowerCase().includes('application/pdf') ||
   (name || '').toLowerCase().endsWith('.pdf');
+
+const isPptx = (mime: string | null | undefined, name: string | null | undefined): boolean => {
+  const ext = (name || '').toLowerCase().split('.').pop();
+  return (
+    ext === 'pptx' ||
+    ext === 'ppt' ||
+    mime === 'application/vnd.ms-powerpoint' ||
+    mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  );
+};
 
 const toGcsKey = (url: string): string => {
   if (url.startsWith('gs://')) {
@@ -32,6 +52,30 @@ const toGcsKey = (url: string): string => {
   return url;
 };
 
+/**
+ * Resolves the GCS key the splitter should read real PDF bytes from for
+ * this attachment. A genuine PDF resolves to its own stored file. A
+ * pptx/ppt is converted to PDF first and resolves to the converted file's
+ * (content-hash-keyed, already GCS-cached) location instead. Anything else
+ * returns null -- not routed to the scheduler, falls back to the
+ * synchronous FileProcessor path.
+ */
+const resolveSourceKey = async (
+  mime: string | null | undefined,
+  name: string | null | undefined,
+  url: string,
+): Promise<string | null> => {
+  if (isPdf(mime, name)) {
+    return toGcsKey(url);
+  }
+  if (isPptx(mime, name)) {
+    const buffer = await storageService.getFileBuffer(url);
+    await convertToPdf(buffer, name || 'file.pptx');
+    return getConvertedPdfGcsPath(buffer);
+  }
+  return null;
+};
+
 const pageChunkSize = () => getRuntimeConfig().pageChunkSize;
 
 const routeCollection = async (fileId: string): Promise<boolean> => {
@@ -42,9 +86,9 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
     where: { entityId: item.id, entityType: AttachmentEntityType.COLLECTION },
   });
   if (!attachment?.url) return false;
-  if (!isPdf(attachment.mimetype, item.name)) return false;
+  const sourceKey = await resolveSourceKey(attachment.mimetype, item.name, attachment.url);
+  if (!sourceKey) return false;
 
-  const sourceKey = toGcsKey(attachment.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: item.rootCollectionId });
 
   const inserted = await runAsServiceActor('docling-intake', attachment.workspaceId,
@@ -76,9 +120,9 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
 const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boolean> => {
   const att = await db.messageAttachment.findUnique({ where: { id: attachmentId } });
   if (!att?.url) return false;
-  if (!isPdf(att.mimetype, att.originalFilename)) return false;
+  const sourceKey = await resolveSourceKey(att.mimetype, att.originalFilename, att.url);
+  if (!sourceKey) return false;
 
-  const sourceKey = toGcsKey(att.url);
   const { basePriority } = inferDoclingSourcePriority({ collectionId: '' });
 
   const inserted = await runAsServiceActor('docling-intake', att.workspaceId,

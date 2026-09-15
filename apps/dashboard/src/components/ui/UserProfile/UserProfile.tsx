@@ -448,6 +448,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               {isOwnProfile && (
                 <button
                   onClick={() => handleStartEdit('team', userProfile.team)}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='EDIT_TEAM_NAME'
                   className='text-muted-foreground hover:text-muted-foreground'
                   title='Edit team name'
                 >

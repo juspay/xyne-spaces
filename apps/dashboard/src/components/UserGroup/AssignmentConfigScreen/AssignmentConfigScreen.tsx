@@ -924,7 +924,7 @@ export const AssignmentConfigScreen = ({
               checked={localIsNotified.get(user.id) ?? false}
               onCheckedChange={() => handleToggleIsNotified(user.id)}
               data-track-event='change'
-              data-track-category='UserGroup'
+              data-track-category='UserGroups'
               data-track-name='ToggleIsNotified'
               data-track-metadata={JSON.stringify({ userId: user.id })}
             />
@@ -935,7 +935,7 @@ export const AssignmentConfigScreen = ({
             <td className='px-6 py-4 whitespace-nowrap text-center'>
               <div
                 className='flex items-center justify-center'
-                data-track-category='UserGroup'
+                data-track-category='UserGroups'
                 data-track-name='ToggleExpertise'
                 data-track-metadata={JSON.stringify({ userId: user.id })}
               >
@@ -1406,7 +1406,7 @@ export const AssignmentConfigScreen = ({
                       onClick={handleApplyNotifyRoles}
                       disabled={selectedNotifyRoleIds.length === 0}
                       data-track-event='click'
-                      data-track-category='UserGroup'
+                      data-track-category='UserGroups'
                       data-track-name='ApplyNotifyByRole'
                     >
                       Apply

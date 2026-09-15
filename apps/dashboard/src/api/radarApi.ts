@@ -1,0 +1,171 @@
+import { apiInstance } from '../services/clients/apiClient';
+
+interface SuccessEnvelope<T> {
+  success: true;
+  data: T;
+}
+
+export interface RadarFeedItem {
+  id: string;
+  conversationId: string;
+  channelId: string;
+  sourceMessageId: string;
+  title: string;
+  contextSummary: string | null;
+  requestedBy: string[];
+  pendingOn: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RadarThreadCard {
+  /** A thread, or a whole DM. Bulk actions address the card through this. */
+  scopeKey: string;
+  /** Representative conversation only — open an item by its own conversationId. */
+  conversationId: string;
+  channelId: string;
+  threadPreview: string | null;
+  lastActivityAt: string | null;
+  items: RadarFeedItem[];
+}
+
+export interface RadarApplyResult {
+  created: number;
+  resolved: number;
+  reassigned: number;
+  dismissed: number;
+}
+
+export interface RadarRunLog {
+  id: string;
+  conversationId: string;
+  gatePassed: boolean;
+  gateReason: string;
+  windowSize: number;
+  parserRan: boolean;
+  proposedOps: unknown[] | null;
+  validOps: unknown[] | null;
+  droppedOps: unknown[] | null;
+  applied: { created: number; resolved: number; reassigned: number } | null;
+  /** Model's one-sentence read of the window — why these ops, or why none. */
+  assessment: string | null;
+  error: string | null;
+  durationMs: number | null;
+  createdAt: string;
+}
+
+async function unwrap<T>(promise: Promise<{ data: SuccessEnvelope<T> }>): Promise<T> {
+  const res = await promise;
+  return res.data.data;
+}
+
+export function fetchRadarPendingMe(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-me'),
+  ).then(d => d.threads);
+}
+
+export function fetchRadarWaitingOn(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/waiting-on'),
+  ).then(d => d.threads);
+}
+
+/** Open items held by anyone but the viewer, whoever asked — the "All" half of
+ *  the Others filter. Waiting On is the same feed narrowed to the viewer's own
+ *  asks, so the two are never fetched together. */
+export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-others'),
+  ).then(d => d.threads);
+}
+
+export interface RadarItemMutation {
+  id: string;
+  itemId: string;
+  op: string;
+  actorType: 'llm' | 'manual';
+  actorId: string | null;
+  sourceMessageId: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface RadarTrailMessage {
+  senderId: string;
+  senderName: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface RadarItemTrail {
+  item: RadarFeedItem & { status: string; resolvedAt: string | null };
+  mutations: RadarItemMutation[];
+  sourceMessages: Record<string, RadarTrailMessage>;
+  threadState: { watermarkCreatedAt: string; watermarkMsgId: string; updatedAt: string } | null;
+  latestMessage: { messageId: string; createdAt: string } | null;
+}
+
+export function fetchRadarItemTrail(itemId: string): Promise<RadarItemTrail> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<RadarItemTrail>>(
+      `/radar/debug/items/${encodeURIComponent(itemId)}`,
+    ),
+  );
+}
+
+export interface RadarMessagePreview {
+  messageId: string;
+  createdAt: string;
+  senderId: string | null;
+  text: string;
+}
+
+export interface RadarRunsResult {
+  runs: RadarRunLog[];
+  threadState: { watermarkCreatedAt: string; watermarkMsgId: string; updatedAt: string } | null;
+  latestMessage: RadarMessagePreview | null;
+  /** The message the watermark sits on — what "processed till" actually means. */
+  watermarkMessage: RadarMessagePreview | null;
+  /** Every item the thread produced (resolved included) when scoped to one thread. */
+  items: Array<{ id: string; title: string; status: string }>;
+}
+
+/** Debug is per-thread: the endpoint has no workspace-wide listing. */
+export function fetchRadarDebugRuns(conversationId: string): Promise<RadarRunsResult> {
+  const query = `?conversationId=${encodeURIComponent(conversationId)}`;
+  return unwrap(apiInstance.get<SuccessEnvelope<RadarRunsResult>>(`/radar/debug/runs${query}`));
+}
+
+export function resolveRadarItem(itemId: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/items/${encodeURIComponent(itemId)}/resolve`,
+    ),
+  );
+}
+
+export function resolveAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/threads/${encodeURIComponent(scopeKey)}/resolve-all`,
+    ),
+  );
+}
+
+/** Drops the caller from pendingOn; the item closes only when nobody is left. */
+export function dismissRadarItem(itemId: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/items/${encodeURIComponent(itemId)}/dismiss`,
+    ),
+  );
+}
+
+export function dismissAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
+      `/radar/threads/${encodeURIComponent(scopeKey)}/dismiss-all`,
+    ),
+  );
+}

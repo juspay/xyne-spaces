@@ -1,7 +1,14 @@
 import type React from 'react';
 import { useMemo, useState } from 'react';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import { CircleCheckBig, UserIcon, X, Layers, Calendar, Tag } from 'lucide-react';
+import {
+  CheckTickCircle as CircleCheckBig,
+  UserDefault as UserIcon,
+  MultipleCrossCancelDefault as X,
+  LayerTwo as Layers,
+  CalendarDefault as Calendar,
+  Tag,
+} from '@xyne/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
@@ -13,14 +20,14 @@ import {
   useAssigneeOptions,
   useStageOptions,
 } from './TicketTableHelper';
-import type { ActiveMenu } from './TicketTableTypes';
+import type { ActiveMenu, StageOptionSource } from './TicketTableTypes';
 import { TagSelector } from './TagSelector';
 
 interface BulkActionToolbarProps {
   selectedCount: number;
   users?: User[];
   userGroups?: UserGroup[];
-  stages?: Array<{ id: string; name: string }>;
+  stages?: StageOptionSource[];
   onAssigneeChange: (assignee: string | null) => void;
   onStatusChange: (status: TicketStatusV2) => void;
   onPriorityChange: (priority: TicketPriority | null) => void;

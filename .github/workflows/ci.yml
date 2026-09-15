@@ -24,7 +24,7 @@ jobs:
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
     # tsc over backend's type surface (incl. generated Prisma/Zero schemas)
     # exceeds Node's ~2GB default heap on the runner.
     env:
@@ -35,6 +35,7 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -64,7 +65,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dashboard:
     name: Dashboard ${{ matrix.task }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI != 'true' && 'ubuntu-latest' || matrix.task == 'build' && 'ci-cluster-github-runners-mini-max' || 'ci-cluster-github-runners-mini' }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +78,7 @@ jobs:
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v5
+        if: vars.USE_SELF_HOSTED_CI != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm

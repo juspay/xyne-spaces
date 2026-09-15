@@ -894,6 +894,7 @@ export const ShareCollectionModal = ({
                             <button
                               type='button'
                               onClick={() => handleRemoveAccess(row)}
+                              data-ph-capture-attribute-track-id='remove_collection_access'
                               aria-label={`Remove ${row.channel?.name || 'channel'} access`}
                               data-track-category='knowledge-base'
                               data-track-name='access-remove-channel'
@@ -1098,6 +1099,7 @@ export const ShareCollectionModal = ({
                 onClick={() => {
                   void handleShare();
                 }}
+                trackId='share_collection'
                 data-track-category='knowledge-base'
                 data-track-name='SHARE_COLLECTION'
                 className='px-4 py-2 bg-muted-foreground text-background rounded-lg hover:bg-muted-foreground/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'

@@ -205,6 +205,7 @@ export const buttonComponentSchema = baseComponentSchema.extend({
     variant: z.enum(['primary', 'secondary', 'destructive', 'ghost', 'outline']).optional(),
     size: z.enum(['sm', 'md', 'lg']).optional(),
     icon: z.string().optional(),
+    url: z.string().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });
@@ -233,6 +234,39 @@ export const linkComponentSchema = baseComponentSchema.extend({
     external: z.boolean().optional(),
     underline: z.boolean().optional(),
   }).strict(),
+});
+
+/**
+ * Roster summary — "you have N agents", with a link into the agent library.
+ *
+ * Counts only; the individual agents are the `agent` card's job. Emitted when a
+ * user asks what agents exist, where a prose list of 30 names is unreadable and
+ * the library page is the real answer. The route is NOT carried in props: the
+ * dashboard's router already knows the workspace, so the node builds its own
+ * link and a payload can never point this CTA somewhere else.
+ */
+export const agentSummaryComponentSchema = baseComponentSchema.extend({
+  type: z.literal('agent_summary'),
+  props: z
+    .object({
+      total: z.number().int().nonnegative(),
+      global: z.number().int().nonnegative().optional(),
+      personal: z.number().int().nonnegative().optional(),
+      label: z.string().optional(),
+      /** Sample rows, each opening the agent's own page. Server-picked. */
+      agents: z
+        .array(
+          z
+            .object({
+              slug: z.string().min(1),
+              name: z.string().min(1),
+              description: z.string().optional(),
+            })
+            .strict(),
+        )
+        .optional(),
+    })
+    .strict(),
 });
 
 export const tableComponentSchema = baseComponentSchema.extend({
@@ -716,6 +750,12 @@ export const agentIdentitySchema = z
     slug: z.string().min(1),
     /** Handle credited under the name ("Built by @fractal-agent") — who authored it. */
     builtBy: z.string().optional(),
+    /** Owner's display name, credited in the chin ("Created by @aryan.pidiha"). */
+    ownedBy: z.string().optional(),
+    /** Owner's user id — renders their avatar beside the credit. */
+    ownedById: z.string().optional(),
+    /** Reach: 'global' is org-wide, 'personal' belongs to one user. */
+    scope: z.enum(['personal', 'global']).optional(),
     description: z.string().optional(),
     /** Full system prompt — revealed in the expanded view, never the card body. */
     systemPrompt: z.string().optional(),
@@ -882,6 +922,36 @@ export const mcpConfigurePropsSchema = z
   })
   .strict();
 
+
+export const mcpSuggestItemSchema = z
+  .object({
+    serverType: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    connected: z.boolean().optional(),
+  })
+  .strict();
+
+export const mcpSuggestPropsSchema = z
+  .object({
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    connectors: z.array(mcpSuggestItemSchema).min(1),
+    /** Roster mode: render a "Browse MCPs" footer into the connector library. */
+    browseAll: z.boolean().optional(),
+    /** Total connectors available, so the footer can say what is not shown. */
+    totalCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const mcpSuggestComponentSchema = baseComponentSchema.extend({
+  type: z.literal('mcp_suggest'),
+  props: mcpSuggestPropsSchema,
+});
+
+export type McpSuggestItem = z.infer<typeof mcpSuggestItemSchema>;
+export type McpSuggestProps = z.infer<typeof mcpSuggestPropsSchema>;
+
 export const mcpConfigureComponentSchema = baseComponentSchema.extend({
   type: z.literal('mcpConfigure'),
   props: mcpConfigurePropsSchema,
@@ -906,6 +976,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     imageComponentSchema,
     linkComponentSchema,
     tableComponentSchema,
+    agentSummaryComponentSchema,
     planComponentSchema,
     prComponentSchema,
     prApprovalComponentSchema,
@@ -917,6 +988,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     chartComponentSchema,
     agentComponentSchema,
     mcpConfigureComponentSchema,
+    mcpSuggestComponentSchema,
     slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
@@ -954,7 +1026,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'mcpConfigure', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema

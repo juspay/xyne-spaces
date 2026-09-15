@@ -25,7 +25,7 @@ export type RecordingDatePreset =
   | 'this-month'
   | 'last-month';
 
-export type RecordingOwnershipTab = 'created' | 'shared';
+export type RecordingOwnershipTab = 'all' | 'created' | 'shared';
 
 type FixedRecordingDateGroupId = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month';
 

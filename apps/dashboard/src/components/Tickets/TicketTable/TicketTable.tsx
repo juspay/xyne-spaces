@@ -19,7 +19,11 @@ import { toast } from 'sonner';
 import { useZero } from '../../../hooks/useZero';
 import { useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
-import { Calendar, Check, User } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  CheckTickSingle as Check,
+  UserDefault as User,
+} from '@xyne/icons';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { mutators } from '../../../zero/mutators';
@@ -225,6 +229,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const userGroups = useUserGroups();
 
   const theme = themeQuartz.withParams({
+    backgroundColor: 'hsl(var(--background))',
+    foregroundColor: 'hsl(var(--foreground))',
+    chromeBackgroundColor: 'hsl(var(--card))',
     headerBackgroundColor: 'hsl(var(--card))',
     headerTextColor: 'hsl(var(--muted-foreground))',
     headerFontWeight: '600',
@@ -264,6 +271,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         headerName: 'Ticket name',
         field: 'title',
         minWidth: isComfortView ? 340 : 300,
+        flex: 1,
         editable: true,
         cellEditor: 'agTextCellEditor',
         cellEditorParams: {

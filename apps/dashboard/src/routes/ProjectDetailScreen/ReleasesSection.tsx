@@ -1,7 +1,7 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Rocket } from 'lucide-react';
+import { RocketShip as Rocket } from '@xyne/icons';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
@@ -78,6 +78,7 @@ export const ReleasesSection = ({ projectId }: ReleasesSectionProps): ReactEleme
                 <ReleaseStagePicker
                   ticketId={ticket.id}
                   stageName={ticket.stageName}
+                  statusV2={ticket.statusV2}
                   boardId={ticket.boardId}
                   stages={stagesByBoard.get(ticket.boardId) ?? []}
                 />

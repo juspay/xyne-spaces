@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import { usePlatform } from '../../../../../hooks/usePlatform';
 import Input from '../../../../ui/Input/Input';
 
@@ -59,6 +59,18 @@ export const AICategorySubmenu = ({
     }
   };
 
+  const allVisibleSelected =
+    filteredCategories.length > 0 && filteredCategories.every(c => selectedCategories.includes(c));
+
+  const handleSelectAllToggle = (): void => {
+    if (allVisibleSelected) {
+      onChange(selectedCategories.filter(c => !filteredCategories.includes(c)));
+    } else {
+      const merged = new Set([...selectedCategories, ...filteredCategories]);
+      onChange([...merged]);
+    }
+  };
+
   return (
     <div className='w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden'>
       <div className='p-3 border-b sticky top-0 bg-background z-10'>
@@ -81,6 +93,24 @@ export const AICategorySubmenu = ({
           </div>
         ) : filteredCategories.length > 0 ? (
           <div className='space-y-0.5'>
+            <button
+              type='button'
+              onClick={handleSelectAllToggle}
+              className={`
+                w-full flex items-center gap-2 px-3 py-2 rounded-md transition-all outline-none
+                ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                focus-visible:ring-2 focus-visible:ring-ring border-b border-border/50
+              `}
+              data-track-category='Tickets'
+              data-track-name='ToggleSelectAllAICategories'
+            >
+              <span className='flex-1 text-left text-sm font-medium text-primary'>
+                {allVisibleSelected ? 'Deselect all' : 'Select all'}
+              </span>
+              {allVisibleSelected && (
+                <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />
+              )}
+            </button>
             {filteredCategories.map(category => {
               const isSelected = selectedCategories.includes(category);
 

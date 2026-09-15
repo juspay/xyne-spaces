@@ -130,7 +130,7 @@ function WeekViewCallCard({
           {...(draggable ? listeners : {})}
           onClick={e => e.stopPropagation()}
           title={call.title ?? 'Call'}
-          data-track-category='Calls'
+          data-track-category='CALLS'
           data-track-name='calendar-week-call-card'
           className='group absolute right-1 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
@@ -204,7 +204,7 @@ function WeekViewCallCard({
               onPointerDown={e => onResizePointerDown(e, call)}
               onClick={e => e.stopPropagation()}
               onKeyDown={e => e.stopPropagation()}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='calendar-resize-handle'
             >
               <div className='w-6 h-0.5 rounded-full bg-blue-500' />

@@ -1,5 +1,5 @@
 import React, { useEffect, ReactNode } from 'react';
-import { mixpanelService, EVENTS } from '../services/Analytics/mixpanelService';
+import { posthogService } from '../services/Analytics/posthogService';
 import { usePlatform } from '../hooks/usePlatform';
 
 interface AnalyticsProviderProps {
@@ -7,18 +7,16 @@ interface AnalyticsProviderProps {
 }
 
 /**
- * AnalyticsProvider initializes Mixpanel on mount
- * Use mixpanelService.track() or sudoQueryService.track() directly in components for tracking events
+ * AnalyticsProvider initializes PostHog on mount. Interaction tracking is
+ * handled by PostHog autocapture (clicks/changes) plus the keyboard-shortcut
+ * capture in ShortcutsProvider — no per-component capture calls in this PR.
  */
 export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }) => {
   const { platform } = usePlatform();
 
   useEffect(() => {
-    mixpanelService.initialize();
-    mixpanelService.setPlatform(platform);
-
-    // Track app open for DAU/MAU metrics
-    mixpanelService.track(EVENTS.APP_OPEN);
+    posthogService.initialize();
+    posthogService.setPlatform(platform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

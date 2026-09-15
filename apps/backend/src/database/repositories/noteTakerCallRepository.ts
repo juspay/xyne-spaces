@@ -18,6 +18,7 @@ interface NoteTakerCallMetadata {
   notesCanvasId?: string;
   detailedSummaryCanvasId?: string;
   detailedSummaryReady?: boolean;
+  detailedSummaryStatus?: 'pending' | 'ready' | 'failed';
   conversationId?: string;
   messageId?: string;
   channelId?: string;
@@ -43,6 +44,11 @@ export class NoteTakerCallRepository {
       notesCanvasId,
       detailedSummaryCanvasId,
       detailedSummaryReady: false,
+      // From creation the summary pipeline is nominally in flight (auto
+      // generation runs at call end). Without this, a freshly-created
+      // recording reads as ready=false+canvasId, which the UI treats as a
+      // stranded/failed run and offers "Try again" instead of the shimmer.
+      detailedSummaryStatus: 'pending',
     };
 
     return this.db.call.create({

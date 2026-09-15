@@ -4,6 +4,7 @@ import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
 
 const installedAppsRepository = new InstalledAppsRepository();
@@ -24,20 +25,25 @@ export async function sendWebhookNotification(
     const payload = JSON.stringify(event);
     const signature = signWebhookPayload(payload, signingSecret);
 
-    const { url, headers } = await prepareAppWebhookDispatch(webhookUrl, {
+    const { url, headers, isInternal } = await prepareAppWebhookDispatch(webhookUrl, {
         'Content-Type': 'application/json',
         'X-Xyne-Signature': signature,
         'X-Source': 'XyneSpaces',
     });
 
     try {
-        const response = await fetch(url, {
+        const init: RequestInit = {
             method: 'POST',
             headers,
             body: payload,
             // 'manual' so a 3xx to an internal host cannot bypass the guard above.
             redirect: 'manual',
-        });
+        };
+        // Internal targets are trusted-config pod URLs (plain client); external
+        // targets are user-supplied, so validate + pin the connection (rebinding-safe).
+        const response = isInternal
+            ? await fetch(url, init)
+            : await safeWebhookFetch(url, init);
 
         const text = await response.text().catch(() => '');
 

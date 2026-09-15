@@ -1,5 +1,5 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, BellOff } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import { useOverlayEffect } from '../../../machines/stateMachine';
@@ -63,6 +63,22 @@ export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardPro
           )}
         >
           <DialogPrimitive.Title className='hidden'>Incoming call</DialogPrimitive.Title>
+
+          {/* Absolute so it never competes with the centred context line for
+              width, and so showing it cannot change the card's fixed height. */}
+          {vm.isSilenced && (
+            // Native tooltip on a wrapper rather than the shared Tooltip:
+            // nothing else on this card is hoverable, and the label is a
+            // nicety, not the reason the user is looking at it. (lucide icons
+            // take no `title`, hence the span.)
+            <span
+              aria-label='Ringing silently'
+              title='Ringing silently'
+              className='absolute right-5 top-5 text-muted-foreground'
+            >
+              <BellOff className='h-3.5 w-3.5' />
+            </span>
+          )}
 
           <IncomingCallContextLine context={vm.context} />
 

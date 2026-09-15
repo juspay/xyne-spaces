@@ -243,7 +243,7 @@ export const agentRepository = {
   cloneAgentForUser: async (
     sourceId: string,
     newOwnerId: string,
-    opts: { name?: string } = {},
+    opts: { name?: string; slug?: string } = {},
   ) => {
     const source = await prisma.agent.findUnique({
       where: { id: sourceId },
@@ -265,7 +265,11 @@ export const agentRepository = {
     // the org-scoped ACL middleware. `User.orgId` is NOT NULL, so this resolves
     // for any real user.
     const owner = await prisma.user.findUnique({ where: { id: newOwnerId }, select: { orgId: true } });
-    const slug = await buildCloneSlug(source.slug, owner?.orgId);
+    const requestedSlug = opts.slug?.trim();
+    if (requestedSlug && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(requestedSlug)) {
+      throw new Error(`Invalid clone slug: ${requestedSlug}`);
+    }
+    const slug = requestedSlug || await buildCloneSlug(source.slug, owner?.orgId);
 
     return prisma.$transaction(async (tx) => {
       const clone = await tx.agent.create({

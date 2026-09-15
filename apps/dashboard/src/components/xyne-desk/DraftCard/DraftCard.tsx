@@ -501,6 +501,7 @@ export const DraftCard = ({
           <div className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}>
             <button
               type='button'
+              data-ph-capture-attribute-track-id='accept_ai_draft'
               onClick={onAccept}
               disabled={!draftContent || isStreaming}
               className='inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'

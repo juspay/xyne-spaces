@@ -10,6 +10,11 @@ export const isTestEnv =
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
+// Availability in the client is prod-agnostic now; the server's LOCAL_HARNESS_ENABLED
+// flag is the real gate for whether runs actually route to a local device.
+export const isLocalHarnessAvailable = (): boolean =>
+  typeof window !== 'undefined' && !!window.electronAPI?.localHarness;
+
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
 const ELECTRON_BACKEND_URL = isProd

@@ -63,7 +63,6 @@ import {
   UserRoleMappingsACL,
   UsersACL,
   UserWorkloadMappingsACL,
-  WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
   SdlcEntityLinksACL,
@@ -122,8 +121,10 @@ import {
   ReleaseChangesACL,
   ReleaseEventsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   SurfaceLinksACL,
+  SdlcFoldersACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -272,8 +273,6 @@ export class QueryACLFactory {
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
         return new UsersACL(ctx) as BaseQueryACL<TTable>;
-      case 'workflow_executions':
-        return new WorkflowExecutionsACL(ctx) as BaseQueryACL<TTable>;
       case 'workflows':
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
@@ -282,12 +281,16 @@ export class QueryACLFactory {
         return new SdlcEntityLinksACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_artifacts':
         return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
         return new SavedUserConfigurationValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'view_access':
+        return new ViewAccessACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':

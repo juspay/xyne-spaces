@@ -361,6 +361,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
             <button
               onClick={handleDismiss}
               disabled={isActing}
+              data-ph-capture-attribute-track-id='dismiss_schedule_call_nudge'
               data-track-category='NUDGES'
               data-track-name='dismiss_schedule_call_nudge'
               className='p-0.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 disabled:opacity-50'

@@ -10,6 +10,7 @@ export type MigrationStatus =
   | 'QUEUED'
   | 'COLLECTING'
   | 'AWAITING_APPROVAL'
+  | 'REFRESHING'
   | 'INGESTING'
   | 'STOPPED'
   | 'FAILED'
@@ -41,11 +42,20 @@ export interface MigrationJobView {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  ingestStartedAt?: number;
+  ingestDurationMs?: number; // how long ingestion took (completedAt − ingestStartedAt)
+  collectedAt?: number;
+  lastRefreshedAt?: number;
+  refreshCount?: number;
+  refreshDone?: number;
+  refreshTotal?: number;
+  canRefresh: boolean;
   error?: string;
   issues?: {
     conversationId: string;
     kind: 'skipped' | 'truncated' | 'ingest-error';
     reason: string;
+    label?: string; // human-readable conversation identifier (e.g. "DM with Jane Doe" / "#general")
   }[];
 }
 
@@ -81,6 +91,12 @@ export const slackMigrationApi = {
   approve: async (id: string): Promise<MigrationJobView> =>
     unwrap(
       (await apiInstance.post<Envelope<MigrationJobView>>(`${BASE}/migration-jobs/${id}/approve`))
+        .data,
+    ),
+
+  refresh: async (id: string): Promise<MigrationJobView> =>
+    unwrap(
+      (await apiInstance.post<Envelope<MigrationJobView>>(`${BASE}/migration-jobs/${id}/refresh`))
         .data,
     ),
 
@@ -124,5 +140,8 @@ export const slackMigrationApi = {
   stopIngestion: async (): Promise<{ running: boolean }> =>
     unwrap((await apiInstance.post<Envelope<{ running: boolean }>>(`${BASE}/ingestion/stop`)).data),
 
-  exportUrl: `${BASE}/migration-jobs/export`,
+  exportHistory: async (): Promise<MigrationJobView[]> =>
+    unwrap(
+      (await apiInstance.get<Envelope<MigrationJobView[]>>(`${BASE}/migration-jobs/export`)).data,
+    ),
 };

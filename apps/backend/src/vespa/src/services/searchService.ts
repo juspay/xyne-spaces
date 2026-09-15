@@ -31,6 +31,12 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
 
+/**
+ * Vespa document-summary class used when the caller does not ask for a specific one.
+ * `lean` returns only the fields the search UI needs, keeping payloads small.
+ */
+const DEFAULT_PRESENTATION_SUMMARY = 'lean';
+
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
 
@@ -92,6 +98,7 @@ interface SearchOptions {
   mail?: MailFilters;
   call?: CallFilters;
   prefixBoostWeight?: number;
+  /** Vespa document-summary class to request. Defaults to `lean` when not set. */
   presentationSummary?: string;
   captureDebug?: (info: VespaSearchDebugInfo) => void;
   // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
@@ -220,7 +227,7 @@ export class SearchService {
       'ranking.profile': 'default_native',
       'input.query(alpha)': 0.35,
       timeout: '15s',
-      'presentation.summary': 'lean',
+      'presentation.summary': DEFAULT_PRESENTATION_SUMMARY,
       ...(useSemantic ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
     };
 
@@ -292,7 +299,7 @@ export class SearchService {
         mail = {},
         call = {},
         prefixBoostWeight = 0.2,
-        presentationSummary,
+        presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
         workspaceId,
         captureDebug,
@@ -449,7 +456,7 @@ export class SearchService {
           "input.query(time_from)": timeRangeStart,
           "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
-          ...(presentationSummary ? { "presentation.summary": presentationSummary } : {}),
+          "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
           tracelevel: 0,
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
@@ -464,10 +471,18 @@ export class SearchService {
 
       // Execute search
       // Fetch feature flags from Superposition
-      const useSemanticAnyway = await superpositionClient.getBooleanValue(
-        'vespa_search_use_semantic_anyway',
-        true,
+      // Rank profiles that skip the vector half of retrieval. `personalized` reads no vector
+      // feature, so nearestNeighbor cannot change its ranking -- it only costs a filtered-HNSW
+      // traversal plus an embed call, and floods recall with zero-lexical docs that the
+      // channel-affinity tier then promotes over real matches. Default [] = nothing skipped.
+      const semanticDisabledRankProfiles = await superpositionClient.getObjectValue(
+        'vespa_search_semantic_disabled_rank_profiles',
+        [],
         {}
+      );
+      const useSemanticAnyway = !(
+        Array.isArray(semanticDisabledRankProfiles) &&
+        semanticDisabledRankProfiles.includes(rankProfile)
       );
       const newFallbackMethod = await superpositionClient.getBooleanValue(
         'vespa_search_new_fallback_method',
@@ -512,7 +527,12 @@ export class SearchService {
         textMatchRescuedIds = filtered.rescuedIds;
       }
 
-      const exactResultCount = response.root?.children?.length || 0;
+      // Vespa's own match count. root.children.length is WRONG for grouped queries
+      // (`| all(group(...))`): its children are grouping nodes, so the count is 1 whenever a
+      // group shell exists -- even with zero documents -- which makes any threshold meaningless.
+      // That empty shell also carries relevance exactly 1.0, which is how it surfaces in logs.
+      const exactResultCount =
+        response.root?.fields?.totalCount ?? (response.root?.children?.length || 0);
       const expectedCount = limit - offset;
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
 
@@ -524,17 +544,21 @@ export class SearchService {
       const strongExactResultCount = Math.max(0, exactResultCount - textMatchRescuedIds.size);
 
       const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
-      const isFileSearch = app.some(a => a.toLowerCase() === 'file');
-      const oldFallback = strongExactResultCount < expectedCount && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
+      // Mirrors isTranscriptOnly: exclude a search that is ONLY files, not any search that
+      // happens to include them. `.some()` meant one `file` entry in the All tab's six-app
+      // list disabled the fuzzy fallback for all six.
+      const isFileSearch = app.length === 1 && app[0].toLowerCase() === 'file';
+      // Minimum results required before we skip the fuzzy fallback. It previously fired whenever
+      // the exact pass returned fewer than `limit` hits, so a query with 3 solid matches still
+      // pulled in 3-gram fuzzy noise and buried them. Raise to broaden, lower to tighten.
+      // Below this many results the exact pass is considered insufficient and we broaden with
+      // the 3-gram fuzzy pass. Tunable at runtime via the `vespa_min_good_results` flag.
+      const MIN_RESULTS = await superpositionClient.getNumberValue('vespa_min_good_results', 5, {});
+      const oldFallback = strongExactResultCount < MIN_RESULTS && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
         0.1,
-        {}
-      );
-      const MIN_GOOD_RESULTS = await superpositionClient.getNumberValue(
-        'vespa_min_good_results',
-        5,
         {}
       );
       // Same reasoning as strongExactResultCount: a rescued hit can carry a passable
@@ -546,11 +570,13 @@ export class SearchService {
           (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
       ) ?? [];
 
+      // Same MIN_RESULTS rule as oldFallback. Broadening a result set that already has real
+      // matches is what let vector/3-gram strays outrank them.
       const newFallback =
         searchQuery?.trim() &&
         !isTranscriptOnly &&
         !isFileSearch &&
-        goodResults.length < MIN_GOOD_RESULTS;
+        goodResults.length < MIN_RESULTS;
 
 
       // Exact-match queries never fall back to fuzzy — 3-gram fuzzy would defeat "exact".
@@ -677,4 +703,94 @@ export class SearchService {
       throw error;
     }
   };
+
+  /**
+   * Search for distinct ticket tags from Vespa.
+   * Uses grouping to aggregate unique tag values from ticket documents.
+   *
+   * @param workspaceId - Workspace ID for isolation
+   * @param options - Search options (projectId, boardIds, query prefix, limit)
+   * @returns Array of distinct tag strings sorted alphabetically
+   */
+  async searchTicketTags(
+    workspaceId: string,
+    options: {
+      projectId?: string;
+      boardIds?: string[];
+      query?: string;
+      limit?: number;
+    } = {},
+  ): Promise<{ tags: string[]; total: number }> {
+    const { projectId, boardIds, query, limit = 100 } = options;
+
+    // Build WHERE conditions
+    const conditions: string[] = [
+      `docType contains "ticket"`,
+      `workspaceId contains "${workspaceId}"`,
+    ];
+
+    if (projectId) {
+      conditions.push(`projectId contains "${projectId}"`);
+    }
+
+    if (boardIds && boardIds.length > 0) {
+      const boardConditions = boardIds.map(id => `boardId contains "${id}"`).join(' or ');
+      conditions.push(`(${boardConditions})`);
+    }
+
+    // If query is provided, filter tags that contain the search term
+    // This is done post-grouping since Vespa doesn't support substring filtering on array elements in WHERE
+    const queryLower = query?.trim().toLowerCase();
+
+    // YQL with grouping on the tags array
+    // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
+
+    try {
+      const response = await this.vespa.search<VespaSearchResponse>({
+        yql,
+        hits: 0, // We only want grouping results, not individual docs
+        timeout: '10s',
+      } as any);
+
+      // Parse grouped results
+      const tags: string[] = [];
+      const root = (response?.root ?? {}) as any;
+      const rootChildren = (root?.children ?? []) as Array<any>;
+
+      // Navigate the grouping structure: group:root -> grouplist:tags -> group:string:* -> value
+      for (const rootChild of rootChildren) {
+        // First level: group:root:0
+        if (rootChild.id?.startsWith('group:root:')) {
+          const groupListChildren = rootChild.children ?? [];
+          for (const groupList of groupListChildren) {
+            // Second level: grouplist:tags
+            if (groupList.id?.startsWith('grouplist:')) {
+              const groups = groupList.children ?? [];
+              for (const group of groups) {
+                // Third level: group:string:tagname
+                if (group.id?.startsWith('group:')) {
+                  const tagValue = group.value;
+                  if (typeof tagValue === 'string' && tagValue.trim()) {
+                    // Apply substring filter if query provided
+                    if (!queryLower || tagValue.toLowerCase().includes(queryLower)) {
+                      tags.push(tagValue);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Sort alphabetically
+      tags.sort((a, b) => a.localeCompare(b));
+
+      return { tags, total: tags.length };
+    } catch (error) {
+      this.logger.error(`Error searching ticket tags: ${getErrorMessage(error)}`);
+      return { tags: [], total: 0 };
+    }
+  }
 }

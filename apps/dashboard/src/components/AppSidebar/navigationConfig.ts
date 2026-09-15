@@ -29,7 +29,9 @@ import {
   ChatChatting,
   Bot,
   RocketShip,
+  GitBranch,
   type PikaIconProps,
+  Tag,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
 
@@ -94,6 +96,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/support', label: 'Support', icon: Troubleshoot, popout: true },
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
+  { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
   {
@@ -105,6 +108,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18, popout: true },
   { path: '/workspace-management', label: 'Workspace Management', icon: Settings01, popout: true },
+  { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
   { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo, popout: true },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
@@ -149,9 +153,9 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
 ];
 
-// Core items that are always in the toolbar. Users cannot remove these — their
-// toggle is locked on in the customize UI.
-export const REQUIRED_TOOLBAR_PATHS: string[] = [
+// Paths shown in the toolbar by default (before any user customization).
+export const DEFAULT_TOOLBAR_PATHS: string[] = [
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
@@ -160,16 +164,7 @@ export const REQUIRED_TOOLBAR_PATHS: string[] = [
   '/sdlc',
   '/support',
   '/chat/activity',
-  '/guide',
-  '/releaseManager',
 ];
-
-// Paths shown in the toolbar by default (before any user customization).
-export const DEFAULT_TOOLBAR_PATHS: string[] = [...REQUIRED_TOOLBAR_PATHS];
-
-// Whether a path is locked into the toolbar (cannot be toggled off).
-export const isRequiredToolbarPath = (path: string): boolean =>
-  REQUIRED_TOOLBAR_PATHS.includes(path);
 
 // One-line description per toolbar-manageable path, shown under the label in
 // the workspace admin's Toolbar tab — same { name, description } shape as
@@ -210,7 +205,7 @@ export const filterNavItemsByPermission = (
     let hasAccess = true;
     if (requiresAccess) {
       if (resourceName === 'SDLC') {
-        // Any tier (READ/WRITE/ADMIN) unlocks the SDLC screen.
+        // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
       } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
         hasAccess = permissions.some(

@@ -13,13 +13,21 @@ export interface SdlcActor {
   isApp?: boolean;
 }
 
-export interface SdlcRepositoryHub {
+/** A registered repository. Membership lives in sdlc_entity_links, not here. */
+export interface SdlcRepository {
   id: string;
   name: string;
   url: string;
   canonicalUrl: string;
   projectId: string;
-  channelId: string;
+}
+
+/** An SDLC hub: the private channel plus the repositories it covers. */
+export interface SdlcChannel {
+  id: string;
+  name: string;
+  projectId: string;
+  repoIds: string[];
 }
 
 export interface SdlcRepositoryRunContext {
@@ -52,7 +60,7 @@ export interface SdlcLink {
 }
 
 export interface SdlcHub {
-  attachRepository(actor: SdlcActor, input: AttachSdlcRepositoryInput): Promise<SdlcRepositoryHub>;
+  createRepository(actor: SdlcActor, input: AttachSdlcRepositoryInput): Promise<SdlcRepository>;
   setupRepository(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   refreshSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   retrySetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
@@ -75,7 +83,7 @@ export interface SdlcHub {
     actor: SdlcActor,
     input: UpdateSdlcBaselineDraftInput
   ): Promise<SdlcArtifact>;
-  listTracks(actor: SdlcActor, repoId: string): Promise<unknown>;
+  listTracks(actor: SdlcActor, repoId: string, channelId?: string): Promise<unknown>;
   createTrack(actor: SdlcActor, input: CreateSdlcTrackInput): Promise<unknown>;
   linkContext(actor: SdlcActor, repoId: string, input: CreateSdlcLinkInput): Promise<SdlcLink>;
   unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void>;

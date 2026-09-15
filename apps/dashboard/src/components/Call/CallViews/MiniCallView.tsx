@@ -325,6 +325,8 @@ export function MiniCallView({
         aria-label='Resize width'
         className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
         onMouseDown={e => handleResizeStart(e, 'right')}
+        data-track-category='CALLS'
+        data-track-name='RESIZE_MINI_CALL_WIDTH'
         onPointerDown={(e): void => e.stopPropagation()}
         onKeyDown={(e): void => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -341,6 +343,8 @@ export function MiniCallView({
           aria-label='Resize width and height'
           className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
           onMouseDown={e => handleResizeStart(e, 'corner')}
+          data-track-category='CALLS'
+          data-track-name='RESIZE_MINI_CALL_CORNER'
           onPointerDown={(e): void => e.stopPropagation()}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -485,7 +489,7 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-gradient-to-br from-gray-900 to-gray-950 shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
+              'bg-[#131314] shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
               'border-gray-700/50',
             )}
             style={{
@@ -526,7 +530,7 @@ export function MiniCallView({
 
                 {/* Video Grid */}
                 <div
-                  className='flex-1 bg-gray-950/50 p-3 overflow-auto'
+                  className='flex-1 bg-[#131314] p-3 overflow-auto'
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
                   {isWhiteboardOpen ? (
@@ -569,9 +573,10 @@ export function MiniCallView({
                     </div>
                   )}
                 </div>
-
-                {/* Controls */}
-                <div className='pb-4' onPointerDown={(e): void => e.stopPropagation()}>
+                <div
+                  className='relative z-40 pb-4'
+                  onPointerDown={(e): void => e.stopPropagation()}
+                >
                   <CallControls
                     isMicEnabled={isMicEnabled}
                     isCameraEnabled={isCameraEnabled}

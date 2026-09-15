@@ -23,8 +23,6 @@ const ProjectItem = ({
   onBoardClick: (boardId: string) => void;
   searchQuery?: string;
 }): ReactElement => {
-  const boardCount = project.boards?.length || 0;
-
   return (
     <div
       className='mb-1'
@@ -37,7 +35,6 @@ const ProjectItem = ({
         isExpandable={true}
         isExpanded={isExpanded}
         isActive={isActive}
-        {...(boardCount > 0 && { badge: boardCount })}
         data-track-category='Projects'
         data-track-name='ToggleProjectExpand'
         data-track-metadata={JSON.stringify({ projectId: project.id, projectName: project.name })}

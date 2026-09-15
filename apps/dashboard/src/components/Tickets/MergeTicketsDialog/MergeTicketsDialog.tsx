@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
-import { User, X } from 'lucide-react';
+import { UserDefault as User, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -21,6 +21,7 @@ interface MergeTicket {
   title?: string | null | undefined;
   xyneId?: string | null | undefined;
   stageName?: string | null | undefined;
+  statusV2?: string | null | undefined;
   priority?: TicketPriority | string | null | undefined;
   assignedTo?: string | null | undefined;
   userGroupId?: string | null | undefined;
@@ -258,6 +259,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                       {ticket.stageName !== undefined && (
                         <TicketStatusWithStages
                           currentStageName={ticket.stageName}
+                          statusV2={ticket.statusV2}
                           showLeadingDot={false}
                           labelClassName='max-w-[120px] truncate'
                         />

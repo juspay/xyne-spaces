@@ -19,7 +19,7 @@ import { agentIdentity, type AgentCapability, type AgentIdentity } from "xyne-cl
 import { errMsg } from "./errors.js";
 import type { AvailableToolsCatalog } from "../routes/tools.js";
 import { agentRepository, agentRequestRepository } from "../repositories/index.js";
-import { prisma } from "../db.js";
+import { availableServerTypesSafe } from "./connector-availability.js";
 import { writeAuditLog } from "./audit.js";
 import { createLogger } from "../logger.js";
 
@@ -121,18 +121,9 @@ export async function resolveAgentCapabilities(
     .filter((t): t is string => isConnectorServerType(t));
   const unconnected = new Set<string>(wantedServerTypes);
   if (connectedFor && unconnected.size > 0) {
-    try {
-      const connections = await prisma.userMcpConnection.findMany({
-        where: { userId: connectedFor, mcpServer: { type: { in: [...unconnected] } } },
-        select: { mcpServer: { select: { type: true } } },
-      });
-      for (const c of connections) unconnected.delete(c.mcpServer.type);
-    } catch (err) {
-      unconnected.clear();
-      log.warn(
-        `[agent-card] connection lookup failed for ${connectedFor}: ${errMsg(err)}`,
-      );
-    }
+    const available = await availableServerTypesSafe(connectedFor, [...unconnected]);
+    if (available === null) unconnected.clear();
+    else for (const type of available) unconnected.delete(type);
   } else {
     unconnected.clear();
   }

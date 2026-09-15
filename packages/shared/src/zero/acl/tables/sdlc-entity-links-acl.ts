@@ -15,13 +15,12 @@ export class SdlcEntityLinksACL extends BaseQueryACL<'sdlc_entity_links'> {
       return denyGuestSelect(query, 'id');
     }
 
+    // Links are channel-scoped: channelId is the only scope they carry.
     return query
       .where('workspaceId', '=', this.ctx.workspaceId)
-      .whereExists('repo', (repo) =>
-        repo.whereExists('channel', (channel) =>
-          channel.whereExists('participants', (participant) =>
-            participant.where('userId', '=', this.ctx.userID),
-          ),
+      .whereExists('channel', (channel) =>
+        channel.whereExists('participants', (participant) =>
+          participant.where('userId', '=', this.ctx.userID),
         ),
       );
   }

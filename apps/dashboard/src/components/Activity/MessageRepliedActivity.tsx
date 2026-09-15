@@ -44,11 +44,21 @@ export const MessageRepliedActivity = ({
       isExpanded={isExpanded}
     >
       {isExpanded ? (
-        <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
+        <MessageBubble
+          message={message}
+          showAvatar={false}
+          variant='default'
+          contentOnly={true}
+          disableLinks={true}
+        />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
           {getFlowJsonPreviewText(message.content) ?? (
-            <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
+            <RenderMessageWithHTML
+              message={message.content}
+              showEdited={message.edited}
+              disableLinks
+            />
           )}
         </div>
       )}

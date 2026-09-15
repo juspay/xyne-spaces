@@ -3,12 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Globe, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
-import { ReactArtifactView } from '@/components/AIScreen/ReactArtifact';
+import { ArtifactAppSettings, ReactArtifactView } from '@/components/AIScreen/ReactArtifact';
 import type { ReactArtifactRef } from '@/components/AIScreen/ReactArtifact';
+import { usePinnedArtifactApps } from '@/hooks/usePinnedArtifactApps';
 import {
   getArtifactApp,
   publishArtifactApp,
   unpublishArtifactApp,
+  updateArtifactAppIcon,
 } from '@/services/claw/artifactAppsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 
@@ -31,7 +33,23 @@ const ArtifactAppScreen = (): ReactElement => {
 
   const app = data?.app;
   const versions = useMemo(() => data?.versions ?? [], [data]);
-  const shown = versions[0];
+
+  /**
+   * The build this page is actually served, mirroring the payload route: an
+   * owner gets HEAD, everyone else gets the pin, and both fall back to the
+   * newest row for apps that predate those pointers.
+   *
+   * Not simply `versions[0]`. After a restore the newest version is no longer
+   * head, so that took the *wrong* row: the page rendered head while its header
+   * described a build nobody was looking at — and Publish would have pinned
+   * that other build to the whole workspace.
+   */
+  const shown = useMemo(() => {
+    const preferred = app?.isOwner
+      ? (app.headVersionId ?? app.publishedVersionId)
+      : app?.publishedVersionId;
+    return versions.find(v => v.id === preferred) ?? versions[0];
+  }, [app, versions]);
 
   // The viewer addresses the app by its own id; `attachmentId` is unused on this
   // path but keeps one ref shape across the chat and saved-app surfaces.
@@ -57,6 +75,19 @@ const ArtifactAppScreen = (): ReactElement => {
     onError: (e: unknown) => setError(clawErrorText(e, 'Could not unpublish this app.')),
   });
 
+  // The sidebar draws pinned apps from a localStorage snapshot rather than this
+  // query, so a new mark has to be written there too or the rail keeps the old
+  // icon until the next full load. Same pairing as the chat pane's own edit.
+  const { updatePinnedApp } = usePinnedArtifactApps();
+  const setIcon = useMutation({
+    mutationFn: (icon: string | null) => updateArtifactAppIcon(app?.id ?? '', icon),
+    onSuccess: (_result, icon) => {
+      invalidate();
+      if (appId) updatePinnedApp(appId, { icon });
+    },
+    onError: (e: unknown) => setError(clawErrorText(e, 'Could not change the icon.')),
+  });
+
   if (isLoading) {
     return (
       <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
@@ -69,7 +100,12 @@ const ArtifactAppScreen = (): ReactElement => {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-2'>
         <p className='text-sm font-medium text-foreground'>Could not open this app</p>
-        <Button variant='secondary' onClick={() => void refetch()}>
+        <Button
+          variant='secondary'
+          onClick={() => void refetch()}
+          data-track-category='AskAI'
+          data-track-name='ArtifactAppRetryLoad'
+        >
           Try again
         </Button>
       </div>
@@ -129,7 +165,18 @@ const ArtifactAppScreen = (): ReactElement => {
       {error && <p className='px-4 py-2 text-xs text-destructive'>{error}</p>}
 
       <div className='min-h-0 flex-1'>
-        <ReactArtifactView artifact={artifact} fill />
+        <ReactArtifactView
+          artifact={artifact}
+          fill
+          settingsSlot={
+            <ArtifactAppSettings
+              app={app}
+              viewing={shown ?? null}
+              versions={versions}
+              {...(app.isOwner ? { onIconChange: setIcon.mutate } : {})}
+            />
+          }
+        />
       </div>
     </div>
   );

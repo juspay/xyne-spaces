@@ -85,6 +85,7 @@ export const ticketTable = table("tickets")
     statusUpdatedAt: number(),
     merchantId: string().optional(),
     conversationId: string(),
+    messageId: string().optional(),
     channelId: string(),
     eta: number().optional(),
     firstRespondedAt: number().optional(),
@@ -261,6 +262,8 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -295,6 +298,8 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
   })
   .primaryKey("id");
 
@@ -566,6 +571,8 @@ export const scheduledMessageTable = table("scheduled_messages")
     messageContent: string(),
     channelId: string(),
     daysOfWeek: string(),
+    monthlyMode: string().optional(),
+    monthlyValue: number().optional(),
     scheduledTime: string(),
     isActive: boolean(),
     createdBy: string(),
@@ -1174,6 +1181,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(),
     initial_message_md: string().optional(),
     parent_message_md: string().optional(),
+    sub_tickets_md: string().optional(),
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -1497,6 +1505,7 @@ export const activityTable = table("activities")
     channelId: string().optional(),
     pullRequestId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     actorId: string(),
     classification: string(),
@@ -1602,8 +1611,6 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string(),
-    message: string(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
@@ -1757,6 +1764,7 @@ export const callRecordingTable = table("call_recordings")
     storagePath: string().optional(),
     segmentPrefix: string().optional(),
     messageId: string().optional(),
+    attachmentId: string().optional(),
     startedAt: number(),
     endedAt: number().optional(),
     createdAt: number(),
@@ -1865,6 +1873,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1881,6 +1890,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2000,7 +2010,8 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   .columns({
     id: string(),
     workspaceId: string(),
-    repoId: string(),
+    repoId: string().optional(),
+    channelId: string(),
     sourceType: string(),
     sourceId: string(),
     targetType: string(),
@@ -2015,7 +2026,7 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
     artifactId: string(),
-    repoId: string(),
+    repoId: string().optional(),
     artifactType: string(),
     artifactStatus: string(),
     workflowExecutionId: string().optional(),
@@ -2028,11 +2039,22 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
   })
   .primaryKey("artifactId");
 
+export const sdlcFolderTable = table("sdlc_folders")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
     workspaceId: string(),
     id: string(),
-    repoId: string(),
+    repoId: string().optional(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -2319,6 +2341,20 @@ export const applicationReleaseTicketTable = table("application_release_tickets"
     testedAt: number().optional(),
     failureReason: string().optional(),
     isHotfix: boolean().optional(),
+    createdAt: number(),
+    updatedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const releaseRepositoryTable = table("release_repositories")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    releaseId: string(),
+    mainReleaseBoardId: string(),
+    branch: string(),
+    deployedCommit: string(),
+    newCommit: string(),
     createdAt: number(),
     updatedAt: number().optional(),
   })
@@ -2617,6 +2653,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
   })
   .primaryKey("id");
 
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const delayedMessageTable = table("delayed_messages")
   .columns({
     workspaceId: string(),
@@ -2833,6 +2881,26 @@ export const tagsConfigTable = table("tags_config")
   })
   .primaryKey("id");
 
+export const threadTypeVocabularyTable = table("thread_type_vocabulary")
+  .columns({
+    id: string(),
+    scope: string(),
+    scopeId: string(),
+    workspaceId: string(),
+    name: string(),
+    label: string(),
+    summary: string(),
+    color: string(),
+    description: string(),
+    status: string(),
+    isDeleted: boolean(),
+    createdBy: string().optional(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const doclingAsyncFileTable = table("docling_async_files")
   .columns({
     workspaceId: string().optional(),
@@ -2913,6 +2981,70 @@ export const entityAliasTable = table("entity_aliases")
     surfaceForm: string(),
     normalizedForm: string(),
     count: number(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const executionItemTable = table("execution_items")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    conversationId: string(),
+    channelId: string(),
+    sourceMessageId: string(),
+    title: string(),
+    contextSummary: string().optional(),
+    status: string(),
+    requestedBy: json<string[]>(),
+    pendingOn: json<string[]>(),
+    createdAt: number(),
+    updatedAt: number(),
+    resolvedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const executionThreadStateTable = table("execution_thread_states")
+  .columns({
+    workspaceId: string(),
+    conversationId: string(),
+    watermarkCreatedAt: number(),
+    watermarkMsgId: string(),
+    consecutiveFailures: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("conversationId");
+
+export const executionItemMutationTable = table("execution_item_mutations")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    itemId: string(),
+    conversationId: string(),
+    op: string(),
+    actorType: string(),
+    actorId: string().optional(),
+    sourceMessageId: string().optional(),
+    payload: json().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const executionRunLogTable = table("execution_run_logs")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    conversationId: string(),
+    gatePassed: boolean(),
+    gateReason: string(),
+    windowSize: number(),
+    parserRan: boolean(),
+    proposedOps: json().optional(),
+    validOps: json().optional(),
+    droppedOps: json().optional(),
+    applied: json().optional(),
+    assessment: string().optional(),
+    error: string().optional(),
+    durationMs: number().optional(),
     createdAt: number(),
   })
   .primaryKey("id");
@@ -4063,6 +4195,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ["channelId"],
     destSchema: repoTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: sdlcEntityLinkTable,
+  }),
   collectionPermissions: many({
     sourceField: ["id"],
     destField: ["channelId"],
@@ -4494,6 +4631,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ["repoId"],
     destField: ["id"],
     destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -4727,12 +4869,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5037,6 +5192,7 @@ export const schema = createSchema(
       repoTable,
       sdlcEntityLinkTable,
       sdlcArtifactTable,
+      sdlcFolderTable,
       sdlcTrackTable,
       lookupValueTable,
       formTable,
@@ -5057,6 +5213,7 @@ export const schema = createSchema(
       stageApproversTable,
       applicationTable,
       applicationReleaseTicketTable,
+      releaseRepositoryTable,
       releaseEventTable,
       releaseChangeTable,
       releaseChangeTypeTable,
@@ -5077,6 +5234,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5092,10 +5250,15 @@ export const schema = createSchema(
       installedAppPermissionTable,
       tagTable,
       tagsConfigTable,
+      threadTypeVocabularyTable,
       doclingAsyncFileTable,
       doclingAsyncPartTable,
       entityTable,
       entityAliasTable,
+      executionItemTable,
+      executionThreadStateTable,
+      executionItemMutationTable,
+      executionRunLogTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5194,6 +5357,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5334,6 +5498,7 @@ export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
@@ -5354,6 +5519,7 @@ export type CollectionPermission = Row<typeof schema.tables.collection_permissio
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type Application = Row<typeof schema.tables.applications>;
 export type ApplicationReleaseTicket = Row<typeof schema.tables.application_release_tickets>;
+export type ReleaseRepository = Row<typeof schema.tables.release_repositories>;
 export type ReleaseEvent = Row<typeof schema.tables.release_events>;
 export type ReleaseChange = Row<typeof schema.tables.release_changes>;
 export type ReleaseChangeType = Row<typeof schema.tables.release_change_types>;
@@ -5374,6 +5540,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;
@@ -5389,7 +5556,12 @@ export type AppPermission = Row<typeof schema.tables.app_permission>;
 export type InstalledAppPermission = Row<typeof schema.tables.installed_app_permissions>;
 export type Tag = Row<typeof schema.tables.tags>;
 export type TagsConfig = Row<typeof schema.tables.tags_config>;
+export type ThreadTypeVocabulary = Row<typeof schema.tables.thread_type_vocabulary>;
 export type DoclingAsyncFile = Row<typeof schema.tables.docling_async_files>;
 export type DoclingAsyncPart = Row<typeof schema.tables.docling_async_parts>;
 export type Entity = Row<typeof schema.tables.entities>;
 export type EntityAlias = Row<typeof schema.tables.entity_aliases>;
+export type ExecutionItem = Row<typeof schema.tables.execution_items>;
+export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
+export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
+export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;

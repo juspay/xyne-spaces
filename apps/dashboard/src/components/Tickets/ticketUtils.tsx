@@ -2,12 +2,12 @@ import React from 'react';
 import {
   CircleDashed,
   CircleDot,
-  CircleCheck,
-  Clock,
-  CircleX,
-  CirclePause,
+  CheckTickCircle as CircleCheck,
+  ClockDefault as Clock,
+  MultipleCrossCancelCircle as CircleX,
+  PauseCircle as CirclePause,
   PlayCircle,
-} from 'lucide-react';
+} from '@xyne/icons';
 
 /* ── Status config ── */
 interface StatusConfig {
