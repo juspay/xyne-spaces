@@ -1,7 +1,7 @@
 import { resolveSharedBase } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { tablesOfQuery } from './clientSchema';
-import { isSyntheticQuery, buildGrantBase } from './grantQueries';
+import { isGrantQuery, buildGrantBase } from './grantQueries';
 
 /**
  * Packing metadata for a query-type, derived once (in-memory, no DB) from its base
@@ -59,7 +59,7 @@ const cache = new Map<string, QueryMeta>();
  * fixed partition, so queryName suffices. (Confirmed by the P1 e2e; also the P4 entity_access case.)
  */
 function metaCacheKey(queryName: string, sampleArgs: unknown): string {
-  if (!isSyntheticQuery(queryName)) return queryName;
+  if (!isGrantQuery(queryName)) return queryName;
   const entry = (Array.isArray(sampleArgs) ? sampleArgs[0] : sampleArgs) as Record<string, unknown> | undefined;
   const scopeCol = entry ? Object.keys(entry)[0] : undefined; // scope column is key[0] (grant + struct)
   return scopeCol ? `${queryName}:${scopeCol}` : queryName;
@@ -71,7 +71,7 @@ export function queryMetaFor(queryName: string, sampleArgs: unknown): QueryMeta 
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const base = isSyntheticQuery(queryName)
+  const base = isGrantQuery(queryName)
     ? buildGrantBase(queryName, sampleArgs)
     : resolveSharedBase(queryName, syncContext(), sampleArgs);
   const ast = (base as {

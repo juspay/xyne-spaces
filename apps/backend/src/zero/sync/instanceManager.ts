@@ -7,7 +7,7 @@ import { RedisStreamStore, type FenceGuard } from './redisStore';
 import { buildClientSchema, allPkFields } from './clientSchema';
 import { queryMetaFor, type QueryMeta } from './queryMeta';
 import { SHARED_BASE_QUERIES } from './baseQueries';
-import { isSyntheticQuery } from './grantQueries';
+import { isGrantQuery } from './grantQueries';
 import { ownership, assertOwnershipSafeRedis } from './ownership';
 import { obsEmit } from './obs';
 
@@ -154,7 +154,7 @@ export class InstanceManager {
 
   /** Register interest in `query(args)`; returns its instanceKey, or null if not shareable. */
   subscribe(queryName: string, queryArgs: readonly unknown[], subscriberId: string): string | null {
-    if (!SHARED_BASE_QUERIES.has(queryName) && !isSyntheticQuery(queryName)) return null;
+    if (!SHARED_BASE_QUERIES.has(queryName) && !isGrantQuery(queryName)) return null;
     const meta = queryMetaFor(queryName, queryArgs[0]);
     if (!meta) return null;
     const partitionValue = String((queryArgs[0] as Record<string, unknown>)[meta.partitionColumn]);
@@ -178,7 +178,7 @@ export class InstanceManager {
 
     let instance = this.#instances.get(instanceKey);
     if (!instance) {
-      instance = { groupKey: clientGroupID, partitionValue, args: queryArgs, subscribers: new Set(), idleTimer: null, isGrant: isSyntheticQuery(queryName) };
+      instance = { groupKey: clientGroupID, partitionValue, args: queryArgs, subscribers: new Set(), idleTimer: null, isGrant: isGrantQuery(queryName) };
       this.#instances.set(instanceKey, instance);
       group.members.add(instanceKey);
       obsEmit('tap', {
@@ -187,7 +187,7 @@ export class InstanceManager {
         queryName,
         partition: partitionValue,
         clientGroupID,
-        grant: isSyntheticQuery(queryName),
+        grant: isGrantQuery(queryName),
       });
     }
     if (instance.idleTimer) {

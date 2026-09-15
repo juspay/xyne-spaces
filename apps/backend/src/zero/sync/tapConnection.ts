@@ -6,7 +6,7 @@ import { PackDemux } from './packDemux';
 import type { RowPatchOp, StreamDiff } from './streamState';
 import type { RedisStreamStore, FenceGuard } from './redisStore';
 import { SerialQueue } from './serialQueue';
-import { isSyntheticQuery } from './grantQueries';
+import { isGrantQuery } from './grantQueries';
 import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
@@ -123,7 +123,7 @@ export class PackConnection {
     this.#zeroClientGroupID = opts.clientGroupID;
     this.#clientID = `${opts.clientGroupID}-c-${randomUUID()}`;
     this.#profileID = `${opts.clientGroupID}-p`;
-    this.#isGrantGroup = isSyntheticQuery(opts.queryName);
+    this.#isGrantGroup = isGrantQuery(opts.queryName);
   }
 
   /** Add a query-instance to this group. Registers it live if already connected. */
