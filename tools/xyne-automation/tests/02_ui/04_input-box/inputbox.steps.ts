@@ -69,6 +69,9 @@ export default class InputBoxSteps {
   @Step('clicking link toolbar button')
   public async clickLinkToolbarButton(): Promise<void> {
     const page = testContext.activePage;
+    // Clicking an existing link in the editor already opens this popover, and it can
+    // sit over the toolbar button (layout-dependent) — the goal is "popover open".
+    if (await page.locator("[data-testid='composer-link-popover']").isVisible()) return;
     await this.ensureFormattingToolbarVisible();
     await page.locator('button[aria-label="Insert link"]').first().click();
   }

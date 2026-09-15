@@ -59,6 +59,13 @@ services:
 
   # Dashboard (Frontend) for testing - builds from Dockerfile.test
   # Loads .env.local as base, then .env.test overrides container-specific values
+  # livekit.yaml posts webhooks to host.docker.internal:3001 (the backend alias above).
+  # LiveKit's Go HTTP client honours the CI-injected HTTP_PROXY for that host too.
+  livekit:
+    environment:
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+
   dashboard:
     build:
       context: .
