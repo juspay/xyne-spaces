@@ -35,6 +35,7 @@ import {
   DocType,
   PRStatusEvent,
   RotationInterval,
+  AssignmentStrategy,
   QueryVisualizationType,
   ActivityClassification,
   AccessType,
@@ -4616,6 +4617,7 @@ export const mutators = defineMutators({
         description: z.string().optional(),
         reassignOnUnavailable: z.boolean().optional(),
         maxWorkload: z.number().int().positive().nullable().optional(),
+        assignmentStrategy: z.nativeEnum(AssignmentStrategy).optional(),
         userResponsibilityUpdates: z
           .record(z.string(), z.nativeEnum(UserResponsibility))
           .optional(),
@@ -4632,6 +4634,7 @@ export const mutators = defineMutators({
           description,
           reassignOnUnavailable,
           maxWorkload,
+          assignmentStrategy,
           userResponsibilityUpdates,
           userRoleUpdates,
           timestamp,
@@ -4644,6 +4647,7 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           ...(reassignOnUnavailable !== undefined && { reassignOnUnavailable }),
           ...(maxWorkload !== undefined && { maxWorkload }),
+          ...(assignmentStrategy !== undefined && { assignmentStrategy }),
           updatedAt: timestamp,
         });
 
@@ -7817,6 +7821,9 @@ export const mutators = defineMutators({
             userGroupId,
             onCall: state.onCall,
             isActiveForAssignment,
+            // Carried forward: this is a full-row upsert, and dropping the
+            // round-robin cursor here would restart the rotation on every save.
+            lastAssignedAt: existingState?.lastAssignedAt ?? null,
             createdBy: existingState?.createdBy ?? ctx.userID,
             updatedAt: now,
             createdAt: existingState?.createdAt ?? now,

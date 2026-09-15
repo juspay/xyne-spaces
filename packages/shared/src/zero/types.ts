@@ -89,6 +89,16 @@ export enum RotationInterval {
   MONTHLY = 'MONTHLY',
 }
 
+/**
+ * How a user group ranks its eligible members: WORKLOAD picks the lowest score,
+ * ROUND_ROBIN the least recently assigned.
+ */
+// @ts-ignore TS1294
+export enum AssignmentStrategy {
+  WORKLOAD = 'WORKLOAD',
+  ROUND_ROBIN = 'ROUND_ROBIN',
+}
+
 // @ts-ignore TS1294
 export enum EntityType {
   MERCHANT = 'MERCHANT',

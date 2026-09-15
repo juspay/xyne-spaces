@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { UserResponsibility } from '@xyne/shared';
+import { AssignmentStrategy, UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { logger } from './logger';
@@ -137,6 +137,58 @@ async function resolveStartOffsets(
   }
 
   return offsets;
+}
+
+interface RoundRobin {
+  rank(candidates: AssignmentCandidate[]): void;
+  commit(pickedUserIds: Array<string | undefined>): Promise<void>;
+}
+
+/**
+ * Null unless the group opted in, so the workload path is untouched. `rank`
+ * re-sorts a score-ordered list by cursor alone — Array#sort is stable, so the
+ * workload order survives as the tiebreak.
+ *
+ * KNOWN LIMITATION — `commit` advances the cursor at evaluation time, outside the
+ * caller's transaction: a rollback still consumes a member's turn, and concurrent
+ * evaluations can pick the same member.
+ */
+function roundRobinFor(
+  group: { assignmentStrategy?: string | null } | null | undefined,
+  userStates: UserAssignmentState[],
+): RoundRobin | null {
+  if (group?.assignmentStrategy !== AssignmentStrategy.ROUND_ROBIN) return null;
+
+  const cursorByUserId = new Map(
+    userStates.flatMap(s =>
+      s.lastAssignedAt ? [[s.userId, new Date(s.lastAssignedAt).getTime()] as const] : [],
+    ),
+  );
+  // Never picked sorts ahead of everyone holding a real timestamp.
+  const cursorOf = (userId: string) => cursorByUserId.get(userId) ?? -1;
+
+  return {
+    rank(candidates) {
+      candidates.sort((a, b) => cursorOf(a.userId) - cursorOf(b.userId));
+    },
+    async commit(pickedUserIds) {
+      const now = new Date();
+      await Promise.all(
+        [...new Set(pickedUserIds.filter(Boolean))].map(async userId => {
+          const state = userStates.find(s => s.userId === userId);
+          if (!state) return;
+          try {
+            await withWorkspaceScope(() =>
+              repositories.userAssignmentState.update(state.id, { lastAssignedAt: now }),
+            );
+          } catch (error) {
+            // Never fail an assignment that otherwise succeeded; the member keeps their turn.
+            logger.error(`[Assignment] Failed to advance round-robin cursor for ${userId}:`, error);
+          }
+        }),
+      );
+    },
+  };
 }
 
 async function filterMappingsToChannelParticipants(
@@ -323,6 +375,7 @@ export async function evaluateAssignmentRule(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
+  const roundRobin = roundRobinFor(userGroup, userStates);
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -417,6 +470,7 @@ export async function evaluateAssignmentRule(
 
   // Sort by new score ascending (lowest wins)
   candidates.sort((a, b) => a.score - b.score);
+  roundRobin?.rank(candidates);
 
   // Pick the first candidate who has not exceeded their maxTickets (if set)
   // Exclude excludeUserId from assignment and pick the next-best candidate when possible.
@@ -532,6 +586,7 @@ export async function evaluateAssignmentRule(
     }
     
     fallbackCandidates.sort((a, b) => a.score - b.score);
+    roundRobin?.rank(fallbackCandidates);
 
     // Pick first fallback candidate who hasn't exceeded maxTickets
     // Exclude excludeUserId from fallback assignment and pick the next-best candidate when possible.
@@ -580,6 +635,8 @@ export async function evaluateAssignmentRule(
 
   logger.info(`[Assignment] Selected userId: ${selectedUser.userId} with score: ${selectedUser.score.toFixed(2)}`);
 
+  await roundRobin?.commit([selectedUser.userId]);
+
   return { assignedUserId: selectedUser.userId };
 }
 
@@ -610,6 +667,7 @@ interface SharedContext {
   maxWorkload:              number | null;
   userGroup:                { name: string; workspaceId: string } | null;
   totalTicketsOnBoard:      number;
+  roundRobin:               RoundRobin | null;
 }
 
 /**
@@ -623,7 +681,7 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, userGroup, totalTicketsOnBoard } = ctx;
+  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, maxWorkload, userGroup, totalTicketsOnBoard, roundRobin } = ctx;
   const userGroupId = userGroupMappings[0]?.userGroupId;
 
   const getUserState   = (id: string) => userStateMap.get(id);
@@ -691,6 +749,7 @@ async function pickBest(
 
   const selectFrom = (candidates: AssignmentCandidate[]): AssignmentResult => {
     candidates.sort((a, b) => a.score - b.score);
+    roundRobin?.rank(candidates);
     let excluded: AssignmentCandidate | undefined;
     let cappedCount = 0;
     for (const c of candidates) {
@@ -779,6 +838,7 @@ export async function evaluateAllRoles(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
+  const roundRobin = roundRobinFor(userGroup, userStates);
 
   // Filter workload and board scores to project boards only
   if (projectBoardIds) {
@@ -837,6 +897,7 @@ export async function evaluateAllRoles(
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
+    roundRobin,
   };
 
   // ── Per-role pools ─────────────────────────────────────────────────────────
@@ -861,6 +922,15 @@ export async function evaluateAllRoles(
   );
 
   logger.info(`[Assignment] evaluateAllRoles results — manager:${manager.assignedUserId} teamLead:${teamLead.assignedUserId} member:${member.assignedUserId} prReviewer:${prReviewer.assignedUserId} qa:${qa.assignedUserId}`);
+
+  // Roles draw from disjoint pools, so each pick advances its own member's cursor.
+  await roundRobin?.commit([
+    manager.assignedUserId,
+    teamLead.assignedUserId,
+    member.assignedUserId,
+    prReviewer.assignedUserId,
+    qa.assignedUserId,
+  ]);
 
   return { manager, teamLead, member, prReviewer, qa };
 }
@@ -935,6 +1005,7 @@ export async function evaluateRoleSlots(
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
+  const roundRobin = roundRobinFor(userGroup, userStates);
 
   if (projectBoardIds) {
     allWorkloadMappings = allWorkloadMappings.filter(w => projectBoardIds!.has(w.boardId));
@@ -973,6 +1044,7 @@ export async function evaluateRoleSlots(
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
+    roundRobin,
   };
 
   // Score each roleId's pool independently. `excludeUserId` (if set) removes
@@ -987,6 +1059,8 @@ export async function evaluateRoleSlots(
   }
 
   logger.info(`[Assignment] evaluateRoleSlots results — ${summary.join(' ')}`);
+
+  await roundRobin?.commit(roleIds.map(roleId => result[roleId]?.assignedUserId));
 
   return result;
 }

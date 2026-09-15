@@ -10,6 +10,13 @@
 // It's a single aggregate per (user, group) — not per board — so it's added
 // unconditionally regardless of which board is selected.
 
+import { AssignmentStrategy } from '@xyne/shared';
+
+export interface AssignmentStateLike {
+  userId: string;
+  lastAssignedAt: number | null | undefined;
+}
+
 export interface WorkloadMappingLike {
   userId: string;
   boardId: string;
@@ -68,6 +75,7 @@ export interface AssignmentScoreRow<U> {
    * member is skipped for new assignments. Always false when no cap is set.
    */
   isAtCapacity: boolean;
+  lastAssignedAt: number | null;
 }
 
 /** boardId → weight (defaults to 1 when a board has no complexity score row). */
@@ -117,7 +125,7 @@ export function computeTotalTicketsOnBoard(
 }
 
 /**
- * Per-user tickets + engine score, sorted lowest-score-first (= assigned next).
+ * Per-user tickets + engine score, ordered so the row assigned next comes first.
  * When no board is selected, `score` is null and rows sort by weightedActiveTasks.
  */
 export function computeAssignmentScores<U extends { id: string }>(params: {
@@ -126,10 +134,12 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
   userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
+  assignmentStates?: readonly AssignmentStateLike[] | null | undefined;
   boards: readonly BoardLike[];
   selectedBoardId: string | null;
   /** user_groups.maxWorkload — group-level cap, or null/undefined when unlimited. */
   maxWorkload?: number | null;
+  strategy?: AssignmentStrategy;
 }): AssignmentScoreRow<U>[] {
   const {
     users,
@@ -137,9 +147,11 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
     boardComplexityScores,
     expertiseMappings,
     userGroupMappings,
+    assignmentStates,
     boards,
     selectedBoardId,
     maxWorkload,
+    strategy = AssignmentStrategy.WORKLOAD,
   } = params;
 
   const weightByBoard = buildWeightByBoard(boardComplexityScores);
@@ -152,6 +164,9 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
   const expertiseByUser = new Map((expertiseMappings ?? []).map(e => [e.userId, e] as const));
   const startOffsetByUser = new Map(
     (userGroupMappings ?? []).map(m => [m.userId, m.startOffset ?? 0] as const),
+  );
+  const lastAssignedByUser = new Map(
+    (assignmentStates ?? []).map(s => [s.userId, s.lastAssignedAt] as const),
   );
 
   const rows = users
@@ -180,6 +195,7 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
 
       const isAtCapacity =
         maxWorkload !== null && maxWorkload !== undefined && weightedActiveTasks >= maxWorkload;
+      const lastAssignedAt = lastAssignedByUser.get(user.id) ?? null;
       return {
         user,
         userTickets,
@@ -190,9 +206,15 @@ export function computeAssignmentScores<U extends { id: string }>(params: {
         hasExpertise,
         score,
         isAtCapacity,
+        lastAssignedAt,
       };
     })
     .sort((a, b) => (a.score ?? a.effectiveActiveTasks) - (b.score ?? b.effectiveActiveTasks));
+
+  // Mirrors the engine: cursor only, relying on sort stability for the tiebreak.
+  if (strategy === AssignmentStrategy.ROUND_ROBIN) {
+    rows.sort((a, b) => (a.lastAssignedAt ?? -1) - (b.lastAssignedAt ?? -1));
+  }
 
   const realScores = rows.map(r => r.score).filter((s): s is number => s !== null);
   const minScore = realScores.length > 0 ? Math.min(...realScores) : 0;

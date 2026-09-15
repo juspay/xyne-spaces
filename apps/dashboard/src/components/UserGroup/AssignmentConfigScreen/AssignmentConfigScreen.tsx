@@ -18,7 +18,7 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useActiveUsers } from '../../../hooks/useUsers';
 import type { Board, UserAssignmentState } from '@xyne/shared';
-import { RotationInterval } from '@xyne/shared';
+import { AssignmentStrategy, RotationInterval } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
@@ -35,6 +35,24 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
   { value: 'WEEKLY' as RotationInterval, label: 'Weekly' },
   { value: 'BIWEEKLY' as RotationInterval, label: 'Bi-Weekly' },
   { value: 'MONTHLY' as RotationInterval, label: 'Monthly' },
+];
+
+const ASSIGNMENT_STRATEGY_OPTIONS: {
+  value: AssignmentStrategy;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'WORKLOAD' as AssignmentStrategy,
+    label: 'Workload based',
+    description: 'Lowest score wins — weighted load, expertise bonus and % share.',
+  },
+  {
+    value: 'ROUND_ROBIN' as AssignmentStrategy,
+    label: 'Round robin',
+    description:
+      'Least recently assigned wins — ignores score, ticket counts and % share. Eligibility is unchanged, so where expertise is set it rotates among the experts.',
+  },
 ];
 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
@@ -95,6 +113,9 @@ export const AssignmentConfigScreen = ({
   const [localReassignOnUnavailable, setLocalReassignOnUnavailable] = useState<boolean>(false);
   const [localMaxWorkloadEnabled, setLocalMaxWorkloadEnabled] = useState<boolean>(false);
   const [maxWorkloadInput, setMaxWorkloadInput] = useState<string>('');
+  const [localAssignmentStrategy, setLocalAssignmentStrategy] = useState<AssignmentStrategy>(
+    AssignmentStrategy.WORKLOAD,
+  );
   const [localRotationInterval, setLocalRotationInterval] = useState<RotationInterval>(
     RotationInterval.WEEKLY,
   );
@@ -317,12 +338,14 @@ export const AssignmentConfigScreen = ({
       const savedMaxWorkload = userGroup.maxWorkload ?? null;
       setLocalMaxWorkloadEnabled(savedMaxWorkload !== null);
       setMaxWorkloadInput(savedMaxWorkload !== null ? String(savedMaxWorkload) : '');
+      setLocalAssignmentStrategy(userGroup.assignmentStrategy ?? AssignmentStrategy.WORKLOAD);
     }
   }, [
     userGroup?.autoRotationEnabled,
     userGroup?.rotationInterval,
     userGroup?.reassignOnUnavailable,
     userGroup?.maxWorkload,
+    userGroup?.assignmentStrategy,
   ]);
 
   const boards = useMemo(() => allBoards || [], [allBoards]);
@@ -727,6 +750,8 @@ export const AssignmentConfigScreen = ({
 
       const reassignOnUnavailableChanged =
         localReassignOnUnavailable !== (userGroup?.reassignOnUnavailable ?? false);
+      const assignmentStrategyChanged =
+        localAssignmentStrategy !== (userGroup?.assignmentStrategy ?? AssignmentStrategy.WORKLOAD);
 
       // null clears the cap; the mutator skips the field entirely when undefined.
       const nextMaxWorkload = localMaxWorkloadEnabled ? parsedMaxWorkload : null;
@@ -735,7 +760,7 @@ export const AssignmentConfigScreen = ({
       const pendingServerResults = [
         // Ordered before batchUpdate on purpose: its post-commit handoff reads both settings
         // from committed rows — reassignOnUnavailable gates it, maxWorkload caps candidates.
-        ...(reassignOnUnavailableChanged || maxWorkloadChanged
+        ...(reassignOnUnavailableChanged || maxWorkloadChanged || assignmentStrategyChanged
           ? [
               zero.mutate(
                 mutators.userGroup.update({
@@ -744,6 +769,7 @@ export const AssignmentConfigScreen = ({
                     reassignOnUnavailable: localReassignOnUnavailable,
                   }),
                   ...(maxWorkloadChanged && { maxWorkload: nextMaxWorkload }),
+                  ...(assignmentStrategyChanged && { assignmentStrategy: localAssignmentStrategy }),
                   timestamp: Date.now(),
                 }),
               ).server,
@@ -1121,6 +1147,51 @@ export const AssignmentConfigScreen = ({
 
           {activeTab === 'availability' && (
             <>
+              <div className='rounded-2xl border border-border bg-card p-4'>
+                <div className='mb-4'>
+                  <h2 className='text-sm font-semibold text-foreground'>Assignment method</h2>
+                  <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
+                    How the next assignee is picked once availability and on-call filters have been
+                    applied.
+                  </p>
+                </div>
+
+                <div className='flex flex-wrap items-end gap-3 border-t border-border pt-4'>
+                  <div className='flex flex-col gap-2'>
+                    <span className='text-[13px] font-medium text-foreground'>Method</span>
+                    <Select
+                      value={localAssignmentStrategy}
+                      onValueChange={value => {
+                        setLocalAssignmentStrategy(value as AssignmentStrategy);
+                        setHasChanges(true);
+                      }}
+                    >
+                      <SelectTrigger
+                        className='w-[200px]'
+                        aria-label='Assignment method'
+                        data-track-category='UserGroups'
+                        data-track-name='ChangeAssignmentStrategy'
+                      >
+                        <SelectValue placeholder='Select a method' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSIGNMENT_STRATEGY_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className='flex-1 pb-2 text-xs leading-[1.4] text-muted-foreground'>
+                    {
+                      ASSIGNMENT_STRATEGY_OPTIONS.find(o => o.value === localAssignmentStrategy)
+                        ?.description
+                    }
+                  </p>
+                </div>
+              </div>
+
               {/* Group-Level Rotation Configuration */}
               <div className='rounded-2xl border border-border bg-card p-4'>
                 <div className='mb-4'>
@@ -1542,6 +1613,9 @@ export const AssignmentConfigScreen = ({
               workloadMappings={userWorkloadMappings}
               boardComplexityScores={boardComplexityScores}
               expertiseMappings={expertiseMappings}
+              assignmentStates={userAssignmentStates}
+              // Local, not persisted: switching method re-ranks this tab before save.
+              assignmentStrategy={localAssignmentStrategy}
               isCurrentUserGroupMember={isCurrentUserGroupMember}
               userGroupMappings={userGroupMembers}
               maxWorkload={userGroup?.maxWorkload ?? null}
