@@ -1610,13 +1610,6 @@ const StreamsScreen = (): ReactElement => {
       const stripRect = strip.getBoundingClientRect();
       const delta = box.left + box.width / 2 - (stripRect.left + stripRect.width / 2);
 
-      // In focus mode every column is the same width, so a jump changes nothing
-      // about the layout — there is no growing target to track, only a distance
-      // to travel, and it gets a tween we control the length of.
-      if (focusMode && scrollBehavior() === 'smooth') {
-        tweenScroll(strip, strip.scrollLeft + delta);
-        return;
-      }
       // A jump arrives. It never travels, and the reason is not taste.
       //
       // A smooth scroll is an animation the browser runs internally for
