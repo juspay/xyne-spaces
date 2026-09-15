@@ -428,6 +428,10 @@ export class TicketController {
    * Create one ticket for a bulk batch: opens a fresh conversation, seeds its
    * head system message, then reuses createTicketWithConversation so bulk items
    * follow the exact same transactional creation path as single tickets.
+   *
+   * The conversation is written before the ticket's transaction, so a failure
+   * afterwards would leave a "Ticket created in …" thread with no ticket behind
+   * it — {@link discardBulkConversation} takes that back out.
    */
   async createBulkTicketItem(item: {
     title: string;
@@ -443,12 +447,22 @@ export class TicketController {
     stageName?: string;
     priority?: string;
     statusV2?: string;
-  }, createdBy: string): Promise<Ticket> {
+  }, createdBy: string, options?: { fromTicketsTab?: boolean }): Promise<Ticket> {
     const initialMessageId = randomUUID();
+    let doNotPostToChannel = false;
+    if (options?.fromTicketsTab) {
+      const channelSetting = await prisma.channel.findUnique({
+        where: { id: item.channelId },
+        select: { showTicketsTabTicketsInChat: true },
+      });
+      doNotPostToChannel = channelSetting?.showTicketsTabTicketsInChat === false;
+    }
+
     const conversation = await this.conversationRepository.create({
       channelId: item.channelId,
       createdBy,
       initialMessageId,
+      doNotPostToChannel,
     });
 
     const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
@@ -466,24 +480,48 @@ export class TicketController {
     );
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
-    return this.createTicketWithConversation({
-      title: item.title,
-      description: item.description ?? '',
-      createdBy,
-      updatedBy: createdBy,
-      conversationId: conversation.conversationId,
-      projectId: item.projectId,
-      boardId: item.boardId,
-      assignedTo: item.assignedTo,
-      userGroupId: item.userGroupId,
-      eta: item.eta,
-      ticketType: item.ticketType,
-      stageName: item.stageName,
-      priority: item.priority,
-      statusV2: item.statusV2,
-      messageContent: creationText,
-      messageSubtype: 'bulk_ticket',
-    });
+    try {
+      return await this.createTicketWithConversation({
+        title: item.title,
+        description: item.description ?? '',
+        createdBy,
+        updatedBy: createdBy,
+        conversationId: conversation.conversationId,
+        projectId: item.projectId,
+        boardId: item.boardId,
+        assignedTo: item.assignedTo,
+        userGroupId: item.userGroupId,
+        eta: item.eta,
+        ticketType: item.ticketType,
+        stageName: item.stageName,
+        priority: item.priority,
+        statusV2: item.statusV2,
+        messageContent: creationText,
+        messageSubtype: 'bulk_ticket',
+      });
+    } catch (error) {
+      await this.discardBulkConversation(conversation.conversationId);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove the conversation a failed bulk item had already opened, head message
+   * and all. Best effort: if the cleanup itself fails the orphan is logged by
+   * id rather than left silent.
+   */
+  private async discardBulkConversation(conversationId: string): Promise<void> {
+    try {
+      await prisma.$transaction([
+        prisma.message.deleteMany({ where: { conversationId } }),
+        prisma.conversation.delete({ where: { conversationId } }),
+      ]);
+    } catch (error) {
+      logger.error('[Bulk Ticket] Orphan conversation left behind by a failed ticket', {
+        conversationId,
+        error,
+      });
+    }
   }
 
   /**
@@ -533,6 +571,7 @@ export class TicketController {
         projectId?: string;
         channelId?: string;
         boardId?: string;
+        fromTicketsTab?: boolean;
       };
 
       const mode =
@@ -578,10 +617,31 @@ export class TicketController {
       }));
 
       for (const it of children) {
-        if (!it.title || !it.channelId || !it.projectId) {
-          res.status(400).json({ error: 'Each ticket requires title, channelId, and projectId' });
+        if (!it.title || !it.channelId || !it.boardId) {
+          res.status(400).json({ error: 'Each ticket requires title, channelId, and boardId' });
           return;
         }
+      }
+
+      // The board decides the project, exactly as in single-ticket creation.
+      // Taking projectId from the body would let a request file tickets into a
+      // project it never proved access to — and burn that project's xyneId
+      // sequence doing it. Fetching by workspace also rejects foreign boards.
+      const boardIds = new Set<string>(children.map((c) => c.boardId));
+      if (body.parent?.boardId) {
+        boardIds.add(body.parent.boardId);
+      }
+      const boards = await prisma.board.findMany({
+        where: { id: { in: Array.from(boardIds) }, workspaceId },
+        select: { id: true, projectId: true },
+      });
+      const projectByBoardId = new Map(boards.map((b) => [b.id, b.projectId]));
+      if (projectByBoardId.size !== boardIds.size) {
+        res.status(404).json({ error: 'Board not found in your workspace' });
+        return;
+      }
+      for (const child of children) {
+        child.projectId = projectByBoardId.get(child.boardId)!;
       }
 
       const allChannelIds = new Set<string>(children.map((c) => c.channelId));
@@ -615,7 +675,15 @@ export class TicketController {
             return;
           }
         } else if (body.parent) {
-          const parentTicket = await this.createBulkTicketItem(body.parent, userId);
+          if (!body.parent.boardId) {
+            res.status(400).json({ error: 'parent requires a boardId' });
+            return;
+          }
+          const parentTicket = await this.createBulkTicketItem(
+            { ...body.parent, projectId: projectByBoardId.get(body.parent.boardId)! },
+            userId,
+            { fromTicketsTab: body.fromTicketsTab === true },
+          );
           parentTicketId = parentTicket.id;
         } else {
           res.status(400).json({ error: 'parent or existingParentTicketId is required for parent-sub mode' });
@@ -635,8 +703,10 @@ export class TicketController {
         subTickets: children,
         sourceMessageId: body.sourceMessageId,
         sourceType: 'MESSAGE',
+        fromTicketsTab: body.fromTicketsTab === true,
         channelId: topChannelId ?? children[0]?.channelId,
-        projectId: topProjectId ?? children[0]?.projectId,
+        // Board-derived, not body-supplied: this is what the retry nudge files under.
+        projectId: children[0]?.projectId ?? topProjectId,
       });
 
       const response: CreateBulkTicketResponse = {

@@ -27,14 +27,16 @@ const prisma = DatabaseClient.getInstance();
  *  - Every item is access-checked again here ({@link validateChannelAccess}),
  *    not just at enqueue time, so a job can never create a ticket in a channel
  *    the requester cannot reach even if the payload is tampered with.
- *  - Per-row idempotency: completed `clientRowId`s are recorded in a Redis set
- *    keyed by the batch `jobKey`. If the job stalls and Bull re-runs it, rows
- *    that already succeeded are skipped instead of duplicated.
- *  - Failures are collected and a single failure nudge is created at the end
- *    of the run (not per-item, not per-attempt) so the user can retry failed
- *    tickets from the nudge card.
+ *  - Per-row idempotency: a `clientRowId` is recorded in a Redis set keyed by
+ *    the batch `jobKey` as soon as its ticket exists — before the sub-ticket
+ *    link, which can fail on its own. If the job stalls and Bull re-runs it,
+ *    rows that already produced a ticket are skipped instead of duplicated.
+ *  - Failures are collected and a single failure nudge is created on the last
+ *    attempt that will run (not per-item, not per-attempt) so the user can
+ *    retry failed tickets from the nudge card.
  *  - Throws only if every ticket failed, so Bull retries make sense for
- *    transient total failures. Partial failures are reported via nudge.
+ *    transient total failures. Partial failures never throw; they are reported
+ *    on the spot, since no retry is coming.
  */
 class BulkTicketCreationWorker {
   private isInitialized = false;
@@ -82,6 +84,7 @@ class BulkTicketCreationWorker {
     const failures: Array<{ input: BulkTicketCreationInput; error: string }> = [];
     let created = 0;
     let skipped = 0;
+    let linkFailures = 0;
 
     for (let index = 0; index < data.subTickets.length; index += 1) {
       const item = data.subTickets[index]!;
@@ -104,21 +107,34 @@ class BulkTicketCreationWorker {
           continue;
         }
 
-        const ticket = await this.ticketController.createBulkTicketItem(item, data.userId);
+        const ticket = await this.ticketController.createBulkTicketItem(item, data.userId, {
+          fromTicketsTab: data.fromTicketsTab === true,
+        });
 
-        if (data.mode === BulkTicketMode.PARENT_SUB && data.parentTicketId) {
-          await createSubTicket({
-            parentTicketId: data.parentTicketId,
-            title: item.title,
-            description: item.description ?? null,
-            createdBy: data.userId,
-            assignedTo: item.assignedTo ?? null,
-            mappedTicketId: ticket.id,
-          });
-        }
 
         await client.sadd(doneKey, rowId);
         created += 1;
+
+        if (data.mode === BulkTicketMode.PARENT_SUB && data.parentTicketId) {
+          try {
+            await createSubTicket({
+              parentTicketId: data.parentTicketId,
+              title: item.title,
+              description: item.description ?? null,
+              createdBy: data.userId,
+              assignedTo: item.assignedTo ?? null,
+              mappedTicketId: ticket.id,
+            });
+          } catch (linkError) {
+            linkFailures += 1;
+            logger.error('[BULK-TICKET-WORKER] Ticket created but not linked to its parent', {
+              jobId: job.id,
+              ticketId: ticket.id,
+              parentTicketId: data.parentTicketId,
+              error: linkError,
+            });
+          }
+        }
       } catch (error) {
         logger.error('[BULK-TICKET-WORKER] Failed to create ticket', {
           jobId: job.id,
@@ -140,31 +156,38 @@ class BulkTicketCreationWorker {
       created,
       skipped,
       failed: failures.length,
+      linkFailures,
     });
+
+    const isTotalFailure = failures.length === data.subTickets.length && data.subTickets.length > 0;
+    const willRetry = isTotalFailure && job.attemptsMade + 1 < (job.opts?.attempts ?? 1);
 
     if (failures.length > 0) {
       logger.warn('[BULK-TICKET-WORKER] Some tickets in the batch failed', {
         jobId: job.id,
+        willRetry,
         failures: failures.map(f => ({ title: f.input.title, error: f.error })),
       });
 
-      if (data.sourceMessageId && data.projectId) {
-        await this.createFailureNudge({
-          jobId: job.id,
-          data,
-          failures,
-        });
-      } else {
-        logger.warn('[BULK-TICKET-WORKER] Skipping failure nudge — missing sourceMessageId or projectId', {
-          jobId: job.id,
-          sourceMessageId: data.sourceMessageId,
-          projectId: data.projectId,
-          failureCount: failures.length,
-        });
+      if (!willRetry) {
+        if (data.sourceMessageId && data.projectId) {
+          await this.createFailureNudge({
+            jobId: job.id,
+            data,
+            failures,
+          });
+        } else {
+          logger.warn('[BULK-TICKET-WORKER] Skipping failure nudge — missing sourceMessageId or projectId', {
+            jobId: job.id,
+            sourceMessageId: data.sourceMessageId,
+            projectId: data.projectId,
+            failureCount: failures.length,
+          });
+        }
       }
     }
 
-    if (failures.length === data.subTickets.length && data.subTickets.length > 0) {
+    if (isTotalFailure) {
       throw new Error(`All ${data.subTickets.length} ticket(s) failed to create`);
     }
   }
