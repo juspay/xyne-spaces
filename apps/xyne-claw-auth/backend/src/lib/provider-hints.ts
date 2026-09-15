@@ -91,6 +91,15 @@ function mentions(text: string, keyword: string): number {
   return text.search(new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "i"));
 }
 
+export function stripAddressedAgentMention(text: string, agentSlug?: string): string {
+  if (!text.trim() || !agentSlug?.trim()) return text;
+  const pattern = agentSlug.trim().split("-").map(escapeRegExp).join("[\\s-]*");
+  return text
+    .replace(new RegExp(`@\\s*${pattern}\\b`, "gi"), " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 /** Providers the text names, in the order they first appear. */
 export function providerTypesFromText(text: string): SupportedProvider[] {
   if (!text.trim()) return [];

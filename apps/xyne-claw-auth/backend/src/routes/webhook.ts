@@ -159,6 +159,7 @@ import {
   PROVIDER_DESCRIPTIONS,
   PROVIDER_CONNECT_METHOD,
   providersUserAskedFor,
+  stripAddressedAgentMention,
   unsupportedProvidersFromText,
   wantsProviderRoster,
 } from "../lib/provider-hints.js";
@@ -1919,7 +1920,23 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const threadAwarenessBlock = history
       ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
       : "";
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
+    const providerAskText = stripAddressedAgentMention(task, agent.slug);
+    const providerCardWillPost =
+      eventType !== "USER_MENTIONED" &&
+      !!agent.slug &&
+      !!agent.orgId &&
+      (providersUserAskedFor(providerAskText).length > 0 || wantsProviderRoster(providerAskText));
+    const providerCardNote = providerCardWillPost
+      ? [
+          "## AI Provider Card",
+          "A card listing this user's AI providers and their live connection status is posted to this thread alongside your reply. It is built from their stored credentials, so it is authoritative.",
+          "Do NOT list the providers, state which are connected or disconnected, or say you cannot see the user's credentials — the card already answers that, and contradicting it confuses the user.",
+          "Acknowledge the card in one short sentence and answer anything else they asked.",
+        ].join("\n")
+      : "";
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock, providerCardNote]
+      .filter(Boolean)
+      .join("\n\n");
 
     // Email auto-draft forward target — suppresses placeholder+DM (see /webhook/result).
     const resultForwardUrl =
@@ -5050,7 +5067,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // a card that will never render.
   if (agentCardDeliverable) {
     try {
-      const askText = ctx.rootTask ?? ctx.task ?? "";
+      const askText = stripAddressedAgentMention(ctx.rootTask ?? ctx.task ?? "", ctx.agentSlug);
       const namedProviders = providersUserAskedFor(askText);
       const unsupported = unsupportedProvidersFromText(askText);
       const providerRoster = wantsProviderRoster(askText);
