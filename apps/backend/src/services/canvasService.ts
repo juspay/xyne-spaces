@@ -307,7 +307,7 @@ export async function createKnowledgeCanvas(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const path = workspaceId ? `/${workspaceId}/chat/canvas/${canvasId}` : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
 }

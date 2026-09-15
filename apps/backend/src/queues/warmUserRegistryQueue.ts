@@ -45,7 +45,16 @@ export async function computeSttHintNames(): Promise<string[]> {
       where: {
         status: UserStatus.ACTIVE,
         userType: { not: UserType.BOT },
-        email: { endsWith: '@juspay.in', mode: 'insensitive' },
+        // Deployment-specific corporate domain (STT name hints). Unset means
+        // ALL active non-bot users are included.
+        ...(process.env.CORPORATE_EMAIL_DOMAIN
+          ? {
+              email: {
+                endsWith: `@${process.env.CORPORATE_EMAIL_DOMAIN}`,
+                mode: 'insensitive' as const,
+              },
+            }
+          : {}),
       },
       select: { name: true },
       orderBy: { name: 'asc' },

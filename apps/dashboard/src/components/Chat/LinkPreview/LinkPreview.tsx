@@ -94,7 +94,7 @@ const getHostnameSafely = (url: string): string | null => {
 const isBitbucketUrl = (url: string): boolean => {
   try {
     const urlObj = new URL(url);
-    // Check if hostname contains 'bitbucket' (handles bitbucket.juspay.net, bitbucket.org, etc.)
+    // Check if hostname contains 'bitbucket' (handles internal Bitbucket hosts, bitbucket.org, etc.)
     return urlObj.hostname.toLowerCase().includes('bitbucket');
   } catch {
     return false;

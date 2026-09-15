@@ -93,7 +93,8 @@ export class SlackPostprocessor extends BasePostprocessor {
         return;
       }
 
-      const xyneLink = `https://spaces.xyne.juspay.net/chat/${xyneChannelId}/${context.conversationId}`;
+      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+      const xyneLink = `${frontendUrl}/chat/${xyneChannelId}/${context.conversationId}`;
 
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',

@@ -10,7 +10,7 @@
  * (which has an email) is required — a repository access token will fail.
  *
  * Auth:  export BITBUCKET_TOKEN=BBDC-xxxx   (personal HTTP access token, Repo Write+Admin)
- * Base:  export BITBUCKET_BASE=https://bitbucket.juspay.net   (default)
+ * Base:  export BITBUCKET_BASE=https://bitbucket.example.com   (default)
  *
  * Full:   BITBUCKET_TOKEN=… node backend/scripts/release-manager-localdev/create-bitbucket-release-fixture.mjs
  * Hotfix: BITBUCKET_TOKEN=… node backend/scripts/release-manager-localdev/create-bitbucket-release-fixture.mjs hotfix
@@ -25,7 +25,7 @@ import { join, dirname } from 'node:path';
 import crypto from 'node:crypto';
 
 const TOKEN = process.env.BITBUCKET_TOKEN;
-const BASE = (process.env.BITBUCKET_BASE || 'https://bitbucket.juspay.net').replace(/\/+$/, '');
+const BASE = (process.env.BITBUCKET_BASE || 'https://bitbucket.example.com').replace(/\/+$/, '');
 const API = `${BASE}/rest/api/1.0`;
 
 // ---------- input helpers (TTY or piped) ----------
@@ -240,7 +240,7 @@ async function fullSetup() {
   const me = await bb('GET', '/application-properties'); // cheap auth probe
   if (!me.ok) die(`token check failed (${me.status}). Is BITBUCKET_TOKEN set + valid?`);
 
-  const proj = await ask('Project key (personal repos use ~username, e.g. ~sumant.tirkey_juspay.in)', '~sumant.tirkey_juspay.in');
+  const proj = await ask('Project key (personal repos use ~username, e.g. ~example_user)', '~example_user');
   const repo = await ask('Repo slug', 'xyne-test-release-manager');
   const code = (await ask('Project code / ticket prefix', 'XYNE')).toUpperCase();
   const branch = await ask('Release/base branch', 'master');
@@ -288,7 +288,7 @@ async function fullSetup() {
 
 async function hotfixOnly() {
   console.log('\n=== Release Manager E2E (Bitbucket) — hotfix ===\n');
-  const proj = await ask('Project key', '~sumant.tirkey_juspay.in');
+  const proj = await ask('Project key', '~example_user');
   const repo = await ask('Repo slug', 'xyne-test-release-manager');
   const branch = await ask('Base branch', 'master');
   const code = (await ask('Project code / ticket prefix', 'XYNE')).toUpperCase();

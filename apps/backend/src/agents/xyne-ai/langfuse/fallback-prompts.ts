@@ -1164,7 +1164,7 @@ Use this tool when:
 - User clicks "Ask AI" on a canvas and asks: "see this canvas"
   → Canvas context is implicit (Priority 0) → read_canvas({}) or just call without canvas_id parameter
 
-- User: "What's in this canvas https://spaces.xyne.juspay.net/chat/canvas/abc123-def456?"
+- User: "What's in this canvas https://spaces.example.com/chat/canvas/abc123-def456?"
   → Extract "abc123-def456" from the message (Priority 1) → read_canvas({canvas_id: "abc123-def456"})
 
 - User: "Read the canvas I shared earlier"
@@ -1194,10 +1194,7 @@ Use this tool when:
 - Canvases: /chat/canvas/{canvasId}
 
 **Supported Domains:**
-- spaces.xyne.juspay.net
-- app.spaces.xyne.juspay.net
-- spaces.xyne.rbihub.in
-- app.spaces.xyne.rbihub.in
+- This deployment's own Xyne Spaces domains (the host(s) serving the workspace)
 
 **Parameters:**
 - url: (required) The full Xyne Spaces URL to fetch content from

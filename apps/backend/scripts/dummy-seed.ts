@@ -102,7 +102,7 @@ async function main() {
           name: 'Juspay Innovations',
           description: 'Payment solutions company',
           createdBy: 'system',
-          metadata: { industry: 'FinTech', website: 'https://juspay.in' }
+          metadata: { industry: 'FinTech', website: 'https://example.com' }
         }
       });
       console.log(`    ✅ Created 2 organizations`);

@@ -16,11 +16,15 @@ export function ElectronEnrollmentSteps({
 }: ElectronEnrollmentStepsProps): ReactElement {
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
   const activeStep = currentStep;
+  // Deployment-specific support channel (e.g. a Slack channel). Hidden unless
+  // VITE_SUPPORT_CHANNEL_URL is baked in at build time.
+  const supportChannelUrl = (import.meta.env as Record<string, string | undefined>)
+    .VITE_SUPPORT_CHANNEL_URL;
 
   const steps = [
     {
       title: 'Sign In',
-      description: 'Sign in with your Juspay Google account.',
+      description: "Sign in with your organization's Google account.",
     },
     {
       title: 'Device Enrollment',
@@ -119,18 +123,20 @@ export function ElectronEnrollmentSteps({
             for more details.
           </p>
         )}
-        <p>
-          If it still doesn&apos;t work, please report it in the{' '}
-          <a
-            target='_blank'
-            rel='noreferrer'
-            href='https://juspay.slack.com/archives/C0A2BFNLBB8'
-            className='font-bold text-primary hover:text-primary/80 hover:underline'
-          >
-            #xyne-spaces-troubleshooting
-          </a>{' '}
-          Slack channel.
-        </p>
+        {supportChannelUrl && (
+          <p>
+            If it still doesn&apos;t work, please report it in the{' '}
+            <a
+              target='_blank'
+              rel='noreferrer'
+              href={supportChannelUrl}
+              className='font-bold text-primary hover:text-primary/80 hover:underline'
+            >
+              support channel
+            </a>
+            .
+          </p>
+        )}
       </div>
     </div>
   );

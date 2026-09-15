@@ -1,3 +1,8 @@
+// Corporate email domain used to infer user emails from Jira display names.
+// Deployment-specific: set CORPORATE_EMAIL_DOMAIN (e.g. "example.com").
+// When unset, no email candidates are inferred.
+const CORPORATE_EMAIL_DOMAIN = process.env.CORPORATE_EMAIL_DOMAIN ?? '';
+
 const normalizeNamePart = (value: string): string =>
   value
     .normalize('NFKD')
@@ -22,6 +27,7 @@ export const extractEmailFromDisplayName = (displayName?: string): string | null
 
 export const inferEmailCandidatesFromDisplayName = (displayName?: string): string[] => {
   if (!displayName) return [];
+  if (!CORPORATE_EMAIL_DOMAIN) return [];
 
   const nameParts = displayName
     .split(/\s+/)
@@ -31,7 +37,7 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
   const candidates = new Set<string>();
   const rawLocalPart = normalizeEmailLocalPart(displayName);
   if (rawLocalPart) {
-    candidates.add(`${rawLocalPart}@juspay.in`);
+    candidates.add(`${rawLocalPart}@${CORPORATE_EMAIL_DOMAIN}`);
   }
 
   if (nameParts.length === 0) {
@@ -44,27 +50,27 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
   const firstInitial = first?.[0];
   const lastInitial = last?.[0];
 
-  candidates.add(`${nameParts.join('.')}@juspay.in`);
-  candidates.add(`${nameParts.join('')}@juspay.in`);
+  candidates.add(`${nameParts.join('.')}@${CORPORATE_EMAIL_DOMAIN}`);
+  candidates.add(`${nameParts.join('')}@${CORPORATE_EMAIL_DOMAIN}`);
 
   if (nameParts.length >= 2) {
-    candidates.add(`${first}.${last}@juspay.in`);
-    candidates.add(`${first}${last}@juspay.in`);
-    candidates.add(`${first}.${lastInitial}@juspay.in`);
-    candidates.add(`${first}${lastInitial}@juspay.in`);
-    candidates.add(`${firstInitial}.${last}@juspay.in`);
-    candidates.add(`${last}.${first}@juspay.in`);
-    candidates.add(`${last}${first}@juspay.in`);
+    candidates.add(`${first}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}${last}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}.${lastInitial}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}${lastInitial}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${firstInitial}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${last}.${first}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${last}${first}@${CORPORATE_EMAIL_DOMAIN}`);
     if (firstInitial) {
-      candidates.add(`${last}.${firstInitial}@juspay.in`);
-      candidates.add(`${last}${firstInitial}@juspay.in`);
+      candidates.add(`${last}.${firstInitial}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${last}${firstInitial}@${CORPORATE_EMAIL_DOMAIN}`);
     }
 
     if (second) {
-      candidates.add(`${first}.${second}@juspay.in`);
-      candidates.add(`${first}${second}@juspay.in`);
-      candidates.add(`${second}.${last}@juspay.in`);
-      candidates.add(`${second}${last}@juspay.in`);
+      candidates.add(`${first}.${second}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${first}${second}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${second}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${second}${last}@${CORPORATE_EMAIL_DOMAIN}`);
     }
   }
 
@@ -75,8 +81,8 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
         if (i === j) continue;
         const a = nameParts[i];
         const b = nameParts[j];
-        candidates.add(`${a}.${b}@juspay.in`);
-        candidates.add(`${a}${b}@juspay.in`);
+        candidates.add(`${a}.${b}@${CORPORATE_EMAIL_DOMAIN}`);
+        candidates.add(`${a}${b}@${CORPORATE_EMAIL_DOMAIN}`);
         if (candidates.size >= MAX_PERMUTATION_CANDIDATES) break;
       }
       if (candidates.size >= MAX_PERMUTATION_CANDIDATES) break;

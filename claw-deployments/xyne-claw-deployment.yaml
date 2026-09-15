@@ -62,6 +62,8 @@ spec:
           value: --max-old-space-size=11264
         - name: PORT
           value: "80"
+        - name: SANDBOX_PREVIEW_BASE_URL
+          value: https://app.spaces.xyne.juspay.net
         - name: XYNE_CLAW_PORT
           value: "80"
         - name: LITELLM_URL

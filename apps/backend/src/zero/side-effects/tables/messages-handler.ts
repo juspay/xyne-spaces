@@ -956,7 +956,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       // Extract Bitbucket domain from config or use default
       const bitbucketDomain = config.bitbucket.baseUrl 
         ? new URL(config.bitbucket.baseUrl).hostname 
-        : 'bitbucket.juspay.net';
+        : 'bitbucket.example.com';
       
       // Only handle configured Bitbucket domain
       if (!urlObj.hostname.includes(bitbucketDomain)) {

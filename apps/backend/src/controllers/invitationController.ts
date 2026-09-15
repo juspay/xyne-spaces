@@ -35,7 +35,7 @@ function extractDomainFromOrigin(origin: string): string | null {
  *
  * 1. Extract the domain from the request Origin header
  * 2. Look up `frontend_url` in CAC (Superposition) with { domain } context
- *    — this lets us map e.g. "spaces.xyne.juspay.net" → "https://app.spaces.xyne.juspay.net"
+ *    — this lets us map e.g. "spaces.example.com" → "https://app.spaces.example.com"
  * 3. If CAC has no override, use the Origin itself (for domains where origin = frontend)
  * 4. If no Origin, fall back to SLACK_FRONTEND_URL env
  */

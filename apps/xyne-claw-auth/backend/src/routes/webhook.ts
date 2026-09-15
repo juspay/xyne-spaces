@@ -70,7 +70,7 @@ import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
-import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
+import { getUnregisteredUserTemplate } from "../constants.js";
 import {
   registerRunRecovery,
   touchRunRecovery,
@@ -1498,7 +1498,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
-          markdownText: UNREGISTERED_USER_TEMPLATE,
+          markdownText: getUnregisteredUserTemplate(CONFIG.spacesAppUrl),
           metadata: { contentFormat: "markdown" },
         }
       ).catch((err) => {

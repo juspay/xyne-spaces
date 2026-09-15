@@ -1015,7 +1015,7 @@ function GenericProviderConfigForm({
         label="Base URL"
         value={baseUrl}
         onChange={(e) => setBaseUrl(e.target.value)}
-        placeholder={isLitellm ? "blank = https://grid.ai.juspay.net" : undefined}
+        placeholder={isLitellm ? "blank = default LiteLLM gateway URL" : undefined}
       />
 
       <div>

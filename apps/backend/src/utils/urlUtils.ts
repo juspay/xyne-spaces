@@ -277,23 +277,65 @@ export function extractFirstUrl(text: string): string | null {
 // Internal link detection
 // ---------------------------------------------------------------------------
 
-const INTERNAL_HOSTS = [
-  'spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'xyne-spaces.web.app',
-];
+// Hosts that count as "our own app" for internal-link detection. Deployment
+// hostnames are DERIVED from FRONTEND_URL / BACKEND_URL (which every managed
+// deployment sets), so nothing deployment-specific is baked into source.
+// Additional hosts can be supplied via INTERNAL_APP_HOSTS (comma-separated).
+// Evaluated lazily (and cached) so env bootstrap always runs first.
+const hostnameOf = (url: string | undefined): string | null => {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+};
+
+let cachedInternalHosts: string[] | null = null;
+const getInternalHosts = (): string[] => {
+  if (cachedInternalHosts) return cachedInternalHosts;
+  cachedInternalHosts = Array.from(
+    new Set(
+      [
+        'xyne-spaces.web.app',
+        hostnameOf(process.env.FRONTEND_URL),
+        hostnameOf(process.env.BACKEND_URL),
+        ...(process.env.INTERNAL_APP_HOSTS ?? '')
+          .split(',')
+          .map((host) => host.trim()),
+      ].filter(
+        (host): host is string =>
+          !!host && host !== 'localhost' && host !== '127.0.0.1',
+      ),
+    ),
+  );
+  return cachedInternalHosts;
+};
 
 const INTERNAL_HOSTS_WITH_PORT = [
   'localhost:5173',
   '127.0.0.1:5173',
 ];
 
-// Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
-// Matches: production and sandbox domains. Allows an optional `/{workspaceId}` segment
-// between the host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
-const INTERNAL_URL_REGEX =
-  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)(?:\/[^/\s]+)?\/chat\/[^\s<>"'\)\]]*/i;
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Cached regex for internal URL extraction (avoids creating a new RegExp per
+// call). Matches: the deployment's own hosts (see getInternalHosts) plus
+// localhost variants. Allows an optional `/{workspaceId}` segment between the
+// host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
+let cachedInternalUrlRegex: RegExp | null = null;
+const getInternalUrlRegex = (): RegExp => {
+  if (!cachedInternalUrlRegex) {
+    cachedInternalUrlRegex = new RegExp(
+      String.raw`https?:\/\/(?:${getInternalHosts()
+        .map(escapeRegExp)
+        .join('|')}|localhost:\d+|127\.0\.0\.1:\d+)(?:\/[^\/\s]+)?\/chat\/[^\s<>"'\)\]]*`,
+      'i',
+    );
+  }
+  return cachedInternalUrlRegex;
+};
 
 export interface InternalLinkInfo {
   type: 'message' | 'conversation' | 'ticket';
@@ -311,7 +353,7 @@ export interface InternalLinkInfo {
 export function extractInternalUrl(text: string): string | null {
   if (!text) return null;
   const clean = stripAndDecodeHtml(text);
-  const m = clean.match(INTERNAL_URL_REGEX);
+  const m = clean.match(getInternalUrlRegex());
   return m ? trimSurroundingPunctuation(m[0]) : null;
 }
 
@@ -323,7 +365,8 @@ export function parseInternalUrl(url: string): InternalLinkInfo | null {
   try {
     const parsed = new URL(url);
     const isAllowedHost =
-      INTERNAL_HOSTS.includes(parsed.hostname) || INTERNAL_HOSTS_WITH_PORT.includes(parsed.host);
+      getInternalHosts().includes(parsed.hostname) ||
+      INTERNAL_HOSTS_WITH_PORT.includes(parsed.host);
     if (!isAllowedHost) return null;
 
     // [/:workspaceId]/chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId][/:ticketId]

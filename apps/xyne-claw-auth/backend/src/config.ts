@@ -70,7 +70,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "http://localhost:4000").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -121,7 +121,7 @@ export const CONFIG = {
     ?? process.env["SPACES_APP_URL"]
     ?? process.env["VITE_XYNE_BACKEND_URL"]
     ?? process.env["SPACES_BACKEND_URL"]
-    ?? "https://app.spaces.xyne.juspay.net",
+    ?? "http://localhost:5173",
   defaultAgentSlug: process.env["DEFAULT_AGENT_SLUG"] ?? "assistant",
   minCronIntervalMinutes: Number(process.env["MIN_CRON_INTERVAL_MINUTES"] ?? 30),
   // Daily Brief fan-out throttle. `concurrency` is the HARD cap on parallel brief
