@@ -15,10 +15,16 @@
  * card instead of being silently guessed into the wrong bucket.
  */
 
-import { agentIdentity, type AgentCapability, type AgentIdentity } from "xyne-claw-shared";
+import {
+  agentIdentity,
+  type AgentCapability,
+  type AgentIdentity,
+  type AgentKnowledge,
+  type AgentSkill,
+} from "xyne-claw-shared";
 import { errMsg } from "./errors.js";
 import type { AvailableToolsCatalog } from "../routes/tools.js";
-import { agentRepository, agentRequestRepository } from "../repositories/index.js";
+import { agentRepository, agentRequestRepository, skillRepository } from "../repositories/index.js";
 import { availableServerTypesSafe } from "./connector-availability.js";
 import { writeAuditLog } from "./audit.js";
 import { createLogger } from "../logger.js";
@@ -136,6 +142,8 @@ export async function resolveAgentCapabilities(
         id: name,
         label: name,
         kind: "subagent" as const,
+        group: "subagent" as const,
+        ...(def?.description ? { description: def.description } : {}),
         // The brand icon is keyed by serverType, which is NOT always the
         // subagent name ("spaces" is served by "xyne-spaces") — resolve it here
         // so the renderer never guesses an asset filename. Non-connector types
@@ -153,6 +161,8 @@ export async function resolveAgentCapabilities(
         id: slug,
         label: match?.tool.name ?? slug,
         kind: "tool" as const,
+        group: "mcp" as const,
+        ...(match?.tool.description ? { description: match.tool.description } : {}),
         ...(match?.integration.slug ? { iconKey: match.integration.slug } : {}),
       };
     }),
@@ -160,11 +170,13 @@ export async function resolveAgentCapabilities(
       id: slug,
       label: gatewayBySlug.get(slug)?.label ?? slug,
       kind: "tool" as const,
+      group: "mcp" as const,
     })),
     ...custom.map((slug) => ({
       id: slug,
       label: customBySlug.get(slug)?.name ?? slug,
       kind: "tool" as const,
+      group: "builtin" as const,
     })),
   ];
 
@@ -219,6 +231,11 @@ export interface DraftAgentSpec {
   modelId?: string;
   color?: string;
   tools: string[];
+  skills?: string[];
+  knowledge?: { scope?: "COLLECTIONS" | "USER"; collections?: string[] };
+  providerOrder?: string[];
+  memory?: { enabled: boolean; requiresApproval?: boolean };
+  scope?: "personal" | "global";
   /** The agent's own line for the thread, posted next to the card. Chat text
    *  only — deliberately NOT part of the identity, so it never renders on a
    *  re-drawn card after the decision. */
@@ -231,11 +248,83 @@ export interface DraftAgentSpec {
  * `builtBy` credits the agent that authored the draft — the card says "Built by
  * @<slug>" so a user reading it later knows the agent didn't come from a human.
  */
+export interface ResolvedDraftExtras {
+  skills?: AgentSkill[];
+  knowledgeSources?: AgentKnowledge["sources"];
+  unknownSkills?: string[];
+}
+
+export async function resolveDraftExtras(
+  spec: DraftAgentSpec,
+  orgId: string | null,
+  requesterId?: string,
+): Promise<ResolvedDraftExtras> {
+  const extras: ResolvedDraftExtras = {};
+
+  const requestedSkills = (spec.skills ?? []).map(trimToken).filter(Boolean);
+  if (requestedSkills.length > 0) {
+    const rows = await skillRepository
+      .listVisible({
+        ...(requesterId ? { userId: requesterId } : {}),
+        ...(orgId ? { orgId } : {}),
+      })
+      .catch(() => []);
+    const byKey = new Map<string, { id: string; name: string; description: string }>();
+    for (const row of rows) {
+      byKey.set(row.name.toLowerCase(), row);
+      byKey.set(row.slug.toLowerCase(), row);
+    }
+    const matched: AgentSkill[] = [];
+    const unknown: string[] = [];
+    const seen = new Set<string>();
+    for (const token of requestedSkills) {
+      const hit = byKey.get(token.toLowerCase());
+      if (!hit) {
+        unknown.push(token);
+        continue;
+      }
+      if (seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      matched.push({
+        id: hit.id,
+        name: hit.name,
+        ...(hit.description ? { description: hit.description } : {}),
+      });
+    }
+    if (matched.length > 0) extras.skills = matched;
+    if (unknown.length > 0) extras.unknownSkills = unknown;
+  }
+
+  const collections = (spec.knowledge?.collections ?? []).map(trimToken).filter(Boolean);
+  if (collections.length > 0) {
+    const seen = new Set<string>();
+    const sources = collections
+      .filter((name) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((name) => ({ id: name, name, kind: "collection" as const }));
+    if (sources.length > 0) extras.knowledgeSources = sources;
+  }
+
+  return extras;
+}
+
 export function identityFromDraftSpec(
   spec: DraftAgentSpec,
   resolved: ResolvedCapabilities,
   builtBy?: string,
+  extras?: ResolvedDraftExtras,
 ): AgentIdentity {
+  const knowledge: AgentKnowledge = {
+    ...(spec.knowledge?.scope ? { scope: spec.knowledge.scope } : {}),
+    ...(extras?.knowledgeSources && extras.knowledgeSources.length > 0
+      ? { sources: extras.knowledgeSources }
+      : {}),
+  };
+
   return agentIdentity({
     name: spec.name,
     slug: spec.slug,
@@ -244,6 +333,13 @@ export function identityFromDraftSpec(
     systemPrompt: spec.systemPrompt,
     ...(spec.modelId ? { modelId: spec.modelId } : {}),
     ...(spec.color ? { color: spec.color } : {}),
+    ...(spec.scope ? { scope: spec.scope } : {}),
+    ...(spec.providerOrder && spec.providerOrder.length > 0
+      ? { providerOrder: spec.providerOrder }
+      : {}),
+    ...(spec.memory ? { memory: spec.memory } : {}),
+    ...(extras?.skills && extras.skills.length > 0 ? { skills: extras.skills } : {}),
+    ...(Object.keys(knowledge).length > 0 ? { knowledge } : {}),
     capabilities: resolved.capabilities,
     // No Identifier/Model rows: the card renders slug + model in its header line,
     // and repeating them here showed the same two facts twice. `details` stays as
@@ -366,13 +462,14 @@ export async function resolveAgentDraft(
   }
 
   const catalog = await buildCatalogFor(request.orgId);
+  const extras = await resolveDraftExtras(spec, request.orgId, request.requesterId);
   const buildIdentity = async (grantedIds?: string[]): Promise<{ identity: AgentIdentity; resolved: ResolvedCapabilities }> => {
     const resolved = await resolveAgentCapabilities(
       grantedIds ?? spec.tools,
       catalog,
       request.requesterId,
     );
-    return { identity: identityFromDraftSpec(spec, resolved, builtBy), resolved };
+    return { identity: identityFromDraftSpec(spec, resolved, builtBy, extras), resolved };
   };
 
   // Already decided (replay, or the other tab won): report the settled state

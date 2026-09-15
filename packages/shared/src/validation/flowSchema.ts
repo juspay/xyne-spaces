@@ -725,6 +725,8 @@ export const agentCapabilitySchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     kind: z.enum(['subagent', 'tool']),
+    group: z.enum(['subagent', 'agent', 'mcp', 'builtin']).optional(),
+    description: z.string().optional(),
     /**
      * MCP serverType whose brand icon represents this capability, e.g. "github".
      * Set server-side (the subagent name and the icon key differ — "spaces" is
@@ -733,6 +735,44 @@ export const agentCapabilitySchema = z
     iconKey: z.string().optional(),
     /** serverType whose account/credentials this capability needs, when unconnected. */
     requiresConnection: z.string().optional(),
+  })
+  .strict();
+
+export const agentSkillSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+  })
+  .strict();
+
+export const agentKnowledgeSourceSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    kind: z.enum(['collection', 'file']).optional(),
+  })
+  .strict();
+
+export const agentKnowledgeSchema = z
+  .object({
+    scope: z.enum(['COLLECTIONS', 'USER']).optional(),
+    sources: z.array(agentKnowledgeSourceSchema).optional(),
+  })
+  .strict();
+
+export const agentMemorySchema = z
+  .object({
+    enabled: z.boolean(),
+    requiresApproval: z.boolean().optional(),
+  })
+  .strict();
+
+export const agentProviderStatusSchema = z
+  .object({
+    provider: z.string().min(1),
+    label: z.string().min(1),
+    connected: z.boolean(),
   })
   .strict();
 
@@ -767,6 +807,11 @@ export const agentIdentitySchema = z
      */
     color: z.string().optional(),
     capabilities: z.array(agentCapabilitySchema).optional(),
+    providerOrder: z.array(z.string().min(1)).optional(),
+    providers: z.array(agentProviderStatusSchema).optional(),
+    skills: z.array(agentSkillSchema).optional(),
+    knowledge: agentKnowledgeSchema.optional(),
+    memory: agentMemorySchema.optional(),
     details: z.array(agentDetailRowSchema).optional(),
     connectLinks: z
       .array(
@@ -820,6 +865,11 @@ export const agentComponentSchema = baseComponentSchema.extend({
 // TS mirrors inferred from the schema so the two can't drift.
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>;
 export type AgentDetailRow = z.infer<typeof agentDetailRowSchema>;
+export type AgentSkill = z.infer<typeof agentSkillSchema>;
+export type AgentKnowledgeSource = z.infer<typeof agentKnowledgeSourceSchema>;
+export type AgentKnowledge = z.infer<typeof agentKnowledgeSchema>;
+export type AgentMemory = z.infer<typeof agentMemorySchema>;
+export type AgentProviderStatus = z.infer<typeof agentProviderStatusSchema>;
 export type AgentIdentity = z.infer<typeof agentIdentitySchema>;
 export type AgentProps = z.infer<typeof agentPropsSchema>;
 export type AgentVariant = AgentProps['variant'];

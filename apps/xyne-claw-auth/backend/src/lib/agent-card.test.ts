@@ -60,8 +60,8 @@ describe("resolveAgentCapabilities", () => {
       // iconKey is the subagent's serverType, NOT its name — the brand asset for
       // "spaces" lives under "xyne-spaces", so the renderer must be told which
       // key to use rather than guessing from the label.
-      { id: "spaces", label: "spaces", kind: "subagent", iconKey: "xyne-spaces" },
-      { id: "web-search", label: "Web Search", kind: "tool" },
+      { id: "spaces", label: "spaces", kind: "subagent", group: "subagent", iconKey: "xyne-spaces" },
+      { id: "web-search", label: "Web Search", kind: "tool", group: "builtin" },
     ]);
   });
 
@@ -84,7 +84,7 @@ describe("resolveAgentCapabilities", () => {
     const resolved = await resolveAgentCapabilities(["gateway:jira/primary"], catalog);
     expect(resolved.gateway).toEqual(["gateway:jira/primary"]);
     expect(resolved.capabilities).toEqual([
-      { id: "gateway:jira/primary", label: "Jira (primary)", kind: "tool" },
+      { id: "gateway:jira/primary", label: "Jira (primary)", kind: "tool", group: "mcp" },
     ]);
   });
 
@@ -117,6 +117,7 @@ describe("resolveAgentCapabilities", () => {
       id: "google",
       label: "google",
       kind: "subagent",
+      group: "subagent",
       iconKey: "google",
     });
   });

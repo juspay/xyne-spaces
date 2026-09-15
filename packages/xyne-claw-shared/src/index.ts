@@ -40,6 +40,11 @@ export type {
   AgentCapability,
   AgentDetailRow,
   AgentConnectLink,
+  AgentSkill,
+  AgentKnowledge,
+  AgentKnowledgeSource,
+  AgentMemory,
+  AgentProviderStatus,
   AgentDraftPhase,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";

@@ -31,6 +31,7 @@ import {
   resolveAgentCapabilities,
   toolIdsFromConfig,
   unknownToolsNote,
+  resolveDraftExtras,
   type DraftAgentSpec,
 } from "../lib/agent-card.js";
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
@@ -5339,7 +5340,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       }
 
-      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug);
+      const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
+      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
       const flow = withSpacesAppId(
         buildAgentCardFlow(
           {

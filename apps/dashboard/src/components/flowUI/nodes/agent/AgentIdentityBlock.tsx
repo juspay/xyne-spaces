@@ -253,10 +253,17 @@ export const AgentCapabilities: React.FC<{
     return null;
   }
 
+  const groupOf = (capability: AgentCapability): string =>
+    capability.group ?? (capability.kind === 'subagent' ? 'subagent' : 'builtin');
+
   const groups: Array<{ key: string; label: string; items: AgentCapability[] }> = [
-    { key: 'mcp', label: 'MCP', items: capabilities.filter(c => c.kind === 'subagent') },
-    { key: 'builtin', label: 'Built in tools', items: capabilities.filter(c => c.kind === 'tool') },
-  ].filter(group => group.items.length > 0);
+    { key: 'subagent', label: 'Subagents' },
+    { key: 'agent', label: 'Agents' },
+    { key: 'mcp', label: 'MCP Tools' },
+    { key: 'builtin', label: 'Built-In tools' },
+  ]
+    .map(group => ({ ...group, items: capabilities.filter(c => groupOf(c) === group.key) }))
+    .filter(group => group.items.length > 0);
 
   return (
     <div className='flex flex-col gap-4'>
