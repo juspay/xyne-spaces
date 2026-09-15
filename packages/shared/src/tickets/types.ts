@@ -56,6 +56,11 @@ export interface CreateBulkTicketRequest {
   projectId?: string;
   channelId?: string;
   boardId?: string;
+  /**
+   * Set by the tickets tab. Channels can be configured to keep tickets-tab
+   * tickets out of chat, and only the caller knows where the batch came from.
+   */
+  fromTicketsTab?: boolean;
 }
 
 /** Backend → dashboard response for a successfully enqueued batch. */

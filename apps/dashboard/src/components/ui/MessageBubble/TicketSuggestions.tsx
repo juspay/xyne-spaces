@@ -124,10 +124,9 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
   const bulkSubTitleTitles = existingParentTicket
     ? suggestions.map(s => s.title)
     : suggestions.slice(1).map(s => s.title);
-  const bulkSubDescriptions = [
-    suggestions[0]?.description ?? '',
-    ...suggestions.slice(1).map(s => s.description),
-  ];
+  const bulkSubDescriptions = existingParentTicket
+    ? ['', ...suggestions.map(s => s.description)]
+    : suggestions.map(s => s.description);
   const bulkClientRowIds = suggestions.map(s => s.suggestionId);
 
   return (

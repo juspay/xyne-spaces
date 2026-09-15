@@ -5386,6 +5386,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           isOpen={isBulkCreateModalOpen}
           onClose={() => setIsBulkCreateModalOpen(false)}
           mode={BulkTicketMode.ALL_PARENTS}
+          fromTicketsTab={true}
           channelId={channel.id}
           projectId={effectiveProjectId}
           boardId={currentBoardId ?? ''}

@@ -61,4 +61,5 @@ export const bulkTicketSchemaValidator = Joi.object({
   projectId: Joi.string().optional(),
   channelId: Joi.string().optional(),
   boardId: Joi.string().optional(),
+  fromTicketsTab: Joi.boolean().optional(),
 }).or('parent', 'tickets', 'existingParentTicketId');
