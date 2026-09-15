@@ -63,6 +63,7 @@ import { resolveKbBasePath } from './utils/kbRoutePaths';
 import { NameDialogV2 } from '../../components/knowledgeBaseV2/components/NameDialogV2';
 import { toast } from 'sonner';
 import { useGlobalCollections } from './hooks/useGlobalCollections';
+import { useKbContentsSearchQuery } from './hooks/useKbContentsSearch';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import Tooltip from '../../components/ui/Tooltip';
@@ -223,6 +224,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   const allVisibleChannels = useAllVisibleChannels();
   const visibleProjects = useVisibleProjects();
   const globalCollections = useGlobalCollections();
+  // Shared with the Contents panel's own search box (KbContentsShell) so
+  // typing there also filters this pane's table/grid instead of only the
+  // left-hand tree — see useKbContentsSearch.tsx.
+  const contentsSearchQuery = useKbContentsSearchQuery();
   // V1's mutation hooks — same path TreeSidebar uses. They drive the same
   // Zero mutators we used inline before, but: (a) they clear `activeCollection`
   // when the user deletes the one they're in, and (b) `deleteNode`/`renameNode`
@@ -471,9 +476,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           return false;
         }
         if (typeFilter !== 'ALL' && typeFilterValueFor(e) !== typeFilter) return false;
+        // Same query as the Contents panel's own search box (KbContentsShell),
+        // shared via context so this pane filters in step with it instead of
+        // only the left-hand tree/list reacting — see useKbContentsSearch.tsx.
+        if (contentsSearchQuery && !e.name.toLowerCase().includes(contentsSearchQuery))
+          return false;
         return true;
       }),
-    [entries, statusFilter, typeFilter],
+    [entries, statusFilter, typeFilter, contentsSearchQuery],
   );
 
   const folderCount = filteredEntries.filter(e => e.type === 'FOLDER').length;
