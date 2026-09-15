@@ -187,13 +187,16 @@ jobs:
             exit 1
           fi
 
-          RESPONSE=$(curl -sS -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
+          # Success is a FILE_UPLOADED event; a rejected upload comes back 2xx with {"success":false,...}.
+          RESPONSE=$(curl -sS --fail-with-body -X POST "${SPACES_URL%/}/api/apps/files/filesUpload" \
             -H "Authorization: Bearer $JWT" \
             -F "channelId=$CHANNELID" \
             -F "markdownText=CI automation test report — commit ${GITHUB_SHA::9}" \
-            "${UPLOAD_ARGS[@]}")
+            "${UPLOAD_ARGS[@]}") || { echo "$RESPONSE"; echo "::error::Report push failed"; exit 1; }
           echo "$RESPONSE"
-          echo "$RESPONSE" | grep -q '"success":true' || { echo "::error::Report push rejected"; exit 1; }
+          if echo "$RESPONSE" | grep -q '"success":false'; then
+            echo "::error::Report push rejected"; exit 1
+          fi
 
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
