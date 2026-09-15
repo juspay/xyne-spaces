@@ -249,5 +249,23 @@
       "recentsLabel": "Recents",
       "newChatTooltip": "New chat"
     }
+  },
+  "citationDocsPanel": {
+    "failedToLoadFile": "Failed to load file.",
+    "failedToReadFile": "Failed to read file.",
+    "rawTab": "Raw",
+    "previewTab": "Preview",
+    "previewNotAvailable": "Preview not available for this file type",
+    "expandPanelLabel": "Expand documents panel",
+    "expandLabel": "Expand",
+    "listOpenDocumentsLabel": "List open documents",
+    "chunkLabel": "ch {{index}}",
+    "closeDocLabel": "Close {{title}}",
+    "jumpToSourceLabel": "Jump to Source",
+    "collapsePanelLabel": "Collapse panel",
+    "collapseLabel": "Collapse",
+    "closeAllDocumentsLabel": "Close all documents",
+    "closeAllLabel": "Close all",
+    "ticketTabTitle": "Ticket {{id}}"
   }
 }

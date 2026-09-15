@@ -249,5 +249,23 @@
       "recentsLabel": "Recientes",
       "newChatTooltip": "Nuevo chat"
     }
+  },
+  "citationDocsPanel": {
+    "failedToLoadFile": "Error al cargar el archivo.",
+    "failedToReadFile": "Error al leer el archivo.",
+    "rawTab": "Sin formato",
+    "previewTab": "Vista previa",
+    "previewNotAvailable": "Vista previa no disponible para este tipo de archivo",
+    "expandPanelLabel": "Expandir panel de documentos",
+    "expandLabel": "Expandir",
+    "listOpenDocumentsLabel": "Listar documentos abiertos",
+    "chunkLabel": "frag. {{index}}",
+    "closeDocLabel": "Cerrar {{title}}",
+    "jumpToSourceLabel": "Ir a la fuente",
+    "collapsePanelLabel": "Contraer panel",
+    "collapseLabel": "Contraer",
+    "closeAllDocumentsLabel": "Cerrar todos los documentos",
+    "closeAllLabel": "Cerrar todo",
+    "ticketTabTitle": "Ticket {{id}}"
   }
 }
