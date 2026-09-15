@@ -42,13 +42,11 @@ export async function decryptRequestBodyMiddleware(
     }
 
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
-    const userId = req.user?.id;
 
-    if (!sessionId || !userId) {
+    if (!sessionId) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
         method,
         path: req.path,
-        hasUserId: Boolean(userId),
         hasSessionId: Boolean(sessionId),
       });
       getCryptoOperations().add(1, {
@@ -65,7 +63,7 @@ export async function decryptRequestBodyMiddleware(
       path: req.path,
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId, userId);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
       method,
@@ -97,12 +95,11 @@ export function encryptResponseBodyMiddleware(
 
   res.json = ((body?: unknown): Response => {
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
-    const userId = req.user?.id;
-    if (!sessionId || !userId || !body || typeof body !== 'object') {
+    if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId, userId)
+    void getEncryptionProvider().encryptResponse(body, sessionId)
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {

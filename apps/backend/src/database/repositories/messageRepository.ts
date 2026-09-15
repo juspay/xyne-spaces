@@ -7,6 +7,8 @@ import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from
 
 //import { extractAllMentions } from '@/utils/mentionParser';
 export interface CreateMessageInput {
+  /** Caller-supplied id, so a conversation can reference the message before it exists. */
+  messageId?: string;
   conversationId: string;
   childConversationId?: string;
   senderId: string;
@@ -171,6 +173,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
      const workspaceId = await this.resolveMessageWorkspaceId(data);
      const result = await this.db.message.create({
         data: {
+          ...(data.messageId && { messageId: data.messageId }),
           conversationId: data.conversationId,
           senderId: data.senderId,
           workspaceId,

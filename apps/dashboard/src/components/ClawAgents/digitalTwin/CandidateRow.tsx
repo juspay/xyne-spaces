@@ -1,6 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { Check, Loader2, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
+
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { cn } from '@/utils/classNames';
 import { usePatchDigitalTwinCandidate } from '@/hooks/useClawDigitalTwin';
@@ -110,6 +111,7 @@ export const CandidateRow = ({
               <button
                 type='button'
                 onClick={() => void handleSave()}
+                data-ph-capture-attribute-track-id='digital_twin_save_candidate_edit'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin save candidate edit'
                 disabled={isBusy}
@@ -162,6 +164,7 @@ export const CandidateRow = ({
               <button
                 type='button'
                 onClick={() => void handleApprove()}
+                data-ph-capture-attribute-track-id='digital_twin_approve_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin approve candidate'
                 disabled={isBusy}
@@ -178,6 +181,7 @@ export const CandidateRow = ({
               <button
                 type='button'
                 onClick={() => void handleReject()}
+                data-ph-capture-attribute-track-id='digital_twin_reject_candidate'
                 data-track-category='Claw Agents'
                 data-track-name='Digital Twin reject candidate'
                 disabled={isBusy}

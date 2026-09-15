@@ -83,6 +83,8 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
           <Drawer.Overlay
             className='fixed inset-0 z-50 bg-background/80 backdrop-blur-[2px]'
             onClick={() => setIsOpen(false)}
+            data-track-category='MOBILE_PROFILE_MENU'
+            data-track-name='CLOSE_USER_MENU_BACKDROP'
           />
           <Drawer.Content
             asChild

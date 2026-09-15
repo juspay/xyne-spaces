@@ -24,6 +24,7 @@ import {
   sdlcClawDeadlineExpired,
   sdlcClawTimeoutMessage,
 } from './sdlcClawDeadline';
+import { requireSdlcChannelId } from './sdlcChannelMembership';
 import { shouldHandleSdlcCallback } from './sdlcCallbackPolicy';
 import { allBaselinesReady } from './sdlcProgressiveGate';
 import { isSafeSdlcGitRef, requireSdlcBaseBranch } from './sdlcRepositoryContext';
@@ -44,6 +45,8 @@ interface ClawCallbackPayload {
 
 interface ExecutionContext {
   repoId: string;
+  /** The hub this run started from. Re-resolving later would pick the oldest. */
+  channelId?: string;
   phase: string;
   agentSlug?: typeof SDLC_AGENT_SLUG;
   conversationId?: string;
@@ -76,11 +79,12 @@ export class SdlcClawExecutionService {
       include: { workflow: true, sdlcRepo: true },
     });
     const repo = execution?.sdlcRepo;
-    if (!execution || !repo?.channelId || !repo.projectId || !execution.createdBy) {
+    if (!execution || !repo?.projectId || !execution.createdBy) {
       throw new Error(`Invalid SDLC setup execution ${executionId}`);
     }
     const repository = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
     const current = this.readContext(execution.context, repo.id);
+    const channelId = await this.runChannelId(current, repo.id);
     const [user, wikiState] = await Promise.all([
       this.requireUser(execution.createdBy),
       // A setup retry may resume hours after Wiki state changed. Re-resolve it
@@ -91,7 +95,7 @@ export class SdlcClawExecutionService {
       current.generationCommit || (await sdlcVcs.resolveBaseBranchHead(repo.id));
     const completed = current.refreshExisting
       ? new Set(current.completedBaselineKinds ?? [])
-      : await this.completedBaselineKinds(repo.channelId, execution.id);
+      : await this.completedBaselineKinds(channelId, execution.id);
     const definition = BASELINE_DEFINITIONS.find((item) => !completed.has(item.kind));
     if (!definition) {
       await this.finishExecution(execution.id, execution.workflowId, {
@@ -145,7 +149,7 @@ export class SdlcClawExecutionService {
         repoName: repo.name,
         repoUrl: repository.cloneUrl,
         baseBranch: requireSdlcBaseBranch(repo.baseBranch),
-        channelId: repo.channelId,
+        channelId,
         setupExecutionId: execution.id,
         definition,
         wikiState,
@@ -157,7 +161,7 @@ export class SdlcClawExecutionService {
       callbackUrl: this.callbackUrl(execution.id, `baseline-${definition.kind}`),
       callbackSecret: config.xyneClaw.s2sKey,
       conversationId,
-      channelId: repo.channelId,
+      channelId,
       workspaceId: this.requiredWorkspaceId(repo.workspaceId),
       executionProfile: 'sdlc',
       sdlcOperation: 'baseline',
@@ -174,10 +178,14 @@ export class SdlcClawExecutionService {
     return true;
   }
 
+  /** The run's hub. The fallback is only for runs queued before it was stamped. */
+  private async runChannelId(context: ExecutionContext, repoId: string): Promise<string> {
+    return context.channelId ?? requireSdlcChannelId(this.prisma, repoId);
+  }
+
   private async resolveBaselineWikiState(repoId: string): Promise<BaselineWikiState> {
     const link = await this.prisma.sdlcEntityLink.findFirst({
       where: {
-        repoId,
         sourceType: 'REPOSITORY',
         sourceId: repoId,
         targetType: 'WORKFLOW_EXECUTION',
@@ -215,7 +223,8 @@ export class SdlcClawExecutionService {
       this.prisma.repo.findUnique({ where: { id: current.repoId } }),
       this.requireUser(execution.createdBy),
     ]);
-    if (!repo?.channelId) throw new Error('SDLC repository unavailable');
+    if (!repo) throw new Error('SDLC repository unavailable');
+    const channelId = await this.runChannelId(current, repo.id);
     const repository = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
     const conversationId = current.conversationId || `chat-sdlc-work-${execution.id}`;
     const sessionId = randomUUID();
@@ -264,7 +273,7 @@ export class SdlcClawExecutionService {
       callbackUrl: this.callbackUrl(execution.id, 'work'),
       callbackSecret: config.xyneClaw.s2sKey,
       conversationId,
-      channelId: repo.channelId,
+      channelId,
       workspaceId: this.requiredWorkspaceId(repo.workspaceId),
       executionProfile: 'sdlc',
       sdlcOperation: 'work',
@@ -489,24 +498,18 @@ export class SdlcClawExecutionService {
         prUrl: true,
         repositoryUrl: true,
         ticketId: true,
+        // The execution that opened the PR names its repository; the TICKET ->
+        // PULL_REQUEST link describes the ticket, not the repo.
+        workflowExecution: { select: { context: true } },
       },
       orderBy: { updatedAt: 'asc' },
       take: 25,
     });
     if (pullRequests.length === 0) return;
-    const links = await this.prisma.sdlcEntityLink.findMany({
-      where: {
-        targetType: 'PULL_REQUEST',
-        relationType: 'PULL_REQUEST',
-        targetId: { in: pullRequests.map((pullRequest) => pullRequest.id) },
-      },
-      select: { targetId: true, repoId: true },
-    });
-    const repoIdByPullRequest = new Map(links.map((link) => [link.targetId, link.repoId]));
     const repository = new PRMetricsRepository();
     const results = await Promise.allSettled(
       pullRequests.map(async (pullRequest) => {
-        const repoId = repoIdByPullRequest.get(pullRequest.id);
+        const repoId = this.readContext(pullRequest.workflowExecution?.context).repoId;
         if (!repoId || !pullRequest.ticketId) return;
         const inspection = await sdlcVcs.inspectPullRequest(repoId, pullRequest.prId);
         if (inspection.state === 'MERGED') {
@@ -570,11 +573,12 @@ export class SdlcClawExecutionService {
       throw new Error('Invalid baseline callback');
     const context = await this.executionContext(executionId);
     const repo = await this.prisma.repo.findUnique({ where: { id: context.repoId } });
-    if (!repo?.channelId) throw new Error('SDLC repository unavailable');
+    if (!repo) throw new Error('SDLC repository unavailable');
+    const channelId = await this.runChannelId(context, repo.id);
     const reconciled = new Set(context.reconciledBaselineKinds ?? []);
     const completed = context.refreshExisting
       ? new Set(context.completedBaselineKinds ?? [])
-      : await this.completedBaselineKinds(repo.channelId, executionId);
+      : await this.completedBaselineKinds(channelId, executionId);
     if (context.refreshExisting) completed.add(kind);
     if (context.refreshExisting ? !reconciled.has(kind) : !completed.has(kind)) {
       throw new Error(`Claw completed without creating ${kind}`);
@@ -588,7 +592,7 @@ export class SdlcClawExecutionService {
     if (!active) return;
     if (completed.size === BASELINE_DEFINITIONS.length) {
       const baselines = await this.prisma.sdlcArtifact.findMany({
-        where: { canvas: { is: { channelId: repo.channelId } } },
+        where: { repoId: repo.id, canvas: { is: { channelId } } },
         select: { artifactType: true, artifactStatus: true },
       });
       const terminalPhase = allBaselinesReady(baselines) ? 'APPROVED' : 'READY_FOR_REVIEW';
@@ -620,6 +624,7 @@ export class SdlcClawExecutionService {
     if (!repo || !context.ticketId || !execution?.createdBy) {
       throw new Error('SDLC work context is incomplete');
     }
+    const channelId = await this.runChannelId(context, repo.id);
     const branchName = this.requiredString(result.branchName, 'branchName');
     const commitHash = this.requiredString(result.commitHash, 'commitHash');
     const pullRequestUrl = this.requiredString(result.pullRequestUrl, 'pullRequestUrl');
@@ -657,8 +662,8 @@ export class SdlcClawExecutionService {
       }),
       this.prisma.sdlcEntityLink.upsert({
         where: {
-          repoId_sourceType_sourceId_targetType_targetId_relationType: {
-            repoId: repo.id,
+          channelId_sourceType_sourceId_targetType_targetId_relationType: {
+            channelId,
             sourceType: 'TICKET',
             sourceId: context.ticketId,
             targetType: 'PULL_REQUEST',
@@ -668,7 +673,7 @@ export class SdlcClawExecutionService {
         },
         create: {
           workspaceId: this.requiredWorkspaceId(repo.workspaceId),
-          repoId: repo.id,
+          channelId,
           sourceType: 'TICKET',
           sourceId: context.ticketId,
           targetType: 'PULL_REQUEST',

@@ -143,6 +143,7 @@ export function AssigneePicker({
         <div className='overflow-y-auto flex-1'>
           <button
             type='button'
+            data-ph-capture-attribute-track-id='ticket_unassign_row'
             onClick={e => {
               e.stopPropagation();
               assign(null);
@@ -163,6 +164,7 @@ export function AssigneePicker({
             <button
               key={user.id}
               type='button'
+              data-ph-capture-attribute-track-id='ticket_assign_row'
               onClick={e => {
                 e.stopPropagation();
                 handleSelectUser(user);

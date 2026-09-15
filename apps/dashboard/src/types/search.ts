@@ -128,13 +128,15 @@ export interface VespaSearchFilters {
   // Ticket-specific filters
   priority?: string; // HIGH, MEDIUM, LOW, CRITICAL
   board?: string; // Board name/ID
-  tags?: string; // Comma-separated tags
+  tags?: string; // Comma-separated tags — ticket labels and message tags alike
+  entity?: string; // Comma-separated entity names — AND-ed across messages and tickets
   before?: string; // Created before date (multiple formats)
   after?: string; // Created after date (multiple formats)
   on?: string; // Created on specific date (multiple formats)
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  userGroup?: string; // User group ID(s) - comma-separated
   dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
@@ -146,6 +148,11 @@ export interface VespaSearchFilters {
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
+
+  // Cmd-K exact-match toggle. The query is quoted on the way out (see
+  // buildVespaSearchParams) so the backend reads it as a phrase; the quotes are never
+  // shown in the box, which is why this is a flag rather than part of the text.
+  exactMatch?: boolean;
 
   // Cmd-K "Include bot messages" toggle. Default off → backend excludes BOT messages.
   includeBotMessages?: boolean;

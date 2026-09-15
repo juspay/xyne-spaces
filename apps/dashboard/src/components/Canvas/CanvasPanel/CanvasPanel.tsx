@@ -13,6 +13,7 @@ import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { queries } from '../../../zero/queries';
 import type { Canvas } from '../Canvas.types';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import { logger, Event } from '../../../utils/logger';
@@ -42,7 +43,7 @@ import {
 } from './canvasSidebarWidth';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { cn } from '../../../utils/classNames';
-import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
+import { APP_NO_DRAG_STYLE, standaloneNavigate } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -53,6 +54,7 @@ import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
 };
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -87,6 +89,10 @@ const CanvasPanel = (): ReactElement => {
   const effectiveGroupedSearchQuery =
     debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
+  const [lastCanvas, lastCanvasDetails] = useCachedQuery(
+    queries.getCanvas({ canvasId: lastCanvasId ?? '' }),
+    { enabled: !!lastCanvasId },
+  );
 
   // react-resizable-panels snaps flex-basis instantly with no CSS transition of its
   // own. We animate the toggle here (not permanently, so manual drag-resize stays
@@ -111,29 +117,29 @@ const CanvasPanel = (): ReactElement => {
     return (): void => window.clearTimeout(timeoutId);
   }, [isSidebarCollapsed]);
 
-  // Remember which canvas was last opened
-  useEffect(() => {
-    if (
-      selectedCanvasId &&
-      selectedCanvasId !== 'new' &&
-      selectedCanvasId !== lastCanvasId &&
-      !deletedCanvasIdsRef.current.has(selectedCanvasId)
-    ) {
-      setLastCanvasId(selectedCanvasId);
-    }
-  }, [selectedCanvasId, lastCanvasId, setLastCanvasId]);
-
   // Restore last opened canvas when landing on the canvas index
   useEffect(() => {
-    if (
-      !isMobile &&
-      isOnIndexRoute &&
-      lastCanvasId &&
-      !deletedCanvasIdsRef.current.has(lastCanvasId)
-    ) {
+    if (!lastCanvasId) return;
+
+    if (lastCanvasDetails.type !== 'complete') return;
+
+    if (!lastCanvas) {
+      setLastCanvasId(null);
+      return;
+    }
+
+    if (!isMobile && isOnIndexRoute && !deletedCanvasIdsRef.current.has(lastCanvasId)) {
       void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
     }
-  }, [isMobile, isOnIndexRoute, lastCanvasId, navigate]);
+  }, [
+    isMobile,
+    isOnIndexRoute,
+    lastCanvas,
+    lastCanvasDetails.type,
+    lastCanvasId,
+    navigate,
+    setLastCanvasId,
+  ]);
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -193,15 +199,12 @@ const CanvasPanel = (): ReactElement => {
         return;
       }
 
-      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // Navigate to the canvas in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
-      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
-      if (!isMobile && isCmdClick) {
-        window.open(canvasUrl, '_blank');
-      } else {
-        void navigate(canvasUrl, { state: { canvas } });
-      }
+      standaloneNavigate(navigate, canvasUrl, {
+        event: !isMobile && 'button' in e ? e : undefined,
+        state: { canvas },
+      });
     },
     [navigate, isMobile],
   );

@@ -134,6 +134,11 @@ export interface importedTicketFields {
   projectId: string;
 }
 
+export interface importedMailFields {
+  channelId: string;
+  channelName: string;
+}
+
 export interface importedChannelFields {
   isIm: boolean;
   isMpim: boolean;
@@ -465,6 +470,8 @@ export interface VespaMailDocument extends VespaDocument {
   parentThreadId?: string;
   mailId?: string;
   xyneId?: string;
+  /** Project.code of the linked ticket — the "<code>" half of xyneId. */
+  projectCode?: string;
   ticketFormFields?: TicketFormFields;
   ticketFormFieldValues?: string[]; // Indexed copy used for Desk/All lexical search.
   subject: string;

@@ -7,6 +7,7 @@ import type {
   SdlcWikiPageAction,
   WriteSdlcWikiPageInput,
 } from '@xyne/shared';
+import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -21,6 +22,7 @@ import {
   stringifySdlcSourceReferences,
 } from '@xyne/shared';
 import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
+import { resolveSdlcChannelId } from '../sdlcChannelMembership';
 import {
   assertWikiCommitAssignment,
   beginWikiCheckpoint,
@@ -52,8 +54,8 @@ import { auditWikiContent, type WikiAuditFinding } from './wikiContentAudit';
 import { validateWikiMermaid } from './wikiMermaidValidation';
 
 interface WikiPageStoreDependencies {
-  readCanvas(canvasId: string): Promise<BlockNoteBlock[]>;
-  syncCanvas(canvasId: string, content: BlockNoteBlock[]): Promise<boolean>;
+  readCanvas(canvasId: string, userId: string): Promise<BlockNoteBlock[]>;
+  syncCanvas(canvasId: string, content: BlockNoteBlock[], userId: string): Promise<boolean>;
   indexCanvas(input: { canvasId: string; userId: string; workspaceId: string }): Promise<void>;
   verifySourcePaths(repoId: string, commitSha: string, sourcePaths: string[]): Promise<void>;
   verifySourceRanges(
@@ -70,6 +72,7 @@ interface WikiPageRecord {
   folderId: string | null;
   folder: { name: string } | null;
   metadata: Prisma.JsonValue;
+  createdBy: string;
 }
 
 interface WikiEntityRecord {
@@ -173,6 +176,7 @@ export class SdlcWikiPageStore {
         folderId: true,
         folder: { select: { name: true } },
         metadata: true,
+        createdBy: true,
       },
     });
     const entities = await this.entityRows(pages.map((page) => page.id));
@@ -195,7 +199,7 @@ export class SdlcWikiPageStore {
         }
         return [
           (async () => {
-            const markdown = await this.readLiveMarkdown(page);
+            const markdown = await this.readLiveMarkdown(page, input.userId);
             return {
               path: metadata.wikiRelativePath as string,
               title: page.title,
@@ -285,7 +289,7 @@ export class SdlcWikiPageStore {
     const archived = isWikiArchiveFolder(page.folder?.name);
     if (archived && !input.includeArchived) throw new AppError('Wiki page not found', 404);
     const entity = await this.entityRow(page.id);
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, input.userId);
     return {
       path,
       title: page.title,
@@ -375,9 +379,11 @@ export class SdlcWikiPageStore {
 
     const repo = await this.prisma.repo.findUnique({
       where: { id: context.repoId },
-      select: { id: true, workspaceId: true, projectId: true, channelId: true, url: true },
+      select: { id: true, workspaceId: true, projectId: true, url: true },
     });
-    if (!repo?.workspaceId || !repo.projectId || !repo.channelId) {
+    const channelId =
+      context.channelId ?? (repo && (await resolveSdlcChannelId(this.prisma, repo.id)));
+    if (!repo?.workspaceId || !repo.projectId || !channelId) {
       throw new AppError('Wiki repository is unavailable', 404);
     }
     const requestedReferences = (
@@ -420,18 +426,13 @@ export class SdlcWikiPageStore {
             }),
           };
     const action = await this.resolveSectionAction({
-      repo: { channelId: repo.channelId, id: repo.id },
+      repo: { channelId, id: repo.id },
       action: pageAction,
+      userId: execution.createdBy,
     });
     if (action.action !== 'archive') validateWikiMermaid(action.markdown);
     const revision = await this.applyPageAction({
-      repo: repo as {
-        id: string;
-        workspaceId: string;
-        projectId: string;
-        channelId: string;
-        url: string;
-      },
+      repo: { ...repo, workspaceId: repo.workspaceId, projectId: repo.projectId, channelId },
       actorId: execution.createdBy,
       executionId: execution.id,
       sessionId: input.sessionId,
@@ -542,21 +543,23 @@ export class SdlcWikiPageStore {
     }
     const repo = await this.prisma.repo.findUnique({
       where: { id: context.repoId },
-      select: { id: true, workspaceId: true, projectId: true, channelId: true },
+      select: { id: true, workspaceId: true, projectId: true },
     });
-    if (!repo?.workspaceId || !repo.projectId || !repo.channelId) throw new AppError('Wiki repository is unavailable', 404);
+    const channelId =
+      context.channelId ?? (repo && (await resolveSdlcChannelId(this.prisma, repo.id)));
+    if (!repo?.workspaceId || !repo.projectId || !channelId) throw new AppError('Wiki repository is unavailable', 404);
     const wikiRepo = {
       id: repo.id,
       workspaceId: repo.workspaceId,
       projectId: repo.projectId,
-      channelId: repo.channelId,
+      channelId,
     };
     const source = await this.findPage(wikiRepo.channelId, wikiRepo.id, sourcePath);
     const destination = await this.findPage(wikiRepo.channelId, wikiRepo.id, destinationPath);
     if (source && destination) throw new AppError(`Wiki page already exists: ${destinationPath}`, 409);
     if (!source && !destination) throw new AppError(`Wiki page does not exist: ${sourcePath}`, 409);
     const page = source ?? destination!;
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, execution.createdBy);
     const contentHash = markdownHash(markdown);
     if (contentHash !== input.request.expectedContentHash) {
       throw new AppError(`[CONTENT_CONFLICT] Wiki page changed concurrently: ${sourcePath}`, 409);
@@ -764,6 +767,7 @@ export class SdlcWikiPageStore {
   private async resolveSectionAction(input: {
     repo: { channelId: string; id: string };
     action: SdlcWikiPageAction;
+    userId: string;
   }): Promise<WholeWikiPageAction> {
     if (!['replace_section', 'insert_section', 'remove_section'].includes(input.action.action)) {
       return input.action as WholeWikiPageAction;
@@ -778,7 +782,7 @@ export class SdlcWikiPageStore {
     };
     const page = await this.findPage(input.repo.channelId, input.repo.id, sectionAction.path);
     if (!page) throw new AppError(`Wiki page does not exist: ${sectionAction.path}`, 409);
-    const markdown = await this.readLiveMarkdown(page);
+    const markdown = await this.readLiveMarkdown(page, input.userId);
     if (markdownHash(markdown) !== sectionAction.expectedContentHash) {
       throw new AppError(
         `[CONTENT_CONFLICT] Wiki page changed concurrently: ${sectionAction.path}`,
@@ -828,7 +832,7 @@ export class SdlcWikiPageStore {
       currentSourcePaths: parseSdlcSourcePaths(existingEntity?.sourcePaths),
     });
 
-    const currentContent = existing ? await this.readLiveContent(existing) : [];
+    const currentContent = existing ? await this.readLiveContent(existing, input.actorId) : [];
     const currentMarkdown = await convertBlockNoteToMarkdown(currentContent);
     const currentHash = markdownHash(currentMarkdown);
     const markdown = input.action.action === 'archive' ? currentMarkdown : input.action.markdown;
@@ -852,7 +856,8 @@ export class SdlcWikiPageStore {
         if (input.action.action !== 'archive') {
           const repaired = await this.dependencies.syncCanvas(
             existing.id,
-            existing.content as unknown as BlockNoteBlock[]
+            existing.content as unknown as BlockNoteBlock[],
+            input.actorId
           );
           if (!repaired) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
         }
@@ -1034,7 +1039,14 @@ export class SdlcWikiPageStore {
     }
 
     if (input.action.action !== 'archive') {
-      const synced = await this.dependencies.syncCanvas(canvas.id, content);
+      // Sync as the canvas's original creator, not the triggering actor —
+      // wiki canvases grant the whole repo channel VIEWER-only access by
+      // design (see sdlcChannelCanvasParticipant), so most actors triggering
+      // a sync legitimately lack canEdit. The creator always has canEdit via
+      // checkCanvasAccess's isCreator check, so this keeps the sync working
+      // once y-sweet revalidates the token's authorization level.
+      const syncActorId = existing?.createdBy ?? input.actorId;
+      const synced = await this.dependencies.syncCanvas(canvas.id, content, syncActorId);
       if (!synced) throw new AppError(`Y-Sweet sync failed for Wiki page: ${path}`, 503);
     }
     await this.dependencies.indexCanvas({
@@ -1074,22 +1086,23 @@ export class SdlcWikiPageStore {
     throw error;
   }
 
-  private async readLiveMarkdown(page: WikiPageRecord): Promise<string> {
-    return convertBlockNoteToMarkdown(await this.readLiveContent(page));
+  private async readLiveMarkdown(page: WikiPageRecord, userId: string): Promise<string> {
+    return convertBlockNoteToMarkdown(await this.readLiveContent(page, userId));
   }
 
-  private async readLiveContent(page: WikiPageRecord): Promise<BlockNoteBlock[]> {
-    const live = await this.dependencies.readCanvas(page.id);
+  private async readLiveContent(page: WikiPageRecord, userId: string): Promise<BlockNoteBlock[]> {
+    const live = await this.dependencies.readCanvas(page.id, userId);
     return live.length > 0 ? live : (page.content as unknown as BlockNoteBlock[]);
   }
 
+  /** Two repositories in one hub can both have a page at the same path. */
   private async findPage(
     channelId: string,
-    _repoId: string,
+    repoId: string,
     path: string
   ): Promise<WikiPageRecord | null> {
     const pages = await this.prisma.canvas.findMany({
-      where: { channelId, sdlcArtifact: { is: { artifactType: 'WIKI' } } },
+      where: { channelId, sdlcArtifact: { is: { artifactType: 'WIKI', repoId } } },
       select: {
         id: true,
         title: true,
@@ -1097,6 +1110,7 @@ export class SdlcWikiPageStore {
         folderId: true,
         folder: { select: { name: true } },
         metadata: true,
+        createdBy: true,
       },
     });
     return (
@@ -1139,16 +1153,21 @@ export class SdlcWikiPageStore {
     workspaceId: string;
     userId: string;
   }): Promise<{ id: string; channelId: string }> {
-    const repo = await this.prisma.repo.findFirst({
+    // Membership is the read check: the actor must participate in a hub this
+    // repository belongs to.
+    const membership = await this.prisma.sdlcEntityLink.findFirst({
       where: {
-        id: input.repoId,
         workspaceId: input.workspaceId,
+        targetType: 'REPOSITORY',
+        targetId: input.repoId,
+        relationType: SDLC_MEMBERSHIP_RELATION,
         channel: { participants: { some: { userId: input.userId } } },
       },
-      select: { id: true, channelId: true },
+      orderBy: { createdAt: 'asc' },
+      select: { channelId: true },
     });
-    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
-    return { id: repo.id, channelId: repo.channelId };
+    if (!membership?.channelId) throw new AppError('SDLC repository not found', 404);
+    return { id: input.repoId, channelId: membership.channelId };
   }
 
   private async ensureFolder(

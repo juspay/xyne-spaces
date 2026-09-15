@@ -46,6 +46,8 @@ const AddReactionDrawerMobile = ({
         <Drawer.Overlay
           className='fixed inset-0 z-[100] bg-black/30'
           onClick={() => setEmojiPickerOpen(false)}
+          data-track-category='MESSAGE'
+          data-track-name='CLOSE_ADD_REACTION_DRAWER_BACKDROP'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}

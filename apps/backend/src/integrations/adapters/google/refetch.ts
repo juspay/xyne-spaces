@@ -224,7 +224,10 @@ export class GoogleRefetch extends BaseRefetch {
       }
     }
 
-    logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
+    logger.info(
+      `${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`,
+      { dlEmail: options.dlEmail, ingestChannelId },
+    );
     return { processed, newTickets, skipped, errors };
   }
 

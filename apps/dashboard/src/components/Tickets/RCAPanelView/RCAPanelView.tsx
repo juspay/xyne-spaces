@@ -243,6 +243,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
           className='px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'
           onClick={() => void handleCreateRCA()}
           disabled={isCreatingRCA}
+          data-ph-capture-attribute-track-id='rca_start_from_panel'
           data-track-category='RCA'
           data-track-name='StartRCAFromPanel'
         >

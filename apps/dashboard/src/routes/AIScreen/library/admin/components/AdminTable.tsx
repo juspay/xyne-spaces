@@ -66,6 +66,8 @@ export function AdminPager({
           type='button'
           variant='outline'
           onClick={onPrev}
+          data-track-category='Claw Admin'
+          data-track-name='ADMIN_PAGER_PREV'
           disabled={offset === 0}
           className='disabled:pointer-events-auto'
         >
@@ -76,6 +78,8 @@ export function AdminPager({
           type='button'
           variant='outline'
           onClick={onNext}
+          data-track-category='Claw Admin'
+          data-track-name='ADMIN_PAGER_NEXT'
           disabled={offset + count >= total}
           className='disabled:pointer-events-auto'
         >

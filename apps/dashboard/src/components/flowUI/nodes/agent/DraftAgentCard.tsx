@@ -2,11 +2,11 @@ import React, { useContext, useEffect, useState } from 'react';
 import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
-import { useAgentProgress } from '../../../../hooks/useAgentProgress';
 import { cn } from '../../../../utils/classNames';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
+import { ChatWithAgentButton } from './ChatWithAgentButton';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -58,11 +58,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id]);
 
-  // Approving mid-run dispatches work that collides with the active run at the
-  // runtime session lock. The server also fails this closed; disabling the
-  // button is just the clearer signal.
-  const { agents } = useAgentProgress(conversationId || undefined);
-  const agentRunning = agents.length > 0;
   const locked = state.submitting || decided || pending !== null;
 
   const toggle = (id: string): void => {
@@ -79,7 +74,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   };
 
   const submit = async (actionId: 'agent-draft-approve' | 'agent-draft-decline'): Promise<void> => {
-    if (locked || (actionId === 'agent-draft-approve' && agentRunning)) {
+    if (locked) {
       return;
     }
     setPending(actionId === 'agent-draft-approve' ? 'approve' : 'reject');
@@ -123,8 +118,14 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     </div>
   );
 
-  const approveLabel =
-    pending === 'approve' ? 'Creating…' : agentRunning ? 'Agent is working…' : 'Create Agent';
+  const decidedFooter = (
+    <div className='flex w-full items-center justify-between gap-3'>
+      {auditNode}
+      {props.phase === 'created' && <ChatWithAgentButton slug={props.agent.slug} />}
+    </div>
+  );
+
+  const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
 
   const interactive = decided ? undefined : { selected, onToggle: toggle, disabled: locked };
 
@@ -152,17 +153,13 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
+        data-ph-capture-attribute-track-id='agent_draft_decline'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {pending === 'reject' ? 'Declining…' : 'Decline'}
       </button>
 
       <div className='flex shrink-0 items-center gap-2'>
-        {agentRunning && (
-          <span className='hidden text-xs text-muted-foreground sm:inline'>
-            Approve once it finishes.
-          </span>
-        )}
         {/* Placeholder from the frame — no edit flow exists yet. Rendered so the
             layout matches the design; wire it up when the behaviour is decided. */}
         <button
@@ -180,14 +177,13 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         <button
           type='button'
           onClick={() => void submit('agent-draft-approve')}
-          disabled={locked || agentRunning}
+          disabled={locked}
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
+          data-ph-capture-attribute-track-id='agent_draft_approve'
         >
-          {(pending === 'approve' || agentRunning) && (
-            <Spinner size={14} className='animate-spin' />
-          )}
+          {pending === 'approve' && <Spinner size={14} className='animate-spin' />}
           {approveLabel}
         </button>
       </div>
@@ -197,14 +193,15 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   return (
     <CardShell style={node.style}>
       {/* Inset panel — the frame's white card sitting on the shell's fill.
-          Radius is 11px, not the shell's 12px (`rounded-xl`): the panel sits
-          flush inside the shell's 1px border, so the radius it has to follow is
-          12 − 1. Matching the shell's 12px instead makes the two curves fight at
-          the top corners — concentric radii differ by the inset. */}
+          Bottom edge only: the shell already draws the outline, so bordering all
+          four sides stacks two 1px strokes on every edge and reads as a heavy
+          double rule. What is left is a single hairline dividing the body from
+          the chin. Bottom radius stays 11px (the shell's 12px minus its 1px
+          border) so the panel's curve sits concentric with the shell's. */}
       {/* Identical in every phase — the state reads from the chip and the chin
           (footer) alone, so a declined agent is presented exactly as a pending
           one rather than dimmed into a different-looking card. */}
-      <div className='flex flex-col gap-4 rounded-[11px] border border-border bg-card/80 p-3'>
+      <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 p-3'>
         <div className='flex h-6 items-center gap-1.5 pl-1'>
           <div className='flex min-w-0 flex-1 items-center gap-1.5'>
             <span className='text-sm font-semibold leading-5 tracking-[-0.5px] text-muted-foreground'>
@@ -264,10 +261,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           decision lands (an audit line is shorter than a button row, and shorter
           again when there is no decider avatar), reflowing the thread under it. */}
       <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
-        {/* A decided card shows the audit line only. No connect prompt in either
-            phase — it belongs with the capability chips, which this card no
-            longer renders; the expanded preview still surfaces both. */}
-        {decided ? auditNode : actionControls}
+        {/* A decided card shows the audit line, plus the chat entry point once the
+            agent exists. No connect prompt in either phase — it belongs with the
+            capability chips, which this card no longer renders; the expanded
+            preview still surfaces both. */}
+        {decided ? decidedFooter : actionControls}
       </div>
 
       <AgentPreview
@@ -279,7 +277,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         note={props.note}
         statePill={statePill}
         conversationId={conversationId ?? undefined}
-        footer={decided ? auditNode : actionControls}
+        footer={decided ? decidedFooter : actionControls}
       />
     </CardShell>
   );

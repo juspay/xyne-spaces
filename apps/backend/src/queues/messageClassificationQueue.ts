@@ -5,10 +5,17 @@ import { config } from '@/config/env';
 import { classifyAndTagThread } from '@/services/messageClassification';
 
 /**
- * Wait this long before classifying. Short enough to read as immediate, long enough that a
- * burst of replies collapses into one pass instead of one call per message.
+ * Wait for the thread to go QUIET this long before classifying.
+ *
+ * Ten minutes, not seconds. A thread judged 30s after its opening message is judged when it
+ * is one message long — and at that moment it cannot yet be a HOW_TO, a WHAT_HAPPENED, a
+ * WHY_DECISION or any other answer type, because the answer has not been written. Classifying
+ * that early does not just produce a stale tag, it makes over half the vocabulary unreachable.
+ *
+ * The delay is refreshed by every new message (see enqueueForMessage), so an active thread is
+ * read once after it settles rather than once per burst.
  */
-const DEBOUNCE_MS = Number(process.env['MESSAGE_CLASSIFICATION_DEBOUNCE_MS'] ?? 30_000);
+const DEBOUNCE_MS = Number(process.env['MESSAGE_CLASSIFICATION_DEBOUNCE_MS'] ?? 10 * 60_000);
 
 const QUEUE_NAME = 'message-classification';
 const JOB_NAME = 'classify-message';
@@ -111,8 +118,11 @@ class MessageClassificationQueue {
    * silently dropped every new thread while replies worked. All real gating (thread size,
    * already-classified, no project) happens in the consumer, which runs after commit.
    *
-   * The debounce collapses a burst of replies into one pass; the jobId is the thread, so
-   * Bull drops repeat adds while that job is still pending.
+   * The jobId is the thread, and Bull SILENTLY IGNORES an add whose jobId already exists —
+   * including a COMPLETED one, which it retains (removeOnComplete: 100). Adding blindly
+   * therefore does neither of the things this needs: a reply would not push the quiet window
+   * back, and a thread classified once could never be looked at again until its finished job
+   * aged out of the last hundred. Both are why an existing job is removed first.
    */
   async enqueueForMessage(conversationId: string): Promise<void> {
     if (!conversationId) return;
@@ -122,12 +132,20 @@ class MessageClassificationQueue {
       return;
     }
 
+    const jobId = `classify:${conversationId}`;
     try {
-      await this.queue.add(
-        JOB_NAME,
-        { conversationId },
-        { jobId: `classify:${conversationId}`, delay: DEBOUNCE_MS },
-      );
+      const existing = await this.queue.getJob(jobId);
+      if (existing) {
+        const state = await existing.getState();
+        // Leave a job that is already running: killing it mid-LLM-call would waste the call
+        // and the reply that triggered this will be picked up by the pass after it.
+        if (state === 'active') return;
+        // Delayed (still counting down), or finished from an earlier pass — either way it is
+        // replaced, which is what turns the delay into a rolling quiet window.
+        await existing.remove();
+      }
+
+      await this.queue.add(JOB_NAME, { conversationId }, { jobId, delay: DEBOUNCE_MS });
     } catch (error) {
       logger.error('[MessageClassificationQueue] Failed to enqueue', { conversationId, error });
     }

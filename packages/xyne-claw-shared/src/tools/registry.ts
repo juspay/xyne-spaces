@@ -135,6 +135,7 @@ register(researchAgent.reviewPullRequest);
 register(createPpt.createPptTool);
 register(createPpt.editPptTool);
 register(reactArtifact.createReactArtifactTool);
+register(reactArtifact.readArtifactAppFileTool);
 
 // Register create-html-report tool — renders a markdown report into a
 // standalone HTML file and attaches it, leaving a short summary inline in

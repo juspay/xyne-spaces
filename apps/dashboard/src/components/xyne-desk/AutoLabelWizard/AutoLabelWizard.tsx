@@ -6,7 +6,9 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { cn } from '../../../utils/classNames';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useUsersById } from '../../../hooks/useUsers';
 import { queries } from '../../../zero/queries';
 import {
   createDeskLabelRules,
@@ -15,7 +17,7 @@ import {
   type Automation,
 } from '../../../api/automationsApi';
 import { EmailReceivedFilterForm } from '../../Automation/AutomationBuilder/TriggerCard/EmailReceivedFilterForm';
-import type { JsonSchema } from '../../Automation/Automation.types';
+import { AutomationStatusValues, type JsonSchema } from '../../Automation/Automation.types';
 import { deskLabelRulesQueryKey, MyAutoLabelRules } from './AutoLabelRules';
 
 const LABEL_COLORS = [
@@ -58,6 +60,8 @@ export interface AutoLabelWizardProps {
   onOpenChange: (open: boolean) => void;
   channelId: string;
   isMember: boolean;
+  /** Hidden on desks with no mailbox folders — there is no Inbox to keep mail in. */
+  showKeepInInbox?: boolean;
   onCreated?: (automations: Automation[]) => void;
 }
 
@@ -66,9 +70,12 @@ export function AutoLabelWizard({
   onOpenChange,
   channelId,
   isMember,
+  showKeepInInbox = true,
   onCreated,
 }: AutoLabelWizardProps): React.ReactElement {
   const queryClient = useQueryClient();
+  const { userID } = useAuthContextValues();
+  const usersById = useUsersById();
   const [view, setView] = useState<WizardView>('create');
   const [step, setStep] = useState<WizardStep>('filters');
   const [emailFilters, setEmailFilters] = useState<Record<string, unknown>>({});
@@ -77,6 +84,7 @@ export function AutoLabelWizard({
   const [labelColor, setLabelColor] = useState<string | undefined>();
   const [labelSearch, setLabelSearch] = useState('');
   const [keepInInbox, setKeepInInbox] = useState(true);
+  const [applyToExisting, setApplyToExisting] = useState(false);
 
   const triggerSchemaQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers', 'EMAIL_RECEIVED'],
@@ -109,6 +117,7 @@ export function AutoLabelWizard({
     setLabelColor(undefined);
     setLabelSearch('');
     setKeepInInbox(true);
+    setApplyToExisting(false);
   }, [open, channelId]);
 
   const emailSchema = useMemo(() => {
@@ -123,10 +132,13 @@ export function AutoLabelWizard({
     return q ? list.filter(l => l.name.toLowerCase().includes(q)) : list;
   }, [catalog, labelSearch]);
 
-  const canCreateLabel = useMemo(() => {
+  const conflictingLabel = useMemo(() => {
     const trimmed = labelSearch.trim();
-    return !!trimmed && !(catalog ?? []).some(l => l.name.toLowerCase() === trimmed.toLowerCase());
+    if (!trimmed) return undefined;
+    return (catalog ?? []).find(l => l.name.toLowerCase() === trimmed.toLowerCase());
   }, [catalog, labelSearch]);
+
+  const canCreateLabel = !!labelSearch.trim() && !conflictingLabel;
 
   const hasConfiguredEmailFilter = Object.values(emailFilters).some(value => {
     if (Array.isArray(value)) {
@@ -152,19 +164,50 @@ export function AutoLabelWizard({
         labelName: labelName.trim(),
         ...(labelColor ? { color: labelColor } : {}),
         ...(labelId ? { labelId } : {}),
-        keepInInbox,
+        keepInInbox: showKeepInInbox ? keepInInbox : true,
+        applyToExisting,
         emailFilters,
       }),
     onSuccess: data => {
       const count = data.automations.length;
       if (!data.created) {
-        toast.info('A matching auto-label rule already exists');
+        // Saving deduped onto a rule the user already had. If that rule is switched
+        // off, say so: a bare "already exists" reads as "you're covered", when in
+        // fact nothing is being labeled and the fix is one toggle away in Rules.
+        const existing = data.automations[0];
+        toast.info(
+          existing && existing.status !== AutomationStatusValues.ACTIVE
+            ? 'A matching auto-label rule already exists, but it is switched off. Activate it from Rules.'
+            : 'A matching auto-label rule already exists',
+        );
       } else {
         toast.success(
           count === 1
             ? 'Auto-label rule created and active'
             : `${count} auto-label rules created and active`,
         );
+      }
+      if (applyToExisting) {
+        // Every non-null result is NOT a queued run: create() dedupes onto an
+        // existing rule, and enqueue() then declines on cooldown or a live job.
+        switch (data.backfill) {
+          case 'enqueued':
+            toast.info('Applying the label to older emails — this runs in the background.');
+            break;
+          case 'already-running':
+            toast.info('This rule is already being applied to older emails.');
+            break;
+          case 'cooldown':
+            toast.warning(
+              'This rule ran over older emails recently. Re-run it from Rules in a few minutes.',
+            );
+            break;
+          case 'inactive':
+            toast.warning('Older emails were not touched — activate the rule first.');
+            break;
+          default:
+            toast.error('Rule saved, but older emails could not be queued. Try again from Rules.');
+        }
       }
       void queryClient.invalidateQueries({
         queryKey: deskLabelRulesQueryKey(channelId),
@@ -173,8 +216,10 @@ export function AutoLabelWizard({
       onOpenChange(false);
     },
     onError: (err: unknown) => {
+      const response = (err as { response?: { status?: number; data?: { error?: string } } })
+        ?.response;
       const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        response?.data?.error ||
         (err instanceof Error ? err.message : 'Failed to create auto-label rules');
       toast.error(message);
     },
@@ -184,7 +229,9 @@ export function AutoLabelWizard({
     id: string,
     name: string,
     color: string | null | undefined,
+    createdBy: string,
   ): void => {
+    if (createdBy !== userID) return;
     setLabelId(id);
     setLabelName(name);
     setLabelColor(color ?? colorForName(name));
@@ -215,6 +262,8 @@ export function AutoLabelWizard({
               size='iconSm'
               className='mt-0.5'
               onClick={() => setView('create')}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-back-to-create'
               aria-label='Back to create rule'
               title='Back to create rule'
             >
@@ -341,17 +390,44 @@ export function AutoLabelWizard({
               data-track-category='xyne-desk'
               data-track-name='auto-label-label-search'
             />
+            {conflictingLabel && (
+              <p
+                className={cn(
+                  'text-[11px]',
+                  conflictingLabel.createdBy === userID
+                    ? 'text-muted-foreground'
+                    : 'text-amber-600',
+                )}
+              >
+                {conflictingLabel.createdBy === userID
+                  ? `“${labelSearch.trim()}” already exists — select it from the list.`
+                  : `A label named “${labelSearch.trim()}” already exists in this channel.`}
+              </p>
+            )}
             <div className='flex flex-col gap-1 max-h-48 overflow-y-auto rounded-md border border-border p-1'>
               {filteredLabels.map(label => {
-                const selected = labelId === label.id || labelName === label.name;
+                const isOwn = label.createdBy === userID;
+                const selected = isOwn && (labelId === label.id || labelName === label.name);
+                const ownerName = isOwn
+                  ? undefined
+                  : usersById.get(label.createdBy)?.name?.trim() || undefined;
                 return (
                   <button
                     key={label.id}
                     type='button'
-                    onClick={() => selectExistingLabel(label.id, label.name, label.color)}
+                    onClick={() =>
+                      selectExistingLabel(label.id, label.name, label.color, label.createdBy)
+                    }
+                    aria-disabled={!isOwn}
+                    title={
+                      isOwn
+                        ? undefined
+                        : `Created by ${ownerName ?? 'a teammate'} — you can't use it in your rules`
+                    }
                     className={cn(
                       'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                      selected ? 'bg-accent' : 'hover:bg-accent/50',
+                      selected ? 'bg-accent' : isOwn && 'hover:bg-accent/50',
+                      !isOwn && 'cursor-not-allowed text-muted-foreground opacity-70',
                     )}
                     data-track-category='xyne-desk'
                     data-track-name='auto-label-pick-existing'
@@ -361,6 +437,14 @@ export function AutoLabelWizard({
                       style={{ backgroundColor: label.color ?? colorForName(label.name) }}
                     />
                     <span className='flex-1 truncate'>{label.name}</span>
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground',
+                        !isOwn && 'max-w-[120px] truncate',
+                      )}
+                    >
+                      {isOwn ? 'You' : (ownerName ?? 'Teammate')}
+                    </span>
                     {selected && <Tag className='size-3.5 text-muted-foreground' />}
                   </button>
                 );
@@ -401,16 +485,35 @@ export function AutoLabelWizard({
                 </span>
               </div>
             )}
+            {showKeepInInbox && (
+              <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
+                <Checkbox
+                  checked={keepInInbox}
+                  onChange={setKeepInInbox}
+                  label='Keep matching emails in Inbox'
+                  size='sm'
+                />
+                <p className='mt-1 pl-5 text-[11px] text-muted-foreground'>
+                  When disabled, inbox label will be removed from matching emails.
+                </p>
+              </div>
+            )}
             <div className='rounded-md border border-border bg-muted/30 px-3 py-2.5'>
               <Checkbox
-                checked={keepInInbox}
-                onChange={setKeepInInbox}
-                label='Keep matching emails in Inbox'
+                checked={applyToExisting}
+                onChange={setApplyToExisting}
+                label='Also apply to existing emails that match'
                 size='sm'
               />
               <p className='mt-1 pl-5 text-[11px] text-muted-foreground'>
-                When disabled, inbox label will be removed from matching emails.
+                Labels matching threads already in this desk. Runs in the background.
               </p>
+              {applyToExisting && showKeepInInbox && !keepInInbox && (
+                <p className='mt-1.5 pl-5 text-[11px] text-amber-600'>
+                  This will also archive every older thread that matches, removing them from your
+                  Inbox.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -419,10 +522,23 @@ export function AutoLabelWizard({
       <div className='flex items-center justify-between gap-2 border-t border-border px-5 py-4'>
         {view === 'rules' ? (
           <>
-            <Button type='button' variant='ghost' size='sm' onClick={() => onOpenChange(false)}>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              onClick={() => onOpenChange(false)}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-rules-close'
+            >
               Close
             </Button>
-            <Button type='button' size='sm' onClick={() => setView('create')}>
+            <Button
+              type='button'
+              size='sm'
+              onClick={() => setView('create')}
+              data-track-category='xyne-desk'
+              data-track-name='auto-label-new-rule'
+            >
               <Plus className='size-4' />
               New rule
             </Button>
@@ -456,6 +572,7 @@ export function AutoLabelWizard({
             size='sm'
             disabled={!canSave || saveMutation.isPending}
             onClick={() => saveMutation.mutate()}
+            trackId='create_auto_label_rule'
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-save'
           >

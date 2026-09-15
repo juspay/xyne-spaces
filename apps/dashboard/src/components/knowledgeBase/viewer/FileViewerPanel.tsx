@@ -378,6 +378,7 @@ export const FileViewerPanel: React.FC<{
           onClick={() => {
             void handleDownload();
           }}
+          data-ph-capture-attribute-track-id='download_document'
           aria-label='Download'
           title='Download'
           className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'

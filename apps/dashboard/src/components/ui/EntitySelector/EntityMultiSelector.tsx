@@ -31,6 +31,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   showSearch = false,
   collapseSelectedAfter,
   collapsedLabel = 'items',
+  matchTriggerWidth = false,
 }) => {
   // ==================== STATE ====================
   const [isOpen, setIsOpen] = useState(false);
@@ -244,6 +245,15 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
               e.stopPropagation();
             }}
             className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
+            // Never narrower than the trigger, matching EntitySelector. A compact
+            // trigger still lets the content size the popover as before.
+            style={{
+              minWidth: 'var(--radix-popover-trigger-width)',
+              ...(matchTriggerWidth && {
+                width: 'var(--radix-popover-trigger-width)',
+                maxWidth: 'var(--radix-popover-trigger-width)',
+              }),
+            }}
           >
             {/* Search input inside dropdown */}
             {showSearch && (

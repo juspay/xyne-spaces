@@ -3,6 +3,7 @@ import type { SdlcCallLink } from '@xyne/shared';
 import { Headphones, ChevronDown } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
+
 import { cn } from '../../../utils/classNames';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallTrigger } from '../CallTrigger/CallTrigger';
@@ -48,6 +49,8 @@ interface CallTriggerModalProps {
   disabled?: boolean;
   isMember: boolean;
   sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link started calls to
+  /** Which surface rendered this, for analytics. Forwarded to CallTrigger. */
+  trackSource?: string;
 }
 
 export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
@@ -61,6 +64,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   disabled = false,
   isMember,
   sdlcLink,
+  trackSource = 'chat_header',
 }) => {
   const { isMobile } = usePlatform();
   const usesCustomTriggerStyle = Boolean(className?.trim());
@@ -168,6 +172,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         participantCount={participantCount}
         isMember={isMember}
         sdlcLink={sdlcLink}
+        trackSource={trackSource}
         {...(className ? { className } : {})}
         {...(callDisplayName && { callDisplayName })}
       />
@@ -223,11 +228,18 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
             Other Options
           </div>
           <button
-            className='flex items-center gap-3 w-full px-6 py-4 rounded-lg hover:bg-muted transition-colors'
+            className='flex items-center gap-3 w-full h-auto justify-start px-6 py-4 rounded-lg hover:bg-muted transition-colors'
             onClick={() => handleCallAction(handleInitiateCall)}
-            data-track-category='CALL'
+            data-track-category='CALLS'
+            data-ph-capture-attribute-track-id='start_call_now'
             data-track-name='StartCallNow'
-            data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
+            data-track-metadata={JSON.stringify({
+              channelId,
+              targetUserIds,
+              source: trackSource,
+              scopeType,
+              participantCount,
+            })}
           >
             <div className='rounded-md bg-border p-2'>
               <Headphones className='w-5 h-5 text-foreground' />

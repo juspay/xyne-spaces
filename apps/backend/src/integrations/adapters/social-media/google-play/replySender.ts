@@ -36,7 +36,6 @@ export class GooglePlayReviewsReplySender extends BaseInteractionReplySender {
         type: EmailType.REPLY,
         sentByUserId: context.userId,
         updateExisting: true,
-        skipBlockingCheck: true,
       },
       metadata: {
         eventType: SOCIAL_MEDIA_INTERACTION_TYPES.REPLY,

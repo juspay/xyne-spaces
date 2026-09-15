@@ -7,7 +7,7 @@ CREATE TABLE "non_zero"."execution_items" (
     "sourceMessageId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "contextSummary" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'open',
+    "status" TEXT NOT NULL DEFAULT 'OPEN',
     -- NOT NULL is load-bearing: a NULL array makes "pendingOn" @> ARRAY[me]
     -- evaluate to NULL rather than false, so the row would silently vanish
     -- from BOTH feeds -- including the NOT(...) branch of Waiting On, breaking

@@ -68,7 +68,7 @@ function CopyRow({ label, value }: { label: string; value: string }): React.Reac
         type='button'
         aria-label={`Copy ${label}`}
         onClick={copy}
-        data-track-category='Automation'
+        data-track-category='automation-builder'
         data-track-name='CopyWebhookEndpointValue'
         className='flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground'
       >

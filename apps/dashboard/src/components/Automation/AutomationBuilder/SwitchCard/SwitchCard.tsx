@@ -375,6 +375,8 @@ export function SwitchCard({
                   setTagConditionError(null);
                   setEditingCaseIndex(null);
                 }}
+                data-track-category='automation-builder'
+                data-track-name='CANCEL_SWITCH_CASE'
               >
                 Cancel
               </Button>

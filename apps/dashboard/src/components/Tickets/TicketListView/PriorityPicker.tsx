@@ -83,6 +83,7 @@ export function PriorityPicker({
           <button
             key={p}
             type='button'
+            data-ph-capture-attribute-track-id='ticket_set_priority_row'
             onClick={e => {
               e.stopPropagation();
               setPriority(p);

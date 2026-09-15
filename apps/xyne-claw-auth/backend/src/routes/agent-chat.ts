@@ -1,7 +1,8 @@
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { isAgentInvocableBy } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -35,8 +36,17 @@ import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-con
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
@@ -431,12 +441,37 @@ async function persistAssistantResult(args: {
 
         const inlineMeta = att.metadata && typeof att.metadata === "object" ? att.metadata : undefined;
         const fallbackSlide = fallbackSlides.get(att.fileName);
-        const attachmentMetadata: Record<string, unknown> | undefined =
+        let attachmentMetadata: Record<string, unknown> | undefined =
           inlineMeta && Object.keys(inlineMeta).length > 0
             ? inlineMeta
             : fallbackSlide
               ? { slideJson: fallbackSlide }
               : undefined;
+
+        // A conversation owns ONE app: the first generated artifact creates it,
+        // every later one becomes a version of it. Done here rather than in the
+        // tool because the tool runs in xyne-claw with no database. The ids are
+        // stamped onto the manifest so the chat card can address the app (and
+        // its version history) instead of only the raw attachment.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
+        if (reactArtifact && typeof reactArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(reactArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
 
         const row = await prisma.chatAttachment.create({
           data: {
@@ -616,6 +651,18 @@ router.post(
       const thumbnails = filesMap?.["thumbnails"];
       if (files.length === 0) {
         res.status(400).json({ success: false, error: "No files uploaded" });
+        return;
+      }
+
+      // Deny-by-default content screening: reject native executables / the EICAR
+      // test file (by magic bytes, regardless of filename) and executable
+      // extensions / MIME types, so an attachment can't be a malware carrier.
+      const rejected = screenUploadFiles([...files, ...(thumbnails ?? [])]);
+      if (rejected) {
+        res.status(400).json({
+          success: false,
+          error: `File "${rejected.filename}" was rejected: ${rejected.reason}`,
+        });
         return;
       }
 
@@ -806,7 +853,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
       res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
@@ -3071,12 +3118,12 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     });
 
     if (!result.ok) {
-      log.error(`[agent-chat] approve-action failed: ${action.tool} — ${result.error}`);
+      log.error(`[agent-chat] approve-action failed: ${sanitizeForLog(action.tool)} — ${sanitizeForLog(result.error)}`);
       res.status(400).json({ success: false, error: result.error ?? "Execution failed" });
       return;
     }
 
-    log.info(`[agent-chat] approve-action ok: ${action.tool} → ${result.content.slice(0, 100)}`);
+    log.info(`[agent-chat] approve-action ok: ${sanitizeForLog(action.tool)} → ${sanitizeForLog(result.content).slice(0, 100)}`);
     res.json({ success: true, data: { content: result.content } });
   } catch (err) {
     log.error("[agent-chat] approve-action error:", err);

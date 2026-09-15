@@ -1,22 +1,13 @@
-import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useCacConfig } from '@xyne/shared/hooks';
 import type { Message } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ReactArtifactView } from './ReactArtifactView';
 import { ReactArtifactDialog } from './ReactArtifactDialog';
 import { toArtifactRef, type ReactArtifactRef } from './ReactArtifact.types';
+import { useAppCreationModeSignal, useIsShownInPane } from './appCreationModeContext';
+import { ArtifactPaneReference } from './ArtifactPaneReference';
 import { saveArtifactApp } from '../../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../../services/claw/clawRequest';
-import {
-  REACT_ARTIFACT_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  type ReactArtifactCacConfig,
-} from './reactArtifactCacConfig';
-import {
-  REACT_ARTIFACT_PUBLISH_CAC_KEY,
-  DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  type ReactArtifactPublishCacConfig,
-} from './reactArtifactPublishCacConfig';
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
@@ -28,15 +19,6 @@ type SaveState = 'idle' | 'saving' | 'saved';
  * surface, so this is additive — anything that isn't an artifact is left alone.
  */
 export function MessageReactArtifacts({ message }: { message: Message }): ReactElement | null {
-  const { config } = useCacConfig<ReactArtifactCacConfig>({
-    key: REACT_ARTIFACT_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_CAC_CONFIG,
-  });
-  const { config: publishConfig } = useCacConfig<ReactArtifactPublishCacConfig>({
-    key: REACT_ARTIFACT_PUBLISH_CAC_KEY,
-    fallbackConfig: DEFAULT_REACT_ARTIFACT_PUBLISH_CAC_CONFIG,
-  });
-
   const [expanded, setExpanded] = useState<ReactArtifactRef | null>(null);
   // Keyed by attachmentId: one message can carry several artifacts, and each
   // saves independently.
@@ -50,6 +32,10 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     setExpanded(null);
   }, []);
 
+  // Anything generated since session-scoping is ALREADY an app — the thread owns
+  // one and each generation versioned it — so Save would create a confusing
+  // duplicate. The button survives only for pre-scoping artifacts and for the
+  // rare case where materialization failed. Publishing stays explicit either way.
   const saveMutation = useMutation({
     mutationFn: (artifact: ReactArtifactRef) =>
       saveArtifactApp({
@@ -83,22 +69,88 @@ export function MessageReactArtifacts({ message }: { message: Message }): ReactE
     [message.attachments],
   );
 
-  if (!config.enabled) return null;
   if (artifacts.length === 0) return null;
 
   return (
     <>
       {artifacts.map(artifact => (
-        <ReactArtifactView
+        <ArtifactCard
           key={artifact.attachmentId}
           artifact={artifact}
           onExpand={handleExpand}
-          {...(publishConfig.enabled ? { onSave: handleSave } : {})}
+          {...(artifact.savedAppId ? {} : { onSave: handleSave })}
           saveState={saveStates[artifact.attachmentId] ?? 'idle'}
         />
       ))}
       {saveError && <p className='mb-2 text-xs text-destructive'>{saveError}</p>}
       <ReactArtifactDialog artifact={expanded} onClose={handleClose} />
     </>
+  );
+}
+
+/**
+ * One artifact in the transcript — live, or a reference when App Creation mode
+ * is already running this app in the pane. Split into its own component because
+ * the decision needs a hook, and hooks cannot be called inside a `.map`.
+ *
+ * This card is also what OPENS the mode. It mounts exactly when a build appears
+ * in the thread — on history load and on every new generation — so a
+ * mount-once request here fires at precisely the moments the pane should open,
+ * with the app id and version in hand and nothing to infer. Once per mount is
+ * what lets a close stick: an existing card never asks again, and only the
+ * next build's fresh card reopens the pane.
+ *
+ * Expand follows the same logic. For an app this thread owns, "expand" means
+ * the pane — that is the full-size surface — so it enters the mode rather than
+ * opening a second copy in a dialog. The dialog survives only for artifacts
+ * that predate session-scoping and have no app to open.
+ */
+function ArtifactCard({
+  artifact,
+  onExpand,
+  onSave,
+  saveState,
+}: {
+  artifact: ReactArtifactRef;
+  onExpand: (a: ReactArtifactRef) => void;
+  onSave?: (a: ReactArtifactRef) => void;
+  saveState: SaveState;
+}): ReactElement {
+  const shownInPane = useIsShownInPane(artifact.savedAppId);
+  const { active, enterForApp } = useAppCreationModeSignal();
+  const { savedAppId, versionId } = artifact;
+
+  // Ask once per APP, not once per mount.
+  //
+  // The guard used to be set before the savedAppId check, which made the whole
+  // thing inert on the turn that matters: a card first renders while the app id
+  // is still unknown, the effect marked itself "asked" and bailed, and when the
+  // id arrived moments later the effect re-ran and returned immediately. Mode
+  // never opened on the creating turn — only after a reload. Keying on the id
+  // means the ask happens when there is something to ask WITH, and a re-render
+  // with the same app still cannot re-open a pane the user closed.
+  const askedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedAppId || active) return;
+    if (askedFor.current === savedAppId) return;
+    askedFor.current = savedAppId;
+    enterForApp(savedAppId, versionId ?? null);
+  }, [savedAppId, versionId, active, enterForApp]);
+
+  if (shownInPane) return <ArtifactPaneReference artifact={artifact} />;
+
+  // Expand ALWAYS means the side pane for an app — never the dialog. The dialog
+  // survives only for artifacts with no app behind them (pre-session-scoping
+  // ones), which cannot be shown in a pane that addresses apps by id.
+  const expand = savedAppId ? (): void => enterForApp(savedAppId, versionId ?? null) : onExpand;
+
+  return (
+    <ReactArtifactView
+      artifact={artifact}
+      onExpand={expand}
+      expandLabel={savedAppId ? 'Open in the app panel' : 'Open full screen'}
+      {...(onSave ? { onSave } : {})}
+      saveState={saveState}
+    />
   );
 }

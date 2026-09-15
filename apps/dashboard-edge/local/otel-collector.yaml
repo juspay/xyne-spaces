@@ -1,0 +1,18 @@
+# Local OpenTelemetry collector for the compose harness: receives the edge's
+# OTLP/HTTP metrics and prints them, so `docker compose logs otel` shows what
+# the cluster collector would receive.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]

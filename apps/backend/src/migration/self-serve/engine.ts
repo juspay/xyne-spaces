@@ -1,4 +1,5 @@
 import { PassThrough } from 'stream';
+import { randomUUID } from 'node:crypto';
 import readline from 'readline';
 import fetch from 'node-fetch';
 import { WebClient, LogLevel } from '@slack/web-api';
@@ -7,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { decrypt } from '@/services/encryptionService';
 import { getStorageService } from '@/services/storage';
+import { createRedisClient } from '@/services/redisFactory';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { UserRepository } from '@/database/repositories/users';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
@@ -17,6 +19,7 @@ import {
   findOrCreateApp,
   ingestConversationSlack,
 } from '@/migration/scripts/ingestConversationSlack';
+import { bulkIngestConversationSlack } from '@/migration/scripts/bulkIngestConversationSlack';
 import {
   transformMessage,
   collectRawFiles,
@@ -29,19 +32,15 @@ import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
+import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
 
 const PAGE = 1000;
 const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
-const FILE_CONCURRENCY = 5;
+// Refresh scans this far back so replies on threads whose parent predates the delta are still caught (matches the
+// daily-sync "legacy thread replies" 30-day window). A reply on a thread older than this window isn't picked up.
+const REFRESH_LOOKBACK_DAYS = 30;
 const PUBLIC_CHANNELS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-// Timing knobs (validated in config/env.ts): pageDelayMs (throttle paged Slack calls),
-// fileTimeoutMs (per-attachment), requestTimeoutMs (per Slack request), ingestMessageDelayMs (per-message DB/Vespa upper bound).
-const PAGE_DELAY_MS = config.slackMigration.pageDelayMs;
-const LIST_PAGE_DELAY_MS = config.slackMigration.listDelayMs;
-const FILE_TIMEOUT_MS = config.slackMigration.fileTimeoutMs;
-const REQUEST_TIMEOUT_MS = config.slackMigration.requestTimeoutMs;
-const INGEST_MESSAGE_DELAY_MS = config.slackMigration.ingestMessageDelayMs;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Route the Slack SDK's own diagnostics (esp. rate-limit "A rate limit was exceeded … retry in N seconds")
@@ -56,7 +55,7 @@ const sdkLogger = {
   setName: () => undefined,
 };
 // Per-request timeout so a hung page aborts (SDK retries) instead of wedging collection.
-const slackClient = (token: string) => new WebClient(token, { timeout: REQUEST_TIMEOUT_MS, logger: sdkLogger });
+const slackClient = (token: string, timeoutMs: number = MIGRATION_DEFAULTS.requestTimeoutMs) => new WebClient(token, { timeout: timeoutMs, logger: sdkLogger });
 
 // Time a Slack call and warn (with method + context) when it runs long, so a stall points at the exact culprit.
 async function timed<T>(label: string, ctx: Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
@@ -86,6 +85,9 @@ const paths = {
   manifest: (p: string) => `${p}/manifest.json`,
   users: (p: string) => `${p}/users.json`,
   conversation: (p: string, id: string) => `${p}/conversations/${id}.jsonl`,
+  conversationRefresh: (p: string, id: string, runTs: number) => `${p}/conversations/${id}.r${runTs}.jsonl`,
+  conversationsDir: (p: string) => `${p}/conversations/`,
+  cursors: (p: string) => `${p}/cursors.json`,
   pins: (p: string, id: string) => `${p}/pins/${id}.json`,
   usergroups: (p: string) => `${p}/usergroups.json`,
   channels: (p: string) => `${p}/channels.json`,
@@ -93,7 +95,7 @@ const paths = {
   publicChannelsCache: (root: string, teamId: string) => `${root}/_public-channels/${teamId}.json`,
 };
 
-export interface CollectedConversation { id: string; isMpim: boolean; members: string[]; }
+export interface CollectedConversation { id: string; isMpim: boolean; members: string[]; isEmpty?: boolean; }
 export interface ChannelMeta { id: string; name: string; isPrivate: boolean; }
 
 export interface DirUser { id: string; email?: string; real_name?: string; display_name?: string; is_bot?: boolean; deleted?: boolean; bot_id?: string; }
@@ -141,8 +143,70 @@ export class SlackMigrationEngine {
     return getStorageService(bucket);
   }
 
+  // Parallel ingest: each worker builds the offline reference + manifest ONCE per migration and reuses them across
+  // every conversation it drains (instead of once per conversation). Bounded by TTL; entries fall out after a job ends.
+  private readonly offlineRefCache = new Map<string, { at: number; ref: SlackOfflineReference }>();
+  private readonly manifestCache = new Map<string, { at: number; convs: CollectedConversation[] }>();
+  private static readonly WORKER_CACHE_TTL_MS = 30 * 60 * 1000;
+  private readonly lockRedis = createRedisClient('slack-migration-ingest-lock');
+
+  // Serialize writes per target channel so two jobs ingesting the same group DM don't race past dedup. TTL avoids
+  // deadlock on a crashed holder; refreshed while held so a long ingest keeps it.
+  private async withChannelLock<T>(workspaceId: string, scope: string, fn: () => Promise<T>): Promise<T> {
+    const key = `slackmig:inglock:${workspaceId}:${scope}`;
+    const token = randomUUID();
+    const TTL_MS = 60_000, RETRY_MS = 200, MAX_WAIT_MS = 15 * 60_000;
+    const deadline = Date.now() + MAX_WAIT_MS;
+    while ((await this.lockRedis.set(key, token, 'PX', TTL_MS, 'NX')) === null) {
+      if (Date.now() > deadline) throw new Error(`ingest lock timeout: ${key}`);
+      await sleep(RETRY_MS);
+    }
+    const KEEP = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('pexpire',KEYS[1],ARGV[2]) else return 0 end";
+    const DROP = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
+    const refresh = setInterval(() => void this.lockRedis.eval(KEEP, 1, key, token, String(TTL_MS)).catch(() => undefined), TTL_MS / 2);
+    refresh.unref?.();
+    try {
+      return await fn();
+    } finally {
+      clearInterval(refresh);
+      await this.lockRedis.eval(DROP, 1, key, token).catch(() => undefined);
+    }
+  }
+
+  async getOfflineReference(migrationId: string, gcsPrefix: string): Promise<SlackOfflineReference> {
+    let hit = this.offlineRefCache.get(migrationId);
+    if (!hit || Date.now() - hit.at >= SlackMigrationEngine.WORKER_CACHE_TTL_MS) {
+      hit = { at: Date.now(), ref: await this.buildOfflineReference(gcsPrefix) };
+      this.offlineRefCache.set(migrationId, hit);
+      this.evictStaleCache(this.offlineRefCache);
+    }
+    // Fresh shallow clone per call: concurrent loadConversation calls share the read-only users/groups/channels maps
+    // but each gets its own object so they don't race on the mutable `createUser` field loadConversation assigns.
+    return { users: hit.ref.users, groups: hit.ref.groups, channels: hit.ref.channels };
+  }
+
+  async getManifest(migrationId: string, gcsPrefix: string): Promise<CollectedConversation[]> {
+    let hit = this.manifestCache.get(migrationId);
+    if (!hit || Date.now() - hit.at >= SlackMigrationEngine.WORKER_CACHE_TTL_MS) {
+      hit = { at: Date.now(), convs: await this.readManifest(gcsPrefix) };
+      this.manifestCache.set(migrationId, hit);
+      this.evictStaleCache(this.manifestCache);
+    }
+    return hit.convs;
+  }
+
+  async getManifestConversation(migrationId: string, gcsPrefix: string, conversationId: string): Promise<CollectedConversation | undefined> {
+    return (await this.getManifest(migrationId, gcsPrefix)).find((c) => c.id === conversationId);
+  }
+
+  private evictStaleCache<T extends { at: number }>(cache: Map<string, T>): void {
+    const cutoff = Date.now() - SlackMigrationEngine.WORKER_CACHE_TTL_MS;
+    for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
+  }
+
   async collectDirectory(token: string, gcsPrefix: string): Promise<Record<string, DirUser>> {
-    const client = slackClient(token);
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
     const users: Record<string, DirUser> = {};
     let cursor: string | undefined;
     do {
@@ -156,39 +220,42 @@ export class SlackMigrationEngine {
         };
       }
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-      if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
+      if (cursor && cfg.listDelayMs > 0) await sleep(cfg.listDelayMs);
     } while (cursor);
     await this.writeJson(paths.users(gcsPrefix), users);
     return users;
   }
 
   async listConversations(token: string, type: MigrationType, channel?: ChannelInput): Promise<CollectedConversation[]> {
+    const cfg = await getMigrationRuntimeConfig();
     if (type === MigrationType.CHANNEL) {
       if (!channel) return [];
       // Real Slack membership → synced as Xyne participants at ingest.
       const members = await this.fetchChannelMembers(token, channel.slackChannelId);
       return [{ id: channel.slackChannelId, isMpim: false, members }];
     }
-    const client = slackClient(token);
+    const client = slackClient(token, cfg.requestTimeoutMs);
     const out: CollectedConversation[] = [];
     let cursor: string | undefined;
     do {
       const r = await client.conversations.list({ types: 'im,mpim', limit: 1000, cursor });
       for (const c of r.channels ?? []) {
-        const cc = c as { id: string; is_mpim?: boolean; user?: string };
+        const cc = c as { id: string; is_mpim?: boolean; user?: string; is_empty?: boolean };
         // im carries the other user in `.user`; mpim (group DM) needs members fetched, else the loader drops it.
+        // Slack's is_empty (never had a message) lets us skip the history call for dead DMs entirely.
         const members = cc.is_mpim ? await this.fetchChannelMembers(token, cc.id) : (cc.user ? [cc.user] : []);
-        out.push({ id: cc.id, isMpim: !!cc.is_mpim, members });
+        out.push({ id: cc.id, isMpim: !!cc.is_mpim, members, isEmpty: cc.is_empty });
       }
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-      if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
+      if (cursor && cfg.listDelayMs > 0) await sleep(cfg.listDelayMs);
     } while (cursor);
     return out;
   }
 
   /** All member Slack user ids of a channel (paginated). */
   private async fetchChannelMembers(token: string, channelId: string): Promise<string[]> {
-    const client = slackClient(token);
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
     const members: string[] = [];
     let cursor: string | undefined;
     try {
@@ -196,7 +263,7 @@ export class SlackMigrationEngine {
         const r = await client.conversations.members({ channel: channelId, limit: 1000, cursor });
         members.push(...(r.members ?? []));
         cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-        if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+        if (cursor && cfg.pageDelayMs > 0) await sleep(cfg.pageDelayMs);
       } while (cursor);
     } catch (e) {
       logger.warn('[SlackMigration] conversations.members failed — channel participants may be incomplete', {
@@ -206,14 +273,30 @@ export class SlackMigrationEngine {
     return members;
   }
 
-  async collectConversation(token: string, conv: CollectedConversation, gcsPrefix: string, startDate?: string, onProgress?: (p: { messages: number; newestTs: number; oldestTs: number }) => Promise<void>): Promise<{ messages: number; outcome: 'ok' | 'truncated' | 'skipped'; reason?: string }> {
-    const client = slackClient(token);
-    const oldest = oldestFromStartDate(startDate);
-    const pinned = await fetchPinnedMessageTimestamps(client, conv.id).catch(() => new Set<string>());
-    const stream = new PassThrough();
-    const done = this.storage.uploadStreamToPath(encryptStream(stream), {
-      path: paths.conversation(gcsPrefix, conv.id), contentType: 'application/octet-stream', chunkSize: UPLOAD_CHUNK_SIZE,
-    });
+  // sinceTs > 0 ⇒ DELTA mode (refresh): still pages the full history (to see old parents' latest_reply), but only
+  // downloads/writes messages newer than sinceTs and replies added after it — everything unchanged is skipped.
+  async collectConversation(token: string, conv: CollectedConversation, gcsPrefix: string, startDate?: string, onProgress?: (p: { messages: number; newestTs: number; oldestTs: number }) => Promise<void>, destPath?: string, sinceTs = 0): Promise<{ messages: number; outcome: 'ok' | 'truncated' | 'skipped'; reason?: string; newestTs: number }> {
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
+    let oldest = oldestFromStartDate(startDate);
+    if (sinceTs > 0) {
+      // Delta: scan from the cursor, but never earlier than the 30-day lookback (so old-thread replies are caught) and
+      // never earlier than the original startDate floor.
+      const lookbackTs = Math.floor(Date.now() / 1000) - REFRESH_LOOKBACK_DAYS * 86400;
+      oldest = String(Math.max(oldest ? parseFloat(oldest) : 0, Math.min(sinceTs, lookbackTs)));
+    }
+    // Base files (destPath undefined) always exist so the union reader can open them; snapshots (destPath set, refresh) are
+    // created lazily on the first message, so a quiet DM with nothing new touches GCS zero times.
+    const outPath = destPath ?? paths.conversation(gcsPrefix, conv.id);
+    const io: { stream: PassThrough | null; done: Promise<unknown> | null } = { stream: null, done: null };
+    const sink = (): PassThrough => {
+      if (!io.stream) {
+        io.stream = new PassThrough();
+        io.done = this.storage.uploadStreamToPath(encryptStream(io.stream), { path: outPath, contentType: 'application/octet-stream', chunkSize: UPLOAD_CHUNK_SIZE });
+      }
+      return io.stream;
+    };
+    if (!destPath) sink(); // eager-create the base file even if empty
     let count = 0;
     let outcome: 'ok' | 'truncated' | 'skipped' = 'ok';
     let reason: string | undefined;
@@ -230,20 +313,30 @@ export class SlackMigrationEngine {
         page += 1;
         logger.debug('[SlackMigration] history page', { convId: conv.id, page, messages: (r.messages ?? []).length, running: count });
         for (const m of r.messages ?? []) {
-          await this.prefetchFiles(token, m, gcsPrefix);
-          if (((m as { reply_count?: number }).reply_count ?? 0) > 0 && (m as { ts?: string }).ts) {
-            const replies = await this.fetchReplies(token, conv.id, (m as { ts: string }).ts, gcsPrefix);
-            if (replies.length) (m as { _replies?: unknown[] })._replies = replies;
-          }
           const ts = parseFloat((m as { ts?: string }).ts ?? '0');
+          const replyCount = (m as { reply_count?: number }).reply_count ?? 0;
+          const latestReply = parseFloat((m as { latest_reply?: string }).latest_reply ?? '0');
+          const isNew = ts > sinceTs;                                  // full mode (sinceTs=0): everything is "new"
+          const hasNewReplies = replyCount > 0 && latestReply > sinceTs;
+          if (sinceTs > 0 && !isNew && !hasNewReplies) continue;       // delta: unchanged message → skip entirely
+          if (isNew) await this.prefetchFiles(token, m, gcsPrefix);    // only new top-level content pulls attachments
+          if (replyCount > 0 && (m as { ts?: string }).ts) {
+            const replies = await this.fetchReplies(token, conv.id, (m as { ts: string }).ts, gcsPrefix, sinceTs);
+            if (replies.length) (m as { _replies?: unknown[] })._replies = replies;
+            else if (sinceTs > 0 && !isNew) continue;                  // old thread but no NEW replies after filtering → nothing to write
+          }
           if (ts > newestTs) newestTs = ts;
+          for (const rep of (m as { _replies?: { ts?: string }[] })._replies ?? []) {
+            const rts = parseFloat(rep.ts ?? '0');
+            if (rts > newestTs) newestTs = rts;
+          }
           if (ts > 0 && ts < oldestTs) oldestTs = ts;
-          stream.write(`${JSON.stringify(m)}\n`);
+          sink().write(`${JSON.stringify(m)}\n`);
           count += 1;
         }
         if (onProgress) await onProgress({ messages: count, newestTs, oldestTs: oldestTs === Infinity ? 0 : oldestTs }); // live per-page progress
         cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-        if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+        if (cursor && cfg.pageDelayMs > 0) await sleep(cfg.pageDelayMs);
       } while (cursor);
     } catch (err) {
       if (!isSkippableConversationError(err)) throw err;
@@ -260,18 +353,24 @@ export class SlackMigrationEngine {
       }
       logger.warn('[SlackMigration] conversation not fully collected', { conversationId: conv.id, error: code, outcome });
     } finally {
-      stream.end();
+      io.stream?.end();
     }
-    await done;
-    await this.writeJson(paths.pins(gcsPrefix, conv.id), [...pinned]);
-    return { messages: count, outcome, reason };
+    if (io.done) await io.done;
+    // Fetch pins lazily — only when the conversation actually has content — so empty / no-new-activity conversations
+    // never hit the rate-limited pins.list. On refresh only overwrite pins if we got some (a failed fetch can't clobber base pins).
+    if (count > 0) {
+      const pinned = await fetchPinnedMessageTimestamps(client, conv.id).catch(() => new Set<string>());
+      if (!destPath || pinned.size > 0) await this.writeJson(paths.pins(gcsPrefix, conv.id), [...pinned]);
+    }
+    return { messages: count, outcome, reason, newestTs };
   }
 
   /** Reference dumps so ingestion resolves users/groups/channels offline (no Slack). */
   async collectUsergroups(token: string, gcsPrefix: string): Promise<void> {
+    const cfg = await getMigrationRuntimeConfig();
     const groups: Record<string, unknown> = {};
     try {
-      const r = await slackClient(token).usergroups.list({ include_users: true });
+      const r = await slackClient(token, cfg.requestTimeoutMs).usergroups.list({ include_users: true });
       for (const g of r.usergroups ?? []) groups[(g as { id: string }).id] = g;
     } catch (e) {
       logger.warn('[SlackMigration] usergroups.list failed — mentions of usergroups will be unresolved', {
@@ -282,7 +381,8 @@ export class SlackMigrationEngine {
   }
 
   async collectChannels(token: string, gcsPrefix: string, teamId: string): Promise<void> {
-    const client = slackClient(token);
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
     const channels: Record<string, ChannelMeta> = {};
 
     try {
@@ -294,7 +394,7 @@ export class SlackMigrationEngine {
           channels[cc.id] = { id: cc.id, name: cc.name || cc.id, isPrivate: true };
         }
         cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-        if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
+        if (cursor && cfg.listDelayMs > 0) await sleep(cfg.listDelayMs);
       } while (cursor);
     } catch (e) {
       logger.warn('[SlackMigration] conversations.list (private channels) failed — some channel mentions may be unresolved', {
@@ -310,6 +410,7 @@ export class SlackMigrationEngine {
   }
 
   private async publicChannels(client: WebClient, cachePath: string, teamId: string): Promise<Record<string, ChannelMeta>> {
+    const cfg = await getMigrationRuntimeConfig();
     const cached = (await this.storage.fileExists(cachePath))
       ? await this.readJson<{ fetchedAt: number; channels: Record<string, ChannelMeta> }>(cachePath).catch(() => null)
       : null;
@@ -328,7 +429,7 @@ export class SlackMigrationEngine {
           channels[cc.id] = { id: cc.id, name: cc.name || cc.id, isPrivate: false };
         }
         cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-        if (cursor && LIST_PAGE_DELAY_MS > 0) await sleep(LIST_PAGE_DELAY_MS);
+        if (cursor && cfg.listDelayMs > 0) await sleep(cfg.listDelayMs);
       } while (cursor);
       complete = true;
     } catch (e) {
@@ -346,10 +447,11 @@ export class SlackMigrationEngine {
 
   /** Stream every Slack-hosted file on a message (top-level or reply) → storage, in bounded-concurrency batches. */
   private async prefetchFiles(token: string, m: unknown, gcsPrefix: string): Promise<void> {
+    const cfg = await getMigrationRuntimeConfig();
     const files = collectRawFiles(m).filter((f) => isDownloadableSlackFile(f));
-    for (let i = 0; i < files.length; i += FILE_CONCURRENCY) {
+    for (let i = 0; i < files.length; i += cfg.fileConcurrency) {
       await Promise.all(
-        files.slice(i, i + FILE_CONCURRENCY).map(async (f) => {
+        files.slice(i, i + cfg.fileConcurrency).map(async (f) => {
           const uri = await this.streamFileToGcs(token, f, gcsPrefix);
           if (uri) f.prefetchedStoragePath = uri;
         }),
@@ -357,9 +459,10 @@ export class SlackMigrationEngine {
     }
   }
 
-  /** Fetch all replies of a thread (excluding the parent) and prefetch their files. */
-  private async fetchReplies(token: string, channelId: string, ts: string, gcsPrefix: string): Promise<unknown[]> {
-    const client = slackClient(token);
+  /** Fetch a thread's replies (excluding the parent) and prefetch their files. sinceTs>0 keeps only replies newer than it. */
+  private async fetchReplies(token: string, channelId: string, ts: string, gcsPrefix: string, sinceTs = 0): Promise<unknown[]> {
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
     const replies: unknown[] = [];
     let cursor: string | undefined;
     do {
@@ -367,21 +470,23 @@ export class SlackMigrationEngine {
         client.conversations.replies({ channel: channelId, ts, limit: PAGE, cursor }));
       for (const m of r.messages ?? []) {
         if ((m as { ts?: string }).ts === ts) continue; // conversations.replies includes the parent first
+        if (sinceTs > 0 && parseFloat((m as { ts?: string }).ts ?? '0') <= sinceTs) continue; // delta: skip already-collected replies
         await this.prefetchFiles(token, m, gcsPrefix);
         replies.push(m);
       }
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
-      if (cursor && PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
+      if (cursor && cfg.pageDelayMs > 0) await sleep(cfg.pageDelayMs);
     } while (cursor);
     return replies;
   }
 
   /** Stream one Slack-hosted file straight to storage (never buffered); returns its storage path. */
   private async streamFileToGcs(token: string, file: { id: string; url_private: string; url_private_download?: string; mimetype?: string }, gcsPrefix: string): Promise<string | undefined> {
+    const cfg = await getMigrationRuntimeConfig();
     const dest = paths.file(gcsPrefix, file.id);
     const url = file.url_private_download || file.url_private;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FILE_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
     const startedAt = Date.now();
     try {
       const res = await fetch(url, {
@@ -436,7 +541,16 @@ export class SlackMigrationEngine {
     };
   }
 
+  /** Base dump + all refresh snapshots for a conversation, oldest first. */
+  private async listConversationDataFiles(gcsPrefix: string, convId: string): Promise<string[]> {
+    const base = paths.conversation(gcsPrefix, convId);
+    const files = await this.storage.listFiles(paths.conversationsDir(gcsPrefix)).catch(() => [] as { name: string }[]);
+    const snapshots = files.map((f) => f.name).filter((n) => n.includes(`/${convId}.r`) && n.endsWith('.jsonl')).sort();
+    return [base, ...snapshots];
+  }
+
   async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
+    const cfg = await getMigrationRuntimeConfig();
     return runAsServiceActor('slack-migration', job.workspaceId, async () => {
       const userRepo = new UserRepository();
       const channelRepo = new ChannelRepository();
@@ -481,24 +595,32 @@ export class SlackMigrationEngine {
 
       const pinnedTs = new Set(await this.readJson<string[]>(paths.pins(job.gcsPrefix, conv.id)).catch(() => []));
 
-      // Transform with the offline reference active so mentions, author lookups and usergroup import all resolve from the dumps, never Slack.
-      const stream = await this.storage.createReadStream(paths.conversation(job.gcsPrefix, conv.id));
-      const rl = readline.createInterface({ input: decryptStream(stream), crlfDelay: Infinity });
+      // Read base dump + any refresh snapshots as a union (per-message dedup downstream drops overlaps; union means a
+      // partial refresh can't lose data). Offline reference active so mentions/authors resolve from the dumps, never Slack.
+      const dataFiles = await this.listConversationDataFiles(job.gcsPrefix, conv.id);
       const messages: SlackMessage[] = await runWithSlackOfflineReference(ref, async () => {
         const out: SlackMessage[] = [];
-        for await (const line of rl) {
-          if (!line.trim()) continue;
-          let raw: unknown;
-          try { raw = JSON.parse(line); } catch { continue; }
-          // Drop Slack system messages ("X joined the channel", topic changes) and env-ignored bots,
-          // matching the existing /sync flow (isHumanMessage); real bot content is still kept.
-          if (!isHumanMessage(raw, 'channel', [], true)) continue;
-          out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
+        for (const file of dataFiles) {
+          const stream = await this.storage.createReadStream(file);
+          const rl = readline.createInterface({ input: decryptStream(stream), crlfDelay: Infinity });
+          for await (const line of rl) {
+            if (!line.trim()) continue;
+            let raw: unknown;
+            try { raw = JSON.parse(line); } catch { continue; }
+            // Drop Slack system messages and env-ignored bots (matches /sync isHumanMessage); real bot content is kept.
+            if (!isHumanMessage(raw, 'channel', [], true)) continue;
+            out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
+          }
         }
         return out;
       });
       if (messages.length === 0) return { ingested: 0, failed: 0 };
 
+      // Lock the write on the resolved target channel (member-set for DMs, xyneChannelId for channels); the read above is unlocked.
+      const lockScope = isChannel
+        ? `ch:${job.channelInput!.xyneChannelId}`
+        : isSelfDm ? `dm:${dmOwnerId}` : `dm:${[dmOwnerId!, ...dmOtherIds].sort().join(',')}`;
+      return await this.withChannelLock(job.workspaceId, lockScope, async () => {
       // Channel → the requester's chosen Xyne channel. DM → find/create it (only now we know it has messages, so an empty DM never pins to the top).
       const channelId = isChannel
         ? job.channelInput!.xyneChannelId
@@ -532,17 +654,22 @@ export class SlackMigrationEngine {
         if (newest) await channelRepo.setLastActivity(channelId, newest);
       }
 
-      const ingestResult = await ingestConversationSlack({
+      const ingestInput = {
         slackMessages: messages,
         externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
         channelId,
         workspaceId: job.workspaceId,
         botToken: 'slack-migration-offline',
-        interMessageDelayMs: INGEST_MESSAGE_DELAY_MS,
+        interMessageDelayMs: cfg.messageDelayMs,
         onProgress,
-      });
+      };
+      // Opt-in bulk path (createMany) — off by default; A/B against the per-message path before trusting it.
+      const ingestResult = cfg.bulk
+        ? await bulkIngestConversationSlack(ingestInput)
+        : await ingestConversationSlack(ingestInput);
       await channelRepo.recalculateLastActivityFromMessages(channelId);
       return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
+      });
     });
   }
 
@@ -579,12 +706,32 @@ export class SlackMigrationEngine {
     return decrypt(job.encryptedToken);
   }
 
+  /** Snapshot path a refresh writes new messages to (base file stays untouched). */
+  conversationRefreshPath(gcsPrefix: string, convId: string, runTs: number): string {
+    return paths.conversationRefresh(gcsPrefix, convId, runTs);
+  }
+
+  /** Per-conversation last-collected message ts (epoch secs) — the delta cursor for "Get latest messages". */
+  async readCursors(gcsPrefix: string): Promise<Record<string, number>> {
+    // Absent on the first collection — check first so the storage layer doesn't log a scary "file does not exist".
+    if (!(await this.storage.fileExists(paths.cursors(gcsPrefix)))) return {};
+    return this.readJson<Record<string, number>>(paths.cursors(gcsPrefix)).catch(() => ({}));
+  }
+  writeCursors(gcsPrefix: string, cursors: Record<string, number>): Promise<void> {
+    return this.writeJson(paths.cursors(gcsPrefix), cursors);
+  }
+
   writeManifest(gcsPrefix: string, conversations: CollectedConversation[]): Promise<void> {
     return this.writeJson(paths.manifest(gcsPrefix), conversations);
   }
 
   readManifest(gcsPrefix: string): Promise<CollectedConversation[]> {
     return this.readJson<CollectedConversation[]>(paths.manifest(gcsPrefix));
+  }
+
+  /** Light read of the collected users dump (no Slack) — used to label skipped/truncated conversations for the UI. */
+  readDirectory(gcsPrefix: string): Promise<Record<string, DirUser>> {
+    return this.readJson<Record<string, DirUser>>(paths.users(gcsPrefix)).catch(() => ({} as Record<string, DirUser>));
   }
 
   manifestExists(gcsPrefix: string): Promise<boolean> {

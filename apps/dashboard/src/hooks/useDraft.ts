@@ -265,22 +265,9 @@ export function useDraftAttachments() {
 
         const formData = new FormData();
 
-        // Add all files
-        filesArray.forEach(file => {
-          formData.append('files', file);
-        });
-
-        // Add all thumbnails (if available)
-        processedFiles.forEach(({ thumbnailBlob, file }) => {
-          if (thumbnailBlob) {
-            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
-          } else {
-            // Add placeholder for consistent indexing
-            formData.append('thumbnails', new Blob([]), '');
-          }
-        });
-
-        // Add fileMetadata JSON with complete information for all files
+        // Text fields go in BEFORE the file bodies. Multipart parts are parsed in wire
+        // order, so on a mid-upload disconnect the server has already read the ids and
+        // can mark those rows FAILED; appended last, they would never arrive.
         const fileMetadataArray = processedFiles.map(
           ({ index, thumbnailBlob, width, height, duration }) => ({
             fileIndex: index,
@@ -300,6 +287,21 @@ export function useDraftAttachments() {
         if (conversationId) {
           formData.append('conversationId', conversationId);
         }
+
+        // Add all files
+        filesArray.forEach(file => {
+          formData.append('files', file);
+        });
+
+        // Add all thumbnails (if available)
+        processedFiles.forEach(({ thumbnailBlob, file }) => {
+          if (thumbnailBlob) {
+            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
+          } else {
+            // Add placeholder for consistent indexing
+            formData.append('thumbnails', new Blob([]), '');
+          }
+        });
 
         await apiInstance.post('/drafts/attachments/upload', formData);
 

@@ -64,7 +64,7 @@ export const SlashCommandArtifactActivity = ({
       className='flex items-start'
       actorAction={activity.actorAction}
     >
-      <div className={isExpanded ? 'text-sm text-foreground' : 'truncate text-sm text-foreground'}>
+      <div className='text-sm text-foreground'>
         <TextNode node={bodyNode} />
       </div>
     </ActivityItemCard>

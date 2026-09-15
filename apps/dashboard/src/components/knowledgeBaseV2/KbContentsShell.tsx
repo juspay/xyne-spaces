@@ -16,7 +16,7 @@ import {
   type PanelImperativeHandle,
 } from '../ui/Resizable/Resizable';
 
-const KB_CONTENTS_DEFAULT_WIDTH = 240;
+const KB_CONTENTS_DEFAULT_WIDTH = 300;
 const KB_CONTENTS_MIN_WIDTH = 180;
 const KB_CONTENTS_MAX_WIDTH = 600;
 const KB_CONTENTS_COLLAPSED_WIDTH = 40;
@@ -143,9 +143,12 @@ const KbContentsShellInner: React.FC<KbContentsShellProps> = ({ children }) => {
     (fileId: string, folderId: string | null): void => {
       if (!collectionId) return;
       const owning = globalCollections.byId(collectionId);
-      const projectId = owning?.projectId;
       const channelId = owning?.scopeId;
-      if (projectId && channelId) {
+      if (channelId) {
+        // `projectId` is only known for CHANNEL-scoped collections whose
+        // channel is in our visible-channel list — '_' for workspace-scoped
+        // (or unresolvable) collections, same sentinel as the folder segment.
+        const projectId = owning?.projectId ?? '_';
         void navigate(
           `${browseBasePath}/${projectId}/${channelId}/${collectionId}/${folderId ?? '_'}/${fileId}`,
         );

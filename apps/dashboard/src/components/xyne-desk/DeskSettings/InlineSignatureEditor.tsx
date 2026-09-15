@@ -128,6 +128,7 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
         <button
           type='button'
           onClick={() => void handleSave()}
+          data-ph-capture-attribute-track-id='save_signature'
           disabled={isSaving || name.trim() === ''}
           className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='DeskSettings'

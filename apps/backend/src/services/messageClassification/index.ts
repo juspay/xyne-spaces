@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import {
-  MESSAGE_ACTS,
-  MESSAGE_ACT_NAMES,
-  NO_ACT,
-  THREAD_TYPES,
   OrgLLMServiceAccountPurpose,
+  isHumanApplied,
+  parseAppliedTags,
+  serializeAppliedTags,
+  type AppliedTag,
+  type ThreadTypeEntry,
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
@@ -17,6 +18,7 @@ import {
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt } from './prompt';
+import { getThreadTypeVocabulary } from './vocabulary';
 
 const TAG = '[MessageClassification]';
 
@@ -31,6 +33,21 @@ export const MIN_THREAD_SIZE = Number(
 
 /** Upper bound on messages sent to the model in one pass. */
 const MAX_THREAD_CONTEXT = 60;
+
+/**
+ * How many earlier messages from the same DM to send as background.
+ *
+ * People do not reply in threads in a DM — they just keep typing — so a DM "thread" is
+ * usually one message with nothing under it. Classifying that in isolation is guessing: "can
+ * you check this?" is a REQUEST or a QUESTION depending entirely on what came before it.
+ *
+ * Channels do not get this. There a thread is a real thread and its own replies are the
+ * context; pulling in unrelated channel chatter would add noise, not signal.
+ */
+const DM_CONTEXT_MESSAGES = Number(process.env['MESSAGE_CLASSIFICATION_DM_CONTEXT'] ?? 5);
+
+/** scopeType values that mean "no one uses threads here". */
+const DM_SCOPES = new Set(['DM', 'GROUP_DM']);
 
 /** A ticket description can be pages long; the opening is where the intent lives. */
 const TICKET_DESCRIPTION_LIMIT = 1000;
@@ -49,12 +66,60 @@ export interface ClassifyThreadResult {
 }
 
 /**
- * Classify every message in a thread in one LLM call and apply the results.
+ * Has a person ruled on this thread's tags?
  *
- * Once per message: a message that already has acts is sent as context but never rewritten.
- * The vocabulary's dependencies all point backwards, so a later pass gets no better answer,
- * and the column has no provenance — a re-run would silently clobber hand-applied acts.
- * threadType is the exception, re-derived each pass and written only when it changes.
+ * A curated thread is never sent to the model again — not to protect cost, but because a
+ * re-run would argue with a decision someone already made. Three things count as a ruling:
+ *
+ *  - the column is non-null but holds no tags: the legacy '[]' a clear used to write
+ *  - any tag is tombstoned: someone removed it, and a removal is the one edit that leaves
+ *    no other trace, so re-deriving would hand it straight back
+ *  - any VOCABULARY tag was applied by hand: a person picked the type themselves
+ *
+ * A free-form tag deliberately does NOT count. Inventing "gateway-timeout" says nothing
+ * about whether ISSUE is right or whether HOW_TO should appear once the fix is posted — and
+ * the classifier can only ever emit vocabulary names, so it cannot touch the free-form one.
+ */
+const isCurated = (
+  raw: string | null,
+  tags: AppliedTag[],
+  vocabulary: readonly ThreadTypeEntry[],
+): boolean => {
+  if (raw === null) return false;
+  if (tags.length === 0) return true;
+
+  const known = new Set(vocabulary.map(entry => entry.name));
+  return tags.some(
+    tag => tag.removed === true || (isHumanApplied(tag) && known.has(tag.name)),
+  );
+};
+
+/**
+ * Enough has been said since the last pass to be worth another look.
+ *
+ * `max(at)` across the thread's tags IS the last-classification time, so no extra column is
+ * needed to remember it. The floor stops a one-word "thanks" buying a model call.
+ */
+const MIN_NEW_MESSAGES_TO_RECLASSIFY = Number(
+  process.env['MESSAGE_CLASSIFICATION_MIN_NEW_MESSAGES'] ?? 3,
+);
+
+const newMessagesSince = (tags: AppliedTag[], messages: { createdAt: Date }[]): number => {
+  const lastPass = Math.max(0, ...tags.map(tag => tag.at));
+  // A legacy tag carries at:0, which would make every message look new. Treating it as
+  // "never classified" is right: nothing is known about when it was tagged.
+  return messages.filter(message => message.createdAt.getTime() > lastPass).length;
+};
+
+/**
+ * Classify a thread in one LLM call and apply the results.
+ *
+ * The model returns thread types, each citing the messages that evidence it. Both halves are
+ * stored: the types land on the conversation, and every cited message gets the types it is
+ * the source for — so a chip on a thread can always be traced to the message that caused it.
+ *
+ * Everything the classifier writes is AI-applied and approved; a person's tags carry their
+ * own provenance and are never touched here.
  *
  * Writes go through Prisma (no client context in a worker); Zero replicates to clients.
  */
@@ -74,19 +139,32 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     return { tagged: 0, skipped: 'conversation-not-found' };
   }
 
-  // Once a thread has a type — the classifier's or a person's, including '[]' for cleared —
-  // it is never sent to the model again. Nothing can then overwrite a hand-applied tag, and
-  // an active thread costs one call rather than one every few messages.
-  if (conversation.threadType !== null) {
-    return { tagged: 0, skipped: 'already-classified' };
-  }
-
   const channel = await db.channel.findUnique({
     where: { id: conversation.channelId },
-    select: { id: true, workspaceId: true },
+    select: { id: true, workspaceId: true, scopeType: true },
   });
   if (!channel) {
     return { tagged: 0, skipped: 'no-channel' };
+  }
+
+  // The vocabulary is per workspace and editable at runtime, so it is fetched once and
+  // threaded through everything below: the freeze check needs it to tell a vocabulary tag
+  // from a free-form one, and the same list generates the prompt AND validates what comes
+  // back. Building the prompt from one list and checking answers against another is how a
+  // workspace ends up with every model answer silently dropped.
+  const vocabulary = await getThreadTypeVocabulary(channel.workspaceId);
+
+  // A workspace whose vocabulary is empty has not set one up, or has removed everything.
+  // Bail rather than prompt the model with no types: it would either invent names that fail
+  // validation and get dropped, or return nothing, and either way every thread would cost an
+  // LLM call to achieve nothing.
+  if (vocabulary.length === 0) {
+    return { tagged: 0, skipped: 'no-vocabulary' };
+  }
+
+  const existingTags = parseAppliedTags(conversation.threadType);
+  if (isCurated(conversation.threadType, existingTags, vocabulary)) {
+    return { tagged: 0, skipped: 'curated-by-hand' };
   }
 
   // A ticket's title and description are usually the clearest statement of what the thread
@@ -109,7 +187,6 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
       messageId: true,
       content: true,
       createdAt: true,
-      messageActs: true,
       sender: { select: { name: true } },
     },
     // Newest first, reversed below: taking the oldest N would never reach a long thread's
@@ -120,28 +197,59 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
 
   messages.reverse(); // back to chronological — the model is told the thread is in order
 
+  // In a DM, everything before this message in the same conversation window is the context a
+  // reader would have had. Fetched from the CHANNEL rather than the conversation, because
+  // each top-level DM message opens a conversation of its own.
+  const precedingMessages =
+    DM_SCOPES.has(channel.scopeType) && DM_CONTEXT_MESSAGES > 0
+      ? await db.message.findMany({
+          where: {
+            // A message has no channel of its own — it reaches one through its conversation.
+            conversation: { channelId: channel.id },
+            conversationId: { not: conversationId },
+            isDeleted: false,
+            msgType: { not: 'SYSTEM' },
+            createdAt: { lt: messages[0]?.createdAt ?? conversation.createdAt },
+          },
+          select: {
+            content: true,
+            createdAt: true,
+            sender: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: DM_CONTEXT_MESSAGES,
+        })
+      : [];
+  precedingMessages.reverse();
+
+  // Every message is offered as context: the model is classifying the thread, and it needs
+  // the whole thing to pick which messages are the evidence for each type.
   const threadMessages: ClassifierMessage[] = messages
-    .map(m => {
-      const existing = parseActs(m.messageActs);
-      return {
-        id: m.messageId,
-        text: stripHtml(m.content ?? ''),
-        author_display_name: m.sender?.name ?? 'Unknown',
-        timestamp_iso: m.createdAt.toISOString(),
-        // Present at all => settled, empty included: [] is a deliberate clear, and
-        // re-tagging what someone just removed is worse than leaving it blank.
-        ...(m.messageActs !== null && { existing_acts: existing }),
-      };
-    })
+    .map(m => ({
+      id: m.messageId,
+      text: stripHtml(m.content ?? ''),
+      author_display_name: m.sender?.name ?? 'Unknown',
+      timestamp_iso: m.createdAt.toISOString(),
+    }))
     .filter(m => m.text.length > 0);
 
   if (threadMessages.length < MIN_THREAD_SIZE && !ticket) {
     return { tagged: 0, skipped: 'thread-too-short' };
   }
 
-  // Reached only when the thread has no type yet, so an empty list means there is nothing
-  // left to do at all.
-  const unclassified = threadMessages.filter(m => m.existing_acts === undefined);
+  // Already classified, and not curated. Worth re-reading only if the thread has actually
+  // moved on — otherwise a re-run pays for the same answer.
+  if (existingTags.length > 0) {
+    const fresh = newMessagesSince(existingTags, messages);
+    if (fresh < MIN_NEW_MESSAGES_TO_RECLASSIFY) {
+      return { tagged: 0, skipped: 'nothing-new' };
+    }
+    logger.info(`${TAG} Re-classifying a thread that has grown`, {
+      conversationId,
+      newMessages: fresh,
+      existing: existingTags.map(tag => tag.name),
+    });
+  }
 
   // Passed as a fact, not a rule — what it implies lives in the prompt, not in code.
   const rootMessage = await db.message.findUnique({
@@ -151,10 +259,22 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   const rootIsBot = rootMessage?.msgType === 'BOT';
 
   const modelName = config.messageClassification.model;
-  const { acts, threadTypes } = await classifyThread(
+  const { threadTypes } = await classifyThread(
     {
       thread_messages: threadMessages,
       root_is_bot: rootIsBot,
+      // Deliberately WITHOUT ids. These are not part of the thread and must never be cited
+      // as evidence — a citation is written back onto the message, and tagging someone
+      // else's unrelated DM line would be wrong and would surface as a stray evidence chip.
+      ...(precedingMessages.length > 0 && {
+        preceding_messages: precedingMessages
+          .map(m => ({
+            text: stripHtml(m.content ?? ''),
+            author_display_name: m.sender?.name ?? 'Unknown',
+            timestamp_iso: m.createdAt.toISOString(),
+          }))
+          .filter(m => m.text.length > 0),
+      }),
       ...(ticket && {
         ticket: {
           title: ticket.title,
@@ -165,39 +285,91 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     null,
     channel.workspaceId,
     modelName,
+    vocabulary,
   );
 
+  const now = Date.now();
+
+  // Everything the model produced, merged onto what is already there. A tag with no cited
+  // message still counts for the thread — a type derived from the ticket has no message
+  // behind it.
+  //
+  // The classifier's answer REPLACES its own previous answer; anything a person touched is
+  // kept exactly as it is.
+  //
+  // Additive-only was wrong, and wrong in the direction that decays: a pass can misread a
+  // thread — "what is hydration here?" is a question, not an explanation — and under an
+  // additive merge that mistake was permanent, because nothing else ever removes a tag. Every
+  // re-read was another chance to add one and never a chance to correct one, so on a long
+  // thread precision could only fall. Superseding lets the model take a tag back when the
+  // thread turns out not to be that after all.
+  //
+  // A tag that survives a re-run keeps its ORIGINAL timestamp, so the tooltip goes on meaning
+  // "first tagged" rather than silently becoming "last classified".
+  //
+  // Dropped tags are DELETED rather than tombstoned. A tombstone means "a person took this
+  // off", which isCurated reads as "stop classifying this thread" — so tombstoning here would
+  // let the classifier freeze a thread by correcting itself.
+  //
+  // No evidence pointer on the thread. The model's citations decide which MESSAGES get the
+  // tag, and that is the whole record: to see why a thread is an ISSUE you look at which of
+  // its messages carry ISSUE — messages the thread view has already loaded. A pointer here
+  // would duplicate that into a column replicated to every client, and nothing read it.
+  const returned = new Map(threadTypes.map(type => [type.name, type]));
+  const threadTags: AppliedTag[] = [];
+  for (const tag of existingTags) {
+    // Human decisions — an added tag, or a tombstone for one someone removed — outrank the
+    // model and are never superseded by it.
+    if (isHumanApplied(tag) || tag.removed) {
+      threadTags.push(tag);
+      continue;
+    }
+    // Its own earlier tag: kept only if it still stands this time, and kept with the
+    // timestamp it was first applied.
+    if (returned.has(tag.name)) threadTags.push(tag);
+  }
+  const already = new Set(threadTags.map(tag => tag.name));
+  for (const type of threadTypes) {
+    if (already.has(type.name)) continue;
+    threadTags.push({ name: type.name, at: now });
+  }
+
+  // Inverted: messageId -> the types it is the evidence for. A message can justify several
+  // types, and a type can cite several messages, so this is many-to-many.
+  const byMessage = new Map<string, AppliedTag[]>();
+  for (const type of threadTypes) {
+    for (const messageId of type.sourceMessageIds) {
+      const tags = byMessage.get(messageId) ?? [];
+      // The tag alone: which messages evidence a type IS the record, so nothing points back.
+      // The model's citations decide which messages land here, and that is the whole trail —
+      // reading it back is a matter of asking which messages carry the name.
+      tags.push({ name: type.name, at: now });
+      byMessage.set(messageId, tags);
+    }
+  }
+
+  // Every message in the thread is reconciled, not only the newly cited ones. A message that
+  // was evidence last time and is not cited now must LOSE that tag, or clicking a thread's
+  // chip would still surface it — the thread would say it is not a WHAT_IS while one of its
+  // messages went on claiming to be the proof that it is.
   let tagged = 0;
-  for (const [messageId, messageActs] of acts) {
-    await writeActs(messageId, messageActs);
-    await refeedToVespa(messageId, conversation.workspaceId);
-    tagged += messageActs.length;
+  for (const message of messages) {
+    const tags = byMessage.get(message.messageId) ?? [];
+    const changed = await writeMessageTags(message.messageId, tags);
+    // Only re-feed what actually moved: a thread of sixty messages would otherwise queue
+    // sixty Vespa writes on every pass to change two of them.
+    if (changed) await refeedToVespa(message.messageId, conversation.workspaceId);
+    tagged += tags.length;
   }
 
-  // Anything the model skipped, or whose acts all failed validation, is marked attempted
-  // rather than left null. Without this it stays eligible forever, so `unclassified` is
-  // never empty and every future bucket pays a full-thread call that can only skip it
-  // again. No Vespa refeed — an empty act list changes nothing in the index.
-  const giveUps = unclassified.filter(m => !acts.has(m.id));
-  for (const message of giveUps) {
-    await writeActs(message.id, []);
-  }
-  if (giveUps.length > 0) {
-    logger.info(`${TAG} Messages judged to perform no act`, {
-      conversationId,
-      count: giveUps.length,
-    });
-  }
-
-  // threadType was null to get here, so this is the one and only write.
-  const nextThreadType = threadTypes.length > 0 ? JSON.stringify(threadTypes) : null;
+  const nextThreadType = threadTags.length > 0 ? serializeAppliedTags(threadTags) : null;
   if (nextThreadType) {
     await db.conversation.update({
       where: { conversationId },
       data: { threadType: nextThreadType },
     });
     // The root message doc is the one carrying the thread type, so it needs refeeding even
-    // if its own acts didn't change.
+    // if its own tags didn't change.
     await refeedToVespa(conversation.initialMessageId, conversation.workspaceId);
   }
 
@@ -224,21 +396,47 @@ async function refeedToVespa(messageId: string, workspaceId: string | null): Pro
   }
 }
 
-async function writeActs(messageId: string, acts: string[]): Promise<void> {
-  const valid = acts.filter(act => (MESSAGE_ACT_NAMES as readonly string[]).includes(act));
-  if (valid.length !== acts.length) {
-    logger.warn(`${TAG} Dropping acts outside the vocabulary`, {
-      messageId,
-      dropped: acts.filter(a => !valid.includes(a)),
-    });
+/**
+ * Set the classifier's evidence tags on a message to `tags`, leaving human ones alone.
+ *
+ * The same supersede rule the thread uses, for the same reason: the model's previous answer
+ * about this message is replaced by its current one, so a citation it no longer stands behind
+ * stops claiming to be evidence. What a PERSON put on the message — or took off it — outranks
+ * the model and survives untouched.
+ *
+ * `tags` may be empty, which is how a message that is no longer cited is cleared.
+ *
+ * Returns whether anything actually changed, so the caller can skip re-feeding Vespa for the
+ * messages this pass did not move.
+ */
+async function writeMessageTags(messageId: string, tags: AppliedTag[]): Promise<boolean> {
+  const message = await db.message.findUnique({
+    where: { messageId },
+    select: { messageActs: true },
+  });
+  if (!message) {
+    logger.warn(`${TAG} Model cited a message that no longer exists`, { messageId });
+    return false;
   }
+
+  const existing = parseAppliedTags(message.messageActs);
+  // Nothing to do, and nothing was ever done: skip the write rather than rewrite '[]' onto
+  // every untagged message in the thread on every pass.
+  if (existing.length === 0 && tags.length === 0) return false;
+
+  const returned = new Set(tags.map(tag => tag.name));
+  const kept = existing.filter(tag => isHumanApplied(tag) || tag.removed || returned.has(tag.name));
+  const already = new Set(kept.map(tag => tag.name));
+  const merged = [...kept, ...tags.filter(tag => !already.has(tag.name))];
+
+  const next = serializeAppliedTags(merged);
+  if (next === serializeAppliedTags(existing)) return false;
 
   await db.message.update({
     where: { messageId },
-    // '[]' rather than null, matching the picker: null means "never classified" and would
-    // make this message eligible again next pass, re-dropping the same acts every time.
-    data: { messageActs: valid.length > 0 ? JSON.stringify(valid) : '[]' },
+    data: { messageActs: next },
   });
+  return true;
 }
 
 // ─── LLM invocation ──────────────────────────────────────────────────────────────
@@ -321,57 +519,55 @@ interface ClassifierMessage {
   text: string;
   author_display_name: string;
   timestamp_iso: string;
-  /** Acts already on this message; empty when cleared by hand. Absent => needs classifying. */
-  existing_acts?: string[];
 }
-
-/** messageActs is a stringified array; anything unparseable is treated as untagged. */
-const parseActs = (raw: string | null): string[] => {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-  } catch {
-    return [];
-  }
-};
 
 interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
+  /**
+   * Earlier DM messages, for context only. No ids, so they cannot be cited — see where this
+   * is built. Absent for channel threads.
+   */
+  preceding_messages?: Omit<ClassifierMessage, 'id'>[];
   /** Present when the thread was turned into a ticket. */
   ticket?: { title: string; description: string };
 }
 
-interface Classification {
-  /** messageId -> its message acts. Messages the model omitted or mis-tagged are absent. */
-  acts: Map<string, string[]>;
-  /** The thread as a whole — a thread can be several things at once. */
-  threadTypes: string[];
+/** One thread type the model returned, with the messages it says justify it. */
+export interface ClassifiedType {
+  name: string;
+  /** Always ids that were actually sent. Empty when the type came from the ticket. */
+  sourceMessageIds: string[];
 }
 
-const VALID_ACTS = new Set(MESSAGE_ACTS.map(entry => entry.name));
-/** Its own set so the sentinel gets the same spelling tolerance as a real act. */
-const NO_ACT_SET = new Set<string>([NO_ACT]);
-const VALID_THREAD_TYPES = new Set(THREAD_TYPES.map(entry => entry.name));
+interface Classification {
+  /** The thread as a whole — a thread can be several things at once. */
+  threadTypes: ClassifiedType[];
+}
 
-// Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised becomes
-// null and is dropped rather than failing the whole job.
+/** No more than this many citations per type, matching what the prompt asks for. */
+const MAX_SOURCES_PER_TYPE = 3;
+
+// Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised is dropped
+// rather than failing the whole job. Both the current object form and a bare list of names
+// are accepted — a smaller model asked for objects will sometimes answer with strings.
+const RawTypeSchema = z.union([
+  z.string(),
+  z.object({
+    name: z.string().nullish(),
+    // Tolerate a bare string as well as an array: models collapse single-element arrays
+    // even when the schema asks for one.
+    sourceMessageIds: z.union([z.string(), z.array(z.string())]).nullish(),
+  }),
+]);
+
 const RawOutputSchema = z.object({
-  // Tolerate a bare string as well as an array — the model collapses single-element arrays.
-  threadTypes: z.union([z.string(), z.array(z.string())]).nullish(),
-  classifications: z
-    .array(
-      z.object({
-        id: z.string(),
-        // Tolerate a bare string as well as an array — models collapse single-element
-        // arrays even when the schema asks for one.
-        messageActs: z.union([z.string(), z.array(z.string())]).nullish(),
-      }),
-    )
-    .default([]),
+  threadTypes: z.union([RawTypeSchema, z.array(RawTypeSchema)]).nullish(),
 });
+
+const asArray = <T,>(value: T | T[] | null | undefined): T[] =>
+  Array.isArray(value) ? value : value == null ? [] : [value];
 
 /**
  * Coerce onto the closed vocabulary. Near-misses (case, hyphens, whitespace) are worth
@@ -398,6 +594,7 @@ async function classifyThread(
   projectId: string | null,
   workspaceId: string,
   modelName: string,
+  vocabulary: readonly ThreadTypeEntry[],
 ): Promise<Classification> {
   const credential =
     dedicatedCredential() ??
@@ -415,7 +612,7 @@ async function classifyThread(
   }
 
   const output = await callLiteLLM(credential, modelName, [
-    { role: 'system', content: buildClassifierPrompt() },
+    { role: 'system', content: buildClassifierPrompt(vocabulary) },
     { role: 'user', content: JSON.stringify(input, null, 2) },
   ]);
 
@@ -425,57 +622,45 @@ async function classifyThread(
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   const parsed = RawOutputSchema.parse(JSON.parse(jsonMatch ? jsonMatch[0] : cleaned));
 
-  // Sent AND still unclassified. Blocks both a hallucinated id and a model that ignores
-  // the prompt and re-classifies a settled message. The prompt asks; this guarantees.
-  const eligibleIds = new Set(
-    input.thread_messages.filter(m => m.existing_acts === undefined).map(m => m.id),
-  );
-  const acts = new Map<string, string[]>();
+  // Only ids that were actually sent. Blocks a hallucinated citation, which would otherwise
+  // become a Prisma update against a message that does not exist.
+  const sentIds = new Set(input.thread_messages.map(m => m.id));
+  const validThreadTypes = new Set(vocabulary.map(entry => entry.name));
 
-  for (const entry of parsed.classifications) {
-    if (!eligibleIds.has(entry.id)) {
-      logger.warn('[MessageClassifier] Model returned an unknown or already-tagged id; dropping', {
-        returned: entry.id,
-      });
+  const threadTypes: ClassifiedType[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of asArray(parsed.threadTypes)) {
+    const rawName = typeof raw === 'string' ? raw : raw.name;
+    const name = coerce(rawName, validThreadTypes);
+    if (!name) {
+      logger.warn('[MessageClassifier] Unusable thread type; dropping', { returned: rawName });
       continue;
     }
-    const raw = Array.isArray(entry.messageActs)
-      ? entry.messageActs
-      : entry.messageActs
-        ? [entry.messageActs]
-        : [];
+    // A model asked for several types will sometimes repeat one; first citation wins.
+    if (seen.has(name)) continue;
+    seen.add(name);
 
-    // Dedupe: a model asked for several tags will sometimes repeat one.
-    const tagged = [...new Set(raw.map(value => coerce(value, VALID_ACTS)).filter(Boolean))] as string[];
-
-    // NO_ACT is the expected answer for chatter, not a failure — only warn when the model
-    // sent something that was meant to be a real act and failed to land on the vocabulary.
-    if (tagged.length === 0) {
-      const declaredNoAct = raw.some(value => coerce(value, NO_ACT_SET) !== null);
-      if (!declaredNoAct && raw.length > 0) {
-        logger.warn('[MessageClassifier] No usable message act returned; dropping', {
-          messageId: entry.id,
-          returned: entry.messageActs,
+    const cited = typeof raw === 'string' ? [] : asArray(raw.sourceMessageIds);
+    const sourceMessageIds = [...new Set(cited)]
+      .filter(id => {
+        if (sentIds.has(id)) return true;
+        logger.warn('[MessageClassifier] Type cited an unknown message id; dropping citation', {
+          type: name,
+          returned: id,
         });
-      }
-      continue;
-    }
-    acts.set(entry.id, tagged);
+        return false;
+      })
+      .slice(0, MAX_SOURCES_PER_TYPE);
+
+    threadTypes.push({ name, sourceMessageIds });
   }
 
-  const rawTypes = Array.isArray(parsed.threadTypes)
-    ? parsed.threadTypes
-    : parsed.threadTypes
-      ? [parsed.threadTypes]
-      : [];
-  const threadTypes = [
-    ...new Set(rawTypes.map(value => coerce(value, VALID_THREAD_TYPES)).filter(Boolean)),
-  ] as string[];
-  if (rawTypes.length > 0 && threadTypes.length === 0) {
-    logger.warn('[MessageClassifier] Model returned no usable thread type; dropping', {
+  if (threadTypes.length === 0) {
+    logger.warn('[MessageClassifier] Model returned no usable thread type', {
       returned: parsed.threadTypes,
     });
   }
 
-  return { acts, threadTypes };
+  return { threadTypes };
 }

@@ -715,7 +715,7 @@ export function slackBlockElementToFlowComponent(element: SlackBlockElement): Fl
       return {
         id: crypto.randomUUID(),
         type: 'button',
-        props: { label: btn.text.text, variant },
+        props: { label: btn.text.text, variant, ...(btn.url && { url: btn.url }) },
       };
     }
     case 'image': {

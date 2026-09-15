@@ -1,5 +1,3 @@
-import type { SdlcEntityType, SdlcRelationType } from '@xyne/shared';
-
 export type SdlcChatTab = 'conversations' | 'ai';
 export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
 
@@ -44,7 +42,6 @@ export const sdlcChatLayout = (input: {
 export const sdlcChatNavigationSearch = (input: {
   currentSearch: string;
   destinationSearch?: string;
-  destinationHasConversations: boolean;
 }): string => {
   const current = new URLSearchParams(input.currentSearch);
   const destination = new URLSearchParams(input.destinationSearch ?? '');
@@ -59,7 +56,8 @@ export const sdlcChatNavigationSearch = (input: {
   }
 
   destination.delete('conversation');
-  if (currentLayout.activeTab === 'conversations' && input.destinationHasConversations) {
+  destination.delete('selectedTab');
+  if (currentLayout.activeTab === 'conversations') {
     destination.set('discussion', '1');
     destination.set('chat', 'conversations');
   } else {
@@ -87,23 +85,13 @@ export const shouldStartFreshSdlcAssistant = (input: {
   input.actorRepositoryId !== input.repositoryId;
 
 export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
-  repoQueryComplete: boolean;
+  /** Both the channel and the entity links, since the context needs both. */
+  dataLoaded: boolean;
   discussionOpen: boolean;
   selectedConversationId: string | null;
   discussionContextResolved: boolean;
 }): boolean =>
-  input.repoQueryComplete &&
+  input.dataLoaded &&
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
-
-export const shouldShowSdlcRelatedLink = (input: {
-  relationType: SdlcRelationType;
-  entityType: SdlcEntityType;
-  entityChannelId?: string | null;
-  repositoryChannelId?: string | null;
-}): boolean => {
-  if (input.relationType === 'DISCUSSION') return false;
-  if (input.entityType !== 'CONVERSATION') return true;
-  return Boolean(input.entityChannelId && input.entityChannelId !== input.repositoryChannelId);
-};

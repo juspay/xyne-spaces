@@ -14,6 +14,8 @@ interface EndCallModalProps {
   onDeleteTranscriptChange?: (deleteTranscript: boolean) => void;
   submitting?: boolean;
   error?: string | null;
+  /** Analytics context stamped on both end buttons (callId, participantCount, …). */
+  trackMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -32,6 +34,7 @@ export function EndCallModal({
   onDeleteTranscriptChange,
   submitting = false,
   error = null,
+  trackMetadata = {},
 }: EndCallModalProps): React.ReactElement | null {
   // Don't show modal for non-hosts, just disconnect them directly
   if (!isHost) {
@@ -61,12 +64,16 @@ export function EndCallModal({
           onClick: onEndForAll,
           variant: 'outline',
           disabled: submitting,
+          trackName: 'END_CALL_FOR_EVERYONE',
+          trackMetadata: { ...trackMetadata, endScope: 'everyone' },
         },
         {
           label: submitting ? 'Ending…' : 'Just leave the call',
           onClick: onEndForSelf,
           className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
           disabled: submitting,
+          trackName: 'END_CALL_LEAVE_SELF',
+          trackMetadata: { ...trackMetadata, endScope: 'self' },
         },
       ]}
     />

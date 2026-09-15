@@ -1245,6 +1245,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 isSubmitDisabled && 'pointer-events-none',
               )}
               data-testid='create-channel-button'
+              trackId={mode === 'promote' ? 'promote_group_dm_to_channel' : 'create_channel'}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='CREATE_CHANNEL_SUBMIT'
               data-track-metadata={JSON.stringify({ mode, channelName })}

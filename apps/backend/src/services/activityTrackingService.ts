@@ -4,6 +4,7 @@ import { ActivityEventPayload } from '@xyne/shared';
 import { triggerNudgesFromActivity } from '@/services/nudges/nudgeTriggerService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
+import { canonicalizeTrackingCategory } from '@/services/trackingCategoryAliases';
 
 export type { ActivityEventPayload };
 
@@ -18,7 +19,8 @@ class ActivityTrackingService {
     try {
       const resolved = resolveModule(payload.url);
       // Named individually rather than spreading context_metadata: that object
-      // also holds free text and, for INPUT_CHANGE events, the raw typed value.
+      // can hold free text (INPUT_CHANGE events carry only value length, never
+      // the typed content).
       const meta = payload.context_metadata ?? {};
 
       sudoQueryService.identify({ id: payload.user_id });
@@ -33,7 +35,16 @@ class ActivityTrackingService {
         // Carries the channel for DB_MUTATION events, whose url is 'backend'.
         // Click events get it from the url instead and rarely set this key.
         ...(typeof meta.channelId === 'string' && { channelId: meta.channelId }),
+        // Channel usage dimensions from the dashboard's channelTrackingMetadata
+        // (CHANNEL_VIEWED, SEND_MESSAGE, ADD/REMOVE_REACTION, join/leave). The
+        // name is denormalized so reports survive renames; DM rows carry none.
+        ...(typeof meta.channelName === 'string' && { channelName: meta.channelName }),
+        ...(typeof meta.scopeType === 'string' && { scopeType: meta.scopeType }),
+        ...(typeof meta.isThreadReply === 'boolean' && { isThreadReply: meta.isThreadReply }),
+        ...(typeof meta.emojiName === 'string' && { emojiName: meta.emojiName }),
         ...(typeof meta.path === 'string' && { path: meta.path }),
+        // Target URL on ELECTRON_NAVIGATE events.
+        ...(typeof meta.to === 'string' && { to: meta.to }),
         ...(typeof meta.label === 'string' && { label: meta.label }),
         ...(typeof meta.tabValue === 'string' && { tabValue: meta.tabValue }),
         ...(typeof meta.tab === 'string' && { tab: meta.tab }),
@@ -46,7 +57,14 @@ class ActivityTrackingService {
     }
   }
 
-  async saveActivityEvent(payload: ActivityEventPayload): Promise<void> {
+  async saveActivityEvent(rawPayload: ActivityEventPayload): Promise<void> {
+    // Clients running older bundles still emit pre-canonicalization category
+    // spellings; fold them in here so both sinks aggregate under one name.
+    const payload: ActivityEventPayload = {
+      ...rawPayload,
+      event_category: canonicalizeTrackingCategory(rawPayload.event_category),
+    };
+
     // Emitted before the write so a database failure cannot suppress the
     // metric — the two sinks are independent.
     this.emitToSudoQuery(payload);

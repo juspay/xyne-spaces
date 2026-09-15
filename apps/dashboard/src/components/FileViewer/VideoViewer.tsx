@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Settings } from 'lucide-react';
 import { BaseViewerProps } from './utils';
-import { BASE_URL } from '../../services/clients/apiClient';
+import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
@@ -23,6 +23,8 @@ interface VideoViewerProps extends BaseViewerProps {
   menuContent?: React.ReactNode;
   initialTime?: number;
   autoPlay?: boolean;
+  /** Immersive mode renders at the video's natural size; this scales it up to fill the viewer. */
+  fillContainer?: boolean;
 }
 
 const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
@@ -36,6 +38,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       menuContent,
       initialTime,
       autoPlay = false,
+      fillContainer = false,
       disableGestures,
       onInteractionStateChange,
     },
@@ -77,7 +80,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const streamUrl = React.useMemo((): string => {
       if (attachmentId) {
         // Use the streaming endpoint for range request support
-        return `${BASE_URL}/attachments/${attachmentId}/stream`;
+        return getAttachmentStreamUrl(attachmentId);
       }
       // Fallback: create object URL from File
       if (source instanceof File) {
@@ -410,9 +413,26 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           }
         }, delay);
       } else {
-        // Retries exhausted → show error UI
+        // Retries exhausted → show error UI. A file that never finished uploading 404s
+        // here and surfaces as the same MediaError as an undecodable one, so ask the
+        // server which it is instead of always blaming the format.
         setIsLoading(false);
         setError('Failed to load video. The video format may not be supported.');
+        if (attachmentId) {
+          void apiInstance
+            .get(`/attachments/${attachmentId}/stream`, {
+              headers: { Range: 'bytes=0-0' },
+              validateStatus: () => true,
+            })
+            .then(res => {
+              if (res.status === 404) {
+                setError('This video did not finish uploading, so there is nothing to play.');
+              }
+            })
+            .catch(() => {
+              // Offline or blocked — leave the generic message in place.
+            });
+        }
       }
     };
 
@@ -547,7 +567,10 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           crossOrigin='use-credentials'
           className={cn(
             isImmersiveMode
-              ? 'relative z-10 max-h-full max-w-full h-auto w-auto'
+              ? cn(
+                  'relative z-10',
+                  fillContainer ? 'h-full w-full' : 'max-h-full max-w-full h-auto w-auto',
+                )
               : width && height
                 ? 'w-full h-full'
                 : 'max-w-full max-h-full',

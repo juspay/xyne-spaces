@@ -2,11 +2,11 @@ import { logger, Event as LogEvent } from '../utils/logger';
 import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
-import { searchService } from '../services/searchService';
+import { searchService, clearVespaSearchCache } from '../services/searchService';
 import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
 import {
   TabType,
-  MentionType,
+  ChipType,
   VespaApps,
   VespaDocTypes,
   SearchableTypes,
@@ -31,12 +31,15 @@ import {
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import type { StructuredSearchFilters } from './useSearchResultsScreen';
+import { resolveDateKeyword } from '../search/filterModel';
+import { unwrapExactSearchQuery } from '../utils/exactSearch';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
 type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
 
-type SelectedMention = { id: string; type: MentionType; prefix?: string; name?: string };
+type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 type MentionBuckets = {
   from: SelectedMention[];
@@ -88,11 +91,14 @@ interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
-  mentionSearchType?: MentionType | null;
+  mentionSearchType?: ChipType | null;
   isCallSearchPage?: boolean;
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // Initial value for the "Include automations" toggle. Set when reopening the palette
+  // from a search whose scope had it on, so the restored search matches what was run.
+  defaultIncludeBotMessages?: boolean;
   // When true, the ALL-tab Vespa query uses groupBy:'docType' so the backend
   // returns results bucketed by document type (≤10 per category) instead of a
   // flat ranked list — lets the ALL tab show a few of each type at once.
@@ -112,6 +118,72 @@ const MAX_BACKEND_OFFSET = 1000;
  * the user typed it.
  */
 export const CMDK_USER_LIMIT = 25;
+
+/**
+ * Text filters for a query, with UI-picked values layered on top. Typed syntax
+ * (`status:todo`, `board:…`) keeps working; an explicit pick from the results page's
+ * Filters popover wins for that field.
+ */
+type ResolvedTextFilters = ReturnType<typeof parseSearchFilters> & {
+  /** Chip-only — never parsed from the query. See parseSearchFilters. */
+  entity: string | undefined;
+};
+
+function resolveTextFilters(
+  query: string,
+  overrides: StructuredSearchFilters,
+): ResolvedTextFilters {
+  const parsed = parseSearchFilters(query);
+  return {
+    ...parsed,
+    board: overrides.board || parsed.board,
+    tags: overrides.tags || parsed.tags,
+    entity: overrides.entity,
+    status: overrides.status || parsed.status,
+    before: overrides.before || parsed.before,
+    after: overrides.after || parsed.after,
+    on: overrides.on || parsed.on,
+    range: overrides.range || parsed.range,
+  };
+}
+
+/**
+ * Date bounds carried by chips rather than text. Dates are chips in the palette now, so
+ * they no longer appear in the query for `parseSearchFilters` to find — without this the
+ * date filter would render as a chip and quietly not be applied.
+ */
+function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const boards = mentions.filter(m => m.type === ChipType.BOARD).map(m => m.id);
+  return boards.length > 0 ? { board: boards.join(',') } : {};
+}
+
+/** Entity chips carry the name the backend matches, so they travel as-is. */
+function entityFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const entities = mentions.filter(m => m.type === ChipType.ENTITY).map(m => m.id);
+  return entities.length > 0 ? { entity: entities.join(',') } : {};
+}
+
+function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const dates = mentions.filter(m => m.type === ChipType.DATE);
+  if (dates.length === 0) return {};
+  // A preset chip carries its keyword (`last 7 days`) rather than a date — one chip
+  // standing for a window, so the user reads back what they picked. The window is resolved
+  // here, at the request boundary, so the backend still gets the two bounds it wants.
+  const preset = dates.map(m => resolveDateKeyword(m.id)).find(Boolean);
+  // A one-day window goes as `on`, never as equal bounds: the backend reads `before` as
+  // "< start of that day" and `after` as "> end of it", so the pair contradicts itself and
+  // matches nothing. `on` builds the inclusive range.
+  if (preset) {
+    return preset.after === preset.before
+      ? { on: preset.after }
+      : { after: preset.after, before: preset.before };
+  }
+  const on = dates.find(m => m.prefix === 'on:');
+  if (on) return { on: on.id };
+  const after = dates.find(m => m.prefix === 'after:')?.id;
+  const before = dates.find(m => m.prefix === 'before:')?.id;
+  return { ...(after ? { after } : {}), ...(before ? { before } : {}) };
+}
 
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
@@ -142,22 +214,37 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // Parse filters early for UI visibility (typeFilter) and cleaned searchText
   const parsedFilters = useMemo(() => parseSearchFilters(text), [text]);
-  const { searchText: cleanedSearchText, type: typeFilter } = parsedFilters;
+  const { searchText: rawSearchText, type: typeFilter } = parsedFilters;
+  // A bare `""` is exact mode with nothing in it yet — the pill is on, the phrase is empty.
+  // It counts as no query, so every downstream "is there a query?" check stays honest and
+  // we do not fire a request whose `q` resolves to nothing (the backend answers "Query
+  // parameter q is required" and the palette falls back to People and Channels only).
+  const cleanedSearchText = unwrapExactSearchQuery(rawSearchText).trim() ? rawSearchText : '';
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
-    Array<{ id: string; type: MentionType; prefix?: string; name?: string }>
+    Array<{ id: string; type: ChipType; prefix?: string; name?: string }>
   >([]);
   // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
-  const [includeBotMessages, setIncludeBotMessages] = useState(false);
+  const [includeBotMessages, setIncludeBotMessages] = useState(
+    options.defaultIncludeBotMessages ?? false,
+  );
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // Exact-match mode. Not derived from the query text: the quotes are added when the
+  // request is built, so the box stays clean.
+  const [exactMatch, setExactMatch] = useState(false);
   // Vespa rank profile, passed through to the search payload. '' => backend default.
   const [rankProfile, setRankProfile] = useState('');
+  // Structured filters picked from UI (the results page's Filters popover) rather than typed
+  // into the query. Merged over whatever `parseSearchFilters` finds in the text, so typed
+  // syntax keeps working and an explicit pick wins.
+  const [structuredFilters, setStructuredFilters] = useState<StructuredSearchFilters>({});
+  const structuredFiltersKey = JSON.stringify(structuredFilters);
   // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
   const [includeDebugInfo, setIncludeDebugInfo] = useState(false);
   // Load More Ref
@@ -204,6 +291,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // ranked list). Defaults true to preserve the sectioned ALL view.
   const [isGrouped, setIsGrouped] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  // Whether a search has been scheduled for the current inputs and hasn't settled yet.
+  // Drives the initial loader. Armed in the debounce effect (whose dep array is the
+  // canonical, lint-enforced list of search inputs) and disarmed when the latest
+  // dispatch's performSearch settles — so it is immune to the synchronous-cache-hit
+  // race that stranded the old render-body `isLoading` latch.
+  const [isSearchPending, setIsSearchPending] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [paginationState, setPaginationState] = useState<
@@ -237,9 +330,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // results — would hand the callback fresh results labelled with its stale query.
   const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
-  // Guards out-of-order search responses. Each performSearch run claims the next
-  // sequence number; only the latest run is allowed to commit. A slow/stale response
-  // (e.g. a partial `from` query that resolves seconds after the completed `from:`
+  // Guards out-of-order responses. Each dispatch claims the next sequence number at the
+  // call site (alongside the abort below); only the latest run may commit its results, and
+  // the same seq gates the loader disarm — so no separate loader counter is needed. A
+  // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
   // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
@@ -446,8 +540,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const parsedFiltersForImpression = parseSearchFilters(params.queryText);
 
       // Priority is chip-only — track it from the chip, not parsed text.
-      if (selectedMentions.some(m => m.type === MentionType.PRIORITY)) {
+      if (selectedMentions.some(m => m.type === ChipType.PRIORITY)) {
         sessionFiltersRef.current.add('priority');
+      }
+      if (selectedMentions.some(m => m.type === ChipType.ENTITY)) {
+        sessionFiltersRef.current.add('entity');
       }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
       if (parsedFiltersForImpression.tags) sessionFiltersRef.current.add('tags');
@@ -574,6 +671,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const onOpen = useCallback(
     (trigger: SearchTrigger) => {
+      // A fresh palette open must never reuse a previous session's cached search — only the
+      // in-flight popup → full-screen → back handoff should. Back-navigation restores the
+      // palette without calling onOpen, so its cached result survives.
+      // debugger;
+      clearVespaSearchCache();
       startSession(trigger);
     },
     [startSession],
@@ -685,6 +787,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    // Clear the dedup guard's text so reopening the palette and re-entering the same query
+    // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
+    lastSearchedParamsRef.current.text = '';
+    // Re-arm the loader latch: after a clear/close, re-entering a query must show the
+    // spinner again rather than a stale "No results".
+    setIsSearchPending(false);
   }, [resetImpressionTracking]);
 
   /**
@@ -692,9 +800,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
    */
   const performSearch = useCallback(
     async (
+      seq: number,
+      abortController: AbortController,
       query: string,
       activeTab: TabType,
-      selectedMentions: Array<{ id: string; type: MentionType; prefix?: string; name?: string }>,
+      selectedMentions: Array<{ id: string; type: ChipType; prefix?: string; name?: string }>,
       filteredLocalUsers: User[],
       filteredLocalChannels: Array<{
         channel: Channel;
@@ -703,18 +813,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
-      // Claim this run's sequence and abort any previous in-flight request so a slow,
-      // stale response can neither waste the network nor overwrite fresh results.
-      const seq = ++searchSeqRef.current;
+      // Run identity (seq + abortController) is minted by the caller at dispatch time so the
+      // loader disarm can reuse the same seq. A stale response fails isStale() and is dropped.
       const isStale = () => seq !== searchSeqRef.current;
-      searchAbortRef.current?.abort();
-      const abortController = new AbortController();
-      searchAbortRef.current = abortController;
 
       const {
         searchText,
         board: boardFilter,
         tags: tagsFilter,
+        entity: entityFilter,
         before: beforeFilter,
         after: afterFilter,
         on: onFilter,
@@ -722,11 +829,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         stage: stageFilter,
         status: statusFilter,
         type: typeFilter,
-      } = parseSearchFilters(query);
+      } = resolveTextFilters(query, {
+        ...structuredFilters,
+        ...dateFiltersFromChips(selectedMentions),
+        ...boardFilterFromChips(selectedMentions),
+        ...entityFilterFromChips(selectedMentions),
+      });
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
       // isn't a filter (falls through to full-text search).
-      const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+      const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
       // Adjust local results count logic for context
       let localCount = 0;
@@ -746,6 +858,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         priorityFilter ||
         boardFilter ||
         tagsFilter ||
+        entityFilter ||
         beforeFilter ||
         afterFilter ||
         onFilter ||
@@ -846,11 +959,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
               ...(tagsFilter && { tags: tagsFilter }),
+              ...(entityFilter && { entity: entityFilter }),
               ...(beforeFilter && { before: beforeFilter }),
               ...(afterFilter && { after: afterFilter }),
               ...(onFilter && { on: onFilter }),
@@ -1039,6 +1154,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                   presentationSummary: 'lean',
                 },
                 abortController.signal,
+                { cache: true },
               );
 
               // A newer search superseded this one — drop this out-of-order response.
@@ -1085,6 +1201,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                   presentationSummary: 'lean',
                 },
                 abortController.signal,
+                { cache: true },
               );
 
               // A newer search superseded this one — drop this out-of-order response.
@@ -1154,9 +1271,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      exactMatch,
       rankProfile,
       allDefaultRankProfile,
       includeDebugInfo,
+      structuredFilters,
     ],
   );
 
@@ -1167,18 +1286,22 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
     includeDebugInfo: boolean;
+    structuredFiltersKey: string;
   }>({
     text: '',
     activeTab: TabType.ALL,
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
     includeDebugInfo: false,
+    structuredFiltersKey: '{}',
   });
 
   // Debounced backend search with pagination reset
@@ -1194,7 +1317,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
     // Normalize text by trimming trailing spaces to avoid duplicate API calls
     // "sak" and "sak   " should trigger the same search
-    const normalizedText = text.trimEnd();
+    // A bare `""` is exact mode with nothing typed into it yet — the pill is on, the phrase
+    // is empty. It carries no query, so it is dispatched as an empty box: chips on their own
+    // still search, but we never send a `q` that resolves to nothing (the backend answers
+    // "Query parameter q is required" and the palette drops to People and Channels only).
+    const queryText = unwrapExactSearchQuery(text).trim() ? text : '';
+    const normalizedText = queryText.trimEnd();
 
     // Skip if text, tab, mentions, and includeBotMessages are all the same as last search
     // This prevents unnecessary API calls when typing only spaces
@@ -1208,30 +1336,54 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
+      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
     ) {
+      // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
+      // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
+      setIsSearchPending(pendingSearchCountRef.current > 0);
       return;
     }
 
+    // Arm the loader now (before the 300ms debounce) so we never flash "No results"
+    // in the gap before the request fires. Disarmed when the dispatched search settles.
+    setIsSearchPending(true);
     const timer = setTimeout(() => {
       lastSearchedParamsRef.current = {
         text: normalizedText,
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        exactMatch,
         rankProfile,
         allDefaultRankProfile,
         includeDebugInfo,
+        structuredFiltersKey,
         mentionsKey: currentMentionsKey,
       };
+      // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
+      // dispatch time, not on every keystroke; seq and the abort stay atomic together.
+      const seq = ++searchSeqRef.current;
+      searchAbortRef.current?.abort();
+      const abortController = new AbortController();
+      searchAbortRef.current = abortController;
       void performSearch(
-        text,
+        seq,
+        abortController,
+        normalizedText,
         activeTab,
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
         options.onSearchComplete,
-      );
+      ).finally(() => {
+        // Runs on every exit path of performSearch (returns, errors, aborts). Only the
+        // newest dispatch may clear the flag — a superseded run settling (aborted
+        // mid-flight) must not hide the loader while a fresher search is still running.
+        if (seq === searchSeqRef.current) {
+          setIsSearchPending(false);
+        }
+      });
     }, 300);
 
     return () => clearTimeout(timer);
@@ -1246,9 +1398,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFiltersKey,
   ]);
 
   /**
@@ -1259,6 +1413,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchText,
       board: boardFilter,
       tags: tagsFilter,
+      entity: entityFilter,
       before: beforeFilter,
       after: afterFilter,
       on: onFilter,
@@ -1266,15 +1421,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       stage: stageFilter,
       status: statusFilter,
       type: typeFilter,
-    } = parseSearchFilters(text);
+    } = resolveTextFilters(text, {
+      ...structuredFilters,
+      ...dateFiltersFromChips(selectedMentions),
+      ...boardFilterFromChips(selectedMentions),
+      ...entityFilterFromChips(selectedMentions),
+    });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
-    const priorityFilter = selectedMentions.find(m => m.type === MentionType.PRIORITY)?.id;
+    const priorityFilter = selectedMentions.find(m => m.type === ChipType.PRIORITY)?.id;
 
     const hasFilters =
       priorityFilter ||
       boardFilter ||
       tagsFilter ||
+      entityFilter ||
       beforeFilter ||
       afterFilter ||
       onFilter ||
@@ -1318,11 +1479,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
           ...(tagsFilter && { tags: tagsFilter }),
+          ...(entityFilter && { entity: entityFilter }),
           ...(beforeFilter && { before: beforeFilter }),
           ...(afterFilter && { after: afterFilter }),
           ...(onFilter && { on: onFilter }),
@@ -1473,9 +1636,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    exactMatch,
     rankProfile,
     allDefaultRankProfile,
     includeDebugInfo,
+    structuredFilters,
     options.isCallSearchPage,
   ]);
 
@@ -1566,8 +1731,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    exactMatch,
+    setExactMatch,
     rankProfile,
     setRankProfile,
+    structuredFilters,
+    setStructuredFilters,
     includeDebugInfo,
     setIncludeDebugInfo,
     loadMore,
@@ -1588,6 +1757,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     searchResults,
     isGrouped,
     isSearching,
+    isSearchPending,
     searchError,
     isLoadingMore,
     paginationState,

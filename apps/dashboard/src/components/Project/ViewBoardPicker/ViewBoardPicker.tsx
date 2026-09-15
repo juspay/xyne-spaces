@@ -98,6 +98,11 @@ function PickerProjectRow({
   );
 }
 
+interface BoardWithProject {
+  id: string;
+  projectId: string;
+}
+
 export function ViewBoardPicker({
   selectedBoardIds,
   onChange,
@@ -110,12 +115,31 @@ export function ViewBoardPicker({
   const [projects] = useCachedQuery(queries.getAllProjectsList(), { enabled: open });
   const selected = useMemo(() => new Set(selectedBoardIds), [selectedBoardIds]);
 
+  // Fetch selected boards to determine which projects have boards selected
+  const [selectedBoards] = useCachedQuery(queries.boardsByIds({ boardIds: selectedBoardIds }), {
+    enabled: open && selectedBoardIds.length > 0,
+  });
+
+  // Projects that have at least one selected board
+  const projectsWithSelectedBoards = useMemo(() => {
+    const boards = (selectedBoards ?? []) as readonly BoardWithProject[];
+    return new Set(boards.map(b => b.projectId));
+  }, [selectedBoards]);
+
   const filteredProjects = useMemo(() => {
     const list = (projects ?? []) as readonly ProjectLite[];
     const q = search.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(p => p.name.toLowerCase().includes(q));
-  }, [projects, search]);
+    const filtered = q ? list.filter(p => p.name.toLowerCase().includes(q)) : list;
+
+    // Sort: projects with selected boards first, then the rest
+    return [...filtered].sort((a, b) => {
+      const aHasSelected = projectsWithSelectedBoards.has(a.id);
+      const bHasSelected = projectsWithSelectedBoards.has(b.id);
+      if (aHasSelected && !bHasSelected) return -1;
+      if (!aHasSelected && bHasSelected) return 1;
+      return 0;
+    });
+  }, [projects, search, projectsWithSelectedBoards]);
 
   const handleToggleBoards = (boardIds: string[], on: boolean): void => {
     const next = new Set(selectedBoardIds);

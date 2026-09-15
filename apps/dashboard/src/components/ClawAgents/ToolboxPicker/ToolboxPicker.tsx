@@ -17,6 +17,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { Sparkles, ChevronRight, Loader2, Check, X, Info } from 'lucide-react';
 import { suggestTools } from '@/services/claw/clawToolsService';
+
 import { Dialog } from '@/components/ui/Dialog';
 import type {
   AvailableTools,
@@ -674,6 +675,7 @@ export function ToolboxPicker({
           </span>
           <button
             type='button'
+            data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
             onClick={reRollSuggestion}
@@ -847,6 +849,7 @@ export function ToolboxPicker({
                 </button>
                 <button
                   type='button'
+                  data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
                   data-track-category='Claw Agents'
                   data-track-name='Re-suggest tools'
                   onClick={reRollSuggestion}
@@ -865,6 +868,7 @@ export function ToolboxPicker({
           <span className='flex-1'>Suggestions applied</span>
           <button
             type='button'
+            data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
             onClick={reRollSuggestion}
@@ -937,6 +941,7 @@ export function ToolboxPicker({
           </button>
           <button
             type='button'
+            data-ph-capture-attribute-track-id='claw_toolbox_suggest_submit'
             data-track-category='Claw Agents'
             data-track-name='Submit suggest tools'
             onClick={submitRefine}

@@ -42,6 +42,7 @@ import { sendCsatRequestStep } from './steps/send-csat-request.step';
 import { makeCallStep } from './steps/make-call.step';
 
 import { automationQueue } from './queue/automation.queue';
+import { deskLabelBackfillQueue } from './queue/desk-label-backfill.queue';
 
 let initialised = false;
 
@@ -89,6 +90,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(makeCallStep);
 
   await automationQueue.initialize();
+  await deskLabelBackfillQueue.initialize();
 
   logger.info(
     `[automations] Initialised — triggers=${triggerRegistry.list().length}, steps=${stepRegistry.list().length}`,
@@ -96,6 +98,7 @@ export async function initializeAutomations(): Promise<void> {
 }
 
 export { automationQueue } from './queue/automation.queue';
+export { deskLabelBackfillQueue } from './queue/desk-label-backfill.queue';
 export { triggerRegistry } from './triggers/trigger-registry';
 export { stepRegistry } from './steps/step-registry';
 export { eventRouter } from './engine/event-router';

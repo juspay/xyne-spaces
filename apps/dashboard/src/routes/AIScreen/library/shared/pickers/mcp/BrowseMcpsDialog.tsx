@@ -1,9 +1,14 @@
 import { Fragment, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { AGENT_CATEGORIES } from '@/services/claw/agentCategory';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { SectionHeading, Separator } from '../../primitives/Section';
 import {
   disableEntry,
@@ -25,10 +30,13 @@ interface EntryState {
   selectedCount: number;
 }
 
-function matchesSearch(entry: McpCatalogEntry, query: string): boolean {
-  if (!query) return true;
-  if (`${entry.label} ${entry.description}`.toLowerCase().includes(query)) return true;
-  return entry.tools.some(tool => tool.name.toLowerCase().replace(/_/g, ' ').includes(query));
+function mcpSearchFields(entry: McpCatalogEntry) {
+  return {
+    name: entry.label,
+    description: entry.description,
+    ...(entry.slug && entry.slug !== entry.label ? { aliases: [entry.slug] as const } : {}),
+    extras: entry.tools.map(tool => tool.name.replace(/_/g, ' ')),
+  };
 }
 
 function entrySummary(entry: McpCatalogEntry, state: EntryState): string {
@@ -137,9 +145,9 @@ export function BrowseMcpsDialog({
   const stateOf = (entry: McpCatalogEntry): EntryState =>
     entryStates.get(entry.slug) ?? { enabled: false, selectedCount: 0 };
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searchFiltered = useMemo(
-    () => catalog.filter(entry => matchesSearch(entry, q)),
+    () => searchByNameThenDescription(catalog, q, mcpSearchFields),
     [catalog, q],
   );
 
@@ -199,10 +207,13 @@ export function BrowseMcpsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenSlug(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setCategory(null);
+          setOpenSlug(null);
+        })
+      }
       title='Browse MCPs'
       description='Search and select the MCP integrations this agent can use.'
       testId='browse-mcps-dialog'

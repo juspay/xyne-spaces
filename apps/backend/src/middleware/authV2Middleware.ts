@@ -261,7 +261,7 @@ class AuthV2Middleware {
           secure: isProduction,
           sameSite: 'strict',
           path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: session.refreshTokenExpiry.getTime() - Date.now(),
         });
       }
 

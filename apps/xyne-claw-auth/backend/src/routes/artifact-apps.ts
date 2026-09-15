@@ -20,6 +20,7 @@
 import { Router, type Request, type Response } from "express";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { gcsService } from "../services/storageService.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
@@ -56,6 +57,7 @@ const saveBody = z.object({
 
 const addVersionBody = z.object({ attachmentId: z.string().min(1) });
 const publishBody = z.object({ versionId: z.string().min(1) });
+const restoreBody = z.object({ versionId: z.string().min(1) });
 
 function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
   res.status(400).json({
@@ -112,6 +114,206 @@ async function readAttachmentPayload(
     };
   }
 }
+
+/**
+ * Build a validated payload from raw project files sent by a local tool.
+ *
+ * The counterpart to `readAttachmentPayload`: instead of reading bytes from a
+ * chat attachment, it takes the files directly from the request body and runs
+ * them through the SAME `buildReactArtifact` validator, so a CLI push and an
+ * in-chat generation are held to identical rules — file count, per-file and
+ * total byte caps, the extension allowlist (which is what rejects .env / .db /
+ * .sqlite), reserved paths, and the AST/dependency checks. Nothing a local
+ * caller sends can bypass what the agent path enforces.
+ */
+function buildUploadPayload(
+  body: unknown,
+): { ok: true; buffer: Buffer; manifest: unknown; title: string } | { ok: false; error: string } {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Request body must be a project object" };
+  }
+  try {
+    const built = buildReactArtifact(body as Record<string, unknown>);
+    return {
+      ok: true,
+      buffer: Buffer.from(JSON.stringify(built.payload), "utf8"),
+      manifest: built.manifest,
+      title: built.payload.title,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Invalid project payload" };
+  }
+}
+
+// Title comes from the files via buildReactArtifact (which requires it), so it is
+// not parsed here — only the optional description, which the validator ignores.
+const uploadCreateMeta = z.object({
+  description: z.string().trim().max(MAX_DESCRIPTION).optional(),
+});
+
+/**
+ * POST /upload — create an app (version 1) from raw files, no chat attachment.
+ *
+ * This is the entry point for a locally-built project: the CLI serialises its
+ * files into the body, the server validates and stores them exactly as the
+ * attachment path does. The caller becomes the owner; the app starts PRIVATE
+ * and is made workspace-visible only by an explicit publish.
+ */
+artifactAppsRouter.post("/upload", async (req: Request, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const meta = uploadCreateMeta.safeParse(req.body);
+  if (!meta.success) return badRequest(res, meta);
+
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+  if (!workspaceId) {
+    res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
+    return;
+  }
+
+  const built = buildUploadPayload(req.body);
+  if (!built.ok) {
+    res.status(422).json({ success: false, error: built.error });
+    return;
+  }
+
+  const contentHash = createHash("sha256").update(built.buffer).digest("hex");
+  const app = await prisma.artifactApp.create({
+    data: {
+      workspaceId,
+      ownerUserId: requesterId,
+      title: built.title,
+      ...(meta.data.description ? { description: meta.data.description } : {}),
+      visibility: VISIBILITY_PRIVATE,
+    },
+  });
+
+  const path = storagePathFor(app.id);
+  try {
+    await gcsService.uploadFile(built.buffer, path, ARTIFACT_MIME);
+  } catch (err) {
+    await prisma.artifactApp.delete({ where: { id: app.id } }).catch(() => undefined);
+    log.error(`failed storing uploaded artifact app appId=${app.id}: ${String(err)}`);
+    res.status(502).json({ success: false, error: "Could not store the app" });
+    return;
+  }
+
+  const version = await prisma.artifactAppVersion.create({
+    data: {
+      workspaceId: app.workspaceId,
+      appId: app.id,
+      versionNumber: 1,
+      manifest: built.manifest as object,
+      storagePath: path,
+      contentHash,
+      sizeBytes: built.buffer.byteLength,
+      createdBy: requesterId,
+    },
+  });
+
+  // HEAD points at the build the owner is working on — the one just created.
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { headVersionId: version.id },
+  });
+
+  res.status(201).json({ success: true, app: { ...updated, versions: [version] } });
+});
+
+/**
+ * POST /:id/versions/upload — append a version from raw files.
+ *
+ * Same content-hash dedupe as the attachment path: pushing an unchanged project
+ * is a no-op that returns the existing version with `deduped: true`, which makes
+ * a CLI `push` safe to run repeatedly.
+ */
+artifactAppsRouter.post("/:id/versions/upload", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  if (!app || app.isArchived) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+
+  const built = buildUploadPayload(req.body);
+  if (!built.ok) {
+    res.status(422).json({ success: false, error: built.error });
+    return;
+  }
+
+  const contentHash = createHash("sha256").update(built.buffer).digest("hex");
+  const existing = await prisma.artifactAppVersion.findUnique({
+    where: { appId_contentHash: { appId: app.id, contentHash } },
+  });
+  if (existing) {
+    res.json({ success: true, version: existing, deduped: true });
+    return;
+  }
+
+  const last = await prisma.artifactAppVersion.findFirst({
+    where: { appId: app.id },
+    orderBy: { versionNumber: "desc" },
+    select: { versionNumber: true },
+  });
+
+  const path = storagePathFor(app.id);
+  try {
+    await gcsService.uploadFile(built.buffer, path, ARTIFACT_MIME);
+  } catch (err) {
+    log.error(`failed storing uploaded version appId=${app.id}: ${String(err)}`);
+    res.status(502).json({ success: false, error: "Could not store the app" });
+    return;
+  }
+
+  try {
+    const version = await prisma.artifactAppVersion.create({
+      data: {
+        workspaceId: app.workspaceId,
+        appId: app.id,
+        versionNumber: (last?.versionNumber ?? 0) + 1,
+        manifest: built.manifest as object,
+        storagePath: path,
+        contentHash,
+        sizeBytes: built.buffer.byteLength,
+        createdBy: requesterId,
+      },
+    });
+    // HEAD moves forward to the pushed build.
+    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id } });
+    res.status(201).json({ success: true, version });
+  } catch (err) {
+    // A concurrent/retried push can lose the check-then-insert race: the unique
+    // (appId, contentHash) or (appId, versionNumber) index rejects the second
+    // writer with P2002. An identical push is really a dedupe, not an error — so
+    // return the version that won. Any other failure leaves the just-written GCS
+    // object orphaned, so drop it before surfacing the error.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      const existing = await prisma.artifactAppVersion.findUnique({
+        where: { appId_contentHash: { appId: app.id, contentHash } },
+      });
+      if (existing) {
+        await gcsService.deleteFile(path).catch(() => undefined);
+        res.json({ success: true, version: existing, deduped: true });
+        return;
+      }
+    }
+    await gcsService.deleteFile(path).catch(() => undefined);
+    throw err;
+  }
+});
 
 /** POST / — save an artifact as a new app (version 1). */
 artifactAppsRouter.post("/", async (req: Request, res: Response): Promise<void> => {
@@ -286,6 +488,94 @@ artifactAppsRouter.post("/:id/publish", async (req: Request<{ id: string }>, res
 });
 
 /** POST /:id/unpublish — back to private; the pin is cleared. */
+/**
+ * POST /:id/restore — move HEAD back to an earlier version.
+ *
+ * A pointer move, never a copy. `@@unique([appId, contentHash])` makes
+ * re-inserting an old build as a new row impossible by design, so restore
+ * declares which immutable version is current rather than duplicating content.
+ * That also means restoring is free and endlessly reversible: every version
+ * stays in the list, including the one you restored away from.
+ *
+ * Deliberately does NOT touch `publishedVersionId`. Head is what the owner and
+ * the agent work on; the pin is what everyone else sees. Rolling back your own
+ * draft must not silently republish something different to the workspace —
+ * un-publishing is its own explicit act.
+ *
+ * Because the move leaves no trace in the data it touches, the act itself is
+ * recorded as an `ArtifactAppRestore` in the same transaction. That row is the
+ * only thing that can later explain why a thread whose newest generation is v5
+ * is showing v2.
+ */
+artifactAppsRouter.post("/:id/restore", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const parsed = restoreBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  if (!app || app.isArchived) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  // Owner-only for now. Step 4 widens this to group-DM participants, at which
+  // point the check becomes channel membership rather than ownership.
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+
+  // The version must belong to THIS app — otherwise head could be pointed at
+  // another app's build, which the payload route would then happily serve.
+  const version = await prisma.artifactAppVersion.findUnique({ where: { id: parsed.data.versionId } });
+  if (!version || version.appId !== app.id) {
+    res.status(404).json({ success: false, error: "Version not found for this app" });
+    return;
+  }
+
+  // Restoring to what is already current is a no-op, and logging it would put a
+  // "Restored to v3" line in the transcript that explains nothing. Return the
+  // app unchanged rather than 400 — the caller asked for a state that holds.
+  if (app.headVersionId === version.id) {
+    res.json({ success: true, app, versionId: version.id, versionNumber: version.versionNumber });
+    return;
+  }
+
+  const from = app.headVersionId
+    ? await prisma.artifactAppVersion.findUnique({
+        where: { id: app.headVersionId },
+        select: { id: true, versionNumber: true },
+      })
+    : null;
+
+  // One transaction: a head that moved without its event would be exactly the
+  // silent rollback this table exists to prevent.
+  const [updated] = await prisma.$transaction([
+    prisma.artifactApp.update({
+      where: { id: app.id },
+      data: { headVersionId: version.id, updatedAt: new Date() },
+    }),
+    prisma.artifactAppRestore.create({
+      data: {
+        workspaceId: app.workspaceId,
+        appId: app.id,
+        versionId: version.id,
+        versionNumber: version.versionNumber,
+        fromVersionId: from?.id ?? null,
+        fromVersionNumber: from?.versionNumber ?? null,
+        userId: requesterId,
+      },
+    }),
+  ]);
+
+  log.info(`app ${app.id} head restored to v${version.versionNumber} by ${requesterId}`);
+  res.json({ success: true, app: updated, versionId: version.id, versionNumber: version.versionNumber });
+});
+
 artifactAppsRouter.post("/:id/unpublish", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -411,7 +701,27 @@ artifactAppsRouter.get("/:id", async (req: Request<{ id: string }>, res: Respons
     select: { id: true, versionNumber: true, manifest: true, sizeBytes: true, createdAt: true },
   });
 
-  res.json({ success: true, app: { ...app, isOwner }, versions });
+  // Restore history is DRAFT history: it names versions a non-owner is not
+  // served and describes edits behind the published pin. Owners only — everyone
+  // else gets an empty list rather than a shorter one, so the thread renders the
+  // same way whether the feature has events or the caller has no right to them.
+  const restores = isOwner
+    ? await prisma.artifactAppRestore.findMany({
+        where: { appId: app.id },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          versionId: true,
+          versionNumber: true,
+          fromVersionId: true,
+          fromVersionNumber: true,
+          userId: true,
+          createdAt: true,
+        },
+      })
+    : [];
+
+  res.json({ success: true, app: { ...app, isOwner }, versions, restores });
 });
 
 /**
@@ -446,7 +756,13 @@ artifactAppsRouter.get("/:id/payload", async (req: Request<{ id: string }>, res:
   }
 
   const requestedVersionId = typeof req.query["versionId"] === "string" ? req.query["versionId"] : null;
-  const versionId = isOwner ? (requestedVersionId ?? app.publishedVersionId) : app.publishedVersionId;
+  // Owner default is HEAD — the version they and the agent are working on —
+  // falling back to the pin for apps that predate head tracking. A non-owner is
+  // still served the pinned version and only that: honouring a caller-supplied
+  // versionId, or serving head, would expose drafts the owner has not published.
+  const versionId = isOwner
+    ? (requestedVersionId ?? app.headVersionId ?? app.publishedVersionId)
+    : app.publishedVersionId;
 
   const version = versionId
     ? await prisma.artifactAppVersion.findUnique({ where: { id: versionId } })

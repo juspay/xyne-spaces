@@ -236,6 +236,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='SaveAll'
+                    data-ph-capture-attribute-track-id='desk_settings_save'
                   >
                     {saving ? 'Saving…' : 'Save changes'}
                   </button>

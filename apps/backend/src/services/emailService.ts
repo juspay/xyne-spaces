@@ -47,8 +47,6 @@ import {
   NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
-import { superpositionClient } from './superpositionClient';
-import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
@@ -72,6 +70,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -100,6 +99,18 @@ interface UserInfo {
   picture?: string;
 }
 
+/**
+ * App-desk source binding for an ingested message. When set, the ExternalMessage
+ * link row binding (externalSourceId, externalId) → Email is written inside the
+ * same DB transaction as the Email write, so a crash cannot leave an Email
+ * without the link that per-source thread continuation and reply routing rely on.
+ */
+export interface ExternalSourceLink {
+  externalSourceId: string;
+  externalId: string;
+  externalThreadId: string;
+}
+
 export interface CreateConversationWithEmailParams {
   channelId: string;
   boardId?: string; // @deprecated - Target board for ticket creation. Now fetched from EmailChannelPreference table. Kept for backward compatibility.
@@ -113,10 +124,10 @@ export interface CreateConversationWithEmailParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
-  sourceName?: string; // External source name for Superposition context
   receivedAt?: Date;
   // Type of the initial email row. Defaults to DEFAULT (inbound thread root).
   // Outbound-new flows (compose / apps email-ticket creation) pass COMPOSE.
@@ -139,6 +150,7 @@ export interface AddEmailToConversationParams {
   emailReplyTo?: string[];
   externalThreadId: string;
   externalMessageId: string;
+  externalSourceId?: string;
   rfcMessageId?: string | null;
   emailType?: EmailType;
   sentByUserId?: string;
@@ -204,7 +216,6 @@ export interface IngestEmailThreadParams {
     uploadedFiles?: UploadedFileResult[];
   }>;
   ticketMetadata?: Record<string, unknown>;
-  sourceName?: string;
   referencedMessageIds?: string[];
 }
 
@@ -248,6 +259,52 @@ function derivePriorityFromSubject(subject: string): TicketPriority {
   }
 
   return TicketPriority.LOW;
+}
+
+/**
+ * Write the ExternalMessage link row inside an existing transaction.
+ *
+ * The (externalSourceId, externalId) pair being already linked means the same
+ * app re-posted an id it already linked — that is a no-op, not an error.
+ * `createMany` + `skipDuplicates` covers the concurrent-repost race without
+ * raising P2002, which would poison the surrounding interactive transaction.
+ */
+async function linkExternalMessageInTx(
+  tx: Prisma.TransactionClient,
+  link: ExternalSourceLink,
+  emailId: string,
+  workspaceId: string,
+): Promise<void> {
+  const existing = await tx.externalMessage.findUnique({
+    where: {
+      externalSourceId_externalId: {
+        externalSourceId: link.externalSourceId,
+        externalId: link.externalId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    logger.warn('[EmailService] ExternalMessage link already exists, skipping', {
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      emailId,
+    });
+    return;
+  }
+  await tx.externalMessage.createMany({
+    data: [{
+      externalSourceId: link.externalSourceId,
+      externalId: link.externalId,
+      externalThreadId: link.externalThreadId,
+      messageId: emailId,
+      entityId: emailId,
+      direction: MessageDirection.INCOMING,
+      entityType: ExternalEntityType.EMAIL,
+      workspaceId,
+    }],
+    skipDuplicates: true,
+  });
 }
 
 export class EmailService {
@@ -1061,10 +1118,10 @@ export class EmailService {
       emailReplyTo = [],
       externalThreadId,
       externalMessageId,
+      externalSourceId,
       rfcMessageId,
       ticketMetadata,
       uploadedFiles = [],
-      sourceName,
       receivedAt,
       emailType = EmailType.DEFAULT,
       sentByUserId,
@@ -1085,49 +1142,6 @@ export class EmailService {
       await this.channelRepository.update(channelId, {
         type: ChannelType.EMAIL,
       });
-    }
-
-    // Step 0: Superposition guard — bail out before creating anything
-    if (sourceName) {
-      try {
-        const context = createBlockingContext({
-          sourceName: sourceName,
-          email: emailFrom,
-          emailSubject: emailSubject,
-        });
-
-        if (!superpositionClient.isReady()) {
-          logger.warn('[EmailService] SuperpositionClient not ready, proceeding without blocking check', {
-            sourceName,
-            email: emailFrom,
-            domain: context.domain,
-          });
-        } else {
-          const isBlocked = await superpositionClient.getBooleanValue('blocked', false, context);
-          
-          logger.info('[EmailService] Superposition check result', {
-            sourceName,
-            domain: context.domain,
-            email: emailFrom,
-            isBlocked,
-          });
-
-          if (isBlocked) {
-            logger.warn('[EmailService] Blocking Zoho ingestion (no conversation/ticket/email)', {
-              sourceName,
-              domain: context.domain,
-              email: emailFrom,
-            });
-            return { blocked: true };
-          }
-        }
-      } catch (error) {
-        logger.error('[EmailService] Error checking Superposition flag, proceeding with ticket creation', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          sourceName,
-        });
-        // If Superposition check fails, proceed with ticket creation (fail-open)
-      }
     }
 
     // Fetch boardId from EmailChannelPreference table
@@ -1237,6 +1251,11 @@ export class EmailService {
         } as Prisma.EmailUncheckedCreateInput,
       });
 
+      // App-desk source link shares this transaction so it can't be lost to a crash.
+      if (externalSourceId) {
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, createdEmail.id, channel.workspaceId);
+      }
+
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
       const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
@@ -1309,6 +1328,24 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
+    // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -1460,6 +1497,7 @@ export class EmailService {
         emailReplyTo = [],
         externalThreadId,
         externalMessageId,
+        externalSourceId,
         rfcMessageId,
         emailType = EmailType.DEFAULT,
         sentByUserId,
@@ -1506,7 +1544,13 @@ export class EmailService {
         ...(receivedAt && { createdAt: receivedAt }),
       };
 
-      const email = await this.emailRepository.create(emailData);
+      // When an app-desk source link is requested, the Email upsert and the
+      // link write share one transaction so neither can be lost on its own.
+      const email = externalSourceId ? await this.prisma.$transaction(async (tx) => {
+        const created = await this.emailRepository.create(emailData, tx);
+        await linkExternalMessageInTx(tx, { externalId: externalMessageId, externalThreadId, externalSourceId }, created.id, created.workspaceId);
+        return created;
+      }) : await this.emailRepository.create(emailData);
       void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
@@ -2046,7 +2090,6 @@ export class EmailService {
       externalSourceId,
       userId,
       ticketMetadata,
-      sourceName,
     } = params;
 
     if (params.emails.length === 0) {
@@ -2066,26 +2109,6 @@ export class EmailService {
       throw new Error(
         `[EmailService] refusing to ingest into non-EMAIL channel ${channelId} (type=${channel.type})`,
       );
-    }
-
-    if (sourceName) {
-      try {
-        const ctx = createBlockingContext({
-          sourceName,
-          email: firstEmail.from,
-          emailSubject: firstEmail.subject,
-        });
-        if (
-          superpositionClient.isReady() &&
-          (await superpositionClient.getBooleanValue('blocked', false, ctx))
-        ) {
-          return { conversationId: '', inserted: 0, duplicates: 0, isNew: false, blocked: true };
-        }
-      } catch (error) {
-        logger.error('[EmailService] Superposition check failed, proceeding', {
-          error: error,
-        });
-      }
     }
 
     const existingFirstEmail = await this.emailRepository.findFirstByThreadAndChannel(
@@ -2558,6 +2581,24 @@ export class EmailService {
           error,
         );
       });
+
+      // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
+      // truthy here; the guard is what narrows string | undefined for TS.
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

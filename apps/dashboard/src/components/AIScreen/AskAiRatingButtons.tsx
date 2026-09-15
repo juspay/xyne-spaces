@@ -1,6 +1,7 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { useEffect, useState, type ReactElement } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
+
 import { cn } from '../../utils/classNames';
 import { rateV2Message } from '../../services/XyneAI/XyneAISessionsV2Service';
 
@@ -82,6 +83,7 @@ export function AskAiRatingButtons({
   return (
     <span className={cn('inline-flex items-center gap-0.5', className)}>
       <button
+        data-ph-capture-attribute-track-id='ask_ai_rate_up'
         type='button'
         onClick={(): void => {
           setShowComment(false);
@@ -97,7 +99,7 @@ export function AskAiRatingButtons({
         data-track-name='LIKE_MESSAGE'
       >
         <ThumbsUp
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isUp ? 'currentColor' : 'none'}
@@ -105,6 +107,7 @@ export function AskAiRatingButtons({
         />
       </button>
       <button
+        data-ph-capture-attribute-track-id='ask_ai_rate_down'
         type='button'
         onClick={(): void => {
           setShowComment(true);
@@ -120,7 +123,7 @@ export function AskAiRatingButtons({
         data-track-name='DISLIKE_MESSAGE'
       >
         <ThumbsDown
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isDown ? 'currentColor' : 'none'}
@@ -147,6 +150,7 @@ export function AskAiRatingButtons({
             }}
           />
           <button
+            data-ph-capture-attribute-track-id='ask_ai_rate_comment_save'
             type='button'
             onClick={(): void => {
               void submit('down', commentText);

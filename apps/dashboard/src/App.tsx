@@ -26,6 +26,9 @@ import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLo
 import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
+import { parseCallInviteLink } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
+import { detectPlatform } from './hooks/usePlatform';
 import { DEFAULT_WORKSPACE_ID } from './config';
 import {
   CheckTickCircle,
@@ -53,6 +56,48 @@ const App = (): ReactElement => {
       if (!anchor || !anchor.href) return;
 
       if (anchor.protocol === 'blob:') return;
+
+      // A call has one invite URL, shared with teammates and guests alike, so it
+      // points at the external lobby app. Checked ahead of the origin test
+      // because the invite host is deployment config and need not be one of
+      // ours, while the `/external/call/<id>` path shape is.
+      //
+      // The call is handed to roomActor rather than routed to, so the reader
+      // stays on the screen they were reading and GlobalCallOverlay opens the
+      // call over it — the same thing every join button in the app does,
+      // including leaving a call already in progress for this one.
+      // /calls/join is what decides whether the call is theirs to join, and
+      // roomMachine falls back to the lobby when it says no, which is why the
+      // URL they clicked rides along.
+      const callInviteId = parseCallInviteLink(anchor.href);
+      if (callInviteId) {
+        // Modified clicks mean "open this somewhere else" — left to the browser,
+        // as the call-link handling this replaced did. The invite URL still
+        // works on its own: the lobby it opens redirects members back in.
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+        event.preventDefault();
+        // Detached windows are their own route tree with no GlobalCallOverlay in
+        // it, so a call joined there would have nothing to render it. Those keep
+        // going through the call route, which lands on the main app.
+        if (router.state.location.pathname.startsWith('/newWindow')) {
+          void router.navigate(`/call/${encodeURIComponent(callInviteId)}`, {
+            state: { callInviteUrl: anchor.href },
+          });
+          return;
+        }
+
+        joinCallSwitchingIfNeeded({
+          type: 'JOIN_CALL',
+          callId: callInviteId,
+          // roomMachine only forwards this to its disconnect actor, which does
+          // not read it; the join itself never touches Zero.
+          zero: null,
+          viewMode: detectPlatform() === 'mobile' ? 'full' : 'mini',
+          externalLobbyUrl: anchor.href,
+        });
+        return;
+      }
 
       // Check origin directly from anchor element
       if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {

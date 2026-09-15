@@ -41,7 +41,13 @@ export * from './utils/slashCommandArtifact';
 export {
   parseTicketMd,
   serializeTicketMd,
+  parseSubTicketsMd,
+  serializeSubTicketsMd,
+  SUB_TICKETS_MD_LIMIT,
+} from './utils/activityMetadataParser';
+export type {
   TicketCardSummary,
+  SubTicketsMdData,
 } from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';
@@ -50,6 +56,8 @@ export * from './crypto/index.js';
 export * from './templates/callInvitation';
 export * from './templates/callInvitationIcs';
 export * from './templates/callSummary';
+export * from './templates/summaryTemplateSections';
 export * from './types/flowUI';
 export * from './validation/flowSchema';
 export * from './sdlc';
+export * from './validation/etaManagementSchema';

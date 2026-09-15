@@ -554,16 +554,35 @@ export function MCPPageV3({ userId }: Props) {
   // collect their credential fields via the AddConnectionDialog first. The raw
   // connect() would post empty credentials, which the backend rejects — and the
   // sidebar swallows the error, so the button appears to "do nothing".
-  const requiresCredentials = useCallback((s: McpServer) => {
-    if (s.oauth) return false;
-    if (s.type === "google" || s.type === "microsoft" || s.type === "xyne-spaces") return false;
-    const hasFormFields = (s.credentialForm?.fields?.length ?? 0) > 0;
-    const hasSchema = !!s.credentialSchema && Object.keys(s.credentialSchema).length > 0;
-    return hasFormFields || hasSchema;
-  }, []);
+  const requiresCredentials = useCallback(
+    (s: McpServer, resolvedFields?: CredentialField[]) => {
+      if (s.oauth) return false;
+      if (s.type === "google" || s.type === "microsoft" || s.type === "xyne-spaces") return false;
+      if (resolvedFields) return resolvedFields.length > 0;
+      const hasFormFields = (s.credentialForm?.fields?.length ?? 0) > 0;
+      const hasSchema = !!s.credentialSchema && Object.keys(s.credentialSchema).length > 0;
+      return hasFormFields || hasSchema;
+    },
+    [],
+  );
+
+  const resolveCredentialFields = useCallback(
+    async (type: string): Promise<CredentialField[] | undefined> => {
+      const cached = credentialFields[type];
+      if (cached) return cached;
+      try {
+        const map = await getCredentialFields();
+        setCredentialFields(map);
+        return map[type];
+      } catch {
+        return undefined;
+      }
+    },
+    [credentialFields],
+  );
 
   const handleConnect = useCallback(async (server: McpServer) => {
-    if (requiresCredentials(server)) {
+    if (requiresCredentials(server, await resolveCredentialFields(server.type))) {
       setConnectServerId(server.id);
       setShowAddDialog(true);
       return;
@@ -577,7 +596,7 @@ export function MCPPageV3({ userId }: Props) {
         description: err instanceof Error ? err.message : undefined,
       });
     }
-  }, [requiresCredentials, connect, showSnackbar]);
+  }, [requiresCredentials, resolveCredentialFields, connect, showSnackbar]);
 
   // OAuth callback params
   useEffect(() => {

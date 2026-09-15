@@ -33,9 +33,8 @@ const SdlcFrameHost = (): ReactElement | null => {
   const initiateCallRef = useRef(initiateCall);
   initiateCallRef.current = initiateCall;
 
-  // Last path each side told the other, so echoes do not loop.
-  const lastFromFrameRef = useRef<string | null>(null);
-  const lastToFrameRef = useRef<string | null>(null);
+  // Where the frame is now, from its last report or our last send; sending it again only echoes.
+  const frameLocationRef = useRef<string | null>(null);
 
   const container = useMemo(() => {
     if (typeof document === 'undefined') return null;
@@ -59,9 +58,9 @@ const SdlcFrameHost = (): ReactElement | null => {
   // :workspaceId, so at mount the location is usually a different screen.
   useEffect(() => {
     if (!viewport || initialSrcRef.current || !workspaceId) return;
-    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}`;
+    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}${location.hash}`;
     setHasActivated(true);
-  }, [viewport, workspaceId, location.pathname, location.search]);
+  }, [viewport, workspaceId, location.pathname, location.search, location.hash]);
 
   // frame → parent
   useEffect(() => {
@@ -93,8 +92,7 @@ const SdlcFrameHost = (): ReactElement | null => {
         // request a true cache-bypassing reload.
         const root = `/${workspaceId}/sdlc`;
         initialSrcRef.current = `${SDLC_APP_BASE_PATH}${root}?_reset=${Date.now()}`;
-        lastFromFrameRef.current = null;
-        lastToFrameRef.current = null;
+        frameLocationRef.current = null;
         setIsReady(false);
         setResetCount(count => count + 1);
         if (location.pathname !== root) void navigate(root, { replace: true });
@@ -103,9 +101,9 @@ const SdlcFrameHost = (): ReactElement | null => {
 
       if (message.type !== SDLC_FRAME_MESSAGE.route) return;
 
-      lastFromFrameRef.current = message.path;
+      frameLocationRef.current = message.path;
       // Only while on screen — a hidden frame must not move the address bar.
-      const current = `${location.pathname}${location.search}`;
+      const current = `${location.pathname}${location.search}${location.hash}`;
       if (viewport && isSdlcPath(message.path) && message.path !== current) {
         void navigate(message.path, { replace: true });
       }
@@ -113,7 +111,7 @@ const SdlcFrameHost = (): ReactElement | null => {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [location.pathname, location.search, navigate, viewport, workspaceId]);
+  }, [location.pathname, location.search, location.hash, navigate, viewport, workspaceId]);
 
   // parent → frame
   useEffect(() => {
@@ -121,13 +119,25 @@ const SdlcFrameHost = (): ReactElement | null => {
     const target = iframeRef.current?.contentWindow;
     if (!target) return;
 
-    const path = `${location.pathname}${location.search}`;
+    // The hash carries #origin/#messageId scroll targets, so it must ride along.
+    const path = `${location.pathname}${location.search}${location.hash}`;
     if (!isSdlcPath(location.pathname)) return;
-    if (path === lastFromFrameRef.current || path === lastToFrameRef.current) return;
+    if (path === frameLocationRef.current) return;
 
-    lastToFrameRef.current = path;
+    // The bare hub link means "back to SDLC", so it returns to wherever the frame already is.
+    const frameLocation = frameLocationRef.current;
+    if (
+      frameLocation &&
+      isSdlcPath(frameLocation) &&
+      /^\/[^/]+\/sdlc\/?$/.test(location.pathname)
+    ) {
+      void navigate(frameLocation, { replace: true });
+      return;
+    }
+
+    frameLocationRef.current = path;
     target.postMessage({ type: SDLC_FRAME_MESSAGE.navigate, path }, window.location.origin);
-  }, [isReady, viewport, location.pathname, location.search]);
+  }, [isReady, viewport, location.pathname, location.search, location.hash, navigate]);
 
   if (!container || !hasActivated || !initialSrcRef.current) return null;
 

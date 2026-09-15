@@ -76,6 +76,7 @@ export interface SupportKanbanBoardProps {
     aiCategory: string[] | undefined;
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
+    hasSubTickets: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
@@ -119,7 +120,7 @@ export const SupportKanbanBoard = ({
   // first row below.
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV3({
+    queries.supportTicketsFilteredV4({
       channelId,
       isMember,
       ...restTicketFilter,
@@ -144,6 +145,7 @@ export const SupportKanbanBoard = ({
         ac: ticketFilter.aiCategory ?? null,
         ci: ticketFilter.conversationIdWhitelist ?? null,
         ad: ticketFilter.hasAiDraft ?? null,
+        hst: ticketFilter.hasSubTickets ?? null,
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
@@ -161,6 +163,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.aiCategory,
       ticketFilter.conversationIdWhitelist,
       ticketFilter.hasAiDraft,
+      ticketFilter.hasSubTickets,
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,

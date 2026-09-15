@@ -55,6 +55,7 @@ import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
   FormFieldType,
   parseFieldOptionValues,
+  WorkspaceRole,
   type DeskMetricsAgentRow,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
@@ -688,11 +689,14 @@ const MetricsTicketTable = ({
   onDownload,
   onTicketClick,
   onAssigneeClick,
+  basic = false,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
   onAssigneeClick: (assigneeId: string) => void;
+  /** Only ID, Title, Assignee, Priority and Stage (the first five columns), no CSV export. */
+  basic?: boolean;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
@@ -711,7 +715,10 @@ const MetricsTicketTable = ({
           <button
             type='button'
             onClick={onDownload}
-            className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
+            className={cn(
+              'flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border',
+              basic && 'hidden',
+            )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
           >
@@ -748,7 +755,12 @@ const MetricsTicketTable = ({
         </div>
       </div>
       <div className='overflow-x-auto'>
-        <table className='w-full text-sm'>
+        <table
+          className={cn(
+            'w-full text-sm',
+            basic && '[&_td:nth-child(n+6)]:hidden [&_th:nth-child(n+6)]:hidden',
+          )}
+        >
           <thead>
             <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
@@ -959,6 +971,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   onTicketClick,
 }) => {
   const { user } = useAuth();
+  // Guests see a trimmed view: overview only, created vs resolved chart, basic ticket table.
+  const isGuest = user?.role === WorkspaceRole.GUEST;
   const {
     dateRange,
     startTime,
@@ -982,19 +996,21 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     setSelectedCustomFieldValues,
     comparedChannelIds,
     setComparedChannelIds,
-    chartView,
+    chartView: persistedChartView,
     setChartView,
     activeTab,
     setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
+  const chartView = isGuest ? 'trend' : persistedChartView;
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
 
   const selectedDeskIds = useMemo(() => {
+    if (isGuest) return [channelId];
     const selectable = new Set(availableDesks.map(d => d.id));
     return [channelId, ...comparedChannelIds.filter(id => selectable.has(id) && id !== channelId)];
-  }, [channelId, comparedChannelIds, availableDesks]);
+  }, [isGuest, channelId, comparedChannelIds, availableDesks]);
 
   const isMultiDesk = selectedDeskIds.length > 1;
   const isDeskSelectionAtLimit = selectedDeskIds.length >= DESK_METRICS_MAX_AGGREGATE_DESKS;
@@ -1141,7 +1157,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedDeskIds,
     timeRangeParam,
     open,
-    selectedAssigneeIds,
+    isGuest ? [] : selectedAssigneeIds,
     customFieldFilter,
     isMultiDesk ? [] : selectedStageNames,
     selectedPriorities,
@@ -1350,10 +1366,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
   const handleAssigneeClick = useCallback(
     (assigneeId: string) => {
+      if (isGuest) return;
       setSelectedAssigneeIds([assigneeId]);
       setActiveTab('agents');
     },
-    [setSelectedAssigneeIds, setActiveTab],
+    [isGuest, setSelectedAssigneeIds, setActiveTab],
   );
 
   const handleAgentClick = useCallback(
@@ -1409,7 +1426,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {(
                   [
                     { id: 'overview', label: 'Overview' },
-                    { id: 'agents', label: 'Agents' },
+                    ...(isGuest ? [] : ([{ id: 'agents', label: 'Agents' }] as const)),
                     ...(isMultiDesk ? ([{ id: 'desks', label: 'By desk' }] as const) : []),
                   ] as const
                 ).map(({ id, label }) => (
@@ -1448,7 +1465,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
             </div>
             <div className='contents'>
               <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
-                {availableDesks.length > 1 && (
+                {availableDesks.length > 1 && !isGuest && (
                   <Popover
                     open={deskPickerOpen}
                     onOpenChange={openState => {
@@ -1583,7 +1600,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   trigger={
                     <button
                       type='button'
-                      className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
+                      className={cn(
+                        'flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border',
+                        isGuest && 'hidden',
+                      )}
                       data-track-category='DeskMetrics'
                       data-track-name='AssigneeFilter'
                     >
@@ -2285,7 +2305,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   Blended totals in Overview are weighted by these counts.
                 </p>
               </div>
-            ) : activeTab === 'agents' ? (
+            ) : activeTab === 'agents' && !isGuest ? (
               <div className='flex flex-col gap-4'>
                 {agents.length === 0 ? (
                   <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
@@ -2388,6 +2408,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               <div className='flex flex-col gap-4'>
                 {/* KPI row — FRT / RT / CSAT / Email Replies */}
                 <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
+                  {isGuest && (
+                    <KpiCard
+                      label='Tickets Created'
+                      value={String(data.counts.openedInRange)}
+                      sub='created in range'
+                    />
+                  )}
                   <KpiCard
                     label='Avg First Response'
                     value={formatDuration(data.frt.avgSeconds)}
@@ -2398,16 +2425,25 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     value={formatDuration(data.rt.avgSeconds)}
                     sub={`${data.rt.resolvedTickets} resolved`}
                   />
-                  <KpiCard
-                    label='CSAT'
-                    value={data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'}
-                    sub={
-                      csatTotal > 0
-                        ? `${data.csat.good} good · ${data.csat.bad} bad`
-                        : 'No responses'
-                    }
-                  />
-                  <KpiCard label='Email Replies' value={String(data.counts.emailRepliesInRange)} />
+                  {!isGuest && (
+                    <>
+                      <KpiCard
+                        label='CSAT'
+                        value={
+                          data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
+                        }
+                        sub={
+                          csatTotal > 0
+                            ? `${data.csat.good} good · ${data.csat.bad} bad`
+                            : 'No responses'
+                        }
+                      />
+                      <KpiCard
+                        label='Email Replies'
+                        value={String(data.counts.emailRepliesInRange)}
+                      />
+                    </>
+                  )}
                 </div>
 
                 {/* Stage counts */}
@@ -2456,7 +2492,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               : 'Tickets by tag category')}
                         </div>
                         <div className='flex items-center gap-2'>
-                          <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
+                          <div
+                            className={cn(
+                              'flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border',
+                              isGuest && 'hidden',
+                            )}
+                          >
                             <button
                               type='button'
                               onClick={() => setChartView('priority')}
@@ -2693,6 +2734,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         onDownload={handleDownload}
                         onTicketClick={onTicketClick}
                         onAssigneeClick={handleAssigneeClick}
+                        basic={isGuest}
                       />
                     )}
                   </>

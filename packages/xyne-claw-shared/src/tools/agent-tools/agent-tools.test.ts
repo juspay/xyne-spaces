@@ -3,6 +3,7 @@ import {
   AGENT_TOOLS_SOURCE,
   AGENT_TOOL_DEFS,
   createAgentTool,
+  cloneAgentTool,
   updateAgentTool,
   createSubagentTool,
   updateSubagentTool,
@@ -13,7 +14,7 @@ import { validateMcpProposal } from "../../flow/mcp-proposal.js";
 import { getAllCustomTools } from "../registry.js";
 
 describe("the Agent Tools group", () => {
-  it("puts all seven authoring tools under one source", () => {
+  it("puts all authoring tools under one source", () => {
     // The picker derives its groups from distinct `custom:*` sources, so a
     // shared source IS the grouping — this is what makes them appear together.
     const slugs = [...AGENT_TOOL_DEFS, createSkillTool, updateSkillTool]
@@ -21,6 +22,7 @@ describe("the Agent Tools group", () => {
       .map((t) => t.slug)
       .sort();
     expect(slugs).toEqual([
+      "clone-agent",
       "create-agent",
       "create-mcp",
       "create-skill",
@@ -70,6 +72,12 @@ describe("tool schemas", () => {
     expect(createAgentTool.inputSchema.required).toEqual(
       expect.arrayContaining(["name", "description", "systemPrompt"]),
     );
+  });
+
+  it("requires an explicit source and destination name for clones", () => {
+    expect(cloneAgentTool.inputSchema.required).toEqual(["sourceSlug", "name"]);
+    expect(cloneAgentTool.description).toMatch(/personal agent/i);
+    expect(cloneAgentTool.description).toMatch(/credentials copy only/i);
   });
 
   it("requires only the target on updates, so callers can send one field", () => {

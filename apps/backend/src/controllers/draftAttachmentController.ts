@@ -5,7 +5,7 @@ import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
 import { Prisma } from '@prisma/client';
-import { AttachmentEntityType } from '@xyne/shared';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {
@@ -231,6 +231,7 @@ export class DraftAttachmentController {
             thumbnailUrl,
             storageProvider: config.fileStorage.provider,
             metadata: completeMetadata,
+            uploadStatus: AttachmentUploadStatus.COMPLETED,
           };
 
           try {
@@ -278,6 +279,7 @@ export class DraftAttachmentController {
           });
         } catch (error) {
           logger.error(`Failed to process draft attachment ${attachmentId}:`, error);
+          await this.markAttachmentsFailed([attachmentId]);
           // Continue with next file even if this one fails
           results.push({
             attachmentId,
@@ -287,20 +289,40 @@ export class DraftAttachmentController {
         }
       }
 
-      res.status(200).json({
-        success: true,
+      const failureCount = results.filter(r => !r.success).length;
+
+      res.status(failureCount > 0 ? 500 : 200).json({
+        success: failureCount === 0,
         uploadedAttachments: results,
         totalCount: results.length,
         successCount: results.filter(r => r.success).length,
-        failureCount: results.filter(r => !r.success).length,
+        failureCount,
       });
 
     } catch (error) {
       logger.error('Error uploading draft attachments:', error);
+      await this.markAttachmentsFailed(attachmentIdsArray);
       res.status(500).json({
         error: 'Failed to upload attachments',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  };
+
+  /**
+   * Best-effort: park rows whose upload never completed in FAILED so the send gate
+   * rejects them and the UI can show the failure. Never throws — the caller is
+   * already on an error path.
+   */
+  private markAttachmentsFailed = async (attachmentIds: string[]): Promise<void> => {
+    if (attachmentIds.length === 0) return;
+    try {
+      await this.db.messageAttachment.updateMany({
+        where: { id: { in: attachmentIds }, url: '' },
+        data: { uploadStatus: AttachmentUploadStatus.FAILED },
+      });
+    } catch (error) {
+      logger.error('Failed to mark attachments as failed:', error);
     }
   };
 }

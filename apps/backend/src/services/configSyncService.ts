@@ -215,6 +215,23 @@ export class ConfigSyncService {
         logger.info('VESPA resource already exists');
       }
 
+      const releaseManagerResource = await prisma.resource.findUnique({
+        where: { name: 'RELEASE-MANAGER' }
+      });
+
+      if (!releaseManagerResource) {
+        logger.info('Creating RELEASE-MANAGER resource');
+        await prisma.resource.create({
+          data: {
+            name: 'RELEASE-MANAGER',
+            description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.'
+          }
+        });
+        logger.info('Successfully created RELEASE-MANAGER resource');
+      } else {
+        logger.info('RELEASE-MANAGER resource already exists');
+      }
+
       // Log final group distribution (only for this workspace)
       const groups = await prisma.userGroup.findMany({
         where: { workspaceId }

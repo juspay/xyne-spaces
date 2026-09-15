@@ -5,6 +5,7 @@ import { VariableRefField } from '../SchemaForm/VariableRefField';
 import { EntityKind } from '../SchemaForm/SchemaForm.utils';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import type { ValidationIssue } from '../../Automation.types';
+import { useAuth } from '../../../../hooks/useAuth';
 import { cn } from '../../../../utils/classNames';
 
 interface ApplyConversationLabelConfigShape {
@@ -47,6 +48,7 @@ export function ApplyConversationLabelStepForm({
   pathPrefix,
   variableSources,
 }: ApplyConversationLabelStepFormProps): React.ReactElement {
+  const { user } = useAuth();
   const cfg = value as ApplyConversationLabelConfigShape;
   const channelId =
     typeof cfg.channelId === 'string' && !cfg.channelId.includes('{{') ? cfg.channelId : '';
@@ -54,6 +56,14 @@ export function ApplyConversationLabelStepForm({
   const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
     enabled: !!channelId,
   });
+
+  // Conversation labels are private per agent: applying one you do not own fails
+  // server-side as label_id_mismatch, which is a skippable code — so the step would
+  // silently no-op at runtime. Only ever offer the current user's own labels.
+  const ownedLabels = useMemo(
+    () => (catalog ?? []).filter(l => l.createdBy === user?.id),
+    [catalog, user?.id],
+  );
 
   const issuesAt = useMemo(() => {
     const map = new Map<string, string>();
@@ -105,7 +115,7 @@ export function ApplyConversationLabelStepForm({
 
       <FieldRow
         label='Label'
-        description='Label from your private catalog (created if missing).'
+        description='Label from this channel’s catalog (created if missing).'
         error={issuesAt.get('labelName')}
         required
       >
@@ -114,7 +124,7 @@ export function ApplyConversationLabelStepForm({
           value={cfg.labelName ?? ''}
           onChange={e => {
             const name = e.target.value;
-            const existing = (catalog ?? []).find(
+            const existing = ownedLabels.find(
               l => l.name.toLowerCase() === name.trim().toLowerCase(),
             );
             onChange({
@@ -131,13 +141,13 @@ export function ApplyConversationLabelStepForm({
           data-track-name='apply-conversation-label-name'
         />
         <datalist id={`apply-label-suggestions-${pathPrefix}`}>
-          {(catalog ?? []).map(l => (
+          {ownedLabels.map(l => (
             <option key={l.id} value={l.name} />
           ))}
         </datalist>
-        {channelId && (catalog?.length ?? 0) > 0 && (
+        {channelId && ownedLabels.length > 0 && (
           <div className='mt-2 flex flex-wrap gap-1.5'>
-            {catalog.slice(0, 12).map(label => {
+            {ownedLabels.slice(0, 12).map(label => {
               const selected =
                 (cfg.labelName ?? '').trim().toLowerCase() === label.name.toLowerCase();
               return (

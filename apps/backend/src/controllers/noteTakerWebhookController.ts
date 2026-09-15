@@ -10,6 +10,7 @@ import { callRecordingService } from '@/services/callRecordingService';
 import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { isRecordingType } from '@/utils/callTypeUtils';
 
 // Deferred the same way as the conversation-based flow's fallback reconcile —
 // see livekitWebhookController's former room_finished comment for the full
@@ -50,8 +51,7 @@ class NoteTakerWebhookController {
 
       case 'egress_started':
       case 'egress_ended':
-        // callRecordingService's egress handling is already channel/message-agnostic
-        // (keyed purely by egressId), so it's shared as-is — see livekitWebhookController.
+        // Handled for every room type by livekitWebhookController.
         return;
 
       default:
@@ -111,6 +111,10 @@ class NoteTakerWebhookController {
     const threadChannelId =
       typeof roomMetadata.channelId === 'string' ? roomMetadata.channelId : undefined;
     const messageId = conversationId && threadChannelId ? uuidv4() : undefined;
+    const requestedRecordingType = roomMetadata.recordingType;
+    const recordingType = isRecordingType(requestedRecordingType)
+      ? requestedRecordingType
+      : RecordingType.AUDIO_ONLY;
 
     if (!workspaceId) {
       logger.error(`[NoteTaker Webhook] Missing workspaceId in room metadata for ${roomName}`);
@@ -222,14 +226,14 @@ class NoteTakerWebhookController {
     // handleParticipantLeft / handleRoomFinished below
     // (noteTakerTranscriptService.shareThreadRecordingIfLinked).
 
-    // Auto-start an audio recording for the whole call — note-taker calls have
+    // Auto-start a recording for the whole call — note-taker calls have
     // no manual "start recording" UI action, so this replaces that trigger.
     // Stopped automatically when the creator leaves. Non-fatal: a failure here shouldn't block call
     // creation or the transcription pipeline.
     try {
       await callRecordingService.startRecording({
         call,
-        recordingType: RecordingType.AUDIO_ONLY,
+        recordingType,
         startedBy: createdBy,
       });
     } catch (recordingError) {

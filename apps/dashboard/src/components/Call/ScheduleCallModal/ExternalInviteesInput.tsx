@@ -86,7 +86,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
               }}
               className='inline-flex items-center justify-center size-4 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
               aria-label={`Remove ${email}`}
-              data-track-category='calls'
+              data-track-category='CALLS'
               data-track-name='remove-external-invitee'
             >
               <X size={12} />
@@ -99,7 +99,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
           className='flex-1 min-w-[180px] outline-none bg-transparent text-sm'
           placeholder={chips.length === 0 ? 'Add guest emails…' : ''}
           value={draft}
-          data-track-category='calls'
+          data-track-category='CALLS'
           data-track-name='external-invitee-input'
           onChange={e => {
             setDraft(e.target.value);
