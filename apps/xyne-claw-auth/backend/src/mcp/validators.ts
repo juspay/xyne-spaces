@@ -477,8 +477,11 @@ for (const tool of [
   SDLC_TOOL_NAMES.readArtifactVersion,
 ]) {
   register("xyne-spaces", tool, async (params) => {
-    for (const key of ["repoId", "workspaceId", "actorUserId"]) {
+    for (const key of ["workspaceId", "actorUserId"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required`;
+    }
+    if (!String(params["channelId"] ?? "").trim() && !String(params["repoId"] ?? "").trim()) {
+      return "channelId is required";
     }
     if (tool === SDLC_TOOL_NAMES.listArtifacts) return null;
     const selector = params["selector"];
