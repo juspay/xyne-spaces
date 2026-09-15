@@ -125,9 +125,12 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     const { previousContent, ...rest } = payload as { previousContent?: string };
     if (previousContent === undefined) return rest;
     const needle = (config as MessageReceivedConfig).contentContains;
+    // Mirror matchFilters: test decoded + raw so an encoded-card needle can't read as a non-match.
+    const prevTexts = [previousContent, toReadableMessageContent(previousContent)];
     return {
       ...rest,
-      previousContentMatched: !!needle && previousContent.toLowerCase().includes(needle.toLowerCase()),
+      previousContentMatched:
+        !!needle && prevTexts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
     };
   }
 
