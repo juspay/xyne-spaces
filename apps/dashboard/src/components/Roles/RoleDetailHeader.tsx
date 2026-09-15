@@ -56,6 +56,7 @@ const RoleDetailHeader = ({
   onAddUsers,
 }: RoleDetailHeaderProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   if (editing) {
     return (
       <div className='shrink-0 flex h-[52px] items-center gap-2.5 border-b border-border px-4'>
@@ -69,7 +70,7 @@ const RoleDetailHeader = ({
           }}
           maxLength={40}
           placeholder={t('roles.detailHeader.namePlaceholder')}
-          aria-label='Role name'
+          aria-label={tc('roles.detailHeader.roleNameAriaLabel')}
           className='h-8 w-52 shrink-0 text-sm font-medium'
         />
         <Input
@@ -81,7 +82,7 @@ const RoleDetailHeader = ({
           }}
           maxLength={80}
           placeholder={t('roles.detailHeader.descriptionPlaceholder')}
-          aria-label='Role description'
+          aria-label={tc('roles.detailHeader.roleDescriptionAriaLabel')}
           className='h-8 min-w-0 flex-1 text-sm'
         />
         <div className='flex shrink-0 items-center gap-1.5'>
@@ -93,7 +94,7 @@ const RoleDetailHeader = ({
             disabled={!canSaveEdit}
             loading={saving}
           >
-            <Check size={14} /> Save
+            <Check size={14} /> {tc('roles.detailHeader.save')}
           </Button>
           <Button
             size='sm'
@@ -103,7 +104,7 @@ const RoleDetailHeader = ({
             data-track-name='CANCEL_ROLE_EDIT'
             disabled={saving}
           >
-            <X size={14} /> Cancel
+            <X size={14} /> {tc('roles.detailHeader.cancel')}
           </Button>
         </div>
       </div>
@@ -124,7 +125,7 @@ const RoleDetailHeader = ({
           {name}
         </h1>
         <p className='hidden min-w-0 flex-1 truncate text-xs text-muted-foreground lg:block'>
-          {description?.trim() ? description : 'No description yet'}
+          {description?.trim() ? description : tc('roles.detailHeader.noDescriptionYet')}
         </p>
       </div>
 
@@ -133,26 +134,26 @@ const RoleDetailHeader = ({
           {memberCount > 0 && <AvatarGroup userIds={memberUserIds} size='sm' count={4} />}
           <span className='text-xs text-muted-foreground'>
             <span className='font-medium tabular-nums text-foreground'>{memberCount}</span>{' '}
-            {memberCount === 1 ? 'member' : 'members'}
+            {tc('roles.detailHeader.memberCount', { count: memberCount })}
           </span>
         </div>
         {createdAt !== undefined && (
           <>
             <span className='hidden h-3 w-px bg-border xl:block' />
             <span className='hidden text-xs text-muted-foreground xl:block'>
-              Created {formatDate(createdAt)}
+              {tc('roles.detailHeader.createdOn', { date: formatDate(createdAt) })}
             </span>
           </>
         )}
       </div>
 
       <div className='flex shrink-0 items-center gap-1.5'>
-        <Tooltip content='Rename or describe this role'>
+        <Tooltip content={tc('roles.detailHeader.renameTooltip')}>
           <Button
             size='iconSm'
             variant='ghost'
             onClick={onStartEdit}
-            aria-label='Edit role'
+            aria-label={tc('roles.detailHeader.editRoleAriaLabel')}
             className='rounded-lg text-muted-foreground hover:text-foreground'
             data-track-category='ROLES'
             data-track-name='StartEditRole'
@@ -166,7 +167,7 @@ const RoleDetailHeader = ({
           data-track-category='ROLES'
           data-track-name='OpenAddMembers'
         >
-          <UserPlus size={14} /> Add users
+          <UserPlus size={14} /> {tc('roles.detailHeader.addUsers')}
         </Button>
       </div>
     </div>

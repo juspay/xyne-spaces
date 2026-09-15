@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, Maximize2, X, FileText } from 'lucide-react';
 
 export interface PdfPageViewerProps {
@@ -17,6 +18,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
   title,
   base64Data,
 }) => {
+  const { t } = useTranslation('common');
   const [presenting, setPresenting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const fullscreenRef = useRef<HTMLDivElement>(null);
@@ -157,7 +159,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               data-track-name='PDF_PREVIEW'
             >
               <Maximize2 size={12} />
-              Preview
+              {t('pdfPageViewer.preview')}
             </button>
             <div className='w-px h-3 bg-border' />
             <button
@@ -167,7 +169,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               data-track-name='PDF_DOWNLOAD'
             >
               <Download size={12} />
-              Download
+              {t('pdfPageViewer.download')}
             </button>
           </div>
         </div>
@@ -202,7 +204,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
           ref={fullscreenRef}
           role='dialog'
           aria-modal='true'
-          aria-label='PDF preview'
+          aria-label={t('pdfPageViewer.pdfPreviewAriaLabel')}
           style={{
             position: 'fixed',
             inset: 0,
@@ -260,7 +262,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
                 data-track-name='PDF_FS_DOWNLOAD'
               >
                 <Download size={14} />
-                Download
+                {t('pdfPageViewer.download')}
               </button>
               <button
                 onClick={exitPresent}
@@ -320,7 +322,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               color: '#888',
             }}
           >
-            Use the PDF toolbar for zoom and navigation • Press Esc to close
+            {t('pdfPageViewer.fullscreenHint')}
           </div>
         </div>
       )}

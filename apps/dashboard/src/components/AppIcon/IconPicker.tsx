@@ -46,6 +46,7 @@ export const IconPicker = ({
   className?: string;
 }): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -72,8 +73,8 @@ export const IconPicker = ({
       }}
       // Accessibility only — the Dialog renders these `hidden`, so the visible
       // header below is not a duplicate.
-      title='Choose an icon'
-      description='Search the Xyne icon set by name or category, then pick one.'
+      title={tc('appIcon.chooseIcon')}
+      description={tc('appIcon.chooseIconDescription')}
       // `max-w-*` as well as width: the base content class sets `max-w-md`, and
       // a width alone loses to it.
       className='w-[min(92vw,48rem)] max-w-[48rem]'
@@ -81,8 +82,12 @@ export const IconPicker = ({
         <button
           type='button'
           disabled={disabled}
-          aria-label={value ? `App icon: ${value}. Change icon` : 'Choose an app icon'}
-          title={disabled ? undefined : 'Change icon'}
+          aria-label={
+            value
+              ? tc('appIcon.appIconChangeAriaLabel', { name: value })
+              : tc('appIcon.chooseAppIconAriaLabel')
+          }
+          title={disabled ? undefined : tc('appIcon.changeIcon')}
           className={cn(
             'flex shrink-0 items-center justify-center rounded-md p-1 text-muted-foreground transition-colors',
             !disabled && 'hover:bg-accent hover:text-foreground',
@@ -100,15 +105,15 @@ export const IconPicker = ({
       <div className='flex flex-col'>
         <div className='flex items-start justify-between gap-4 border-b border-border px-6 py-4'>
           <div className='flex flex-col gap-0.5'>
-            <h2 className='text-base font-semibold text-foreground'>Choose an icon</h2>
+            <h2 className='text-base font-semibold text-foreground'>{tc('appIcon.chooseIcon')}</h2>
             <p className='text-xs text-muted-foreground'>
-              Shown in the sidebar and the app library.
+              {tc('appIcon.shownInSidebarAndLibrary')}
             </p>
           </div>
           <button
             type='button'
             onClick={() => setOpen(false)}
-            aria-label='Close'
+            aria-label={tc('appIcon.closeAriaLabel')}
             className='-mr-1 shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='ArtifactAppIconPickerClose'
@@ -124,7 +129,7 @@ export const IconPicker = ({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder={t('appIcon.searchIcons')}
-              aria-label='Search icons'
+              aria-label={tc('appIcon.searchIconsAriaLabel')}
               className='flex-1'
             />
             {value && (
@@ -136,14 +141,14 @@ export const IconPicker = ({
                 data-track-name='ArtifactAppIconClear'
               >
                 <X className='h-3.5 w-3.5' aria-hidden='true' />
-                Remove
+                {tc('appIcon.remove')}
               </button>
             )}
           </div>
 
           <div
             role='listbox'
-            aria-label='Icons'
+            aria-label={tc('appIcon.iconsAriaLabel')}
             // Fixed height, not max-height: the grid must not resize as you
             // type, or the page jumps under the pointer on every keystroke.
             className='grid h-[min(58vh,28rem)] grid-cols-[repeat(auto-fill,minmax(3rem,1fr))] content-start gap-1.5 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3'
@@ -173,15 +178,18 @@ export const IconPicker = ({
             })}
             {results.length === 0 && (
               <p className='col-span-full py-12 text-center text-sm text-muted-foreground'>
-                No icons match “{query}”.
+                {tc('appIcon.noIconsMatch', { query })}
               </p>
             )}
           </div>
 
           <p className='text-[11px] text-muted-foreground'>
             {hidden > 0
-              ? `Showing ${results.length} of ${results.length + hidden} — keep typing to narrow it down.`
-              : `${results.length} ${results.length === 1 ? 'icon' : 'icons'}`}
+              ? tc('appIcon.showingOfTotal', {
+                  shown: results.length,
+                  total: results.length + hidden,
+                })
+              : tc('appIcon.iconCount', { count: results.length })}
           </p>
         </div>
       </div>

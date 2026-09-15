@@ -1155,5 +1155,66 @@
     },
     "connectionStatusAriaLabel": "Connection status: {{label}}. {{hint}}",
     "connectionStatusAriaLabelNoHint": "Connection status: {{label}}"
+  },
+  "appIcon": {
+    "chooseIcon": "Choose an icon",
+    "chooseIconDescription": "Search the Xyne icon set by name or category, then pick one.",
+    "appIconChangeAriaLabel": "App icon: {{name}}. Change icon",
+    "chooseAppIconAriaLabel": "Choose an app icon",
+    "changeIcon": "Change icon",
+    "shownInSidebarAndLibrary": "Shown in the sidebar and the app library.",
+    "closeAriaLabel": "Close",
+    "searchIconsAriaLabel": "Search icons",
+    "remove": "Remove",
+    "iconsAriaLabel": "Icons",
+    "noIconsMatch": "No icons match “{{query}}”.",
+    "showingOfTotal": "Showing {{shown}} of {{total}} — keep typing to narrow it down.",
+    "iconCount_one": "{{count}} icon",
+    "iconCount_other": "{{count}} icons"
+  },
+  "roles": {
+    "detailHeader": {
+      "roleNameAriaLabel": "Role name",
+      "roleDescriptionAriaLabel": "Role description",
+      "save": "Save",
+      "cancel": "Cancel",
+      "noDescriptionYet": "No description yet",
+      "memberCount_one": "member",
+      "memberCount_other": "members",
+      "createdOn": "Created {{date}}",
+      "renameTooltip": "Rename or describe this role",
+      "editRoleAriaLabel": "Edit role",
+      "addUsers": "Add users"
+    },
+    "sidebar": {
+      "heading": "Roles",
+      "createRoleAriaLabel": "Create role",
+      "noRolesYet": "No roles yet.",
+      "createOneToGetStarted": "Create one to get started.",
+      "loadMore": "Load more"
+    }
+  },
+  "share": {
+    "entityShareModal": {
+      "peopleWithAccess": "People with access",
+      "subjectShared": "{{subject}} shared",
+      "sharedWithCount_one": "Shared with {{count}} recipient",
+      "sharedWithCount_other": "Shared with {{count}} recipients",
+      "failedToShare": "Failed to share",
+      "unableToShareSubject": "Unable to share this {{subject}}",
+      "shareWithDescription": "Share with people, groups, or channels",
+      "addMessageOptional": "Add a message (optional)",
+      "sayAboutSubject": "Say something about this {{subject}}...",
+      "sharing": "Sharing...",
+      "share": "Share",
+      "openSharedConversationAriaLabel": "Open shared conversation",
+      "removeAccessAriaLabel": "Remove access"
+    }
+  },
+  "pdfPageViewer": {
+    "preview": "Preview",
+    "download": "Download",
+    "pdfPreviewAriaLabel": "PDF preview",
+    "fullscreenHint": "Use the PDF toolbar for zoom and navigation • Press Esc to close"
   }
 }

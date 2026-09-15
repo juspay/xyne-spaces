@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { Hash, Users, X } from 'lucide-react';
@@ -75,10 +76,12 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
   onRevoke,
   subject,
   trackCategory,
-  accessListTitle = 'People with access',
+  accessListTitle,
   generalAccess,
   onClose,
 }) => {
+  const { t } = useTranslation('common');
+  const resolvedAccessListTitle = accessListTitle ?? t('share.entityShareModal.peopleWithAccess');
   const { user: currentUser } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -189,16 +192,21 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
       await onGrant(targets, messageContent);
       toast.success(
         selectedValues.length === 1
-          ? `${subject.charAt(0).toUpperCase()}${subject.slice(1)} shared`
-          : `Shared with ${selectedValues.length} recipients`,
+          ? t('share.entityShareModal.subjectShared', {
+              subject: `${subject.charAt(0).toUpperCase()}${subject.slice(1)}`,
+            })
+          : t('share.entityShareModal.sharedWithCount', { count: selectedValues.length }),
       );
       setSelectedValues([]);
       setSearchQuery('');
       setMessageContent('');
       onClose?.();
     } catch (error) {
-      toast.error('Failed to share', {
-        description: getApiErrorMessage(error, `Unable to share this ${subject}`),
+      toast.error(t('share.entityShareModal.failedToShare'), {
+        description: getApiErrorMessage(
+          error,
+          t('share.entityShareModal.unableToShareSubject', { subject }),
+        ),
       });
     } finally {
       setSharing(false);
@@ -209,7 +217,7 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
     <div className='flex flex-col w-full p-5 gap-4'>
       <div className='space-y-2'>
         <p className='text-muted-foreground text-[13px] leading-5'>
-          Share with people, groups, or channels
+          {t('share.entityShareModal.shareWithDescription')}
         </p>
         <UnifiedParticipantSearch
           selectedValues={selectedValues}
@@ -237,12 +245,12 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
         }}
       >
         <label htmlFor={`share-${subject}-message`} className='text-muted-foreground text-[13px]'>
-          Add a message (optional)
+          {t('share.entityShareModal.addMessageOptional')}
         </label>
         <InputBox
           ref={inputBoxRef}
           id={`share-${subject}-message`}
-          placeholder={`Say something about this ${subject}...`}
+          placeholder={t('share.entityShareModal.sayAboutSubject', { subject })}
           onSendMessage={() => {}}
           onContentChange={(html, _text) => {
             setMessageContent(html);
@@ -273,13 +281,13 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
           data-track-category={trackCategory}
           data-track-name={`share_${subject}_confirm`}
         >
-          {sharing ? 'Sharing...' : 'Share'}
+          {sharing ? t('share.entityShareModal.sharing') : t('share.entityShareModal.share')}
         </Button>
       </div>
 
       {shares.length > 0 && (
         <div className='space-y-2 border-t border-border pt-3'>
-          <p className='text-muted-foreground text-[13px]'>{accessListTitle}</p>
+          <p className='text-muted-foreground text-[13px]'>{resolvedAccessListTitle}</p>
           <div className='space-y-3.5 max-h-60 overflow-y-auto pr-1'>
             {shares.map(share => {
               const icon =
@@ -300,7 +308,7 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
                       <Link
                         to={`/chat/dir/${share.post.channelId}/${share.post.conversationId}`}
                         className='shrink-0 text-muted-foreground transition-colors hover:text-foreground'
-                        aria-label='Open shared conversation'
+                        aria-label={t('share.entityShareModal.openSharedConversationAriaLabel')}
                         data-track-category={trackCategory}
                         data-track-name={`open_${subject}_share_conversation`}
                       >
@@ -312,7 +320,7 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
                     type='button'
                     onClick={() => void onRevoke(share.target)}
                     className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
-                    aria-label='Remove access'
+                    aria-label={t('share.entityShareModal.removeAccessAriaLabel')}
                     data-track-category={trackCategory}
                     data-track-name={`revoke_${subject}_share`}
                   >

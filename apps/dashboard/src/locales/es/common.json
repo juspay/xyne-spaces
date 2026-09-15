@@ -1155,5 +1155,66 @@
     },
     "connectionStatusAriaLabel": "Estado de conexión: {{label}}. {{hint}}",
     "connectionStatusAriaLabelNoHint": "Estado de conexión: {{label}}"
+  },
+  "appIcon": {
+    "chooseIcon": "Elegir un icono",
+    "chooseIconDescription": "Busca en el conjunto de iconos de Xyne por nombre o categoría y elige uno.",
+    "appIconChangeAriaLabel": "Icono de la app: {{name}}. Cambiar icono",
+    "chooseAppIconAriaLabel": "Elegir un icono de app",
+    "changeIcon": "Cambiar icono",
+    "shownInSidebarAndLibrary": "Se muestra en la barra lateral y en la biblioteca de apps.",
+    "closeAriaLabel": "Cerrar",
+    "searchIconsAriaLabel": "Buscar iconos",
+    "remove": "Quitar",
+    "iconsAriaLabel": "Iconos",
+    "noIconsMatch": "Ningún icono coincide con “{{query}}”.",
+    "showingOfTotal": "Mostrando {{shown}} de {{total}} — sigue escribiendo para acotar la búsqueda.",
+    "iconCount_one": "{{count}} icono",
+    "iconCount_other": "{{count}} iconos"
+  },
+  "roles": {
+    "detailHeader": {
+      "roleNameAriaLabel": "Nombre del rol",
+      "roleDescriptionAriaLabel": "Descripción del rol",
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "noDescriptionYet": "Aún sin descripción",
+      "memberCount_one": "miembro",
+      "memberCount_other": "miembros",
+      "createdOn": "Creado el {{date}}",
+      "renameTooltip": "Cambiar el nombre o la descripción de este rol",
+      "editRoleAriaLabel": "Editar rol",
+      "addUsers": "Agregar usuarios"
+    },
+    "sidebar": {
+      "heading": "Roles",
+      "createRoleAriaLabel": "Crear rol",
+      "noRolesYet": "Aún no hay roles.",
+      "createOneToGetStarted": "Crea uno para empezar.",
+      "loadMore": "Cargar más"
+    }
+  },
+  "share": {
+    "entityShareModal": {
+      "peopleWithAccess": "Personas con acceso",
+      "subjectShared": "{{subject}} compartido",
+      "sharedWithCount_one": "Compartido con {{count}} destinatario",
+      "sharedWithCount_other": "Compartido con {{count}} destinatarios",
+      "failedToShare": "No se pudo compartir",
+      "unableToShareSubject": "No se pudo compartir este {{subject}}",
+      "shareWithDescription": "Compartir con personas, grupos o canales",
+      "addMessageOptional": "Agregar un mensaje (opcional)",
+      "sayAboutSubject": "Escribe algo sobre este {{subject}}...",
+      "sharing": "Compartiendo...",
+      "share": "Compartir",
+      "openSharedConversationAriaLabel": "Abrir conversación compartida",
+      "removeAccessAriaLabel": "Quitar acceso"
+    }
+  },
+  "pdfPageViewer": {
+    "preview": "Vista previa",
+    "download": "Descargar",
+    "pdfPreviewAriaLabel": "Vista previa del PDF",
+    "fullscreenHint": "Usa la barra de herramientas del PDF para hacer zoom y navegar • Presiona Esc para cerrar"
   }
 }
