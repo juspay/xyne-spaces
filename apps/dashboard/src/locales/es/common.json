@@ -396,5 +396,33 @@
     "closeLabel": "Cerrar",
     "couldNotOpenApp": "No se pudo abrir esta app",
     "failedToLoadArtifact": "Error al cargar este artefacto."
+  },
+  "aiComposer": {
+    "removeLabel": "Quitar {{label}}",
+    "listeningLabel": "Escuchando...",
+    "uploadFilesAriaLabel": "Subir archivos",
+    "closeContextModalAriaLabel": "Cerrar el modal de contexto",
+    "addToConversationLabel": "Agregar a la conversación",
+    "addContextLabel": "Agregar contexto",
+    "instantAgentTitle": "Este agente siempre responde al instante desde la base de conocimiento",
+    "instantAgentAriaLabel": "Agente instantáneo",
+    "instantLabel": "Instantáneo",
+    "askAiFallback": "Preguntar a la IA",
+    "recommendedFallback": "Recomendado",
+    "stopGeneratingLabel": "Detener generación",
+    "stopLabel": "Detener",
+    "sendLabel": "Enviar",
+    "disclaimer": "Xyne puede cometer errores. Verifica los detalles importantes.",
+    "toasts": {
+      "fileTypeNotAllowed": "El tipo de archivo seleccionado no está permitido por razones de seguridad.",
+      "filesTooLarge": "Archivo(s) demasiado grande(s): {{fileNames}}. El tamaño máximo de archivo es 10MB.",
+      "maxAttachments": "Se permite un máximo de {{max}} archivos adjuntos.",
+      "totalSizeExceeds": "El tamaño total de los adjuntos ({{totalMB}}MB) supera el límite de 25MB. Elimina algunos adjuntos.",
+      "invalidFileFormat": "Formato de archivo inválido - no es una URL de datos válida para el archivo: {{name}}",
+      "emptyFileData": "Datos de archivo vacíos para el archivo: {{name}}",
+      "invalidBase64": "Datos base64 inválidos para el archivo: {{name}}",
+      "filesAttachedSuccess": "{{count}} archivos adjuntados correctamente",
+      "errorReadingFiles": "Error al leer los archivos. Inténtalo de nuevo."
+    }
   }
 }

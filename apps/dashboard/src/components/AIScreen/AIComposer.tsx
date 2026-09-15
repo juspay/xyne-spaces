@@ -152,6 +152,7 @@ function ContextPill({
   onRemove: () => void;
   accent?: boolean;
 }): ReactElement {
+  const { t } = useTranslation('common');
   return (
     <div className='flex h-7 flex-shrink-0 items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2'>
       {icon}
@@ -166,7 +167,7 @@ function ContextPill({
       <button
         type='button'
         onClick={onRemove}
-        aria-label={`Remove ${label}`}
+        aria-label={t('aiComposer.removeLabel', { label })}
         className='ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground transition hover:bg-secondary hover:text-foreground'
         data-track-category='XyneAI'
         data-track-name='REMOVE_CONTEXT_PILL'
@@ -228,6 +229,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   ref,
 ): ReactElement {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const resolvedPlaceholder = placeholder ?? t('aiComposer.askAnything');
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
@@ -391,7 +393,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       });
 
       if (validFiles.length === 0) {
-        toast.error('The selected file type is not allowed for security reasons.', {
+        toast.error(tc('aiComposer.toasts.fileTypeNotAllowed'), {
           duration: 3000,
         });
         return;
@@ -400,7 +402,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       const oversizedFiles = validFiles.filter(file => file.size > MAX_INDIVIDUAL_FILE_SIZE);
       if (oversizedFiles.length > 0) {
         const fileNames = oversizedFiles.map(f => f.name).join(', ');
-        toast.error(`File(s) too large: ${fileNames}. Maximum file size is 10MB.`, {
+        toast.error(tc('aiComposer.toasts.filesTooLarge', { fileNames }), {
           duration: 4000,
         });
         return;
@@ -408,22 +410,23 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
       const remaining = MAX_ATTACHMENTS - attachments.length;
       if (remaining <= 0) {
-        toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed.`, { duration: 3000 });
+        toast.error(tc('aiComposer.toasts.maxAttachments', { max: MAX_ATTACHMENTS }), {
+          duration: 3000,
+        });
         return;
       }
       const allowedFiles = validFiles.slice(0, remaining);
       if (validFiles.length > remaining) {
-        toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed.`, { duration: 3000 });
+        toast.error(tc('aiComposer.toasts.maxAttachments', { max: MAX_ATTACHMENTS }), {
+          duration: 3000,
+        });
       }
 
       const existingTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       const newFilesSize = allowedFiles.reduce((sum, file) => sum + file.size, 0);
       if (existingTotalSize + newFilesSize > MAX_TOTAL_SIZE) {
         const totalMB = Math.round((existingTotalSize + newFilesSize) / (1024 * 1024));
-        toast.error(
-          `Total attachment size (${totalMB}MB) exceeds the 25MB limit. Please remove some attachments.`,
-          { duration: 4000 },
-        );
+        toast.error(tc('aiComposer.toasts.totalSizeExceeds', { totalMB }), { duration: 4000 });
         return;
       }
 
@@ -435,18 +438,16 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               const result = reader.result as string;
               const base64Match = result.match(/^data:([^;]+);base64,(.+)$/);
               if (!base64Match) {
-                reject(
-                  new Error(`Invalid file format - not a valid data URL for file: ${file.name}`),
-                );
+                reject(new Error(tc('aiComposer.toasts.invalidFileFormat', { name: file.name })));
                 return;
               }
               const [, , base64Data] = base64Match;
               if (!base64Data) {
-                reject(new Error(`Empty file data for file: ${file.name}`));
+                reject(new Error(tc('aiComposer.toasts.emptyFileData', { name: file.name })));
                 return;
               }
               if (!isValidBase64(base64Data)) {
-                reject(new Error(`Invalid base64 data for file: ${file.name}`));
+                reject(new Error(tc('aiComposer.toasts.invalidBase64', { name: file.name })));
                 return;
               }
               resolve({
@@ -469,15 +470,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         const newAttachments = await Promise.all(filePromises);
         setAttachments(prev => [...prev, ...newAttachments]);
         if (newAttachments.length > 1) {
-          toast.success(`${newAttachments.length} files attached successfully`, { duration: 2000 });
+          toast.success(
+            tc('aiComposer.toasts.filesAttachedSuccess', { count: newAttachments.length }),
+            { duration: 2000 },
+          );
         }
       } catch (error) {
         const errorMessage =
-          error instanceof Error ? error.message : 'Error reading files. Please try again.';
+          error instanceof Error ? error.message : tc('aiComposer.toasts.errorReadingFiles');
         toast.error(errorMessage, { duration: 3000 });
       }
     },
-    [attachments],
+    [attachments, tc],
   );
 
   useImperativeHandle(
@@ -564,7 +568,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     if (pastedText && pastedText.length > LARGE_PASTE_THRESHOLD) {
       e.preventDefault();
       if (attachments.length >= MAX_ATTACHMENTS) {
-        toast.error(`Maximum ${MAX_ATTACHMENTS} attachments allowed.`, { duration: 3000 });
+        toast.error(tc('aiComposer.toasts.maxAttachments', { max: MAX_ATTACHMENTS }), {
+          duration: 3000,
+        });
         return;
       }
       let fileName: string;
@@ -641,13 +647,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   // Labels for the "+" menu's agent/model rows, so a folded toolbar still shows
   // what is selected without opening either picker. Mirrors what the pills read.
-  const agentLabel = selectedAgent?.name ?? 'Ask AI';
+  const agentLabel = selectedAgent?.name ?? tc('aiComposer.askAiFallback');
   const modelLabel = useMemo(() => {
     const pinned = (agentModelsData?.models ?? []).find(m => m.id === selectedModel);
     if (pinned) return formatModelLabel(pinned.name);
     const fallback = agentModelsData?.defaultModel;
-    return fallback ? formatModelLabel(fallback) : 'Recommended';
-  }, [agentModelsData, selectedModel]);
+    return fallback ? formatModelLabel(fallback) : tc('aiComposer.recommendedFallback');
+  }, [agentModelsData, selectedModel, tc]);
 
   const agentSelectorNode = showAgentSelector ? (
     <AIAgentSelector
@@ -695,7 +701,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             onKeyDown={e => {
               if (e.key === 'Escape') closeContextModal();
             }}
-            aria-label='Close context modal'
+            aria-label={tc('aiComposer.closeContextModalAriaLabel')}
             data-track-category='XyneAI'
             data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
           />
@@ -715,7 +721,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         multiple
         onChange={handleFileInputChange}
         className='hidden'
-        aria-label='Upload files'
+        aria-label={tc('aiComposer.uploadFilesAriaLabel')}
       />
       <div
         className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
@@ -851,7 +857,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                     />
                   ))}
                 </div>
-                <span className='text-[13px] text-muted-foreground'>Listening...</span>
+                <span className='text-[13px] text-muted-foreground'>
+                  {tc('aiComposer.listeningLabel')}
+                </span>
               </div>
             )}
           </div>
@@ -892,8 +900,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 >
                   <button
                     type='button'
-                    aria-label='Add to conversation'
-                    title='Add to conversation'
+                    aria-label={tc('aiComposer.addToConversationLabel')}
+                    title={tc('aiComposer.addToConversationLabel')}
                     className={cn(
                       'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
                       // The menu hides which modes are on, so the trigger carries
@@ -926,7 +934,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               </div>
               <ToolbarButton
                 icon={<span className='text-sm font-semibold leading-none'>/</span>}
-                label='Add context'
+                label={tc('aiComposer.addContextLabel')}
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
                 trackName='OPEN_CONTEXT_MODAL'
@@ -941,12 +949,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   agents show no instant affordance at all. */}
               {instant && (
                 <div
-                  title='This agent always answers instantly from the Knowledge Base'
-                  aria-label='Instant agent'
+                  title={tc('aiComposer.instantAgentTitle')}
+                  aria-label={tc('aiComposer.instantAgentAriaLabel')}
                   className='inline-flex h-8 shrink-0 cursor-default items-center justify-center gap-1 rounded-full bg-secondary px-2.5 text-status-pending'
                 >
                   <Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />
-                  <span className='text-xs font-medium'>Instant</span>
+                  <span className='text-xs font-medium'>{tc('aiComposer.instantLabel')}</span>
                 </div>
               )}
             </div>
@@ -964,8 +972,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 <button
                   type='button'
                   onClick={onStop}
-                  aria-label='Stop generating'
-                  title='Stop'
+                  aria-label={tc('aiComposer.stopGeneratingLabel')}
+                  title={tc('aiComposer.stopLabel')}
                   className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'
                   data-track-category='XyneAI'
                   data-track-name='STOP_GENERATION'
@@ -977,8 +985,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   data-ph-capture-attribute-track-id='ai_composer_send'
                   type='submit'
                   disabled={!canSend}
-                  aria-label='Send'
-                  title='Send'
+                  aria-label={tc('aiComposer.sendLabel')}
+                  title={tc('aiComposer.sendLabel')}
                   data-track-category='XyneAI'
                   data-track-name='SEND_MESSAGE'
                   className={cn(
@@ -994,7 +1002,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       </div>
       {hideDisclaimer ? null : (
         <p className='mt-1.5 text-center text-[11px] text-muted-foreground/80'>
-          Xyne can make mistakes. Verify important details.
+          {tc('aiComposer.disclaimer')}
         </p>
       )}
     </form>

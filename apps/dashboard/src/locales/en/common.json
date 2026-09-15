@@ -396,5 +396,33 @@
     "closeLabel": "Close",
     "couldNotOpenApp": "Could not open this app",
     "failedToLoadArtifact": "Failed to load this artifact."
+  },
+  "aiComposer": {
+    "removeLabel": "Remove {{label}}",
+    "listeningLabel": "Listening...",
+    "uploadFilesAriaLabel": "Upload files",
+    "closeContextModalAriaLabel": "Close context modal",
+    "addToConversationLabel": "Add to conversation",
+    "addContextLabel": "Add context",
+    "instantAgentTitle": "This agent always answers instantly from the Knowledge Base",
+    "instantAgentAriaLabel": "Instant agent",
+    "instantLabel": "Instant",
+    "askAiFallback": "Ask AI",
+    "recommendedFallback": "Recommended",
+    "stopGeneratingLabel": "Stop generating",
+    "stopLabel": "Stop",
+    "sendLabel": "Send",
+    "disclaimer": "Xyne can make mistakes. Verify important details.",
+    "toasts": {
+      "fileTypeNotAllowed": "The selected file type is not allowed for security reasons.",
+      "filesTooLarge": "File(s) too large: {{fileNames}}. Maximum file size is 10MB.",
+      "maxAttachments": "Maximum {{max}} attachments allowed.",
+      "totalSizeExceeds": "Total attachment size ({{totalMB}}MB) exceeds the 25MB limit. Please remove some attachments.",
+      "invalidFileFormat": "Invalid file format - not a valid data URL for file: {{name}}",
+      "emptyFileData": "Empty file data for file: {{name}}",
+      "invalidBase64": "Invalid base64 data for file: {{name}}",
+      "filesAttachedSuccess": "{{count}} files attached successfully",
+      "errorReadingFiles": "Error reading files. Please try again."
+    }
   }
 }
