@@ -42,6 +42,19 @@ const formatDate = (iso: string): string => {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+const formatDateTime = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
+
 const formatNumber = (n: number): string => n.toLocaleString('en-US');
 
 const formatFileSize = (bytes: number): string => {
@@ -669,6 +682,7 @@ const ClawSkillDetailScreen = (): ReactElement => {
                         </DetailRow>
                       )}
                       <DetailRow label='Created'>{formatDate(skill.createdAt)}</DetailRow>
+                      <DetailRow label='Last updated'>{formatDateTime(skill.updatedAt)}</DetailRow>
                       <DetailRow label='Size'>
                         {formatNumber(contentValue.length)} characters
                       </DetailRow>
