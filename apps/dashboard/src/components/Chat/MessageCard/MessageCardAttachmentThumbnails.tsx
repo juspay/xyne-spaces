@@ -150,7 +150,7 @@ function PanelAuthImageThumb({
       try {
         const source =
           isVideo && thumbnailUrl ? `/attachments/${attachmentId}/thumbnail` : attachmentId;
-        const blob = await createPreviewUrl(source);
+        const blob = await createPreviewUrl(source, { mimeType });
         if (cancelled) {
           return;
         }

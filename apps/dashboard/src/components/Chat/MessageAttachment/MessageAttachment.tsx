@@ -206,7 +206,7 @@ const Preview: React.FC<{
             ? `/attachments/${attachmentId}/thumbnail`
             : attachmentId;
 
-        const blob = await createPreviewUrl(source);
+        const blob = await createPreviewUrl(source, { mimeType });
         blobUrl = URL.createObjectURL(blob);
 
         // Pre-calculate image dimensions to maintain aspect ratio with fixed height
@@ -230,6 +230,7 @@ const Preview: React.FC<{
     };
   }, [
     attachmentId,
+    mimeType,
     isImage,
     isVideo,
     isDocumentWithThumbnail,

@@ -23,6 +23,30 @@ const resolveUrl = (source: string): string => {
 };
 
 /**
+ * HEIC/HEIF attachments cannot be rasterized by browsers (Safari aside), so
+ * preview fetches ask the backend to transcode them losslessly to WebP via
+ * `?format=webp` (see attachmentController.downloadAttachment). Manual
+ * downloads never pass through here and always get the original bytes.
+ */
+const HEIC_MIME_TYPES = new Set([
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+]);
+
+export const isHeicMimeType = (mimeType?: string | null): boolean => {
+  const baseType = (mimeType || '').split(';')[0] ?? '';
+  return HEIC_MIME_TYPES.has(baseType.trim().toLowerCase());
+};
+
+const withPreviewFormat = (url: string, mimeType?: string | null): string => {
+  if (!isHeicMimeType(mimeType)) return url;
+  if (!url.includes('/download') || url.includes('format=')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}format=webp`;
+};
+
+/**
  * Fetch file and return as File object
  */
 export const fetchFile = async (
@@ -30,7 +54,7 @@ export const fetchFile = async (
   fileName: string,
   mimeType: string,
 ): Promise<File> => {
-  const url = resolveUrl(source);
+  const url = withPreviewFormat(resolveUrl(source), mimeType);
   const queryKey = ['file', url, fileName, mimeType];
 
   return queryClient.fetchQuery<File>({
@@ -107,9 +131,9 @@ export const downloadFile = async (
  */
 export const createPreviewUrl = async (
   source: string,
-  options?: { forceRefresh?: boolean },
+  options?: { forceRefresh?: boolean; mimeType?: string | null },
 ): Promise<Blob> => {
-  const url = resolveUrl(source);
+  const url = withPreviewFormat(resolveUrl(source), options?.mimeType);
 
   if (options?.forceRefresh) {
     queryClient.removeQueries({ queryKey: ['preview-blob', url] });
