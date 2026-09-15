@@ -78,6 +78,12 @@ export const ENABLE_ACTIVITY_LOG: boolean = import.meta.env['VITE_ENABLE_ACTIVIT
 
 export const SEARCH_VERSION = import.meta.env['VITE_SEARCH_VERSION'] as string;
 
+// Channel that "Ask an agent to investigate" posts performance reports into.
+// Workspace-specific, so env-only; the button hides itself when unset rather
+// than posting somewhere arbitrary.
+export const PERF_REPORT_CHANNEL_ID: string =
+  (import.meta.env['VITE_PERF_REPORT_CHANNEL_ID'] as string) ?? '';
+
 // Working hours configuration (in IST) - should match backend defaults
 export const WORKING_HOUR_START: number = parseInt(
   (import.meta.env['VITE_WORKING_HOUR_START'] as string) || '11',
