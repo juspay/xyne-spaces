@@ -1,0 +1,267 @@
+.memory-folders {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  color: #232229;
+  background: #fff;
+  font-family: Inter, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+.memory-folders__header {
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+.memory-folders__header svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: #232229;
+}
+
+.memory-folders__header h1 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.32px;
+  color: #232229;
+}
+
+.memory-folders__detail {
+  position: absolute;
+  left: 0;
+  top: 56px;
+  bottom: 0;
+  z-index: 10;
+  width: min(560px, 48%);
+  min-height: 0;
+  padding: 8px 56px 64px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.memory-folders__detail::-webkit-scrollbar {
+  display: none;
+}
+
+.memory-folders__detail-card {
+  position: relative;
+  max-width: 480px;
+}
+
+.memory-folders__eyebrow {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: oklch(0.59 0.011 285);
+}
+
+.memory-folders__title {
+  margin: 0 0 20px;
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 550;
+  letter-spacing: -0.4px;
+  color: #232229;
+}
+
+.memory-folders__body {
+  margin: 0 0 28px;
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 450;
+  color: #232229;
+}
+
+.memory-folders__section {
+  margin-bottom: 22px;
+}
+
+.memory-folders__section h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: oklch(0.59 0.011 285);
+}
+
+.memory-folders__section p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 450;
+  white-space: pre-line;
+  color: oklch(0.43 0.014 285);
+}
+
+.memory-folders__quote {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid oklch(0.88 0.01 285);
+  font-style: italic;
+  color: oklch(0.59 0.011 285);
+}
+
+.memory-folders__stack {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.memory-folders__hit {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--stack-hit-left, 48%);
+  z-index: 30;
+  cursor: ew-resize;
+  touch-action: pan-x;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+.memory-folders__folder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--folder-w, 70%);
+  height: var(--folder-h, 100%);
+  opacity: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.memory-folders__silhouette {
+  position: absolute;
+  /* 974×1554 viewBox on 890×1400 body: 7/1400, 42/890, 147/1400 */
+  inset: -0.5% -4.72% -10.5% -4.72%;
+  pointer-events: none;
+}
+
+.memory-folders__silhouette svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.memory-folders__summary {
+  position: absolute;
+  left: 6.97%;
+  top: 6.71%;
+  display: flex;
+  width: min(50%, 444px);
+  flex-direction: column;
+  gap: clamp(8px, 1.4vh, 15px);
+  color: #232229;
+  opacity: 0;
+}
+
+.memory-folders__folder-title {
+  margin: 0;
+  font-size: clamp(22px, 3.8vh, 40px);
+  line-height: 1.2;
+  font-weight: 550;
+  letter-spacing: -0.8px;
+  word-break: break-word;
+}
+
+.memory-folders__hook {
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(12px, 1.4vh, 14px);
+  line-height: 1.43;
+  font-weight: 450;
+  letter-spacing: -0.28px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.memory-folders__meta {
+  margin: 0;
+  font-size: clamp(12px, 1.3vh, 13px);
+  line-height: 1.45;
+  font-weight: 450;
+  color: oklch(0.59 0.011 285);
+}
+
+.memory-folders__hint {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 25;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid oklch(0.9 0.01 285);
+  background: oklch(0.98 0.004 285 / 0.92);
+  font-size: 11px;
+  color: oklch(0.59 0.011 285);
+  pointer-events: none;
+}
+
+.memory-folders__status {
+  position: absolute;
+  left: 64px;
+  top: 88px;
+  z-index: 20;
+  max-width: 420px;
+}
+
+.memory-folders__status h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 550;
+  letter-spacing: -0.4px;
+}
+
+.memory-folders__status p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: oklch(0.43 0.014 285);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-folders__detail-card {
+    transition: none !important;
+  }
+
+  .memory-folders__folder {
+    transition: none !important;
+    filter: none !important;
+  }
+}

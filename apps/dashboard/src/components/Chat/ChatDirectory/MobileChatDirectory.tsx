@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChevronRight,
   PlusDefault,
@@ -43,15 +43,19 @@ import { useChannelSort } from '../../../hooks/useChannelSort';
 import { ChannelSortOrder } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';
+import OnboardingSampleChannelRow from './OnboardingSampleChannelRow';
 import Tooltip from '../../ui/Tooltip';
+import { isOnboardingSampleVisible } from '../../../routes/OnboardingScreen/onboardingSample';
 
 const MobileChatDirectory = ({
   channelData,
   allChannelsUserStatus,
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const context = useAuthContextValues();
   const zero = useZero();
+  const showOnboardingSample = isOnboardingSampleVisible(workspaceId);
 
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
@@ -283,6 +287,7 @@ const MobileChatDirectory = ({
               </div>
             </Accordion.Trigger>
             <Accordion.Content>
+              {showOnboardingSample && <OnboardingSampleChannelRow />}
               {channels.map(channel => (
                 <MobileChannelItem
                   key={channel.id}

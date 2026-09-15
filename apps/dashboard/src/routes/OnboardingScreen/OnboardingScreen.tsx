@@ -1,397 +1,429 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
-import Cookies from 'js-cookie';
+import { ReactElement, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { useUser } from '../../hooks/useUsers';
-import { useMigratedChannels, useChannelByName } from '../../hooks/useChannels';
-import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
-import Confetti from 'react-confetti';
+import {
+  getQuestionnaireResponse,
+  saveQuestionnaireResponse,
+} from '../../services/userProfile/userProfileService';
+import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
+import { suppressAIOnboardingAutoStart } from '../../contexts/AIOnboardingContext';
+import { OnboardingConnectLogo } from './OnboardingConnectLogos';
+import { markOnboardingSampleVisible } from './onboardingSample';
+import {
+  addPrototypeConnectKey,
+  buildCompletePayload,
+  canCompleteOnboarding,
+  ONBOARDING_DOMAINS,
+  ONBOARDING_ROLES,
+  ONBOARDING_TRY_FIRST,
+  PLUG_AND_PLAY_ONBOARDING_TYPE,
+  PROTOTYPE_CONNECTORS,
+  parseOnboardingPayload,
+  wizardOpeningTap,
+  tap4FooterAction,
+  tryFirstLandingPath,
+  type OnboardingDomain,
+  type OnboardingPayload,
+  type OnboardingRole,
+  type OnboardingTap,
+  type OnboardingTryFirst,
+  type PrototypeConnectKey,
+} from './onboardingFlow';
 
-const OnboardingScreen: React.FC = () => {
+const TAP_COPY: Record<OnboardingTap, { title: string; subtitle: string }> = {
+  1: {
+    title: 'What do you do here?',
+    subtitle: "We'll remember this. It doesn't change where you land.",
+  },
+  2: {
+    title: 'What space are you in?',
+    subtitle: 'Stored only. Your landing still follows what you want to try first.',
+  },
+  3: {
+    title: 'What do you want to try first?',
+    subtitle: "We'll take you there after you connect — or skip — your tools.",
+  },
+  4: {
+    title: 'See Spaces with the tools you already live in.',
+    subtitle: 'Connect one, several, or skip. You can use Spaces either way.',
+  },
+};
+
+const OnboardingScreen = (): ReactElement | null => {
   const navigate = useNavigate();
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [currentStep, setCurrentStep] = useState(0);
-  const { user: currentUser } = useAuth();
-  const targetUserId = currentUser?.id || '';
-  const user = useUser(targetUserId);
-
-  // Get migrated channels using the hook
-  const migratedChannels = useMigratedChannels();
-
-  // Resolve the default "general" channel so first-time users land there after
-  // onboarding instead of the user guide.
-  const generalChannel = useChannelByName('general');
-
-  // Build onboarding steps dynamically based on whether user has migrated channels
-  const hasMigratedChannels = migratedChannels?.length > 0;
-
-  const onboardingSteps = [
-    {
-      key: 'welcome',
-      title: 'Welcome to a smarter workspace made for you',
-      animation: 'none',
-    },
-    {
-      key: 'collaborate',
-      title: 'Collaborate faster with a similar but enhanced interface',
-      animation: 'fadeUp',
-    },
-    {
-      key: 'tickets',
-      title: 'Create & triage tickets easily from conversations',
-      animation: 'fadeLeft',
-    },
-    {
-      key: 'productivity',
-      title: 'Welcome to Day 1 of 10x productivity',
-      animation: 'fadeLeft',
-    },
-    ...(hasMigratedChannels
-      ? [
-          {
-            key: 'channels',
-            title: '',
-            animation: 'fadeUp',
-          } as const,
-        ]
-      : []),
-    {
-      key: 'profile',
-      title: 'Your profile is ready for action!',
-      animation: 'none',
-    },
-  ];
-
-  // Get context for queries
-  // const context = useAuthContextValues();
-
-  const [profileAnim, setProfileAnim] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
-
-  useEffect((): void | (() => void) => {
-    if (onboardingSteps.length > 0 && currentStep === onboardingSteps.length - 1) {
-      // start animation on mount with slight delay for smooth entry
-      const animTimeout = setTimeout(() => {
-        setProfileAnim(true);
-      }, 100);
-
-      // play confetti once
-      setShowConfetti(true);
-      const confettiTimeout = setTimeout(() => setShowConfetti(false), 800);
-
-      return () => {
-        clearTimeout(animTimeout);
-        clearTimeout(confettiTimeout);
-      };
-    }
-
-    setProfileAnim(false);
-  }, [currentStep, migratedChannels]);
+  const { user } = useAuth();
+  const [tap, setTap] = useState<OnboardingTap>(1);
+  const [payload, setPayload] = useState<OnboardingPayload>({});
+  const [checkedKeys, setCheckedKeys] = useState<PrototypeConnectKey[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingLand, setPendingLand] = useState<OnboardingPayload | null>(null);
 
   useEffect(() => {
-    // Check if is_new_user cookie exists
-    const isNewUserCookie = Cookies.get('is_new_user');
-    if (!isNewUserCookie) {
-      // Redirect to home screen if cookie doesn't exist
-      void navigate('/');
+    suppressAIOnboardingAutoStart();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async (): Promise<void> => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const raw = await getQuestionnaireResponse(PLUG_AND_PLAY_ONBOARDING_TYPE);
+        if (cancelled) {
+          return;
+        }
+        const next = parseOnboardingPayload(raw);
+        setPayload(next);
+        setCheckedKeys(next.onboardingPrototypeConnectKeys ?? []);
+        const openingTap = wizardOpeningTap(next);
+        setTap(openingTap);
+        mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: openingTap, prototype: true });
+      } catch {
+        if (!cancelled) {
+          setError("Couldn't load your progress. You can still continue.");
+          setTap(1);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingLand) {
+      return;
     }
-  }, [navigate]);
-
-  const handleCompleteOnboarding = (): void => {
-    setIsCompleting(true);
-
-    // Send event to auth machine to update isNewUser state
+    const workspaceId = user?.workspaceId;
+    const tryFirst = pendingLand.onboardingTryFirst;
+    if (!workspaceId || !tryFirst) {
+      return;
+    }
+    markOnboardingSampleVisible(workspaceId);
+    suppressAIOnboardingAutoStart();
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
+    void navigate(tryFirstLandingPath(workspaceId, tryFirst));
+  }, [pendingLand, user?.workspaceId, navigate]);
 
-    const workspaceId = currentUser?.workspaceId;
-    if (workspaceId) {
-      // After onboarding, land directly in the chat directory on the general
-      // channel instead of the user guide.
-      const landing = generalChannel?.id ? `/chat/dir/${generalChannel.id}` : '/chat/dir';
-      void navigate(`/${workspaceId}${landing}`);
+  const persist = async (next: OnboardingPayload): Promise<OnboardingPayload> => {
+    const saved = await saveQuestionnaireResponse({
+      questionnaireType: PLUG_AND_PLAY_ONBOARDING_TYPE,
+      payload: { ...next },
+    });
+    return parseOnboardingPayload(saved);
+  };
+
+  const selectAndAdvance = async (
+    patch: OnboardingPayload,
+    nextTap: OnboardingTap,
+  ): Promise<void> => {
+    if (isSaving) {
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    const next = { ...payload, ...patch };
+    setPayload(next);
+    try {
+      const saved = await persist(next);
+      setPayload(saved);
+      setTap(nextTap);
+      mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: nextTap, prototype: true });
+    } catch {
+      setError("Couldn't save. Stay here and try again.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const nextStep = (): void => {
-    if (currentStep < onboardingSteps.length - 1) {
-      setCurrentStep(currentStep + 1);
+  const handleRole = (key: OnboardingRole): void => {
+    void selectAndAdvance({ onboardingRole: key }, 2);
+  };
+
+  const handleDomain = (key: OnboardingDomain): void => {
+    void selectAndAdvance({ onboardingDomain: key }, 3);
+  };
+
+  const handleTryFirst = (key: OnboardingTryFirst): void => {
+    void selectAndAdvance({ onboardingTryFirst: key }, 4);
+  };
+
+  const handleConnectClick = (key: PrototypeConnectKey): void => {
+    if (checkedKeys.includes(key)) {
+      return;
+    }
+    const nextKeys = addPrototypeConnectKey(checkedKeys, key);
+    setCheckedKeys(nextKeys);
+    mixpanelService.track(EVENTS.ONBOARDING_CONNECT_CLICK, {
+      connectorKey: key,
+      prototype: true,
+    });
+    const next = { ...payload, onboardingPrototypeConnectKeys: nextKeys };
+    setPayload(next);
+    void persist(next).catch(() => {
+      setError("Couldn't save. Stay here and try again.");
+    });
+  };
+
+  const handleBack = (): void => {
+    if (tap <= 1 || isSaving) {
+      return;
+    }
+    const previous = (tap - 1) as OnboardingTap;
+    setError(null);
+    setTap(previous);
+    mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: previous, prototype: true });
+  };
+
+  const handleComplete = async (skipped: boolean): Promise<void> => {
+    if (isSaving || !canCompleteOnboarding(payload) || !payload.onboardingTryFirst) {
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    const completed = buildCompletePayload(payload, checkedKeys, new Date().toISOString());
+    try {
+      const saved = await persist(completed);
+      const tryFirst = saved.onboardingTryFirst ?? payload.onboardingTryFirst;
+      mixpanelService.track(skipped ? EVENTS.ONBOARDING_SKIP : EVENTS.ONBOARDING_COMPLETE, {
+        checkedKeys,
+        tryFirst,
+        prototype: true,
+      });
+      setPendingLand({
+        ...payload,
+        ...saved,
+        onboardingTryFirst: payload.onboardingTryFirst,
+      });
+    } catch {
+      setError("Couldn't save. Stay here and try again.");
+      setIsSaving(false);
     }
   };
 
-  const renderStep = (): React.JSX.Element | null => {
-    const step = onboardingSteps[currentStep];
-    if (!step) return null;
+  if (isLoading) {
+    return (
+      <div className='flex h-[100dvh] w-full items-center justify-center bg-background'>
+        <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
+      </div>
+    );
+  }
 
-    switch (step.key) {
-      case 'welcome':
-        return (
-          <div className='w-full h-screen relative bg-background overflow-hidden flex items-center justify-center p-4 animate-in fade-in duration-500'>
-            <div className='absolute inset-0 opacity-20 bg-gradient-to-br from-orange-100 to-orange-200 blur-3xl animate-pulse-slow' />
-            <div className='relative z-10 w-full max-w-4xl mx-auto text-center'>
-              <h1 className='text-center text-foreground font-medium text-lg sm:text-xl md:text-2xl lg:text-3xl leading-relaxed'>
-                Welcome to a smarter workspace made
-                <br />
-                {/* FOR (anchor) */}
-                <span className='relative inline-block mx-1'>
-                  for
-                  {/* crissCrossVector */}
-                  <img
-                    src='/images/onboarding/crissCrossVector.svg'
-                    alt=''
-                    className='absolute top-[0.2em] -right-[0.05em] w-[1.2em] pointer-events-none'
-                  />
-                  {/* GREYCOVER (always below 'for') */}
-                  <span
-                    className='
-  absolute
-  left-1/4
-  top-[1em]
-  -translate-x-1/2
-
-'
-                  >
-                    <span
-                      className='
-    relative
-    inline-block
-    w-14 sm:w-16 md:w-20
-    aspect-[3/2]
-  '
-                    >
-                      <img
-                        src='/images/onboarding/greycover.png'
-                        alt=''
-                        className='w-full h-full object-contain block'
-                      />
-                      <span
-                        className='
-      absolute inset-0
-      flex items-center justify-center
-      text-white
-      text-xs sm:text-sm
-    '
-                      >
-                        with
-                      </span>
-                    </span>
-                  </span>
-                </span>
-                you
-              </h1>
-              <button
-                className='mt-8 md:mt-12 bg-slate-500 hover:bg-slate-600 active:scale-95 text-white font-medium py-3 px-8 rounded-xl inline-flex justify-center items-center gap-2 transition-all duration-300 transform hover:shadow-lg hover:-translate-y-1 focus:outline-none'
-                onClick={nextStep}
-                data-track-category='Onboarding'
-                data-track-name='GetStarted'
-              >
-                <div className='text-sm md:text-base font-sans leading-4'>Get Started -&gt;</div>
-              </button>
-            </div>
-          </div>
-        );
-
-      case 'channels':
-        return (
-          <div className='w-full h-screen flex items-center justify-center bg-background'>
-            <div className='flex flex-col items-center text-center gap-10'>
-              {/* Title */}
-              <div
-                className='
-            text-3xl font-medium text-foreground max-w-3xl
-            opacity-0 translate-y-6
-            animate-[fadeUp_.6s_ease-out_forwards]
-          '
-              >
-                We found some channels that you&apos;d be a part of
-              </div>
-
-              {/* Channels List */}
-              <div className='w-full max-w-80 md:max-w-md flex flex-col justify-start items-center gap-6'>
-                {hasMigratedChannels &&
-                  migratedChannels?.slice(0, 5).map(channel => (
-                    <div key={channel.id} className='w-full flex items-center'>
-                      {/* Channel Icon */}
-                      <div className='w-3 h-3 relative overflow-hidden flex-shrink-0'>
-                        <div className='w-2 h-0 left-[2px] top-[4.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-2 h-0 left-[2px] top-[7.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-px h-2 left-[4px] top-[1.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-px h-2 left-[7px] top-[1.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                      </div>
-                      {/* Channel Name */}
-                      <div className='flex-1 py-0.5'>
-                        <div className='text-foreground text-base font-semibold font-sans leading-5'>
-                          {channel.name}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-
-              {/* Continue Button */}
-              <button
-                onClick={nextStep}
-                className='
-            w-16 h-16 rounded-full bg-neutral-900/5
-            transition hover:bg-neutral-900/10 active:scale-90
-            focus:outline-none
-          '
-                data-track-category='Onboarding'
-                data-track-name='ContinueStep'
-              >
-                -&gt;
-              </button>
-            </div>
-          </div>
-        );
-
-      case 'profile':
-        return (
-          <div className='relative w-full min-h-screen bg-background overflow-hidden flex items-center justify-center px-4 sm:px-8'>
-            {/* Confetti */}
-            {showConfetti && (
-              <Confetti
-                width={window.innerWidth}
-                height={window.innerHeight}
-                numberOfPieces={160}
-                gravity={0.35}
-                recycle={false}
-              />
-            )}
-
-            {/* soft background glow */}
-            <div className='absolute top-[-20rem] left-1/2 -translate-x-1/2 w-[60vw] h-[60vw] bg-background rounded-full blur-[90px] pointer-events-none' />
-
-            <div className='relative w-full mx-auto flex flex-col items-center gap-12'>
-              {/* TITLE & BUTTON */}
-              <div
-                className={`
-            flex flex-col items-center text-center gap-6
-            transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
-            ${profileAnim ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'}
-          `}
-              >
-                <h1 className='text-2xl sm:text-3xl font-medium text-foreground'>{step.title}</h1>
-
-                <button
-                  onClick={handleCompleteOnboarding}
-                  disabled={isCompleting}
-                  className='h-10 px-6 rounded-xl bg-slate-500 text-white text-sm font-medium transition hover:bg-slate-600 disabled:opacity-60 inline-flex items-center gap-2 focus:outline-none'
-                  data-track-category='Onboarding'
-                  data-track-name='OpenWorkspace'
-                >
-                  {isCompleting ? 'Completing...' : 'Open My Workspace'}
-                  <span
-                    className={`
-                inline-block transition-transform duration-500 ease-out
-                ${profileAnim ? 'rotate-0' : 'rotate-45'}
-              `}
-                  >
-                    →
-                  </span>
-                </button>
-              </div>
-
-              {/* PROFILE CARD */}
-              <div className='flex justify-center'>
-                <div
-                  className={`
-              relative w-[300px]
-              transition-all duration-500 [transition-timing-function:cubic-bezier(.22,1,.36,1)]
-              ${
-                profileAnim
-                  ? 'translate-y-0 scale-100 rotate-0 opacity-100'
-                  : 'translate-y-20 scale-95 -rotate-6 opacity-0'
-              }
-            `}
-                >
-                  <div className='bg-background/60 backdrop-blur rounded-[30px] shadow-xl overflow-hidden rotate-[-2deg]'>
-                    {/* Avatar */}
-                    <div className='relative w-full aspect-square overflow-hidden rounded-t-[30px]'>
-                      {pictureUrl ? (
-                        <img
-                          src={pictureUrl}
-                          alt='User avatar'
-                          className='w-full h-full object-cover'
-                        />
-                      ) : (
-                        <div className='w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-purple-600'>
-                          <span className='text-6xl font-bold text-white'>
-                            {user?.name?.[0]?.toUpperCase() || 'U'}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Joined badge */}
-                      <div className='absolute top-4 right-4 px-3 py-1 bg-background/70 backdrop-blur rounded-full text-xs font-medium text-foreground'>
-                        {user?.createdAt
-                          ? `Joined ${new Date(user.createdAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              year: 'numeric',
-                            })}`
-                          : 'Joined recently'}
-                      </div>
-                    </div>
-
-                    {/* User info */}
-                    <div className='px-4 py-5 text-center space-y-1'>
-                      <div className='text-base font-semibold text-foreground truncate'>
-                        {user?.name || 'User'}
-                      </div>
-                      <div className='text-xs text-muted-foreground break-all'>
-                        {user?.email || 'user@example.com'}
-                      </div>
-                    </div>
-
-                    <div className='h-px bg-border mx-4' />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return (
-          <div
-            key={currentStep}
-            className='w-full h-screen flex items-center justify-center bg-background'
-          >
-            <div className='flex flex-col items-center text-center gap-10'>
-              <div
-                className={`
-            text-3xl font-medium text-foreground max-w-2xl
-            opacity-0
-            ${step.animation === 'fadeLeft' ? 'translate-x-8 animate-[fadeLeft_.6s_ease-out_forwards]' : 'translate-y-6 animate-[fadeUp_.6s_ease-out_forwards]'}
-          `}
-              >
-                {step.title}
-              </div>
-
-              <button
-                onClick={nextStep}
-                className='
-            w-16 h-16 rounded-full bg-neutral-900/5
-            transition hover:bg-neutral-900/10 active:scale-90
-            focus:outline-none
-          '
-                data-track-category='Onboarding'
-                data-track-name='ContinueDefaultStep'
-              >
-                -&gt;
-              </button>
-            </div>
-          </div>
-        );
-    }
-  };
+  const footerAction = tap4FooterAction(checkedKeys.length);
 
   return (
-    <div className='relative w-full h-screen bg-background overflow-hidden flex items-center justify-center'>
-      {renderStep()}
+    <div className='relative flex h-[100dvh] w-full flex-col bg-background'>
+      <img
+        src='/svgs/xyne.svg'
+        alt='Xyne'
+        className='absolute left-6 top-6 h-7 w-auto sm:left-12 sm:top-8'
+      />
+
+      <div className='mx-auto flex w-full max-w-xl flex-1 flex-col px-5 pb-6 pt-24 sm:px-8'>
+        <div className='mb-8 flex items-center gap-2' aria-label={`Step ${tap} of 4`}>
+          {([1, 2, 3, 4] as const).map(step => (
+            <span
+              key={step}
+              className={`h-1.5 flex-1 rounded-full ${step <= tap ? 'bg-foreground' : 'bg-muted'}`}
+            />
+          ))}
+        </div>
+
+        {tap > 1 && (
+          <button
+            type='button'
+            onClick={handleBack}
+            disabled={isSaving}
+            className='mb-4 inline-flex min-h-11 w-fit items-center gap-2 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground'
+            data-testid='onboarding-back'
+            data-track-category='Onboarding'
+            data-track-name='Back'
+          >
+            <ArrowLeft className='h-4 w-4' />
+            Back
+          </button>
+        )}
+
+        <h1 className='text-2xl font-semibold leading-tight text-foreground sm:text-3xl'>
+          {TAP_COPY[tap].title}
+        </h1>
+        <p className='mt-2 text-sm leading-6 text-muted-foreground sm:text-base'>
+          {TAP_COPY[tap].subtitle}
+        </p>
+
+        {error && (
+          <p
+            className='mt-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'
+            data-testid='onboarding-error'
+            role='alert'
+          >
+            {error}
+          </p>
+        )}
+
+        {tap === 1 && (
+          <div className='mt-8 grid gap-3' data-testid='onboarding-tap-1'>
+            {ONBOARDING_ROLES.map(option => (
+              <ChoiceButton
+                key={option.key}
+                selected={payload.onboardingRole === option.key}
+                disabled={isSaving}
+                onClick={() => handleRole(option.key)}
+                testId={`onboarding-role-${option.key}`}
+              >
+                {option.label}
+              </ChoiceButton>
+            ))}
+          </div>
+        )}
+
+        {tap === 2 && (
+          <div className='mt-8 grid gap-3' data-testid='onboarding-tap-2'>
+            {ONBOARDING_DOMAINS.map(option => (
+              <ChoiceButton
+                key={option.key}
+                selected={payload.onboardingDomain === option.key}
+                disabled={isSaving}
+                onClick={() => handleDomain(option.key)}
+                testId={`onboarding-domain-${option.key}`}
+              >
+                {option.label}
+              </ChoiceButton>
+            ))}
+          </div>
+        )}
+
+        {tap === 3 && (
+          <div className='mt-8 grid gap-3' data-testid='onboarding-tap-3'>
+            {ONBOARDING_TRY_FIRST.map(option => (
+              <ChoiceButton
+                key={option.key}
+                selected={payload.onboardingTryFirst === option.key}
+                disabled={isSaving}
+                onClick={() => handleTryFirst(option.key)}
+                testId={`onboarding-try-${option.key}`}
+              >
+                {option.label}
+              </ChoiceButton>
+            ))}
+          </div>
+        )}
+
+        {tap === 4 && (
+          <div className='mt-8 flex min-h-0 flex-1 flex-col' data-testid='onboarding-tap-4'>
+            <ul className='flex flex-col gap-3'>
+              {PROTOTYPE_CONNECTORS.map(connector => {
+                const checked = checkedKeys.includes(connector.key);
+                return (
+                  <li key={connector.key}>
+                    <div className='flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card px-3 py-3'>
+                      <OnboardingConnectLogo
+                        connectorKey={connector.key}
+                        className='h-7 w-7 shrink-0'
+                      />
+                      <span className='flex-1 text-sm font-medium text-foreground'>
+                        {connector.label}
+                      </span>
+                      {checked ? (
+                        <span
+                          className='inline-flex min-h-11 items-center gap-1.5 px-3 text-sm font-medium text-green-600'
+                          data-testid={`onboarding-connected-${connector.key}`}
+                        >
+                          <Check className='h-4 w-4' />
+                          Connected
+                        </span>
+                      ) : (
+                        <button
+                          type='button'
+                          onClick={() => handleConnectClick(connector.key)}
+                          className='inline-flex min-h-11 items-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90'
+                          data-testid={`onboarding-connect-${connector.key}`}
+                          data-track-category='Onboarding'
+                          data-track-name='ConnectPrototype'
+                          data-track-metadata={JSON.stringify({ connectorKey: connector.key })}
+                        >
+                          Connect {connector.label}
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className='mt-auto pt-8'>
+              {footerAction === 'skip' ? (
+                <button
+                  type='button'
+                  onClick={() => void handleComplete(true)}
+                  disabled={isSaving}
+                  className='inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-60'
+                  data-testid='onboarding-skip'
+                  data-track-category='Onboarding'
+                  data-track-name='SkipConnect'
+                >
+                  {isSaving ? 'Saving…' : 'Skip'}
+                </button>
+              ) : (
+                <button
+                  type='button'
+                  onClick={() => void handleComplete(false)}
+                  disabled={isSaving}
+                  className='inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60'
+                  data-testid='onboarding-continue'
+                  data-track-category='Onboarding'
+                  data-track-name='ContinueConnect'
+                >
+                  {isSaving ? 'Saving…' : 'Continue'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
+
+const ChoiceButton = ({
+  children,
+  selected,
+  disabled,
+  onClick,
+  testId,
+}: {
+  children: string;
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  testId: string;
+}): ReactElement => (
+  <button
+    type='button'
+    onClick={onClick}
+    disabled={disabled}
+    data-testid={testId}
+    data-track-category='Onboarding'
+    data-track-name='Choice'
+    className={`min-h-11 rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60 ${
+      selected
+        ? 'border-foreground bg-accent text-foreground'
+        : 'border-border bg-card text-foreground hover:bg-accent'
+    }`}
+  >
+    {children}
+  </button>
+);
 
 export default OnboardingScreen;

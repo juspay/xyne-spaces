@@ -24,6 +24,9 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useCacConfig } from '@xyne/shared/hooks';
+import { useAuth } from '../../hooks/useAuth';
+import { isOnboardingSampleVisible } from '../../routes/OnboardingScreen/onboardingSample';
+import { OnboardingSampleRecapCard } from './OnboardingSampleRecapCard';
 
 type RecapTab = 'channel' | 'project';
 
@@ -53,6 +56,8 @@ const RecapPanel = (): ReactElement => {
   const params = useParams<{ channelId?: string; conversationId?: string }>();
   const zero = useZero();
   const { isMobile } = usePlatform();
+  const { user } = useAuth();
+  const showOnboardingSample = isOnboardingSampleVisible(user?.workspaceId);
   const { config: projectRecapEnabled } = useCacConfig<boolean>({
     key: 'project_recap_enabled',
     fallbackConfig: false,
@@ -334,6 +339,13 @@ const RecapPanel = (): ReactElement => {
 
     // Show messages if no recap available for historical date
     if (!dataToUse || dataToUse.cards.length === 0) {
+      if (showOnboardingSample && user?.workspaceId && !selectedDate) {
+        return (
+          <div className='h-full overflow-y-auto bg-background p-4'>
+            <OnboardingSampleRecapCard workspaceId={user.workspaceId} />
+          </div>
+        );
+      }
       const displayDate = selectedDate
         ? getPreviousDayDateStr(selectedDate)
         : historicalRecapData?.date || '';
@@ -545,6 +557,9 @@ const RecapPanel = (): ReactElement => {
 
         {/* Scrollable content area with sections */}
         <div className='flex-1 min-h-0 overflow-y-auto px-5 pb-6'>
+          {showOnboardingSample && user?.workspaceId && !isHistoricalView && (
+            <OnboardingSampleRecapCard workspaceId={user.workspaceId} />
+          )}
           {/* Unread Recap Section */}
           {unreadCards.length > 0 && (
             <div className='mb-6'>
@@ -614,6 +629,14 @@ const RecapPanel = (): ReactElement => {
 
   // Render first-time welcome content for channel tab
   const renderChannelContent = (): ReactElement => {
+    if (showOnboardingSample && user?.workspaceId && !isLoadingSubscriptions) {
+      return (
+        <div className='h-full overflow-y-auto bg-background p-4'>
+          <OnboardingSampleRecapCard workspaceId={user.workspaceId} />
+        </div>
+      );
+    }
+
     // First-time users see the welcome screen
     if (isFirstTime && !isLoadingSubscriptions) {
       return (

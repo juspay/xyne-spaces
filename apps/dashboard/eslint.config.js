@@ -1,10 +1,10 @@
-import js from "@eslint/js";
-import globals from "globals";
-import tseslint from "typescript-eslint";
-import reactPlugin from "eslint-plugin-react";
-import reactHooksPlugin from "eslint-plugin-react-hooks";
-import jsxA11yPlugin from "eslint-plugin-jsx-a11y";
-import eslintConfigPrettier from "eslint-config-prettier";
+import js from '@eslint/js';
+import globals from 'globals';
+import tseslint from 'typescript-eslint';
+import reactPlugin from 'eslint-plugin-react';
+import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
+import eslintConfigPrettier from 'eslint-config-prettier';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -20,27 +20,28 @@ const localRules = {
     'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
     'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
-  }
+  },
 };
 
 export default tseslint.config(
   // Global ignores
   {
     ignores: [
-      "node_modules/",
-      "dist/",
-      "dist-electron/",
-      "coverage/",
-      "build/",
-      ".vite/",
-      "*.config.js",
-      "*.config.ts",
-      "src/object-graph/**/*",
-      "*.cjs",
-      "public/**/*",
-      "src2/**/*",
-      "eslint-rules/**/*",
-      "electron/preload.ts"
+      'node_modules/',
+      'dist/',
+      'dist-electron/',
+      'coverage/',
+      'build/',
+      '.vite/',
+      '*.config.js',
+      '*.config.ts',
+      'src/object-graph/**/*',
+      'src/**/*.test.ts',
+      '*.cjs',
+      'public/**/*',
+      'src2/**/*',
+      'eslint-rules/**/*',
+      'electron/preload.ts',
     ],
   },
 
@@ -52,12 +53,12 @@ export default tseslint.config(
 
   // React configuration
   {
-    files: ["**/*.{js,jsx,ts,tsx}"],
+    files: ['**/*.{js,jsx,ts,tsx}'],
     plugins: {
       react: reactPlugin,
-      "react-hooks": reactHooksPlugin,
-      "jsx-a11y": jsxA11yPlugin,
-      "local-rules": localRules,
+      'react-hooks': reactHooksPlugin,
+      'jsx-a11y': jsxA11yPlugin,
+      'local-rules': localRules,
     },
     languageOptions: {
       globals: {
@@ -72,7 +73,7 @@ export default tseslint.config(
     },
     settings: {
       react: {
-        version: "detect",
+        version: 'detect',
       },
     },
     rules: {
@@ -80,137 +81,146 @@ export default tseslint.config(
       ...reactHooksPlugin.configs.recommended.rules,
       ...jsxA11yPlugin.configs.recommended.rules,
       // Autofocus is intentional for modals, comboboxes, and editors (see Canvas, chat input).
-      "jsx-a11y/no-autofocus": "off",
-      "react/react-in-jsx-scope": "off",
-      "react/prop-types": "off",
-      "local-rules/no-fetch-use-axios": "error",
-      "local-rules/no-rocicorp-define-query": "error",
-      "local-rules/no-rocicorp-use-query": "error",
-      "local-rules/no-rocicorp-use-zero": "error",
-      "local-rules/no-date-now-or-uuid-in-mutators": "error",
-      "local-rules/require-is-deleted-filter": "error",
-      "local-rules/require-initial-message-md-in-conversation-insert": "error",
-      "local-rules/no-direct-message-lookup-in-mutators": "error",
-      "local-rules/require-tracking-on-click": ["error", {
-        exemptComponents: [],
-        exemptDataTestIds: [],
-      }],
+      'jsx-a11y/no-autofocus': 'off',
+      'react/react-in-jsx-scope': 'off',
+      'react/prop-types': 'off',
+      'local-rules/no-fetch-use-axios': 'error',
+      'local-rules/no-rocicorp-define-query': 'error',
+      'local-rules/no-rocicorp-use-query': 'error',
+      'local-rules/no-rocicorp-use-zero': 'error',
+      'local-rules/no-date-now-or-uuid-in-mutators': 'error',
+      'local-rules/require-is-deleted-filter': 'error',
+      'local-rules/require-initial-message-md-in-conversation-insert': 'error',
+      'local-rules/no-direct-message-lookup-in-mutators': 'error',
+      'local-rules/require-tracking-on-click': [
+        'error',
+        {
+          exemptComponents: [],
+          exemptDataTestIds: [],
+        },
+      ],
     },
   },
 
   // Disable tracking requirement for reusable UI components
   {
-    files: ["src/components/ui/**/*.{ts,tsx}"],
+    files: ['src/components/ui/**/*.{ts,tsx}'],
     rules: {
-      "local-rules/require-tracking-on-click": "off",
+      'local-rules/require-tracking-on-click': 'off',
     },
   },
 
   // TypeScript specific configuration for src files
   {
-    files: ["src/**/*.ts", "src/**/*.tsx"],
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: "./tsconfig.app.json",
+        project: './tsconfig.app.json',
         tsconfigRootDir: import.meta.dirname,
-      }
+      },
     },
     rules: {
       // Enforce explicit return types on functions and class methods
-      "@typescript-eslint/explicit-function-return-type": "warn",
+      '@typescript-eslint/explicit-function-return-type': 'warn',
       // Disallow the use of 'any' type
-      "@typescript-eslint/no-explicit-any": "error",
+      '@typescript-eslint/no-explicit-any': 'error',
       // Warn about unused variables, allowing those prefixed with _
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       // Disallow unused expressions
-      "@typescript-eslint/no-unused-expressions": "error",
+      '@typescript-eslint/no-unused-expressions': 'error',
       // Prefer const over let for variables that are never reassigned
-      "prefer-const": "error",
+      'prefer-const': 'error',
 
       // Naming Convention Rules
-      "@typescript-eslint/naming-convention": [
-        "warn",
+      '@typescript-eslint/naming-convention': [
+        'warn',
         {
-          selector: "default",
-          format: ["PascalCase", "camelCase", "UPPER_CASE"],
-          leadingUnderscore: "allow",
-          trailingUnderscore: "forbid",
+          selector: 'default',
+          format: ['PascalCase', 'camelCase', 'UPPER_CASE'],
+          leadingUnderscore: 'allow',
+          trailingUnderscore: 'forbid',
         },
         {
-          selector: "variable",
-          format: ["camelCase", "PascalCase", "UPPER_CASE"],
-          leadingUnderscore: "allow",
+          selector: 'variable',
+          format: ['camelCase', 'PascalCase', 'UPPER_CASE'],
+          leadingUnderscore: 'allow',
         },
         {
-          selector: "function",
-          format: ["camelCase", "PascalCase"],
+          selector: 'function',
+          format: ['camelCase', 'PascalCase'],
         },
         {
-          selector: "parameter",
-          format: ["camelCase"],
-          leadingUnderscore: "allow",
+          selector: 'parameter',
+          format: ['camelCase'],
+          leadingUnderscore: 'allow',
         },
         {
-          selector: "property",
-          format: ["PascalCase", "camelCase", "UPPER_CASE"],
-          leadingUnderscore: "allow",
+          selector: 'property',
+          format: ['PascalCase', 'camelCase', 'UPPER_CASE'],
+          leadingUnderscore: 'allow',
         },
         {
-          selector: "typeLike",
-          format: ["PascalCase"],
-          leadingUnderscore: "allow",
+          selector: 'typeLike',
+          format: ['PascalCase'],
+          leadingUnderscore: 'allow',
         },
         {
-          selector: "enumMember",
-          format: ["UPPER_CASE"],
+          selector: 'enumMember',
+          format: ['UPPER_CASE'],
         },
         {
-          selector: "typeParameter",
-          format: ["PascalCase"],
+          selector: 'typeParameter',
+          format: ['PascalCase'],
         },
         {
-          selector: "memberLike",
-          modifiers: ["private", "protected"],
-          format: ["camelCase"],
-          leadingUnderscore: "allow",
+          selector: 'memberLike',
+          modifiers: ['private', 'protected'],
+          format: ['camelCase'],
+          leadingUnderscore: 'allow',
         },
       ],
-    }
+    },
   },
 
   // TypeScript specific configuration for electron files
   {
-    files: ["electron/**/*.ts"],
+    files: ['electron/**/*.ts'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: "./tsconfig.electron.json",
+        project: './tsconfig.electron.json',
         tsconfigRootDir: import.meta.dirname,
-      }
+      },
     },
     rules: {
-      "@typescript-eslint/explicit-function-return-type": "warn",
-      "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
-      "@typescript-eslint/no-unused-expressions": "error",
-      "prefer-const": "error",
-    }
+      '@typescript-eslint/explicit-function-return-type': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/no-unused-expressions': 'error',
+      'prefer-const': 'error',
+    },
   },
 
   // General rules for all JS/TS files
   {
-    files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
       // Enforce strict equality (=== and !==)
-      "eqeqeq": ["error", "always"],
+      eqeqeq: ['error', 'always'],
       // Disallow the use of console.log in production
-      "no-console": "warn",
+      'no-console': 'warn',
       // Enforce curly braces for all control statements
-      "curly": ["error", "all"],
+      curly: ['error', 'all'],
       // Prefer early returns over else blocks when possible
-      "no-else-return": "warn",
-    }
+      'no-else-return': 'warn',
+    },
   },
 
   // Prettier configuration - MUST BE LAST

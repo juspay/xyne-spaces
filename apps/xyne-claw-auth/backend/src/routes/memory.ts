@@ -273,7 +273,7 @@ async function checkTwinAccess(
     if (!(memo.tags ?? []).includes(expectedTag)) {
       res.status(403).json({
         success: false,
-        error: "Cannot delete another user's Digital Twin memory",
+        error: "Cannot access another user's Digital Twin memory",
       });
       return false;
     }
@@ -1334,6 +1334,75 @@ memoryRouter.post("/banks/:agentSlug/recall", requireUserAuth, async (req, res) 
   } catch (err) {
     logger.error("[memory] recall failed", {
       agentSlug,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ success: false, error: "Internal error" });
+  }
+});
+
+/**
+ * GET /memory/banks/:agentSlug/memories/:hindsightMemoryId
+ *
+ * Fetch a single memory by id — used for cold loads / deep links (e.g.
+ * /ai/memory/:id). Digital-twin bank verifies the memory carries the
+ * requester's user:<id> tag (same object-level check as delete).
+ */
+memoryRouter.get("/banks/:agentSlug/memories/:hindsightMemoryId", requireUserAuth, async (req, res) => {
+  try {
+    const agentSlug = req.params["agentSlug"] as string;
+    const hindsightMemoryId = req.params["hindsightMemoryId"] as string;
+
+    if (!(await checkTwinAccess(req, res, agentSlug, "delete", { hindsightMemoryId }))) return;
+
+    const getMemoryFn = memory.getMemory?.bind(memory);
+    if (!getMemoryFn) {
+      res.status(501).json({ success: false, error: "Memory provider does not support get-by-id" });
+      return;
+    }
+
+    const m = await getMemoryFn(bankIdForAgent(agentSlug), hindsightMemoryId).catch(() => null);
+    if (!m) {
+      res.status(404).json({ success: false, error: "Memory not found" });
+      return;
+    }
+
+    const tags = m.tags ?? [];
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const hits = await prisma.memoryRecallHit.groupBy({
+      by: ["hindsightMemoryId"],
+      where: { agentSlug, hindsightMemoryId: m.id, recalledAt: { gte: cutoff } },
+      _count: { _all: true },
+      _max: { recalledAt: true },
+    });
+    const hit = hits[0];
+
+    const isShared = tags.includes("shared");
+    const ownerTag = tags.find((t) => t.startsWith("user:"));
+    const sessionTag = tags.find((t) => t.startsWith("session:"));
+    const categoryTag = tags.find((t) => t.startsWith("cat:"));
+    const resolvedScope: "user" | "shared" | null = isShared ? "shared" : ownerTag ? "user" : null;
+
+    res.json({
+      success: true,
+      data: {
+        id: m.id,
+        hindsightMemoryId: m.id,
+        scope: resolvedScope,
+        category: categoryTag ? categoryTag.slice(4) : (m.factType ?? null),
+        content: m.content,
+        userId: ownerTag ? ownerTag.slice(5) : null,
+        sessionId: sessionTag ? sessionTag.slice(8) : null,
+        factType: m.factType ?? null,
+        tags,
+        createdAt: m.createdAt ?? null,
+        recallHits7d: hit?._count._all ?? 0,
+        lastRecalledAt: hit?._max.recalledAt ?? null,
+        pipelineEventId: tags.find((t) => t.startsWith("pipeline:"))?.slice("pipeline:".length) ?? null,
+      },
+      provider: memory.name,
+    });
+  } catch (err) {
+    logger.error("[memory] GET /banks/:agentSlug/memories/:hindsightMemoryId failed", {
       err: err instanceof Error ? err.message : String(err),
     });
     res.status(500).json({ success: false, error: "Internal error" });

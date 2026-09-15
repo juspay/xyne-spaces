@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { apiInstance } from '../clients/apiClient';
 import { toast } from 'sonner';
 
@@ -49,11 +50,31 @@ export interface SaveQuestionnaireResponseInput {
 export const saveQuestionnaireResponse = async ({
   questionnaireType,
   payload,
-}: SaveQuestionnaireResponseInput): Promise<void> => {
-  await apiInstance.post('/users/me/questionnaire', {
-    questionnaireType,
-    payload,
-  });
+}: SaveQuestionnaireResponseInput): Promise<Record<string, unknown>> => {
+  const response = await apiInstance.post<{ payload: Record<string, unknown> }>(
+    '/users/me/questionnaire',
+    {
+      questionnaireType,
+      payload,
+    },
+  );
+  return response.data.payload ?? payload;
+};
+
+export const getQuestionnaireResponse = async (
+  questionnaireType: string,
+): Promise<Record<string, unknown> | null> => {
+  try {
+    const response = await apiInstance.get<{ payload: Record<string, unknown> | null }>(
+      `/users/me/questionnaire/${encodeURIComponent(questionnaireType)}`,
+    );
+    return response.data.payload ?? null;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 export interface VoiceSignatureStatus {

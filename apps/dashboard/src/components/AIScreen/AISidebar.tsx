@@ -5,6 +5,7 @@ import {
   ChevronBigDown,
   DeleteDustbin01,
   LayoutGridStackDown,
+  LayersTo,
   Notebook,
   PencilEditBox,
   Piechart01,
@@ -58,6 +59,7 @@ interface AINavItem {
 
 const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
+  { key: 'memory', label: 'Memory', icon: LayersTo as NavIcon, to: '/ai/memory' },
   { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'metrics', label: 'Metrics', icon: Piechart01 as NavIcon, to: '/ai/metrics' },
   { key: 'settings', label: 'Settings', icon: Settings01 as NavIcon, to: '/ai/settings' },

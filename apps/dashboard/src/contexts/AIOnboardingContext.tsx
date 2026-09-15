@@ -113,6 +113,13 @@ export function clearAIOnboardingPending(): void {
   sessionStorage.removeItem(PENDING_KEY);
 }
 
+/** Block the canned Ask-AI overlay from first onboarding paint through first land. */
+export function suppressAIOnboardingAutoStart(): void {
+  localStorage.setItem(STORAGE_KEY, 'true');
+  localStorage.removeItem(ACTIVE_KEY);
+  sessionStorage.removeItem(PENDING_KEY);
+}
+
 // --- Provider ---
 
 interface AIOnboardingProviderProps {

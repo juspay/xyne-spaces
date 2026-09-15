@@ -26,6 +26,12 @@ agent slug remains `digital-twin`.
 | `/hot`, `/recall`, `/graph`, `/metrics` | `/ai/settings/hot`, `/recall`, `/graph`, `/metrics` (Activity overflow / inspect tools) |
 | `/claw-agents/settings` (providers only) | `/ai/settings/configuration` |
 
+**Xyne AI sidebar Memory (folder browse):** `/ai/memory` is a primary sidebar destination
+(not a settings tab). The tab body is a stacked-folder browser (open folder + left reading
+pane). Deep links at `/ai/memory/:id` open the same stack focused on that memory.
+**Settings → Memories** at `/ai/settings/memories` remains the practical management list
+(search, filters, delete, provenance) for day-to-day curation.
+
 **Chat:** default Xyne AI at `/ai/chat/new` streams as `digital-twin`. Twin is
 not listed in Library or the agent picker; configure it only via `/ai/settings`.
 Chat works when learning is disabled; a banner points users to settings to enable.
@@ -44,6 +50,7 @@ Chat works when learning is disabled; a banner points users to settings to enabl
 | None         | None          | Primary **Overview** tab (first; default landing)     | `/overview` (`/` redirects here) | Twin description, instructions, and capability chips (MCP, Subagent, Built in tools, Skills, Knowledge) |
 | None         | None          | Primary **Configuration** tab                         | `/configuration` (`/persona` redirects here) | Model and Credentials as separate sections, Behaviour, Tools and Knowledge (one heading over MCP / Subagent / Built in tools / Skills / Knowledge chip rows in the same #f7f7f7 DetailGroup as the other sections), People. Configuration section titles (**AI Providers**, **Agent Model Assignment**, Model, Credentials, Behaviour, Tools and Knowledge, People) are **16px** semibold (`TWIN_SETTINGS_TITLE_CLASS` on `headingClassName`; `DigitalTwinPersonaTab` is settings-only). Nested field titles **14px** medium, Behaviour and People group labels (Sandbox, Constant reminders, Autonomy, Verification, Output; Access, Members, Pending Requests) **14px / 400 / 1.35 / tertiary** (`heading='subcategory'`, `font-normal`) sit **outside** the grey fill; each group's content uses the same #f7f7f7 DetailGroup as Model / Credentials. Hints **14px** `font-normal` (400). Twin-only **16px** section heading-to-content gap; nested Twin subcategory title-to-content is **8px**. Twin Configuration hairline is **`TWIN_STROKE_CLASS`**: `border-[0.8px] border-foreground/10` (same as capability chips) on DetailGroups, selects, credentials control, reminders field, member filter, and empty search; Library / Overview `#e8e8e8` fields stay. Tools and Knowledge is display-only until **Edit** (pencil) on the heading; Edit reveals + on capability titles and × on pills, **Done** hides them again. Overview chips stay display-only. 16px top padding like Overview. Description and instructions live on Overview. |
 | None         | None          | Primary **Activity** tab                              | `/activity`   | New dashboard route                       |
+| None         | None          | Xyne AI sidebar **Memory** (folder browse)            | `/ai/memory` (`/ai/memory/:id` focuses that folder) | New sidebar destination; stacked folders + left reading pane; settings list stays at `/ai/settings/memories` |
 
 The old Digital Twin sidebar has not disappeared feature by feature. Its
 destinations are now divided between:
@@ -74,6 +81,8 @@ destinations are now divided between:
 
 | Shipped element            | Current-version location                                                | Change                                               |
 | -------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| Memory list (primary tab)  | **Settings → Memories** at `/ai/settings/memories`                    | Same practical list for search, filters, delete, and provenance |
+| None                       | Xyne AI sidebar **Memory** at `/ai/memory`                              | Folder-stack browse: folders fill the Memory tab height (not a 1010px artboard). Horizontal progress (wheel/trackpad/←→ maps vertical wheel to stack progress; no vertical overflow scroller). One 890×1400 pose-sheet Union per memory (Figma 1739:101951); notch Y steps 100px. Rest X/Y from 1710:100902 (x=0/30/60/90 and covering 609/−58), layout scale paneH/1055, covering 371px of the open folder. Left pane shows the focused memory in full |
 | Memory content row         | Title and memory text inside the new card                               | Expanded hierarchy                                   |
 | Created date               | `Added [date]` in card metadata                                         | Renamed                                              |
 | Recall count               | `[N] uses this week`                                                    | Plain-language rename                                |
@@ -170,6 +179,7 @@ combine them through the Disable modal.
 | Ask your twin something composer | Header chrome                        | Always-visible **bottom** composer (`bottom: 1.5rem`). Send starts Twin chat from that bar (Figma 1615:43372: first-prompt session title dropdown + the same input). The thread overlay can expand above that bar (Ask AI messages); it grows upward so composer Y stays put. No paper underlay. Clicking the compact composer textarea or pill body expands the thread. Click-outside collapses with the reverse of expand to the compact 500px chrome. Header **X** (compact or expanded) clears the session and leaves the idle bottom pill. Maximize sends the thread to the Ask AI side panel. **+** can attach files, mention agents/skills, attach KB collections, pick a research target, and toggle web/deep research |
 | Learned reply policy        | Settings                               | Exposes the existing response-policy capability |
 | Date-range deletion         | Settings                               | Exposes the existing deletion capability        |
+| Folder-stack memory browse  | `/ai/memory` (Xyne AI sidebar **Memory**) | Stacked folders with a left reading pane over the same digital-twin memory bank; `/ai/memory/:id` focuses that folder; settings list at `/ai/settings/memories` for management |
 
 ## Unchanged foundations
 
@@ -196,7 +206,9 @@ tracked separately from the product changes above.
 >
 > No existing Digital Twin destination was deleted. Memories and Settings kept
 > their routes; Proposals became Review; Hot, Recall, Graph, and Metrics moved
-> under Inspect with clearer names. The header is a centered identity stack
+> under Inspect with clearer names. **Memory** in the Xyne AI sidebar (`/ai/memory`)
+> is a stacked-folder browse with a left reading pane; **Settings → Memories** (`/ai/settings/memories`)
+> remains the practical curation list. The header is a centered identity stack
 > (portrait, **Your Digital Twin**). The
 > composer is always a **bottom** docked pill (`1.5rem`); there is no top
 > origin composer. Overview, Configuration, Memories, Review,

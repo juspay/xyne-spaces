@@ -85,6 +85,7 @@ import SortableSection from './SortableSection';
 import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
+import OnboardingSampleChannelRow from './OnboardingSampleChannelRow';
 import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
@@ -93,6 +94,7 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+import { isOnboardingSampleVisible } from '../../../routes/OnboardingScreen/onboardingSample';
 
 const ContainerDropZone = ({
   id,
@@ -222,6 +224,7 @@ const ChatDirectory = ({
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
   const { isMobile } = usePlatform();
+  const showOnboardingSample = isOnboardingSampleVisible(workspaceId);
 
   const { mentionCount: threadCount, hasUnreadThreads } = useThreadSidebarState();
   const overdueRemindersCount = useOverdueRemindersCount();
@@ -1042,6 +1045,7 @@ const ChatDirectory = ({
                     id={`section-drop-${DEFAULT_CONTAINER}`}
                     className='min-h-[4px]'
                   >
+                    {showOnboardingSample && <OnboardingSampleChannelRow />}
                     {defaultDisplayChannels.map(channel => (
                       <SortableChannelItem
                         key={channel.id}

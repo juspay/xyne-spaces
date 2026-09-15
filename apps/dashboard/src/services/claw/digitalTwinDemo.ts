@@ -1357,6 +1357,12 @@ export const demoListMemories = async (opts: {
   });
 };
 
+export const demoGetMemory = async (hindsightMemoryId: string): Promise<MemoryBankMemory> => {
+  const memory = memories.find(entry => entry.hindsightMemoryId === hindsightMemoryId);
+  if (!memory) throw new Error('Memory not found');
+  return wait(memory);
+};
+
 export const demoDeleteMemory = async (hindsightMemoryId: string): Promise<void> => {
   memories = memories.filter(memory => memory.hindsightMemoryId !== hindsightMemoryId);
   await wait(undefined);

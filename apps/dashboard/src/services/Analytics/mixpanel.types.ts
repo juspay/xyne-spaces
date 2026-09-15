@@ -56,6 +56,12 @@ export const EVENTS = {
 
   // Settings/Preferences events
   PREFERENCE_CHANGED: 'preference_changed',
+
+  // Plug-and-play onboarding prototype
+  ONBOARDING_TAP: 'onboarding_tap',
+  ONBOARDING_CONNECT_CLICK: 'onboarding_connect_click',
+  ONBOARDING_SKIP: 'onboarding_skip',
+  ONBOARDING_COMPLETE: 'onboarding_complete',
 } as const;
 
 // Common property values (optional - you can use plain strings)

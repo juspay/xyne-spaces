@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claw · Memory folders prototype</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@450;550;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: oklch(0.93 0.008 285);
+      --ink: #232229;
+      --ink-secondary: oklch(0.43 0.014 285);
+      --ink-muted: oklch(0.59 0.011 285);
+      --font-sans: "Inter", "Segoe UI", sans-serif;
+      --stage-shadow:
+        0 263px 74px rgba(0, 0, 0, 0),
+        0 168px 67px rgba(0, 0, 0, 0),
+        0 95px 57px rgba(0, 0, 0, 0.02),
+        0 42px 42px rgba(0, 0, 0, 0.03),
+        0 11px 23px rgba(0, 0, 0, 0.03);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      color: var(--ink);
+      background: var(--canvas);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .prototype-canvas {
+      height: 100%;
+      min-height: 100%;
+      display: grid;
+      place-items: stretch;
+      padding: 24px;
+      position: relative;
+      isolation: isolate;
+    }
+
+    .ghost-app {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      background: var(--canvas);
+      color: oklch(0.42 0.012 285);
+      z-index: -1;
+    }
+
+    .ghost-sidebar {
+      padding: 30px 22px;
+      border-right: 1px solid oklch(0.84 0.01 285);
+      background: oklch(0.955 0.007 285);
+    }
+
+    .ghost-brand {
+      width: 84px;
+      height: 14px;
+      border-radius: 99px;
+      background: oklch(0.73 0.012 285);
+      margin-bottom: 42px;
+    }
+
+    .ghost-nav {
+      height: 34px;
+      border-radius: 8px;
+      background: oklch(0.9 0.008 285);
+      margin-bottom: 10px;
+    }
+
+    .ghost-nav:nth-child(3),
+    .ghost-nav:nth-child(4) {
+      width: 78%;
+      background: transparent;
+    }
+
+    .ghost-main {
+      width: min(920px, calc(100vw - 300px));
+      padding: 56px 42px;
+      justify-self: center;
+    }
+
+    .ghost-heading {
+      width: 220px;
+      height: 24px;
+      border-radius: 99px;
+      background: oklch(0.73 0.012 285);
+      margin-bottom: 42px;
+    }
+
+    .ghost-field {
+      height: 96px;
+      border: 1px solid oklch(0.83 0.01 285);
+      border-radius: 14px;
+      margin-bottom: 18px;
+      background: oklch(0.95 0.006 285);
+    }
+
+    .stage {
+      position: relative;
+      justify-self: center;
+      width: min(1408px, 100%);
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: hidden;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: var(--stage-shadow);
+      overscroll-behavior: none;
+    }
+
+    .stage-header {
+      position: absolute;
+      left: 8px;
+      top: 12px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      height: 28px;
+    }
+
+    .stage-header svg {
+      flex: 0 0 16px;
+      width: 16px;
+      height: 16px;
+      color: var(--ink);
+    }
+
+    .stage-header h1 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 28px;
+      font-weight: 700;
+      letter-spacing: -0.32px;
+      color: var(--ink);
+    }
+
+    .detail-pane {
+      position: absolute;
+      left: 0;
+      top: 56px;
+      bottom: 0;
+      width: min(560px, 48%);
+      min-height: 0;
+      padding: 8px 56px 64px;
+      z-index: 10;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+
+    .detail-pane::-webkit-scrollbar {
+      display: none;
+    }
+
+    .detail-card {
+      position: relative;
+      max-width: 480px;
+      opacity: 0;
+      transition: opacity 220ms ease;
+      pointer-events: none;
+    }
+
+    .detail-card.is-active {
+      opacity: 1;
+    }
+
+    .detail-eyebrow {
+      margin: 0 0 12px;
+      font-size: 12px;
+      line-height: 1.4;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+
+    .detail-title {
+      margin: 0 0 20px;
+      font-size: 26px;
+      line-height: 1.25;
+      font-weight: 550;
+      letter-spacing: -0.4px;
+      color: var(--ink);
+    }
+
+    .detail-body {
+      margin: 0 0 28px;
+      font-size: 15px;
+      line-height: 1.6;
+      font-weight: 450;
+      color: var(--ink);
+    }
+
+    .detail-section {
+      margin-bottom: 22px;
+    }
+
+    .detail-section h3 {
+      margin: 0 0 6px;
+      font-size: 11px;
+      line-height: 1.4;
+      font-weight: 550;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+
+    .detail-section p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.55;
+      font-weight: 450;
+      color: var(--ink-secondary);
+    }
+
+    .detail-quote {
+      margin-top: 8px;
+      padding-left: 12px;
+      border-left: 2px solid oklch(0.88 0.01 285);
+      font-style: italic;
+      color: var(--ink-muted);
+    }
+
+    .stack-wrap {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      height: 100%;
+      min-height: 0;
+      z-index: 5;
+      overflow: visible;
+    }
+
+    .scroll-proxy {
+      position: absolute;
+      left: var(--stack-hit-left, 48%);
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: auto;
+      height: 100%;
+      z-index: 30;
+      cursor: ew-resize;
+      touch-action: pan-x;
+      overscroll-behavior: contain;
+      outline: none;
+    }
+
+    .folders {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .folder {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: var(--folder-w, 70%);
+      height: var(--folder-h, 100%);
+      transform-origin: 0 0;
+      will-change: transform;
+      backface-visibility: hidden;
+    }
+
+    .folder-silhouette {
+      position: absolute;
+      inset: -0.5% -4.72% -10.5% -4.72%;
+      pointer-events: none;
+    }
+
+    .folder-silhouette svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .folder-summary {
+      position: absolute;
+      left: 6.97%;
+      top: 6.71%;
+      width: min(50%, 444px);
+      display: flex;
+      flex-direction: column;
+      gap: clamp(8px, 1.4vh, 15px);
+      color: var(--ink);
+      opacity: 0;
+    }
+
+    .folder-title {
+      margin: 0;
+      font-size: clamp(22px, 3.8vh, 40px);
+      line-height: 1.2;
+      font-weight: 550;
+      letter-spacing: -0.8px;
+      word-break: break-word;
+    }
+
+    .folder-hook {
+      margin: 0;
+      font-size: clamp(12px, 1.4vh, 14px);
+      line-height: 1.43;
+      font-weight: 450;
+      letter-spacing: -0.28px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .folder-meta {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+      font-weight: 450;
+      color: var(--ink-muted);
+    }
+
+    .scroll-hint {
+      position: absolute;
+      right: 24px;
+      bottom: 24px;
+      z-index: 25;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: oklch(0.98 0.004 285 / 0.92);
+      border: 1px solid oklch(0.9 0.01 285);
+      font-size: 11px;
+      color: var(--ink-muted);
+      pointer-events: none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .detail-card {
+        transition: none;
+      }
+
+      .folder {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-canvas">
+    <div class="ghost-app" aria-hidden="true">
+      <aside class="ghost-sidebar">
+        <div class="ghost-brand"></div>
+        <div class="ghost-nav"></div>
+        <div class="ghost-nav"></div>
+        <div class="ghost-nav"></div>
+      </aside>
+      <section class="ghost-main">
+        <div class="ghost-heading"></div>
+        <div class="ghost-field"></div>
+        <div class="ghost-field"></div>
+        <div class="ghost-field"></div>
+      </section>
+    </div>
+
+    <section class="stage" aria-label="Momories folder browser">
+      <header class="stage-header">
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 4.5 8 1.75 13.5 4.5V7.25L8 10 2.5 7.25V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          <path d="M2.5 8.25 8 11 13.5 8.25" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2.5 11.25 8 14 13.5 11.25" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>Memories</h1>
+      </header>
+
+      <div class="detail-pane" id="detail-pane" aria-live="polite"></div>
+
+      <div class="stack-wrap">
+        <div class="folders" id="folders"></div>
+      </div>
+      <div class="scroll-proxy" id="scroll-proxy" tabindex="0" role="slider" aria-orientation="horizontal" aria-label="Memory folder stack"></div>
+      <div class="scroll-hint">Scroll or use ← →</div>
+    </section>
+  </main>
+
+  <script>
+    const SUBSYSTEM_LABELS = {
+      style: "Communication style",
+      expertise: "Expertise",
+      projects: "Projects",
+      relationships: "Relationships",
+      preferences: "Preferences",
+      decisions: "Decisions",
+      context: "Context",
+      docs: "Documents",
+    };
+
+    const SUBSYSTEM_ALIASES = {
+      communication: "style",
+      people: "relationships",
+      "working-style": "preferences",
+      documents: "docs",
+      world: "context",
+    };
+
+    const normalizeSubsystem = (value) => {
+      const normalized = String(value).trim().toLowerCase().replaceAll("_", "-");
+      return SUBSYSTEM_ALIASES[normalized] ?? normalized;
+    };
+
+    const subsystemLabel = (value) =>
+      SUBSYSTEM_LABELS[normalizeSubsystem(value)] ?? value;
+
+    const isoAgo = (days, hours = 0) =>
+      new Date(Date.now() - (days * 24 + hours) * 60 * 60 * 1000).toISOString();
+
+    const PIPELINE_EVENTS = {
+      "event-daily-1": {
+        runType: "daily",
+        sourceKind: "messages",
+        sourcePlace: "Message in #launch-review",
+        evidence:
+          "For customer-facing launch notes, lead with the change people will notice and why it matters to them.",
+        how: "Learned automatically while you worked",
+        originShort: "#launch-review",
+      },
+      "event-backfill-1": {
+        runType: "backfill",
+        sourceKind: "messages",
+        sourcePlace: "Message in #digital-twin",
+        evidence:
+          "The next pass should feel native to the Agent Hub and keep the source trail visible.",
+        how: "Imported from earlier history",
+        originShort: "earlier messages",
+      },
+      "event-call-1": {
+        runType: "daily",
+        sourceKind: "calls",
+        sourcePlace: "Call · Product Design",
+        evidence:
+          "Use feedback from the working prototype to refine the interaction.",
+        how: "Learned automatically while you worked",
+        originShort: "a call",
+      },
+      "event-canvas-1": {
+        runType: "backfill",
+        sourceKind: "canvases",
+        sourcePlace: "Canvas · Product Design",
+        evidence:
+          "Use the existing components wherever the product already has an established pattern.",
+        how: "Imported from earlier history",
+        originShort: "a canvas",
+      },
+      "event-synthesis-1": {
+        runType: "synthesize",
+        sourceKind: null,
+        sourcePlace: "Persona refresh",
+        evidence:
+          "Compared the source records with existing memory and retained stable, reusable context.",
+        how: "Learned automatically while you worked",
+        originShort: "persona refresh",
+      },
+    };
+
+    const MEMORIES = [
+      {
+        id: "memory-1",
+        title: "Launch note structure",
+        category: "communication",
+        content:
+          "For customer-facing launch notes, lead with the change people will notice and why it matters to them. Keep implementation detail below the fold, then close with a named owner, the next step, and any action required from the reader.",
+        createdAt: isoAgo(2),
+        recallHits7d: 14,
+        lastRecalledAt: isoAgo(0, 3),
+        pipelineEventId: "event-daily-1",
+        tags: ["subsystem:style", "launches", "writing-style"],
+      },
+      {
+        id: "memory-2",
+        title: "Digital Twin direction",
+        category: "projects",
+        content:
+          "The Digital Twin revamp should work as a calm, self-service record of personal knowledge rather than a collection of technical tools. People need to see what the Twin knows, what is waiting for review, where each memory came from, and whether background learning is still running without understanding the underlying pipeline.",
+        createdAt: isoAgo(4),
+        recallHits7d: 11,
+        lastRecalledAt: isoAgo(0, 8),
+        pipelineEventId: "event-backfill-1",
+        tags: ["subsystem:projects", "digital-twin", "product-direction"],
+      },
+      {
+        id: "memory-3",
+        title: "Prototype before polish",
+        category: "working-style",
+        content:
+          "Build a working prototype early enough to test the product idea before visual details become expensive to change. Review it inside the real Xyne shell across themes, keyboard navigation, long content, and failure states before polishing isolated edge cases.",
+        createdAt: isoAgo(7),
+        recallHits7d: 9,
+        lastRecalledAt: isoAgo(1),
+        pipelineEventId: "event-call-1",
+        tags: ["subsystem:preferences", "prototyping", "collaboration"],
+      },
+      {
+        id: "memory-4",
+        title: "Design system ownership",
+        category: "people",
+        content:
+          "Maya owns the shared design-system rollout and should review changes that introduce reusable components, alter global tokens, or establish a new interaction pattern. Bring her in before implementation is finalized so the pattern can serve the wider product instead of becoming a one-off.",
+        createdAt: isoAgo(10),
+        recallHits7d: 7,
+        lastRecalledAt: isoAgo(2),
+        pipelineEventId: "event-backfill-1",
+        tags: ["subsystem:relationships", "design-system", "ownership"],
+      },
+      {
+        id: "memory-5",
+        title: "Bulk action confirmation",
+        category: "decisions",
+        content:
+          "Destructive bulk actions require a confirmation that names the operation and states the exact number of affected records. Approval, deletion, and disabling must be confirmed independently because these operations have different consequences and the backend may not provide an undo.",
+        createdAt: isoAgo(13),
+        recallHits7d: 6,
+        lastRecalledAt: isoAgo(3),
+        pipelineEventId: "event-canvas-1",
+        tags: ["subsystem:decisions", "safety", "interaction-design"],
+      },
+      {
+        id: "memory-6",
+        title: "UI review checklist",
+        category: "expertise",
+        content:
+          "A strong UI review evaluates hierarchy, information architecture, accessibility, responsive behavior, and every loading, empty, success, and error state. It should also explain whether the experience feels native to its surrounding product and identify the user risk behind each requested change.",
+        createdAt: isoAgo(18),
+        recallHits7d: 5,
+        lastRecalledAt: isoAgo(4),
+        pipelineEventId: "event-synthesis-1",
+        tags: ["subsystem:expertise", "ui-review", "accessibility"],
+      },
+      {
+        id: "memory-7",
+        title: "Consequential action labels",
+        category: "preferences",
+        content:
+          "Use concise, plain-language labels for consequential actions so people know exactly what will happen before they act. Icons may reinforce a label, but they should never be the only explanation for approving, rejecting, deleting, pausing, or disabling something.",
+        createdAt: isoAgo(22),
+        recallHits7d: 4,
+        lastRecalledAt: isoAgo(5),
+        pipelineEventId: null,
+        tags: ["subsystem:preferences", "content-design", "accessibility"],
+      },
+      {
+        id: "memory-8",
+        title: "Agent Hub navigation",
+        category: "projects",
+        content:
+          "The Agent Hub shell remains the primary navigation and visual frame for Digital Twin. Memories, Review, Persona, and Activity belong in one horizontal workspace navigation, while diagnostic tools stay in an Inspect menu instead of introducing a competing sidebar.",
+        createdAt: isoAgo(29),
+        recallHits7d: 3,
+        lastRecalledAt: isoAgo(6),
+        pipelineEventId: "event-canvas-1",
+        tags: ["subsystem:projects", "navigation", "agent-hub"],
+      },
+    ];
+
+    const DESIGN_W = 890;
+    const DESIGN_H = 1055;
+    const GLYPH_H = 1400;
+    const STACK_FROM_RIGHT = 704;
+    const SLOT_MIN = -1;
+    const SLOT_MAX = 3;
+    const COVERING_TRAVEL = 1;
+    const POOL_SIZE = 9;
+    const TAB_STEP = 100;
+    const BLUR_PAST_EXIT = 6;
+    const SLOT_POSES = [
+      { x: 609, y: -58 },
+      { x: 90, y: 0 },
+      { x: 60, y: 0 },
+      { x: 30, y: 0 },
+      { x: 0, y: 0 },
+    ];
+
+    const fmtY = (value) => String(Math.round(value * 1000) / 1000);
+    const folderFillPath = (tabOffset) => {
+      const y = (base) => fmtY(base + tabOffset);
+      return `M932 1407H80V${y(506.838)}C80 ${y(500.236)} 74.0736 ${y(495.072)} 69.3418 ${y(490.469)}L46.8428 ${y(468.58)}C43.7467 ${y(465.568)} 42.0001 ${y(461.432)} 42 ${y(457.112)}V${y(305.888)}C42.0001 ${y(301.568)} 43.7467 ${y(297.432)} 46.8428 ${y(294.42)}L69.3418 ${y(272.531)}C74.0738 ${y(267.928)} 80 ${y(262.763)} 80 ${y(256.161)}V7H932V1407Z`;
+    };
+    const folderStrokePath = (tabOffset) => {
+      const y = (base) => fmtY(base + tabOffset);
+      return `M931.5 7.5V1406.5H80.5V${y(506.838)}C80.5 ${y(503.381)} 78.9475 ${y(500.333)} 76.8418 ${y(497.599)}C74.7407 ${y(494.871)} 72.0394 ${y(492.395)} 69.6904 ${y(490.11)}L47.1914 ${y(468.222)}C44.1921 ${y(465.304)} 42.5001 ${y(461.297)} 42.5 ${y(457.112)}V${y(305.888)}L42.5049 ${y(305.496)}C42.607 ${y(301.454)} 44.2858 ${y(297.605)} 47.1914 ${y(294.778)}L69.6904 ${y(272.89)}C72.0395 ${y(270.604)} 74.7407 ${y(268.129)} 76.8418 ${y(265.4)}C78.9474 ${y(262.666)} 80.4999 ${y(259.618)} 80.5 ${y(256.161)}V7.5H931.5Z`;
+    };
+    const folderShadowFilter = (id) => `
+      <filter id="${id}" x="0" y="0" width="974" height="1554" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+        <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+        <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+        <feOffset dy="7"/><feGaussianBlur stdDeviation="7"/>
+        <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0"/>
+        <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow"/>
+        <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+        <feOffset dy="26"/><feGaussianBlur stdDeviation="13"/>
+        <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.03 0"/>
+        <feBlend mode="normal" in2="effect1_dropShadow" result="effect2_dropShadow"/>
+        <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+        <feOffset dy="59"/><feGaussianBlur stdDeviation="17.5"/>
+        <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.02 0"/>
+        <feBlend mode="normal" in2="effect2_dropShadow" result="effect3_dropShadow"/>
+        <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+        <feOffset dy="105"/><feGaussianBlur stdDeviation="21"/>
+        <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.01 0"/>
+        <feBlend mode="normal" in2="effect3_dropShadow" result="effect4_dropShadow"/>
+        <feBlend mode="normal" in="SourceGraphic" in2="effect4_dropShadow" result="shape"/>
+      </filter>
+    `;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const WHEEL_PIXELS_PER_FOLDER = 260;
+    const SNAP_LAMBDA = 11;
+    const WHEEL_IDLE_MS = 140;
+
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    const getSubsystemFromTags = (tags = []) => {
+      const tag = tags.find((item) => item.startsWith("subsystem:"));
+      return tag ? tag.slice("subsystem:".length) : "context";
+    };
+
+    const formatRelative = (iso) => {
+      const diffMs = Date.now() - Date.parse(iso);
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes < 60) return `${Math.max(1, minutes)} minute${minutes === 1 ? "" : "s"} ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+      const days = Math.floor(hours / 24);
+      if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+      const months = Math.floor(days / 30);
+      return `${months} month${months === 1 ? "" : "s"} ago`;
+    };
+
+    const formatAbsolute = (iso) =>
+      new Date(iso).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+
+    const getPipeline = (memory) => {
+      if (!memory.pipelineEventId) {
+        return {
+          sourcePlace: "Approved in Review",
+          evidence: memory.content.split(".").slice(0, 1).join(".") + ".",
+          how: "You approved this from daily learning",
+          originShort: "Review",
+        };
+      }
+      return PIPELINE_EVENTS[memory.pipelineEventId] ?? {
+        sourcePlace: "Work records",
+        evidence: memory.content.split(".").slice(0, 1).join(".") + ".",
+        how: "Learned automatically while you worked",
+        originShort: "work records",
+      };
+    };
+
+    const folderMetaLine = (memory) => {
+      const pipeline = getPipeline(memory);
+      const parts = [];
+      if (pipeline.originShort.startsWith("#")) {
+        parts.push(`From ${pipeline.originShort}`);
+      } else if (pipeline.originShort === "Review") {
+        parts.push("You approved this");
+      } else {
+        parts.push(`From ${pipeline.originShort}`);
+      }
+      parts.push(`Saved ${formatRelative(memory.createdAt)}`);
+      if (memory.recallHits7d > 0) {
+        parts.push(`Used ${memory.recallHits7d}×`);
+      }
+      return parts.join(" · ");
+    };
+
+    const wrapIndex = (value, size) => ((value % size) + size) % size;
+
+    const poseAt = (relativeSlot, sizeH) => {
+      const scale = sizeH / DESIGN_H;
+      const pose = {
+        x: 0,
+        y: 0,
+        tabY: TAB_STEP * relativeSlot,
+        blur: 0,
+      };
+      if (relativeSlot <= SLOT_MIN) {
+        const extra = SLOT_MIN - relativeSlot;
+        const covering = SLOT_POSES[0];
+        const open = SLOT_POSES[1];
+        pose.x = (covering.x + (covering.x - open.x) * extra) * scale;
+        pose.y = (covering.y + (covering.y - open.y) * extra) * scale;
+        if (!reducedMotion && extra > 0) pose.blur = BLUR_PAST_EXIT + extra * 4;
+        return pose;
+      }
+      if (relativeSlot >= SLOT_MAX) {
+        pose.x = SLOT_POSES[4].x * scale;
+        pose.y = SLOT_POSES[4].y * scale;
+        return pose;
+      }
+      const low = Math.floor(relativeSlot);
+      const high = Math.ceil(relativeSlot);
+      const t = relativeSlot - low;
+      const from = SLOT_POSES[low + 1];
+      const to = SLOT_POSES[high + 1];
+      pose.x = lerp(from.x, to.x, t) * scale;
+      pose.y = lerp(from.y, to.y, t) * scale;
+      return pose;
+    };
+
+    const detailPane = document.getElementById("detail-pane");
+    const scrollProxy = document.getElementById("scroll-proxy");
+    const foldersEl = document.getElementById("folders");
+    const stackWrap = document.querySelector(".stack-wrap");
+    const stage = document.querySelector(".stage");
+    const size = { w: DESIGN_W, h: DESIGN_H };
+
+    const measure = () => {
+      const paneH = stage.clientHeight || DESIGN_H;
+      const paneW = stage.clientWidth || DESIGN_W;
+      const scale = paneH / DESIGN_H;
+      size.w = DESIGN_W * scale;
+      size.h = paneH;
+      const stackLeft = paneW - STACK_FROM_RIGHT * scale;
+      stackWrap.style.left = `${stackLeft}px`;
+      stackWrap.style.setProperty("--folder-w", `${size.w}px`);
+      stackWrap.style.setProperty("--folder-h", `${GLYPH_H * scale}px`);
+      stage.style.setProperty("--stack-hit-left", `${Math.max(0, stackLeft)}px`);
+    };
+
+    const detailCards = MEMORIES.map((memory, index) => {
+      const subsystem = getSubsystemFromTags(memory.tags);
+      const pipeline = getPipeline(memory);
+      const card = document.createElement("article");
+      card.className = "detail-card";
+      card.dataset.index = String(index);
+      card.innerHTML = `
+        <p class="detail-eyebrow">${subsystemLabel(subsystem)}</p>
+        <h2 class="detail-title">${memory.title}</h2>
+        <p class="detail-body">${memory.content}</p>
+        <div class="detail-section">
+          <h3>Where</h3>
+          <p>${pipeline.sourcePlace}</p>
+          <p class="detail-quote">“${pipeline.evidence}”</p>
+        </div>
+        <div class="detail-section">
+          <h3>How</h3>
+          <p>${pipeline.how}</p>
+        </div>
+        <div class="detail-section">
+          <h3>When</h3>
+          <p>Saved ${formatRelative(memory.createdAt)}<br />${formatAbsolute(memory.createdAt)}</p>
+        </div>
+        ${
+          memory.recallHits7d > 0
+            ? `<div class="detail-section">
+                <h3>After</h3>
+                <p>Used ${memory.recallHits7d} time${memory.recallHits7d === 1 ? "" : "s"} this week<br />Last used ${formatRelative(memory.lastRecalledAt)}</p>
+              </div>`
+            : ""
+        }
+      `;
+      detailPane.appendChild(card);
+      return card;
+    });
+
+    const folderEls = [];
+    for (let pool = 0; pool < POOL_SIZE; pool += 1) {
+      const filterId = `folder-shadow-${pool}`;
+      const folder = document.createElement("div");
+      folder.className = "folder";
+      folder.innerHTML = `
+        <div class="folder-silhouette">
+          <svg viewBox="0 0 974 1554" fill="none">
+            <defs>${folderShadowFilter(filterId)}</defs>
+            <g filter="url(#${filterId})">
+              <path class="folder-fill" fill="#fff" d="${folderFillPath(0)}"></path>
+              <path class="folder-stroke" fill="none" stroke="#232229" stroke-opacity="0.1" d="${folderStrokePath(0)}"></path>
+            </g>
+          </svg>
+        </div>
+        <div class="folder-summary">
+          <h2 class="folder-title"></h2>
+          <p class="folder-hook"></p>
+          <p class="folder-meta"></p>
+        </div>
+      `;
+      foldersEl.appendChild(folder);
+      folderEls.push({
+        el: folder,
+        fill: folder.querySelector(".folder-fill"),
+        stroke: folder.querySelector(".folder-stroke"),
+        title: folder.querySelector(".folder-title"),
+        hook: folder.querySelector(".folder-hook"),
+        meta: folder.querySelector(".folder-meta"),
+        summary: folder.querySelector(".folder-summary"),
+        memoryId: null,
+        tabY: NaN,
+      });
+    }
+
+    let focusedIndex = 0;
+    let floatIndex = 0;
+    let targetIndex = 0;
+    let wheeling = false;
+    let raf = 0;
+    let lastTime = 0;
+    let idleTimer = 0;
+
+    const setFocusedDetail = (index) => {
+      const next = clamp(Math.round(index), 0, MEMORIES.length - 1);
+      if (next === focusedIndex && detailCards[focusedIndex].classList.contains("is-active")) {
+        return;
+      }
+      detailCards[focusedIndex]?.classList.remove("is-active");
+      focusedIndex = next;
+      detailCards[focusedIndex]?.classList.add("is-active");
+    };
+
+    const render = () => {
+      const maxIndex = MEMORIES.length - 1;
+      floatIndex = clamp(floatIndex, 0, maxIndex);
+      const windowStart = Math.floor(floatIndex + SLOT_MIN - COVERING_TRAVEL);
+      const windowEnd = Math.ceil(floatIndex + SLOT_MAX);
+
+      folderEls.forEach((node, pool) => {
+        let memoryIndex = -1;
+        for (let idx = windowStart; idx <= windowEnd; idx += 1) {
+          if (idx < 0 || idx > maxIndex) continue;
+          if (wrapIndex(idx, POOL_SIZE) === pool) {
+            memoryIndex = idx;
+            break;
+          }
+        }
+
+        const memory = memoryIndex >= 0 ? MEMORIES[memoryIndex] : null;
+        if (!memory) {
+          node.el.style.opacity = "0";
+          node.el.style.filter = "none";
+          node.memoryId = null;
+          return;
+        }
+
+        const relativeSlot = memoryIndex - floatIndex;
+        const pose = poseAt(relativeSlot, size.h);
+
+        node.el.style.opacity = "1";
+        node.el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, 0)`;
+        node.el.style.zIndex = String(Math.round(80 - relativeSlot * 10));
+        node.el.style.filter =
+          relativeSlot < SLOT_MIN && pose.blur > 0.05 ? `blur(${pose.blur.toFixed(2)}px)` : "none";
+
+        if (node.tabY !== pose.tabY) {
+          node.tabY = pose.tabY;
+          node.fill.setAttribute("d", folderFillPath(pose.tabY));
+          node.stroke.setAttribute("d", folderStrokePath(pose.tabY));
+        }
+
+        if (node.memoryId !== memory.id) {
+          node.memoryId = memory.id;
+          node.title.textContent = memory.title;
+          node.hook.textContent = memory.content;
+          node.meta.textContent = folderMetaLine(memory);
+        }
+
+        const absSlot = Math.abs(relativeSlot);
+        node.summary.style.opacity = String(absSlot < 0.001 ? 1 : clamp(1 - absSlot * 2.4, 0, 1));
+      });
+
+      setFocusedDetail(floatIndex);
+    };
+
+    const stopLoop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      lastTime = 0;
+    };
+
+    const tick = (now) => {
+      const maxIndex = MEMORIES.length - 1;
+      const dt = Math.min(0.05, ((now - (lastTime || now)) / 1000));
+      lastTime = now;
+
+      if (!wheeling) {
+        targetIndex = clamp(targetIndex, 0, maxIndex);
+        if (reducedMotion) {
+          floatIndex = targetIndex;
+        } else {
+          const next = floatIndex + (targetIndex - floatIndex) * (1 - Math.exp(-SNAP_LAMBDA * dt));
+          floatIndex = Math.abs(targetIndex - next) < 0.0008 ? targetIndex : next;
+        }
+      }
+
+      render();
+
+      if (!wheeling && Math.abs(floatIndex - targetIndex) < 0.0008) {
+        stopLoop();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    const startLoop = () => {
+      if (raf) return;
+      lastTime = 0;
+      raf = requestAnimationFrame(tick);
+    };
+
+    const snapTo = (index, instant) => {
+      const maxIndex = MEMORIES.length - 1;
+      targetIndex = clamp(index, 0, maxIndex);
+      wheeling = false;
+      if (instant || reducedMotion) {
+        floatIndex = targetIndex;
+        render();
+        stopLoop();
+        return;
+      }
+      startLoop();
+    };
+
+    const wheelDelta = (event) => {
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? WHEEL_PIXELS_PER_FOLDER : 1;
+      const dx = event.deltaX * scale;
+      const dy = event.deltaY * scale;
+      return Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+    };
+
+    const beginIdleSnap = () => {
+      window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        targetIndex = clamp(Math.round(floatIndex), 0, MEMORIES.length - 1);
+        wheeling = false;
+        startLoop();
+      }, WHEEL_IDLE_MS);
+    };
+
+    const onWheel = (event) => {
+      if (event.ctrlKey) return;
+      const dx = event.deltaX;
+      const dy = event.deltaY;
+      const horizontal = Math.abs(dx) >= Math.abs(dy);
+      if (!horizontal && detailPane.contains(event.target)) {
+        const canScroll = detailPane.scrollHeight - detailPane.clientHeight > 1;
+        const atTop = detailPane.scrollTop <= 0;
+        const atBottom = detailPane.scrollTop + detailPane.clientHeight >= detailPane.scrollHeight - 1;
+        if (canScroll && !((dy > 0 && atBottom) || (dy < 0 && atTop))) return;
+      }
+      event.preventDefault();
+      const maxIndex = MEMORIES.length - 1;
+      const delta = wheelDelta(event);
+      if (delta === 0) return;
+
+      if (reducedMotion) {
+        if (Math.abs(delta) < 12) return;
+        snapTo(targetIndex + (delta > 0 ? 1 : -1), true);
+        return;
+      }
+
+      stopLoop();
+      wheeling = true;
+      floatIndex = clamp(floatIndex + delta / WHEEL_PIXELS_PER_FOLDER, 0, maxIndex);
+      targetIndex = clamp(Math.round(floatIndex), 0, maxIndex);
+      render();
+      beginIdleSnap();
+    };
+
+    stage.addEventListener("wheel", onWheel, { passive: false });
+
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        const next = event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "PageDown";
+        const prev = event.key === "ArrowLeft" || event.key === "ArrowUp" || event.key === "PageUp";
+        if (!next && !prev && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        if (event.key === "Home") {
+          snapTo(0, reducedMotion);
+          return;
+        }
+        if (event.key === "End") {
+          snapTo(MEMORIES.length - 1, reducedMotion);
+          return;
+        }
+        snapTo(targetIndex + (next ? 1 : -1), reducedMotion);
+      },
+      { passive: false },
+    );
+
+    window.addEventListener("resize", () => {
+      measure();
+      render();
+    });
+    const resizeObserver = new ResizeObserver(() => {
+      measure();
+      render();
+    });
+    resizeObserver.observe(stackWrap);
+    resizeObserver.observe(stage);
+
+    measure();
+    const startIndex = clamp(Number(new URLSearchParams(location.search).get("i") || 0), 0, MEMORIES.length - 1);
+    floatIndex = startIndex;
+    targetIndex = startIndex;
+    setFocusedDetail(startIndex);
+    render();
+    scrollProxy.focus({ preventScroll: true });
+  </script>
+</body>
+</html>

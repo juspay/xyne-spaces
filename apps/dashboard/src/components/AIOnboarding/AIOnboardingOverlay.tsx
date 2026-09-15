@@ -9,7 +9,7 @@ export const AIOnboardingOverlay = (): ReactElement | null => {
   const { state, completeOnboarding } = useAIOnboarding();
   const { isMobile } = usePlatform();
   const location = useLocation();
-  const isOnOnboardingRoute = location.pathname === '/onboarding';
+  const isOnOnboardingRoute = location.pathname.endsWith('/onboarding');
   const isXyneAIOpen = useSelector(xyneAIActor, s => s.matches('open'));
 
   // Only show overlay when AI onboarding is active AND the XyneAI sidebar is actually open.

@@ -6,7 +6,8 @@ import HomeScreen from './HomeScreen';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
-import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
+import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
+import OnboardingSampleThread from './OnboardingScreen/OnboardingSampleThread';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketView from '../components/Tickets/TicketView/TicketView';
@@ -221,6 +222,7 @@ import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
 import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
+import AIMemoryScreen from './AIScreen/screens/AIMemoryScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
 import XyneAISettingsScreen from './AIScreen/screens/XyneAISettingsScreen';
 import XyneAISettingsOverviewTab from './AIScreen/screens/XyneAISettingsOverviewTab';
@@ -252,7 +254,7 @@ function CallRouteHandler(): ReactElement | null {
   return <Navigate to='/auth' replace />;
 }
 
-/** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
+/** Do not auto-start the Ask-AI overlay after plug-and-play onboarding. */
 const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
   const { startOnboarding } = useAIOnboarding();
 
@@ -266,7 +268,7 @@ const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null 
       return;
     }
 
-    // First-time trigger: pending flag set by OnboardingScreen on completion
+    // Legacy pending flag. Plug-and-play onboarding never sets this.
     if (isAIOnboardingPending()) {
       clearAIOnboardingPending();
       startOnboarding('auto', true);
@@ -881,6 +883,8 @@ export const router = createBrowserRouter([
                   { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                   { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
                   { path: 'knowledge', element: <AIKnowledgeScreen /> },
+                  { path: 'memory', element: <AIMemoryScreen /> },
+                  { path: 'memory/:memoryId', element: <AIMemoryScreen /> },
                   {
                     element: <AISectionLayout />,
                     children: [
@@ -912,7 +916,7 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'onboarding',
-                element: <QuestionnaireScreen />,
+                element: <OnboardingScreen />,
               },
               {
                 path: 'rca',
@@ -984,6 +988,11 @@ export const router = createBrowserRouter([
                       {
                         path: 'my-tickets',
                         element: <MyTicketsScreen />,
+                      },
+                      // Sample fixture from plug-and-play onboarding (must come before :channelId)
+                      {
+                        path: 'onboarding-sample-slack',
+                        element: <OnboardingSampleThread />,
                       },
                       // Channel routes (must come after specific routes)
                       {

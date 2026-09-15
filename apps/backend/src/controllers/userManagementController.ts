@@ -6,6 +6,11 @@ import { GuestEntity, AccessType, CalendarVisibility, WorkspaceRole } from '@xyn
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { DatabaseClient } from '@/database/client';
+import {
+  assertCompletePlugAndPlayPayload,
+  mergePlugAndPlayPayload,
+  PLUG_AND_PLAY_ONBOARDING_TYPE,
+} from '../services/plugAndPlayOnboarding';
 
 const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
@@ -1015,8 +1020,28 @@ export class UserManagementController {
       }
 
       const type = questionnaireType.trim();
-      const questionnairePayload = payload as Prisma.InputJsonValue;
       const prisma = DatabaseClient.getInstance();
+      let questionnairePayload = payload as Prisma.InputJsonValue;
+
+      if (type === PLUG_AND_PLAY_ONBOARDING_TYPE) {
+        const existing = await prisma.questionnaireResponse.findUnique({
+          where: {
+            workspaceId_questionnaireType_userId: {
+              workspaceId,
+              questionnaireType: type,
+              userId,
+            },
+          },
+        });
+        const merged = mergePlugAndPlayPayload(existing?.payload, payload);
+        const completeError = assertCompletePlugAndPlayPayload(merged);
+        if (completeError) {
+          res.status(400).json({ error: completeError });
+          return;
+        }
+        questionnairePayload = merged as Prisma.InputJsonValue;
+      }
+
       const saved = await prisma.questionnaireResponse.upsert({
         where: {
           workspaceId_questionnaireType_userId: {
@@ -1045,6 +1070,48 @@ export class UserManagementController {
     } catch (error) {
       logger.error('Error saving questionnaire response:', error);
       res.status(500).json({ error: 'Failed to save questionnaire response' });
+    }
+  };
+
+  /**
+   * Get the current user's questionnaire response for a type.
+   */
+  getQuestionnaireResponse = async (
+    req: Request & { user?: { id: string; workspaceId?: string } },
+    res: Response,
+  ): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const questionnaireType = req.params.questionnaireType;
+      if (typeof questionnaireType !== 'string' || !questionnaireType.trim()) {
+        res.status(400).json({ error: 'questionnaireType is required' });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const saved = await prisma.questionnaireResponse.findUnique({
+        where: {
+          workspaceId_questionnaireType_userId: {
+            workspaceId,
+            questionnaireType: questionnaireType.trim(),
+            userId,
+          },
+        },
+      });
+
+      res.status(200).json({
+        questionnaireType: questionnaireType.trim(),
+        payload: saved?.payload ?? null,
+      });
+    } catch (error) {
+      logger.error('Error loading questionnaire response:', error);
+      res.status(500).json({ error: 'Failed to load questionnaire response' });
     }
   };
 

@@ -52,6 +52,20 @@ export async function listDigitalTwinMemories(
   return { memories: body.data ?? [], total: body.total ?? body.data?.length ?? 0 };
 }
 
+export async function getDigitalTwinMemory(
+  userId: string,
+  hindsightMemoryId: string,
+): Promise<MemoryBankMemory> {
+  if (demo.isDigitalTwinDemoMode()) return demo.demoGetMemory(hindsightMemoryId);
+  const qs = `?userTag=${encodeURIComponent(userTag(userId))}`;
+  const body = await clawRequest<{ success: boolean; data: MemoryBankMemory }>(
+    `${BANK}/memories/${encodeURIComponent(hindsightMemoryId)}${qs}`,
+    { headers: userHeaders(userId) },
+  );
+  if (!body.success || !body.data) throw new Error('Memory not found');
+  return body.data;
+}
+
 export async function deleteDigitalTwinMemory(
   userId: string,
   hindsightMemoryId: string,

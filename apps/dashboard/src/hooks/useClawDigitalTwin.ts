@@ -38,6 +38,7 @@ import {
 } from '@/services/claw/digitalTwinService';
 import {
   deleteDigitalTwinMemory,
+  getDigitalTwinMemory,
   getDigitalTwinStats,
   getDigitalTwinSubsystemGraph,
   listDigitalTwinMemories,
@@ -108,6 +109,8 @@ const infiniteMemoriesKey = (userId?: string, opts: Omit<DigitalTwinMemoryQuery,
     opts.search ?? '',
     dataMode(),
   ] as const;
+const memoryByIdKey = (userId?: string, hindsightMemoryId?: string | null) =>
+  ['claw-dt-memory', userId, hindsightMemoryId ?? null, dataMode()] as const;
 const statsKey = (userId?: string, range?: MemoryRange) =>
   ['claw-dt-stats', userId, range, dataMode()] as const;
 const proposalsKey = (userId?: string) => ['claw-dt-proposals', userId, dataMode()] as const;
@@ -187,6 +190,18 @@ export const useClawDigitalTwinMemories = (
     queryFn: () => listDigitalTwinMemories(user!.id, opts),
     enabled: !!user?.id,
     placeholderData: previous => previous,
+    staleTime: 30 * 1000,
+  });
+};
+
+export const useClawDigitalTwinMemory = (
+  hindsightMemoryId: string | undefined,
+): UseQueryResult<MemoryBankMemory, Error> => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: memoryByIdKey(user?.id, hindsightMemoryId),
+    queryFn: () => getDigitalTwinMemory(user!.id, hindsightMemoryId!),
+    enabled: !!user?.id && !!hindsightMemoryId,
     staleTime: 30 * 1000,
   });
 };
