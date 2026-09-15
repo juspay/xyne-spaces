@@ -46,7 +46,9 @@ class AutomationWorker {
       });
 
     this.isInitialized = true;
-    logger.info('[AUTOMATION-WORKER] Started');
+    logger.info(
+      `[AUTOMATION-WORKER] Started (concurrency=${config.automations.workerConcurrency})`,
+    );
   }
 
   private async processJob(job: Bull.Job<AutomationJobData>): Promise<void> {
