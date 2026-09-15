@@ -18,7 +18,7 @@ import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
 import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
-import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
+// import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
@@ -350,8 +350,6 @@ router.delete(
   })
 );
 
-// One-off SDLC data migrations. Delete with src/sdlc/cleanup/ once every
-// environment has run them.
-router.use('/cleanup', sdlcCleanupRoutes);
+// router.use('/cleanup', sdlcCleanupRoutes);
 
 export default router;
