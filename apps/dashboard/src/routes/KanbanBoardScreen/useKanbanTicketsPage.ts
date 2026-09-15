@@ -79,6 +79,17 @@ type UseKanbanTicketsPageOptions = KanbanTicketsPageBaseArgs & {
   stageName: string;
   enabled?: boolean;
   pageSize?: number;
+  /**
+   * This column's server-side total from the counts API, which applies the same filters
+   * but NOT the sliding `createdAfter` window. Used only to tell an empty page caused by
+   * a too-narrow window from a column that is genuinely empty — never to render.
+   *
+   * `undefined` means the count is unusable: still loading, or describing a different set
+   * than the page (a Vespa-narrowed search, or a dynamic-field filter the counts API does
+   * not model). The ladder falls back to probing in that case, so correctness never
+   * depends on the count being present or accurate.
+   */
+  expectedCount?: number;
 };
 
 type UseKanbanTicketsPageResult = {
@@ -776,6 +787,25 @@ export const useKanbanTicketsPage = (
       }
     }
     if (rawPageRows.length === 0) {
+      // An empty page inside a bounded window does NOT mean the column is empty — its rows
+      // may simply all be older than the current rung. Concluding here is what left a
+      // column rendering nothing under a header count of N: the widening below is only
+      // reached by a page with at least one row, so a column whose entire matching set
+      // predates the 30d rung never climbed off it.
+      //
+      // The counts API applies the same filters without the window, so it separates the
+      // two cases for free: a positive count over an empty page is always a window that is
+      // too narrow. When it says zero the column really is empty and stops on this first
+      // probe, instead of climbing every rung to prove it.
+      //
+      // An absent count (loading, or a set the counts API does not model) falls back to
+      // climbing. The ladder is bounded and monotonic, so a count that over-reports costs
+      // a few no-op probes and never loops.
+      const countAllowsMoreRows = options.expectedCount === undefined || options.expectedCount > 0;
+      if (countAllowsMoreRows && !shouldUseDirectVespaRows && windowStep < WINDOW_STEPS_MS.length) {
+        setWindowStep(step => step + 1);
+        return;
+      }
       if (fetchCursor === null) {
         setTicketsState(prev =>
           prev.queryKey === queryKey && prev.tickets.length === 0
@@ -839,6 +869,10 @@ export const useKanbanTicketsPage = (
     tieSlack,
     windowStep,
     options.pageSize,
+    // The count usually arrives AFTER the first page. Without it here, a column that
+    // probed empty while the count was still loading would stay concluded — the 0 -> N
+    // transition has to be able to re-enter the widening branch above.
+    options.expectedCount,
     options.excludeFlowSteps,
     effectivePage,
     effectivePageDetailsType,
