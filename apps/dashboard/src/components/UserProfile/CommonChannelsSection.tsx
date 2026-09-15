@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUser } from '../../hooks/useUsers';
@@ -20,6 +21,7 @@ interface CommonChannelItemProps {
 }
 
 const CommonChannelItem: React.FC<CommonChannelItemProps> = ({ channel, currentUserId }) => {
+  const { t } = useTranslation('common');
   const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserId);
 
   const firstParticipantId = useMemo(() => {
@@ -41,7 +43,11 @@ const CommonChannelItem: React.FC<CommonChannelItemProps> = ({ channel, currentU
     <a
       className='flex items-center gap-3 p-2 rounded-lg group'
       href={`/chat/dir/${channel.id}`}
-      aria-label={`Open ${isDM ? 'direct message' : 'group chat'} with ${displayName}`}
+      aria-label={
+        isDM
+          ? t('userProfile.openDirectMessageWith', { name: displayName })
+          : t('userProfile.openGroupChatWith', { name: displayName })
+      }
     >
       <div className='relative flex-shrink-0'>
         <Avatar userId={finalAvatarUserId} size='rg' showActiveStatus={false} />
@@ -68,6 +74,7 @@ export const CommonChannelsSection: React.FC<CommonChannelsSectionProps> = ({
   currentUserId,
   className,
 }) => {
+  const { t } = useTranslation('common');
   const allChannels = useAllChannels();
 
   const { group_dm: groupDm } = useMemo(
@@ -95,7 +102,9 @@ export const CommonChannelsSection: React.FC<CommonChannelsSectionProps> = ({
 
   return (
     <div className={cn('pt-4', className)}>
-      <h3 className='text-sm font-semibold text-foreground mb-3'>Common Groups</h3>
+      <h3 className='text-sm font-semibold text-foreground mb-3'>
+        {t('userProfile.commonGroups')}
+      </h3>
       <div className='space-y-2'>
         {commonChannels.map(channel => (
           <CommonChannelItem key={channel.id} channel={channel} currentUserId={currentUserId} />

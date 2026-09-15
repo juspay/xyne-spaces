@@ -1,9 +1,11 @@
 import { ReactElement } from 'react';
 import { useSyncExternalStore } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { isSwitchOverlayVisible, subscribeSwitchOverlay } from '../../stores/switchOverlayStore';
 
 export const SwitchLoadingOverlay = (): ReactElement | null => {
+  const { t } = useTranslation('common');
   const visible = useSyncExternalStore(
     subscribeSwitchOverlay,
     isSwitchOverlayVisible,
@@ -25,7 +27,7 @@ export const SwitchLoadingOverlay = (): ReactElement | null => {
         >
           <img
             src='/images/xyne_logo_loading.png'
-            alt='Switching environment'
+            alt={t('switchLoadingOverlay.switchingEnvironment')}
             className='h-[72px] w-[72px]'
             loading='eager'
             decoding='async'

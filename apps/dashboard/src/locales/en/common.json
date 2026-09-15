@@ -1076,5 +1076,25 @@
       "clearSearch": "Clear transcript search",
       "returnToCurrent": "Return to current"
     }
+  },
+  "switchLoadingOverlay": {
+    "switchingEnvironment": "Switching environment"
+  },
+  "userProfile": {
+    "openDirectMessageWith": "Open direct message with {{name}}",
+    "openGroupChatWith": "Open group chat with {{name}}",
+    "commonGroups": "Common Groups"
+  },
+  "channelsSidebar": {
+    "desksAriaLabel": "Desks",
+    "desksHeading": "Desks",
+    "collapseSidebar": "Collapse sidebar",
+    "noChannelsAvailable": "No channels available",
+    "unnamedChannel": "Unnamed Channel"
+  },
+  "appNavigator": {
+    "back": "Back",
+    "forward": "Forward",
+    "search": "Search"
   }
 }

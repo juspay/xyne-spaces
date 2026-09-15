@@ -1076,5 +1076,25 @@
       "clearSearch": "Borrar búsqueda de transcripción",
       "returnToCurrent": "Volver al actual"
     }
+  },
+  "switchLoadingOverlay": {
+    "switchingEnvironment": "Cambiando de entorno"
+  },
+  "userProfile": {
+    "openDirectMessageWith": "Abrir mensaje directo con {{name}}",
+    "openGroupChatWith": "Abrir chat grupal con {{name}}",
+    "commonGroups": "Grupos en común"
+  },
+  "channelsSidebar": {
+    "desksAriaLabel": "Escritorios",
+    "desksHeading": "Escritorios",
+    "collapseSidebar": "Contraer barra lateral",
+    "noChannelsAvailable": "No hay canales disponibles",
+    "unnamedChannel": "Canal sin nombre"
+  },
+  "appNavigator": {
+    "back": "Atrás",
+    "forward": "Adelante",
+    "search": "Buscar"
   }
 }

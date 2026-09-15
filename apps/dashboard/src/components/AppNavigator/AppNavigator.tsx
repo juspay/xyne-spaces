@@ -1,4 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSelector } from '@xstate/react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, SearchBig } from '@xyne/icons';
@@ -30,6 +31,7 @@ const getHistoryIndex = (): number => {
  * search button separated to the right.
  */
 const AppNavigator = (): ReactElement => {
+  const { t } = useTranslation('common');
   const navigate = useNavigate();
   const location = useLocation();
   const [historyIndex, setHistoryIndex] = useState(getHistoryIndex);
@@ -70,10 +72,10 @@ const AppNavigator = (): ReactElement => {
       style={APP_DRAG_STYLE}
     >
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
-        <ShortcutTooltip label='Back' shortcut='global.goBack' side='bottom'>
+        <ShortcutTooltip label={t('appNavigator.back')} shortcut='global.goBack' side='bottom'>
           <button
             type='button'
-            aria-label='Back'
+            aria-label={t('appNavigator.back')}
             onClick={handleGoBack}
             disabled={!canGoBack}
             className={canGoBack ? buttonClass : disabledButtonClass}
@@ -83,10 +85,14 @@ const AppNavigator = (): ReactElement => {
             <ArrowLeft size={16} />
           </button>
         </ShortcutTooltip>
-        <ShortcutTooltip label='Forward' shortcut='global.goForward' side='bottom'>
+        <ShortcutTooltip
+          label={t('appNavigator.forward')}
+          shortcut='global.goForward'
+          side='bottom'
+        >
           <button
             type='button'
-            aria-label='Forward'
+            aria-label={t('appNavigator.forward')}
             onClick={handleGoForward}
             disabled={!canGoForward}
             className={canGoForward ? buttonClass : disabledButtonClass}
@@ -98,10 +104,10 @@ const AppNavigator = (): ReactElement => {
         </ShortcutTooltip>
       </div>
       <div className='flex items-center' style={APP_NO_DRAG_STYLE}>
-        <ShortcutTooltip label='Search' shortcut='global.search' side='bottom'>
+        <ShortcutTooltip label={t('appNavigator.search')} shortcut='global.search' side='bottom'>
           <button
             type='button'
-            aria-label='Search'
+            aria-label={t('appNavigator.search')}
             onClick={() => invokeShortcut('mod+k')}
             className={buttonClass}
             data-track-category='APP_NAVIGATOR'

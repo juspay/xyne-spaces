@@ -1,4 +1,5 @@
 import { ReactElement, ReactNode, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft } from 'lucide-react';
 import SidebarItem from '../Project/ProjectSidebar/SidebarItem';
 
@@ -22,6 +23,7 @@ const ChannelsSidebar = ({
   onCollapse,
   headerAction,
 }: ChannelsSidebarProps): ReactElement => {
+  const { t } = useTranslation('common');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,14 +70,14 @@ const ChannelsSidebar = ({
       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
       role='region'
-      aria-label='Desks'
+      aria-label={t('channelsSidebar.desksAriaLabel')}
       className='h-full flex flex-col bg-sidebar outline-none'
     >
       {/* Header - matches ProjectSidebar structure */}
       <div className='flex-shrink-0 h-14 sticky top-0 z-50 bg-sidebar border-b border-border flex items-center'>
         <div className='px-4 flex items-center justify-between w-full'>
           <h2 className='text-foreground font-inter text-base font-semibold leading-normal'>
-            Desks
+            {t('channelsSidebar.desksHeading')}
           </h2>
           <div className='flex items-center gap-1'>
             {headerAction}
@@ -83,8 +85,8 @@ const ChannelsSidebar = ({
               <button
                 onClick={onCollapse}
                 className='p-2 hover:bg-muted rounded-md transition-colors'
-                aria-label='Collapse sidebar'
-                title='Collapse sidebar'
+                aria-label={t('channelsSidebar.collapseSidebar')}
+                title={t('channelsSidebar.collapseSidebar')}
                 data-track-category='Support'
                 data-track-name='CollapseChannelsSidebar'
               >
@@ -100,12 +102,12 @@ const ChannelsSidebar = ({
         {/* Channel List */}
         {channels.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-32 text-muted-foreground text-sm px-4 text-center'>
-            No channels available
+            {t('channelsSidebar.noChannelsAvailable')}
           </div>
         ) : (
           <div className='mt-2 space-y-0.5' data-testid='channel-list'>
             {channels.map(channel => {
-              const channelName = channel.name?.trim() || 'Unnamed Channel';
+              const channelName = channel.name?.trim() || t('channelsSidebar.unnamedChannel');
               return (
                 <SidebarItem
                   key={channel.id}
