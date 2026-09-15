@@ -506,6 +506,9 @@ export class ActivityService {
         data: {
           actorId: actorId,
           isRead: false,
+          // New engagement on the message: intentionally re-sort this row to
+          // the top of the feed (queries order by updatedAt desc).
+          updatedAt: new Date(),
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
           ...owned,
@@ -585,21 +588,27 @@ export class ActivityService {
   }
 
 
-  async updateReactionActivityActorIdOnlyV2(params: {       //using only in case of reaction deletion where updateAt is not to be updated
+  /**
+   * Re-point the actor on a batched reaction activity after a reaction was
+   * deleted. Deliberately does not pass `updatedAt`: this is a metadata fix,
+   * not new engagement, so it must not re-sort the activity feed.
+   */
+  async updateReactionActivityActorIdOnlyV2(params: {
     messageId: string;
     messageAuthorId: string;
     actorId: string;
   }): Promise<void> {
     const { messageId, messageAuthorId, actorId } = params;
 
-    await this.prisma.$executeRaw`
-      UPDATE "activities"
-      SET "actorId" = ${actorId}
-      WHERE "userId" = ${messageAuthorId}
-        AND "messageId" = ${messageId}
-        AND "actorAction" = 'added_v2'
-        AND "actionSource" = 'message'
-    `;
+    await this.prisma.activity.updateMany({
+      where: {
+        userId: messageAuthorId,
+        messageId: messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+      data: { actorId },
+    });
   }
 
 
@@ -650,6 +659,9 @@ export class ActivityService {
           data: {
             actorId: actorId,
             isRead: false,
+            // New engagement in the thread: intentionally re-sort this row to
+            // the top of the feed (queries order by updatedAt desc).
+            updatedAt: new Date(),
             messageId: latestReplyMessageId,
             actionSourceId: latestReplyMessageId,
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
