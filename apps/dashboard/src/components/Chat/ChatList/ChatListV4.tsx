@@ -343,16 +343,6 @@ const ChatListV4: React.FC<ChatListProps> = ({
     );
   }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
 
-  // Ephemeral cards (chat.postEphemeral) addressed to this channel. Appended the
-  // same way pending sends are above, and for the same reason: they are real rows
-  // to render that have no Zero row behind them. The difference is that a pending
-  // send eventually gets one — these never do, because nothing is stored, so they
-  // simply disappear on reload.
-  //
-  // Appended AFTER the unreads filter rather than before it: an ephemeral has no
-  // read state to compare against — it exists only in this tab, only right now —
-  // so filtering it by lastViewedAt is meaningless, and would silently drop a card
-  // the app just sent if the two timestamps happened to tie.
   const ephemeralConversations = useEphemeralChannelConversations(channelId);
   const conversationsWithEphemeral = useMemo(() => {
     if (ephemeralConversations.length === 0) return filteredConversations;
