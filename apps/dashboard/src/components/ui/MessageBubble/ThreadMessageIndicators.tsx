@@ -1,12 +1,20 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, type ConversationAnchorType } from '@xyne/shared';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { Button } from '../Button/Button';
+
+const ANCHOR_LABELS: Record<ConversationAnchorType, string> = {
+  THREAD_REPLY: 'replied to a thread:',
+  SUBTICKET: 'sub-ticket of',
+};
 
 interface ThreadInfoIndicatorProps {
   threadInfo: {
     conversationId: string;
     preview: string;
+    channelId?: string;
+    anchorType?: ConversationAnchorType;
   };
   channelId: string;
   messageId: string;
@@ -21,26 +29,44 @@ export const ThreadInfoIndicator: React.FC<ThreadInfoIndicatorProps> = ({
   messageId,
 }) => {
   const navigate = useNavigate();
+  const visibleChannels = useAllVisibleChannels();
+  const targetChannelId = threadInfo.channelId ?? channelId;
+  const canOpen = useMemo(
+    () =>
+      !threadInfo.channelId || visibleChannels.some(channel => channel.id === threadInfo.channelId),
+    [threadInfo.channelId, visibleChannels],
+  );
 
   return (
     <div
       // CHANGED: max-w-[60%] enforces the 60% width limit
-      className='cursor-pointer hover:underline inline-flex items-center gap-1 text-xs max-w-[60%]'
-      onClick={() =>
-        void navigate(
-          `/chat/dir/${channelId}/${threadInfo.conversationId}/#origin=${threadInfo.conversationId}&messageId=${messageId}`,
-        )
+      className={
+        canOpen
+          ? 'cursor-pointer hover:underline inline-flex items-center gap-1 text-xs max-w-[60%]'
+          : 'cursor-not-allowed opacity-60 inline-flex items-center gap-1 text-xs max-w-[60%]'
       }
+      {...(!canOpen && { title: 'You do not have access to this ticket' })}
+      onClick={() => {
+        if (!canOpen) return;
+        void navigate(
+          `/chat/dir/${targetChannelId}/${threadInfo.conversationId}/#origin=${threadInfo.conversationId}&messageId=${messageId}`,
+        );
+      }}
+      data-track-category='MESSAGE'
+      data-track-name='OPEN_THREAD_FROM_INDICATOR'
       onKeyDown={e => {
+        if (!canOpen) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          void navigate(`/chat/dir/${channelId}/${threadInfo.conversationId}`);
+          void navigate(`/chat/dir/${targetChannelId}/${threadInfo.conversationId}`);
         }
       }}
       role='button'
-      tabIndex={0}
+      tabIndex={canOpen ? 0 : -1}
     >
-      <span className='text-primary whitespace-nowrap shrink-0'>replied to a thread:</span>
+      <span className='text-primary whitespace-nowrap shrink-0'>
+        {ANCHOR_LABELS[threadInfo.anchorType ?? 'THREAD_REPLY']}
+      </span>
 
       <span className='text-primary font-medium truncate max-w-xs'>{threadInfo.preview}</span>
     </div>
@@ -71,6 +97,8 @@ export const AlsoSentToChannelIndicator: React.FC<AlsoSentToChannelIndicatorProp
           const messageLink = `/chat/dir/${channelId}#origin=${childConversationId}`;
           void navigate(messageLink);
         }}
+        data-track-category='MESSAGE'
+        data-track-name='COPY_THREAD_LINK'
         className='text-xs text-primary hover:text-primary/80 hover:underline mt-1 p-0 h-auto'
       >
         Also sent to{' '}
@@ -116,6 +144,8 @@ export const ViewNewerRepliesButton: React.FC<ViewNewerRepliesButtonProps> = ({
     >
       <button
         onClick={handleOpenParentThread}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_PARENT_THREAD'
         className={`flex items-center gap-2 text-xs bg-transparent border-0 cursor-pointer transition-opacity duration-200 hover:opacity-80 flex-1 ${
           isMe ? 'max-[500px]:justify-end' : ''
         }`}

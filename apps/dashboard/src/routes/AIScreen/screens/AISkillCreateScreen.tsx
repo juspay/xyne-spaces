@@ -7,14 +7,10 @@ const AISkillCreateScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
         data-id='ai-skill-create-view'
-        className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
+        className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
         <ClawSkillCreateV2 />
       </main>

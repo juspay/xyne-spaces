@@ -1,6 +1,6 @@
 import { type ReactElement, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
+import { PencilEditAi } from '@xyne/icons';
 import { Virtuoso } from 'react-virtuoso';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../../../machines/stateMachine';
@@ -45,13 +45,15 @@ const TwinDraftRow = ({ draft }: { draft: TwinDraftItem }): ReactElement => {
       recipientName={displayName}
       contentPreview={
         <span className='inline-flex items-center gap-1.5'>
-          <Sparkles size={12} className='shrink-0 text-muted-foreground' />
+          <PencilEditAi size={12} className='shrink-0 text-muted-foreground' />
           {preview}
         </span>
       }
       timestamp={timestamp}
       className='rounded-xl'
       onClick={handleClick}
+      trackCategory='twin-dock'
+      trackName='open-twin-draft'
       actions={null}
     />
   );
@@ -70,7 +72,7 @@ const TwinDraftsPanel = (): ReactElement => {
       <div className='flex-1 overflow-y-auto p-6'>
         {items.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-            <Sparkles className='text-muted-foreground mb-4' size={48} />
+            <PencilEditAi className='text-muted-foreground mb-4' size={48} />
             <p className='text-muted-foreground text-lg font-medium mb-2'>No twin drafts</p>
             <p className='text-muted-foreground text-sm max-w-md'>
               Replies the Digital Twin drafts for you, awaiting your approval, will appear here

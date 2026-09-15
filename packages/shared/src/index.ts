@@ -1,6 +1,8 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
 export { defineQuery } from './zero/acl';
+export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
+export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
 export * from './ai';
 export * from './dashboard';
 export * from './types/activity';
@@ -35,16 +37,27 @@ export * from './utils/csv';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';
 export * from './utils/hostControls';
+export * from './utils/slashCommandArtifact';
 export {
   parseTicketMd,
   serializeTicketMd,
+  parseSubTicketsMd,
+  serializeSubTicketsMd,
+  SUB_TICKETS_MD_LIMIT,
+} from './utils/activityMetadataParser';
+export type {
   TicketCardSummary,
+  SubTicketsMdData,
 } from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';
 export * from './nudges';
+export * from './crypto/index.js';
 export * from './templates/callInvitation';
 export * from './templates/callInvitationIcs';
 export * from './templates/callSummary';
+export * from './templates/summaryTemplateSections';
 export * from './types/flowUI';
 export * from './validation/flowSchema';
+export * from './sdlc';
+export * from './validation/etaManagementSchema';

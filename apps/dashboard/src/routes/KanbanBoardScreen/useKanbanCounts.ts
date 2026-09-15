@@ -53,6 +53,7 @@ type TicketCountsSnapshot = {
   createdBy: string | null;
   userGroupId: string | null;
   ticketType: string | null;
+  isStageOverdue: boolean;
   eta: number | null;
   createdAt: number;
   tags: string[];
@@ -330,8 +331,7 @@ const matchesRequest = (
       snapshot.statusV2 === TicketStatusV2.COMPLETED ||
       snapshot.statusV2 === TicketStatusV2.CANCELLED;
     if (isTerminal) return false;
-    if (snapshot.eta === null || snapshot.eta === undefined || snapshot.eta >= Date.now())
-      return false;
+    if (!snapshot.isStageOverdue) return false;
   }
 
   return true;

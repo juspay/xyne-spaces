@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import { exec, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -20,6 +21,12 @@ const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
 const SECURITY = '/usr/bin/security';
 const OPENSSL = '/usr/bin/openssl';
+
+// `security` reports a missing keychain item with a "not be found" message on stderr.
+// Single source of truth so the delete-identity paths classify it identically.
+function isNotFoundError(e: any): boolean {
+    return Boolean(e?.stderr?.includes("not be found"));
+}
 
 class MacKeychainService implements IKeychain {
     // Store private key PEM in memory for the duration of the session
@@ -53,7 +60,7 @@ class MacKeychainService implements IKeychain {
             throw new Error("No keys generated. Please generate keys first.");
         }
 
-        console.log(`Generating CSR for ${commonName}...`);
+        log.info(`Generating CSR for ${commonName}...`);
 
         const keyPath = path.join(os.tmpdir(), `key_${Date.now()}.pem`);
         await writeFileAsync(keyPath, this.privateKeyPem);
@@ -121,7 +128,7 @@ class MacKeychainService implements IKeychain {
                     await execAsync(`/usr/bin/codesign --verify "${appPath}"`);
                     return true;
                 } catch {
-                    console.warn(`Skipping trust flag for "${appPath}": codesign verification failed (app may be corrupted or unsigned).`);
+                    Logger.warn('keychain.codesign.verification.failed', { app_path: appPath });
                     return false;
                 }
             };
@@ -183,7 +190,7 @@ class MacKeychainService implements IKeychain {
 
             if (cnMatch && cnMatch[1]) {
                 const commonName = cnMatch[1].trim();
-                console.log(`Checking for existing certificate with CN: "${commonName}"`);
+                log.info(`Checking for existing certificate with CN: "${commonName}"`);
 
                 try {
                     // security find-certificate returns 0 if found, non-zero if not found
@@ -194,13 +201,13 @@ class MacKeychainService implements IKeychain {
                         skipped_installation: true,
                     });
                     return;
-                } catch (e) {
+                } catch {
                     // Certificate not found, proceed with installation
-                    console.log(`Certificate "${commonName}" not found. Proceeding with installation.`);
+                    log.info(`Certificate "${commonName}" not found. Proceeding with installation.`);
                 }
             }
         } catch (e) {
-            console.warn("Error checking for existing certificate:", e);
+            log.warn("Error checking for existing certificate:", e);
             // Proceed with installation if check fails
         }
 
@@ -222,7 +229,7 @@ class MacKeychainService implements IKeychain {
             const { stdout } = await execAsync(`${SECURITY} login-keychain | head -n 1 | xargs`);
             keychainPath = stdout.trim();
         } catch (e) {
-            console.warn("Could not resolve login keychain path, falling back to default.");
+            log.warn("Could not resolve login keychain path, falling back to default.");
         }
 
         // If we have a path, use it. Otherwise, let `security` use the default.
@@ -234,17 +241,17 @@ class MacKeychainService implements IKeychain {
             cmd = `${SECURITY} import "${tmpPath}"`;
         }
 
-        console.log("Installing CA with command:", cmd);
+        log.info("Installing CA with command:", cmd);
 
         try {
             await execAsync(cmd);
-            console.log("CA installed.");
+            log.info("CA installed.");
             Logger.info(EnrollmentEvent.ROOT_CA_INSTALL_SUCCESS, {
                 exists_in_keychain: false,
                 skipped_installation: false,
             });
         } catch (e: any) {
-            console.error("CA install failed:", e.stderr);
+            log.error("CA install failed:", e.stderr);
             Logger.logError(EnrollmentEvent.ROOT_CA_INSTALL_FAILED, e);
             throw new Error(`Failed to install CA: ${e.stderr || e.message}`);
         } finally {
@@ -252,40 +259,100 @@ class MacKeychainService implements IKeychain {
         }
     }
     async deleteIdentity(commonName: string): Promise<void> {
-        console.log(`Deleting identity for "${commonName}"...`);
-        // Security command to delete identity (cert + key) matching the preference
-        // -c: Match on common name
-        const cmd = `${SECURITY} delete-identity -c "${commonName}"`;
-
+        log.info(`Deleting identity for "${commonName}"...`);
+        const logIdentityNotFound = () => {
+            log.info("Identity not found, nothing to delete.");
+            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
+        };
         try {
-            await execAsync(cmd);
-            console.log("Identity deleted successfully.");
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
-        } catch (e: any) {
-            // It might fail if not found, which is fine
-            if (e.stderr && e.stderr.includes("not be found")) {
-                console.log("Identity not found, nothing to delete.");
-                Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
-            } else {
-                console.warn("Delete identity warning:", e.stderr || e.message);
-                Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
-            }
-        }
+            const { stdout } = await execFileAsync(SECURITY, ['find-certificate', '-a', '-c', commonName, '-Z']);
 
-        // Also clear memory just in case
-        this.privateKeyPem = null;
+            // Single-pass parse: dedupe SHA-256 hashes and count blocks dropped by the
+            // exact-label filter, so externally-renamed/legacy items that `-c` matched but
+            // we skip don't disappear without a trace.
+            const hashes = new Set<string>();
+            let skippedBlocks = 0;
+            for (const block of stdout.split(/(?=SHA-256 hash:)/)) {
+                const hash = block.match(/SHA-256 hash:\s*([0-9A-F]+)/i)?.[1];
+                if (!hash) continue;
+                if (block.match(/"labl"<blob>="([^"]*)"/)?.[1] === commonName) {
+                    hashes.add(hash);
+                } else {
+                    skippedBlocks++;
+                }
+            }
+
+            if (skippedBlocks > 0) {
+                log.warn(`Skipped ${skippedBlocks} certificate block(s) matched by common name "${commonName}" whose label did not match exactly.`);
+            }
+
+            if (hashes.size === 0) {
+                logIdentityNotFound();
+                return;
+            }
+
+            let deletedCount = 0;
+            for (const hash of hashes) {
+                // The same hash can exist in more than one keychain in the search list, and
+                // `delete-identity -Z` removes only the first match, so loop until the keychain
+                // reports the hash can no longer be found.
+                while (true) {
+                    try {
+                        // Hash uniquely identifies one identity even when common names are duplicated.
+                        await execFileAsync(SECURITY, ['delete-identity', '-Z', hash]);
+                        deletedCount++;
+                        continue;
+                    } catch (identityError: any) {
+                        if (!isNotFoundError(identityError)) {
+                            throw identityError;
+                        }
+                    }
+
+                    // No identity left for this hash; a partial enrollment may still have left a
+                    // bare certificate without its private key. Swallow a not-found here so a
+                    // concurrent removal (or an item outside the search list) does not abort
+                    // deletion of the remaining hashes.
+                    try {
+                        await execFileAsync(SECURITY, ['delete-certificate', '-Z', hash]);
+                        deletedCount++;
+                    } catch (certError: any) {
+                        if (!isNotFoundError(certError)) {
+                            throw certError;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            log.info(`Deleted ${deletedCount} identity certificate(s) successfully.`);
+            Logger.info(EnrollmentEvent.IDENTITY_DELETED, {
+                common_name: commonName,
+                deleted_count: deletedCount,
+            });
+        } catch (e: any) {
+            if (isNotFoundError(e)) {
+                logIdentityNotFound();
+            } else {
+                log.error("Delete identity failed:", e.stderr || e.message);
+                Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
+                throw e;
+            }
+        } finally {
+            // Also clear memory just in case
+            this.privateKeyPem = null;
+        }
     }
 
     async checkIdentity(commonName: string): Promise<boolean> {
         // -p: Output pem (just to see if it finds something)
         // -c: Match common name
         const cmd = `${SECURITY} find-identity -p ssl-client -s "${commonName}"`;
-        console.log(`Checking identity for "${commonName}"...`, cmd);
+        log.info(`Checking identity for "${commonName}"...`, cmd);
         try {
             const { stdout } = await execAsync(cmd);
             // If found, it lists the identity. If not, usually it says "0 valid identities found"
 
-            console.log("Check identity output:", stdout);
+            log.info("Check identity output:", stdout);
 
             // Check if any of the found identities exactly matches the commonName
             const lines = stdout.split('\n');

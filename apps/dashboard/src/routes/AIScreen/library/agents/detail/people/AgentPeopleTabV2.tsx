@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { CheckTickSingle, MultipleCrossCancelDefault, SearchDefault } from '@xyne/icons';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/hooks/useAuth';
+import { matchesUserQuery } from '@/utils/userDisplayName';
 import { useClawAgentShares } from '@/hooks/useClawAgentDetail';
 import { useClawCloneRequests } from '@/hooks/useClawCloneRequests';
 import { addClawAgentShare, removeClawAgentShare } from '@/services/claw/clawAuthAgentsService';
@@ -107,9 +108,7 @@ export function AgentPeopleTabV2({
     }
 
     return q
-      ? entries.filter(
-          entry => entry.name.toLowerCase().includes(q) || entry.detail.toLowerCase().includes(q),
-        )
+      ? entries.filter(entry => matchesUserQuery({ name: entry.name, email: entry.detail }, query))
       : entries;
   }, [shares.data, agent.ownerUserId, agent.owner, query]);
 

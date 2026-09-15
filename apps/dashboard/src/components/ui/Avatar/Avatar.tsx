@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import * as React from 'react';
 import * as AvatarPrimitive from '@radix-ui/react-avatar';
 import { ReactElement } from 'react';
@@ -169,7 +170,10 @@ const Avatar = ({
 
   const handleImageError = (): void => {
     setImageError(true);
-    console.warn(`Failed to load avatar image for user ${targetUserId}: ${user?.picture}`);
+    logger.warn(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_warn',
+      message: String(`Failed to load avatar image for user ${targetUserId}: ${user?.picture}`),
+    });
   };
 
   const isOnline = presenceStatus === 'ONLINE';

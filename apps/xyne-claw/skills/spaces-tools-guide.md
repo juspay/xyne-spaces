@@ -29,6 +29,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Resolving a person's name → ID | `spaces-users` |
 | A specific topic/keyword across messages, files, tickets | `spaces-search` |
 | Tickets — status, assignee, priority, board, stage, dates | `spaces-tickets` — NOT spaces-search |
+| Desk metrics — response/resolution times, CSAT, ticket volumes, per-agent/priority/stage/tag breakdowns, opened-vs-closed trends | `spaces-desk-metrics` — NOT spaces-tickets |
 | Reading a specific thread | `spaces-messages` |
 | One message's reactions / attachments / metadata | `spaces-message-detail` |
 | Finding a channel | `spaces-channels` |
@@ -240,7 +241,9 @@ User: "Show me the latest files shared in #design."
 
 ## spaces-tickets
 
-**The** tool for any ticket question — lists, status, assignee, board, stage, dates. Returns structured rows including `conversationId` (use with `spaces-messages` to read the thread).
+**The** tool for ticket LOOKUPS — lists, status, assignee, board, stage, dates. Returns structured rows including `conversationId` (use with `spaces-messages` to read the thread).
+
+**Not** the tool for support-desk metrics. Response/resolution times, CSAT, ticket volumes, per-agent performance, priority/stage/tag breakdowns and opened-vs-closed trends belong to `spaces-desk-metrics`, which aggregates them in the database across the whole desk. Rule of thumb: reach here when the asker wants the TICKETS, reach there when they want a NUMBER about the desk.
 
 **Required:** none — all filters optional.
 
@@ -261,7 +264,7 @@ User: "Show me the latest files shared in #design."
 - **limit** (number, 1–500, default 20) — Bump high for team reports.
 - **offset** (number, ≥0, default 0) — Pagination.
 - **classifyActionable** (boolean) — When `true`, server tags each ticket with `actionReason` ∈ `critical | overdue | no-assignee | stale | null`. Use for daily reports / triage. Never classify tickets yourself — it does it wrong.
-- **summary** (boolean) — When `true`, appends aggregate counts: `total`, `byStatus`, `byPriority`, `byUser`. Lets you skip arithmetic for reports.
+- **summary** (boolean) — When `true`, appends aggregate counts: `total`, `byStatus`, `byPriority`, `byUser`. Lets you skip arithmetic for reports. **Page-bounded — read this before trusting it:** the counts cover only the rows THIS call returned (`limit`, default 20, max 500), not everything that matched your filters. They answer "of the tickets I pulled, how many are HIGH?" — never "how many did the desk get?". For desk-wide totals, averages, CSAT or trends use `spaces-desk-metrics`, which aggregates in the database with no page cap.
 - **expectedUserGroup** (array of strings) — Emails/userIDs you expected to see. Combined with `summary=true`, the summary's `byUser` keeps members with 0 tickets — so you can show "Members with No Tickets" without doing set difference yourself.
 
 **Multi-select & UI-parity filters** (these mirror the dashboard's ticket filters — each array matches ANY of its values):
@@ -533,8 +536,9 @@ Full email thread for an Xyne Desk ticket — subject, from, to, cc, bcc, body, 
 
 - **conversationId** (string, required) — From `spaces-tickets` results (desk ticket's conversationId).
 - **limit** (number, 1–100, default 20).
+- **from** (`first | last`, default `first`) — Start from the oldest or latest email.
 
-**Notes:** Sorted chronologically. Bodies are HTML — stripped to 500 chars in display. For full body or attachments, use `spaces-thread-attachments`.
+**Notes:** Sorted chronologically. With `from=last`, the latest `limit` emails are selected and then displayed oldest-to-newest. Bodies are HTML — stripped to 500 chars in display. For full body or attachments, use `spaces-thread-attachments`.
 
 ---
 
@@ -622,9 +626,7 @@ The caller's **own** personal items — always scoped to you, read-only. One `ty
 
 ## memory-search (shared knowledge bank)
 
-Search the shared knowledge bank for verified facts, decisions, and SOPs captured across past sessions. **Best first stop** for "how do we…?", "why do we…?", "what's the policy on…?". A short authoritative hit here beats a long crawl through messages.
-
-You'll see a "Shared Knowledge Bank" injection at the top of your context listing the available subsystem clusters (e.g. `spaces (12 memories)`, `ticket-creation (4 memories)`). Use those names with the `subsystem` filter when relevant.
+Search the shared memory for business knowledge, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions captured across past sessions. Use it when that context helps, but treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the current conversation.
 
 **Required:** `query`.
 

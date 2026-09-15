@@ -22,6 +22,10 @@ export interface UploadTask {
   batchProgress: UploadBatchProgress;
   files: UploadFileStatus[];
   abortController: AbortController;
+  /** Optional phase label shown in the card header instead of the default
+   *  "Uploading X of Y files" (e.g. "Scanning Google Drive…" before the real
+   *  file list is known). Cleared once the actual upload begins. */
+  statusLabel?: string;
 }
 
 interface UploadProgressStore {
@@ -31,6 +35,7 @@ interface UploadProgressStore {
     collectionName: string,
     files: { file: File; id: string }[],
     totalBatches: number,
+    statusLabel?: string,
   ) => { uploadId: string; abortController: AbortController };
   updateProgress: (uploadId: string, current: number, batch: number) => void;
   updateFileStatus: (
@@ -51,7 +56,7 @@ interface UploadProgressStore {
 export const useUploadProgress = create<UploadProgressStore>((set, get) => ({
   currentUpload: null,
 
-  startUpload: (collectionId, collectionName, files, totalBatches) => {
+  startUpload: (collectionId, collectionName, files, totalBatches, statusLabel) => {
     const uploadId = `upload_${Date.now()}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
     const abortController = new AbortController();
 
@@ -74,6 +79,7 @@ export const useUploadProgress = create<UploadProgressStore>((set, get) => ({
       },
       files: uploadFiles,
       abortController,
+      ...(statusLabel ? { statusLabel } : {}),
     };
 
     set({ currentUpload: newUpload });

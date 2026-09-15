@@ -1,5 +1,5 @@
 import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Check } from 'lucide-react';
+import { SearchDefault as Search, CheckTickSingle as Check } from '@xyne/icons';
 import { FormFieldType } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
 import { Button } from '../../../../ui/Button';
@@ -92,6 +92,19 @@ export const DynamicFieldSubmenu = ({
       }
     };
 
+    const isMultiSelect = fieldType === FormFieldType.MULTI_SELECT;
+    const allVisibleSelected =
+      filteredOptions.length > 0 && filteredOptions.every(o => selectedValues.includes(o));
+
+    const handleSelectAllToggle = (): void => {
+      if (allVisibleSelected) {
+        onChange(selectedValues.filter(v => !filteredOptions.includes(v)));
+      } else {
+        const merged = new Set([...selectedValues, ...filteredOptions]);
+        onChange([...merged]);
+      }
+    };
+
     return (
       <div
         className={`w-64 flex flex-col bg-background border border-border rounded-lg shadow-lg overflow-hidden ${className}`}
@@ -112,9 +125,31 @@ export const DynamicFieldSubmenu = ({
             </div>
           )}
         </div>
-        <div className='max-h-80 overflow-y-auto p-1'>
+        <div
+          className='max-h-80 overflow-y-auto p-1'
+          onWheel={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+        >
           {filteredOptions.length > 0 ? (
             <div className='space-y-0.5'>
+              {isMultiSelect && (
+                <button
+                  type='button'
+                  onClick={handleSelectAllToggle}
+                  className={`
+                    w-full flex items-center justify-between px-3 py-2 rounded-md transition-all
+                    ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                    focus-visible:ring-2 focus-visible:ring-ring border-b border-border/50
+                  `}
+                  data-track-category='Tickets'
+                  data-track-name='ToggleSelectAllDynamicField'
+                >
+                  <span className='text-sm font-medium text-primary'>
+                    {allVisibleSelected ? 'Deselect all' : 'Select all'}
+                  </span>
+                  {allVisibleSelected && <Check className='w-4 h-4 text-primary shrink-0' />}
+                </button>
+              )}
               {filteredOptions.map(option => {
                 const isSelected = selectedValues.includes(option);
                 return (

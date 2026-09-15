@@ -210,7 +210,11 @@ class CanvasPrefetchService {
       try {
         canvas.provider.destroy();
       } catch (error) {
-        console.error('Error destroying prefetched provider:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Error destroying prefetched provider:'),
+          error: error,
+        });
       }
       this.prefetchedCanvases.delete(canvasId);
     }

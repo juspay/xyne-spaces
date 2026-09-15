@@ -76,6 +76,7 @@ export interface SupportKanbanBoardProps {
     aiCategory: string[] | undefined;
     conversationIdWhitelist: string[] | undefined;
     hasAiDraft: boolean | undefined;
+    hasSubTickets: boolean | undefined;
     userGroups: string[] | undefined;
     lastEmailAtStart: number | undefined;
     lastEmailAtEnd: number | undefined;
@@ -119,7 +120,7 @@ export const SupportKanbanBoard = ({
   // first row below.
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV3({
+    queries.supportTicketsFilteredV4({
       channelId,
       isMember,
       ...restTicketFilter,
@@ -144,6 +145,7 @@ export const SupportKanbanBoard = ({
         ac: ticketFilter.aiCategory ?? null,
         ci: ticketFilter.conversationIdWhitelist ?? null,
         ad: ticketFilter.hasAiDraft ?? null,
+        hst: ticketFilter.hasSubTickets ?? null,
         g: ticketFilter.userGroups ?? null,
         ds: ticketFilter.lastEmailAtStart ?? null,
         de: ticketFilter.lastEmailAtEnd ?? null,
@@ -161,6 +163,7 @@ export const SupportKanbanBoard = ({
       ticketFilter.aiCategory,
       ticketFilter.conversationIdWhitelist,
       ticketFilter.hasAiDraft,
+      ticketFilter.hasSubTickets,
       ticketFilter.userGroups,
       ticketFilter.lastEmailAtStart,
       ticketFilter.lastEmailAtEnd,
@@ -333,10 +336,15 @@ export const SupportKanbanBoard = ({
   // drag-and-drop hook reads the live `localTickets` directly, so reordering is
   // unaffected — only the settled column layout is deferred a frame.
   const deferredLocalTickets = useDeferredValue(localTickets);
-  const ticketsByStage = useMemo(
-    () => groupTicketsByStage(deferredLocalTickets, stageColumns),
-    [deferredLocalTickets, stageColumns],
-  );
+  const ticketsByStage = useMemo(() => {
+    const grouped = groupTicketsByStage(deferredLocalTickets, stageColumns);
+    for (const stageId of Object.keys(grouped)) {
+      const stageTickets = grouped[stageId];
+      if (!stageTickets) continue;
+      grouped[stageId] = [...stageTickets].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    }
+    return grouped;
+  }, [deferredLocalTickets, stageColumns]);
 
   // Stage form modal state — shown when moving a ticket to a stage that has a form.
   const [stageFormModal, setStageFormModal] = useState<{

@@ -4,6 +4,7 @@ import { config } from '@/config/env';
 import { retryForever } from '@/utils/retry';
 import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
+import { encryptionExtension } from '@/database/prisma-encryption-extension';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
@@ -66,7 +67,6 @@ export class DatabaseClient {
       }
 
       setupEnumTextValidation(DatabaseClient.instance);
-
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
@@ -87,6 +87,8 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
+      // Apply zero field encryption extension (no-op when encryptedFieldsConfig is empty)
+      DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 

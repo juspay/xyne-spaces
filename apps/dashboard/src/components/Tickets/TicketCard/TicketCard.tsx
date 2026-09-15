@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
-import { Calendar, User, Tag, Timer } from 'lucide-react';
+import {
+  CalendarDefault as Calendar,
+  UserDefault as User,
+  Tag,
+  TimerDefault as Timer,
+} from '@xyne/icons';
 import {
   BaseTicketType,
   isReleaseTicket,
@@ -8,7 +13,7 @@ import {
   TicketStatusV2,
   addSlaHours,
 } from '@xyne/shared';
-import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
+import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers, useSelf } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
@@ -24,6 +29,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
+import { StagePicker } from '../TicketListView/StagePicker';
 import { v4 as uuidv4 } from 'uuid';
 import { type BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -186,21 +192,27 @@ const AssigneeEditor: React.FC<{
 
 interface TicketCardProps {
   ticket: Ticket;
-  tags?: TicketTag[];
-  availableTags?: string[];
-  onClick?: (e: React.MouseEvent | KeyboardEvent) => void;
-  width?: string;
-  isCompact?: boolean;
+  tags?: TicketTag[] | undefined;
+  availableTags?: string[] | undefined;
+  /** Callback to load more tags */
+  onLoadMoreTags?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean | undefined;
+  /** Callback for server-side tag search */
+  onSearchTags?: ((query: string) => void) | undefined;
+  onClick?: ((e: React.MouseEvent | KeyboardEvent) => void) | undefined;
+  width?: string | undefined;
+  isCompact?: boolean | undefined;
   visibleColumns?: Set<string> | undefined;
-  isConversation?: boolean;
-  activeTicketId?: string;
+  isConversation?: boolean | undefined;
+  activeTicketId?: string | undefined;
   /** Only true for email-type desks; hides the email unread indicator everywhere else. */
-  showEmailReads?: boolean;
+  showEmailReads?: boolean | undefined;
   /**
    * SLA policies pre-fetched by the parent for the whole board.
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
-  slaPolicies?: BoardSlaPolicy[];
+  slaPolicies?: BoardSlaPolicy[] | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -209,6 +221,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   width = 'w-full',
   tags,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
@@ -242,7 +257,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     !!userReadRow &&
     userReadRow.lastReadEmailAt >= lastEmailAt;
 
-  const isStageOverdue = isStageEtaOverdue(ticket);
+  const hasStageOverdue = isStageOverdue(ticket);
   const hasDueDate = !!ticket.eta;
   const hasTags = tags && tags.length > 0;
 
@@ -599,6 +614,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
+              statusV2={ticket.statusV2}
               showLeadingDot={false}
               labelClassName='max-w-[120px] truncate'
             />
@@ -647,7 +663,21 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 <span className='text-xs font-medium text-muted-foreground font-mono'>
                   {ticket.xyneId}
                 </span>
-                {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
+                {!isCompact && (
+                  <TicketStatusWithStages
+                    currentStageName={ticket.stageName}
+                    statusV2={ticket.statusV2}
+                  />
+                )}
+                {isCompact && (
+                  <StagePicker
+                    ticketId={ticket.id}
+                    stageName={ticket.stageName}
+                    stageLabel={ticket.stageName || 'To Do'}
+                    statusV2={ticket.statusV2}
+                    boardId={ticket.boardId}
+                  />
+                )}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
                 {/*due date*/}
@@ -711,7 +741,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                   </div>
                 )}
                 {/* Stage Overdue Badge */}
-                {isStageOverdue && (
+                {hasStageOverdue && (
                   <div className='flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 border border-red-200'>
                     <svg
                       width='12'
@@ -844,6 +874,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           selectedTags={selectedTagNames}
                           onTagsChange={handleTagsChange}
                           stopEditing={() => setIsEditingTags(false)}
+                          onLoadMore={onLoadMoreTags}
+                          hasMore={hasMoreTags}
+                          onSearch={onSearchTags}
                         />
                       </div>
                     ) : hasTags ? (
@@ -931,6 +964,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     <div className='flex items-center gap-2'>
                       <TicketStatusWithStages
                         currentStageName={ticket.stageName}
+                        statusV2={ticket.statusV2}
                         showLeadingDot={false}
                         iconOnly
                       />

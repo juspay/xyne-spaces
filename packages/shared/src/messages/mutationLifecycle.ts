@@ -2,7 +2,7 @@ import type { PromiseWithServerResult } from '@rocicorp/zero';
 
 /**
  * Mirror of lotus/src/zero/awaitMutation.ts + dashboard's handleMutationResult.
- * Kept private to the messages module so `sendMessage` owns the whole
+ * Shared by `sendMessage` and the channel-forward path so both own the same
  * fire-and-forget lifecycle without pulling a platform-specific helper.
  *
  * Zero classifies mutation errors:

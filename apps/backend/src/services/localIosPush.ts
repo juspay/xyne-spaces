@@ -87,7 +87,7 @@ export async function sendLocalIosPush(payload: LocalPushPayload, data: Record<s
     // Modified to create the temp directory in the current working directory
     tmpDir = await mkdtemp(join(process.cwd(), 'fcm-local-'));
     const apnsFile = join(tmpDir, 'notification.apns');
-    console.log("filefile: ", apnsFile);
+    logger.info("filefile: ", apnsFile);
     let record: Record<string, boolean> = {};
     
     await writeFile(apnsFile, JSON.stringify(apnsPayload, null, 2), 'utf8');

@@ -1,6 +1,7 @@
-import { type Call } from '@prisma/client';
-import { CallStatus, CallType } from '@xyne/shared';
+import { type Call, type Prisma } from '@prisma/client';
+import { CallStatus, CallType, MessageType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { repositories } from './index';
 
 export interface CreateNoteTakerCallParams {
   callId: string;
@@ -8,8 +9,19 @@ export interface CreateNoteTakerCallParams {
   workspaceId: string;
   createdBy: string;
   notesCanvasId: string;
+  detailedSummaryCanvasId: string;
   roomLink: string;
   now: Date;
+}
+
+interface NoteTakerCallMetadata {
+  notesCanvasId?: string;
+  detailedSummaryCanvasId?: string;
+  detailedSummaryReady?: boolean;
+  detailedSummaryStatus?: 'pending' | 'ready' | 'failed';
+  conversationId?: string;
+  messageId?: string;
+  channelId?: string;
 }
 
 /**
@@ -26,7 +38,18 @@ export class NoteTakerCallRepository {
   }
 
   async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
-    const { callId, roomName, workspaceId, createdBy, notesCanvasId, roomLink, now } = params;
+    const { callId, roomName, workspaceId, createdBy, notesCanvasId, detailedSummaryCanvasId, roomLink, now } = params;
+
+    const metadata: NoteTakerCallMetadata = {
+      notesCanvasId,
+      detailedSummaryCanvasId,
+      detailedSummaryReady: false,
+      // From creation the summary pipeline is nominally in flight (auto
+      // generation runs at call end). Without this, a freshly-created
+      // recording reads as ready=false+canvasId, which the UI treats as a
+      // stranded/failed run and offers "Try again" instead of the shimmer.
+      detailedSummaryStatus: 'pending',
+    };
 
     return this.db.call.create({
       data: {
@@ -35,18 +58,197 @@ export class NoteTakerCallRepository {
         workspaceId,
         createdByUserId: createdBy,
         callType: CallType.HEADLESS,
+        recordingParticipants: JSON.stringify([createdBy]),
         status: CallStatus.ACTIVE,
         roomLink,
-        metadata: { notesCanvasId },
+        metadata: metadata as Prisma.InputJsonValue,
         startedAt: now,
         lastActivityAt: now,
       },
     });
   }
 
+  /**
+   * Update the thread's single anchor message once a thread-linked recording
+   * ends. No-op (returns false) for recordings that weren't started from a
+   * thread (no conversationId/messageId on call.metadata).
+   */
+  private async updateThreadMessageOnEnd(
+    tx: Prisma.TransactionClient,
+    call: Call,
+    endedAt: Date,
+  ): Promise<boolean> {
+    const metadata = (call.metadata as NoteTakerCallMetadata | null) ?? {};
+    if (!metadata.conversationId || !metadata.messageId) return false;
+
+    const durationMs = call.startedAt ? endedAt.getTime() - call.startedAt.getTime() : null;
+
+    await tx.message.update({
+      where: { messageId: metadata.messageId },
+      data: {
+        content: 'Recording ended',
+        metadata: {
+          isRecordingMessage: true,
+          isHeadlessRecording: true,
+          callId: call.externalId,
+          operation: 'recording_ended',
+          createdBy: call.createdByUserId,
+          ...(durationMs !== null ? { durationMs } : {}),
+        },
+      },
+    });
+
+    // Clear conversation.callId so the channel row's live-recording indicator
+    // turns off immediately, and drop the isHeadlessRecording metadata flag
+    // stamped in createThreadAnchorMessage (merge-safe: only removes that key).
+    const conversation = await tx.conversation.findUnique({
+      where: { conversationId: metadata.conversationId },
+      select: { metadata: true },
+    });
+    const conversationMetadata: Record<string, unknown> =
+      conversation?.metadata && typeof conversation.metadata === 'object' && !Array.isArray(conversation.metadata)
+        ? { ...(conversation.metadata as Record<string, unknown>) }
+        : {};
+    delete conversationMetadata.isHeadlessRecording;
+
+    await tx.conversation.update({
+      where: { conversationId: metadata.conversationId },
+      data: { callId: null, metadata: conversationMetadata as Prisma.InputJsonValue },
+    });
+
+    return true;
+  }
+
   /** Update activity when the creator reconnects to an existing headless room. */
   async touchCallActivity(callId: string, now: Date): Promise<void> {
     await this.db.call.update({ where: { id: callId }, data: { lastActivityAt: now } });
+  }
+
+  /**
+   * Patches the thread's anchor message content with the AI-generated title
+   * once it's ready (called from noteTakerTranscriptService, well after the
+   * recording itself has ended and updateThreadMessageOnEnd already ran).
+   * Mirrors how a regular call's ended message shows its AI text directly as
+   * message.content — RecordingBubble reads this straight off the message,
+   * no separate live query on the Call row needed for the ended-state title.
+   * No-op for recordings that weren't started from a thread.
+   */
+  async updateThreadMessageTitle(callId: string, title: string): Promise<void> {
+    const call = await this.db.call.findUnique({ where: { id: callId }, select: { metadata: true } });
+    const metadata = (call?.metadata as NoteTakerCallMetadata | null) ?? {};
+    if (!metadata.messageId) return;
+
+    await this.db.message.update({
+      where: { messageId: metadata.messageId },
+      data: { content: title },
+    });
+  }
+
+  /**
+   * Create the thread's single anchor message for a thread-linked recording.
+   * Returns false (no throw) if the conversation/channel/membership checks fail.
+   */
+  async createThreadAnchorMessage(params: {
+    callId: string;
+    conversationId: string;
+    channelId: string;
+    messageId: string;
+    callExternalId: string;
+    createdBy: string;
+    workspaceId: string;
+    notesCanvasId: string;
+    detailedSummaryCanvasId: string;
+  }): Promise<boolean> {
+    const {
+      callId,
+      conversationId,
+      channelId,
+      messageId,
+      callExternalId,
+      createdBy,
+      workspaceId,
+      notesCanvasId,
+      detailedSummaryCanvasId,
+    } = params;
+
+    const conversation = await repositories.conversations.findByIdAndWorkspace(conversationId, workspaceId);
+    if (!conversation || conversation.channelId !== channelId) {
+      return false;
+    }
+    const isMember = await repositories.channelParticipants.isParticipant(channelId, createdBy);
+    if (!isMember) {
+      return false;
+    }
+
+    const initiator = await this.db.user.findUnique({
+      where: { id: createdBy },
+      select: { name: true, displayName: true },
+    });
+
+    const now = new Date();
+    const existingMetadata: Record<string, unknown> =
+      conversation.metadata && typeof conversation.metadata === 'object' && !Array.isArray(conversation.metadata)
+        ? (conversation.metadata as Record<string, unknown>)
+        : {};
+
+    // Anchor message, conversation stamp, and call metadata must land atomically.
+    await this.db.$transaction(async (tx) => {
+      await tx.message.create({
+        data: {
+          messageId,
+          conversationId,
+          workspaceId,
+          senderId: 'system',
+          content: `${initiator?.displayName || initiator?.name || 'Someone'} started recording notes`,
+          msgType: MessageType.SYSTEM,
+          showInChannel: false,
+          createdAt: now,
+          metadata: {
+            isRecordingMessage: true,
+            isHeadlessRecording: true,
+            callId: callExternalId,
+            callType: CallType.HEADLESS,
+            operation: 'recording_active',
+            notesCanvasId,
+            createdBy,
+          },
+        },
+      });
+
+      // Marks the conversation as having a live recording attached.
+      await tx.conversation.update({
+        where: { conversationId },
+        data: {
+          callId: callExternalId,
+          metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
+        },
+      });
+
+
+      const currentCall = await tx.call.findUnique({ where: { id: callId }, select: { metadata: true } });
+      const currentCallMetadata: Record<string, unknown> =
+        currentCall?.metadata && typeof currentCall.metadata === 'object' && !Array.isArray(currentCall.metadata)
+          ? (currentCall.metadata as Record<string, unknown>)
+          : {};
+      await tx.call.update({
+        where: { id: callId },
+        data: {
+          metadata: {
+            ...currentCallMetadata,
+            notesCanvasId,
+            detailedSummaryCanvasId,
+            conversationId,
+            messageId,
+            channelId,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    // Bumps reply count only after the transaction above has committed.
+    await repositories.conversations.incrementReplyCount(conversationId, now);
+
+    return true;
   }
 
   /**
@@ -73,14 +275,17 @@ export class NoteTakerCallRepository {
         data: { status: CallStatus.ENDED, endedAt: leftAt },
       });
 
+      await this.updateThreadMessageOnEnd(tx, call, leftAt);
+
       return { shouldEndCall: true, call };
     });
   }
 
   /**
    * Authoritative room-closed fallback (mirrors callRepository.handleRoomFinished),
-   * simplified for note-taker: no SCHEDULED revert, no system message, no
-   * conversation.callId clearing (note-taker calls have no conversation).
+   * simplified for note-taker: no SCHEDULED revert, no system message.
+   * conversation.callId clearing for thread-linked recordings happens inside
+   * updateThreadMessageOnEnd (no-op for recordings with no conversation).
    */
   async handleRoomFinished(params: {
     callExternalId: string;
@@ -100,6 +305,8 @@ export class NoteTakerCallRepository {
         where: { id: call.id },
         data: { status: CallStatus.ENDED, endedAt },
       });
+
+      await this.updateThreadMessageOnEnd(tx, call, endedAt);
 
       return { shouldEndCall: true, call };
     });

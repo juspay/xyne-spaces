@@ -28,6 +28,10 @@ export interface AccessibleClawAgent {
     fileId: string | null;
     rootCollectionId: string;
   }>;
+  /** When true, every chat request to this agent always runs the single-
+   *  search/single-answer instant KB path — the composer shows a locked
+   *  "Instant" indicator for it instead of the normal per-message toggle. */
+  instantAgent?: boolean;
 }
 
 export async function fetchAccessibleClawAgents(): Promise<AccessibleClawAgent[]> {

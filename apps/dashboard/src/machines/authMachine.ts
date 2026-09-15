@@ -3,8 +3,8 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
-import { mixpanelService, EVENTS, EVENT_PROPERTIES } from '../services/Analytics/mixpanelService';
-import { API_BASE_URL, isLocalDevAuthEnabled, isTestEnv } from '../config';
+import { posthogService } from '../services/Analytics/posthogService';
+import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -14,6 +14,12 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+import { clearAllSessionKeys } from '../services/sessionKeyStore';
+import { indexedDBService } from '../services/indexedDBService';
+import { resetEncryption } from './encryptionMachine';
+import { decryptionCache } from '@xyne/shared';
+import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
+import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
 
 export interface User {
   id: string;
@@ -183,6 +189,27 @@ const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
   return output?.workspaces || [];
 };
 
+// Domain-conflict fields arrive as URL params on the web callback (processingOAuthCallback) and
+// on the OAUTH_CALLBACK_COMPLETE event from the Electron IPC / React Native bridge. Both paths
+// end in a creatingOrg transition, so both must translate them into the request-to-join context.
+const getEnterpriseJoinContext = (
+  output?: OAuthCallbackOutput,
+): { error: string | null; enterpriseJoinTarget: EnterpriseJoinTarget | null } => {
+  return {
+    error: output?.domainConflictError ?? output?.publicEmailDomainError ?? null,
+    enterpriseJoinTarget:
+      output?.enterpriseJoinOrgName && output.enterpriseJoinWorkspaces
+        ? {
+            orgName: output.enterpriseJoinOrgName,
+            workspaces: JSON.parse(output.enterpriseJoinWorkspaces) as Array<{
+              id: string;
+              name: string;
+            }>,
+          }
+        : null,
+  };
+};
+
 export const authMachine = createMachine(
   {
     /** @xstate-layout N4IgpgJg5mDOIC5QEMCuAXAFgWWQY0wEsA7MAOgLDwGsSoBlOWQge2IGIBtABgF1FQABxbN0rYgJAAPRACYAjAE4yANgAsADjXaArIsUaA7AGZ1AGhABPRJuUbjew9xUbZa7muOGAvt4tosXAISckoaOkZYZjYueX4kEGFRcUkZBAVldS1dfSNTNQtrBHUVMmN5WR1TDRVueyrffwwcfCJSCkwqWmIGJnEuWXihEUIxNlS5JVVNbTU9AxNzK0QNeTIdbk35eTmVY25FY1lGkACW4PbBACcWPD6egHkAQWaAYWQAGw+AI3xqdggbHIJAAbixqOQzkE2uRrrd7lBnm9Pj8-ghQbdkGNiDxeLjJElRikEmlDAoyGodnVjHMFCpZCpCjYNNwynp3HolIYdOoTlDWiEyHC7lE6EisO8vr8aOwwFcblchR8sQAzFhXAC2ZH5F1hNxFzEeLwlKOl1HRxDBeCx4lx+IShOxEwQZLWlPc9lp8npjOWCGMNTIimcskMuxqbkUfOa0MFIM+hAgNp6ABVwWAOID2hiIdqYwL2vGPonk1A0xDiBarTa2Ha+ASRk6SYgyaywyp5M5uDo1Io5homf7uGtKjoeWGdLI6jUVNHAgXyEWS2JU+mOHKFUrVeqtTqYWQl0mV2W11XMdi60NEo3iaBSeT3dSvT7B1PWZstvIZ6YlGo5+d9zODMxGtdBIHYAAZB4AHEHgAVRTe1hmScZmwQbZTApbINh0bljEOAc-Q7VkFAOQwtA0CiaX-WN2lQYggOIECsXA2CYIggBRAB9egAEloIAOV4gSkOvFCJDQipyLIbhZAcOoPEUQxDAqQdJzUIMtADRx6gMGiFzIejGOYsCIHYV5OKeAAlLiOKsqyHis0THVvaREAqRQ1iqScFBMXydEIoo1FkDR1nKSoVD7KcaWMXw-BAYgWAgOBJD3EIG3E50AFpfSKLKdCDfQlI0HRvQULRPP03UOi6CI+lQ5CiQatyEGCwc1HUdYSsUDsOrDDQ9PitLLn1BFxUwSVURoDKmoku8bA2GT5B5H95AcBwx3azqAr0SKAoDDteSG-NqsPUtywzGam3m-1DFKBxvQCkKKlqQxXzDdYVHI5a9iMCpjmO+dquMwhQMgK7XLSAw21Wcp5CcYN+sHPZjFUIwx20b76R8QGAMFIzmmA0GWIgCHmrSCpA25cjai8Gk7uRhkKS8UqNh2Fwxzi7wgA */
@@ -246,10 +273,6 @@ export const authMachine = createMachine(
           {
             target: 'validatingSession',
             guard: 'hasStoredSession',
-          },
-          {
-            target: 'testAuthenticating',
-            guard: 'shouldUseDevelopmentAuth',
           },
           {
             target: 'unauthenticated',
@@ -712,27 +735,20 @@ export const authMachine = createMachine(
               }),
             },
           ],
-          onError: [
-            {
-              target: 'testAuthenticating',
-              guard: 'shouldUseDevelopmentAuth',
-              actions: ['clearSessionCookies', assign(() => createClearedContext())],
-            },
-            {
-              target: 'unauthenticated',
-              actions: [
-                'clearSessionCookies',
-                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
-                assign(() => createClearedContext()),
-              ],
-            },
-          ],
+          onError: {
+            target: 'unauthenticated',
+            actions: [
+              'clearSessionCookies',
+              { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+              assign(() => createClearedContext()),
+            ],
+          },
         },
       },
       authenticated: {
         entry: ({ context }) => {
           if (context.user?.id) {
-            mixpanelService.identify(context.user);
+            posthogService.identify(context.user);
           }
         },
         on: {
@@ -780,7 +796,7 @@ export const authMachine = createMachine(
         on: {
           GOOGLE_SIGNIN: [
             {
-              guard: 'shouldUseDevelopmentAuth',
+              guard: 'isTestEnvironment',
               target: 'testAuthenticating',
             },
             {
@@ -864,7 +880,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -911,6 +927,23 @@ export const authMachine = createMachine(
               }),
             },
             {
+              // Single-workspace auto-login (e.g. email login with exactly one workspace):
+              // skip the picker and log straight into the returned workspace, mirroring OAuth.
+              guard: 'hasAutoLoginWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: getWorkspaces(output),
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
               guard: 'hasLastActiveWorkspace',
               target: 'loggingInToWorkspace',
               actions: assign(({ context, event }) => {
@@ -950,7 +983,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -1034,7 +1067,7 @@ export const authMachine = createMachine(
                   workspaces: [],
                   pendingUserData: output?.pendingUserData || null,
                   userExistsButRemoved: output?.userExistsButRemoved || false,
-                  error: null,
+                  ...getEnterpriseJoinContext(output),
                 };
               }),
             },
@@ -1115,7 +1148,7 @@ export const authMachine = createMachine(
         const userId = localStorage.getItem('user_id');
         return !!userId;
       },
-      shouldUseDevelopmentAuth: () => isTestEnv || isLocalDevAuthEnabled,
+      isTestEnvironment: () => isTestEnv,
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.user?.id;
@@ -1174,6 +1207,10 @@ export const authMachine = createMachine(
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
         clearOnboardingCookie();
+        decryptionCache.clear();
+        resetEncryption();
+        resetGlobalEncryptionBootstrap();
+        void clearAllSessionKeys();
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();
@@ -1308,17 +1345,11 @@ export const authMachine = createMachine(
       }),
       trackLoginSuccess: ({ context }) => {
         if (context.user?.id) {
-          mixpanelService.identify(context.user);
-          mixpanelService.track(EVENTS.AUTHENTICATION, {
-            type: EVENT_PROPERTIES.AUTH_TYPES.LOGIN,
-          });
+          posthogService.identify(context.user);
         }
       },
       trackLogoutSuccess: () => {
-        mixpanelService.track(EVENTS.AUTHENTICATION, {
-          type: EVENT_PROPERTIES.AUTH_TYPES.LOGOUT,
-        });
-        mixpanelService.reset();
+        posthogService.reset();
       },
     },
     actors: {
@@ -1338,6 +1369,11 @@ export const authMachine = createMachine(
         } catch {
           /* empty */
         }
+
+        // Logout is the one place a cross-lane drop is right: both bundles are going
+        // away. The lane must not take out its host's store, so it only drops its own.
+        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
+        await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

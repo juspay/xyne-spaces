@@ -1,6 +1,13 @@
 import { createContext, useContext } from 'react';
 import type { FlowState, FlowAction, AppActionResponse } from '@xyne/shared';
 
+export interface FlowMessageContext {
+  channelId?: string;
+  senderId?: string;
+  createdAt?: number;
+  surface?: 'channel' | 'thread';
+}
+
 export interface FlowContextValue {
   state: FlowState;
   data: Record<string, unknown>;
@@ -14,6 +21,7 @@ export interface FlowContextValue {
   onAppAction: (response: AppActionResponse) => void;
   messageId: string;
   conversationId: string;
+  messageContext?: FlowMessageContext;
 }
 
 export const FlowContext = createContext<FlowContextValue | null>(null);

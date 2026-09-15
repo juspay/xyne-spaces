@@ -52,7 +52,6 @@ export const forwardMessageLink: NudgeDefinition<
     const messageId = typeof meta.messageId === 'string' ? meta.messageId : undefined;
     const originalMessageId =
       typeof meta.originalMessageId === 'string' ? meta.originalMessageId : undefined;
-    const projectId = typeof meta.projectId === 'string' ? meta.projectId : undefined;
 
     if (!messageId || !originalMessageId) return [];
 
@@ -67,7 +66,6 @@ export const forwardMessageLink: NudgeDefinition<
           targetType: 'MESSAGE',
           targetId: originalMessageId,
           linkKind: SurfaceLinkKind.RELATES_TO,
-          projectId,
         },
       },
     ];

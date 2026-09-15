@@ -55,11 +55,15 @@ export function useThreadAssist(
   const hasRecap = recap.isAvailable;
   const hasReply = reply.hasDraft;
 
+  // Both edges below only pick the tab you'd land on — neither expands the tray.
+  // It stays collapsed until you open it: the collapsed bar already announces
+  // "N AI replies ready", and auto-expanding shoved the composer down the moment
+  // a draft landed, under whatever you were mid-way through reading.
+
   const replyEdge = useRef(false);
   useEffect(() => {
     if (hasReply && !replyEdge.current) {
       replyEdge.current = true;
-      setCollapsed(false);
       setTab('reply');
     } else if (!hasReply) {
       replyEdge.current = false;
@@ -70,7 +74,6 @@ export function useThreadAssist(
   useEffect(() => {
     if (recap.isRecommended && !recapEdge.current) {
       recapEdge.current = true;
-      setCollapsed(false);
       setTab(hasReply ? 'reply' : 'recap');
     } else if (!recap.isRecommended) {
       recapEdge.current = false;

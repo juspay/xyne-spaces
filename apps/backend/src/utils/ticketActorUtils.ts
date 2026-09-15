@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import { logger } from '@/utils/logger';
 
 /**
  * Fetch additional actor user IDs from board form fields of type USER.
@@ -79,7 +80,7 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
 
     return [...new Set(userIds)];
   } catch (error) {
-    console.error(`[getFormFieldUserActors] Failed to fetch form field users for ticket ${ticketId}:`, error);
+    logger.error(`Failed to fetch form field users for ticket ${ticketId}`, error);
     return [];
   }
 }

@@ -1,7 +1,14 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { ReactElement, useState, useRef, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useZero } from '../../../hooks/useZero';
-import { Channel, ChannelRole, ChannelScopeType } from '@xyne/shared';
+import {
+  Channel,
+  ChannelRole,
+  ChannelScopeType,
+  normalizeChannelName,
+  validateChannelName,
+} from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';
 import { LucideSquarePen } from 'lucide-react';
@@ -103,7 +110,11 @@ const AboutChannel = ({
       setIsEditingDescription(false);
       toast.success(`Channel description updated`);
     } catch (error) {
-      console.error('Failed to update channel description:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to update channel description:'),
+        error: error,
+      });
       toast.error('Failed to update channel description. Please try again.');
     } finally {
       setIsSavingDescription(false);
@@ -137,13 +148,7 @@ const AboutChannel = ({
 
   // ----- Name editing -----
 
-  const validateName = (value: string): string => {
-    if (value.length < 2) return 'Channel name must be at least 2 characters';
-    if (value.length > 80) return 'Channel name must be 80 characters or less';
-    if (!/^[a-z0-9-_]+$/.test(value))
-      return 'Only lowercase letters, numbers, hyphens, and underscores are allowed';
-    return '';
-  };
+  const validateName = (value: string): string => validateChannelName(value) ?? '';
 
   const handleEditName = (): void => {
     setIsEditingName(true);
@@ -152,8 +157,7 @@ const AboutChannel = ({
   };
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    // Convert spaces to hyphens and force lowercase, matching AddChannelForm behaviour
-    const formatted = e.target.value.toLowerCase().replace(/\s+/g, '-');
+    const formatted = normalizeChannelName(e.target.value);
     setEditName(formatted);
     setNameError(validateName(formatted));
   };
@@ -174,10 +178,7 @@ const AboutChannel = ({
     setIsSavingName(true);
     try {
       // Check for duplicate name before committing the optimistic mutation
-      const { isDuplicate } = await channelService.checkDuplicateChannel(
-        trimmed,
-        channel.projectId,
-      );
+      const { isDuplicate } = await channelService.checkDuplicateChannel(trimmed);
       if (isDuplicate) {
         setNameError(`A channel named "#${trimmed}" already exists`);
         setIsSavingName(false);
@@ -200,7 +201,11 @@ const AboutChannel = ({
       setIsEditingName(false);
       toast.success(`Channel renamed to #${trimmed}`);
     } catch (err) {
-      console.error('Failed to rename channel:', err);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('Failed to rename channel:'),
+        error: err,
+      });
       toast.error('Failed to rename channel. Please try again.');
     } finally {
       setIsSavingName(false);

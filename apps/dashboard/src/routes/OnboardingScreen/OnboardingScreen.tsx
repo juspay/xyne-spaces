@@ -7,7 +7,8 @@ import {
   getQuestionnaireResponse,
   saveQuestionnaireResponse,
 } from '../../services/userProfile/userProfileService';
-import { mixpanelService, EVENTS } from '../../services/Analytics/mixpanelService';
+import { posthogService } from '../../services/Analytics/posthogService';
+import { ONBOARDING_EVENTS } from '../../services/Analytics/events';
 import { suppressAIOnboardingAutoStart } from '../../contexts/AIOnboardingContext';
 import { OnboardingConnectLogo } from './OnboardingConnectLogos';
 import { markOnboardingSampleVisible } from './onboardingSample';
@@ -82,7 +83,7 @@ const OnboardingScreen = (): ReactElement | null => {
         setCheckedKeys(next.onboardingPrototypeConnectKeys ?? []);
         const openingTap = wizardOpeningTap(next);
         setTap(openingTap);
-        mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: openingTap, prototype: true });
+        posthogService.capture(ONBOARDING_EVENTS.TAP, { tap: openingTap, prototype: true });
       } catch {
         if (!cancelled) {
           setError("Couldn't load your progress. You can still continue.");
@@ -139,7 +140,7 @@ const OnboardingScreen = (): ReactElement | null => {
       const saved = await persist(next);
       setPayload(saved);
       setTap(nextTap);
-      mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: nextTap, prototype: true });
+      posthogService.capture(ONBOARDING_EVENTS.TAP, { tap: nextTap, prototype: true });
     } catch {
       setError("Couldn't save. Stay here and try again.");
     } finally {
@@ -165,7 +166,7 @@ const OnboardingScreen = (): ReactElement | null => {
     }
     const nextKeys = addPrototypeConnectKey(checkedKeys, key);
     setCheckedKeys(nextKeys);
-    mixpanelService.track(EVENTS.ONBOARDING_CONNECT_CLICK, {
+    posthogService.capture(ONBOARDING_EVENTS.CONNECT_CLICK, {
       connectorKey: key,
       prototype: true,
     });
@@ -183,7 +184,7 @@ const OnboardingScreen = (): ReactElement | null => {
     const previous = (tap - 1) as OnboardingTap;
     setError(null);
     setTap(previous);
-    mixpanelService.track(EVENTS.ONBOARDING_TAP, { tap: previous, prototype: true });
+    posthogService.capture(ONBOARDING_EVENTS.TAP, { tap: previous, prototype: true });
   };
 
   const handleComplete = async (skipped: boolean): Promise<void> => {
@@ -196,7 +197,7 @@ const OnboardingScreen = (): ReactElement | null => {
     try {
       const saved = await persist(completed);
       const tryFirst = saved.onboardingTryFirst ?? payload.onboardingTryFirst;
-      mixpanelService.track(skipped ? EVENTS.ONBOARDING_SKIP : EVENTS.ONBOARDING_COMPLETE, {
+      posthogService.capture(skipped ? ONBOARDING_EVENTS.SKIP : ONBOARDING_EVENTS.COMPLETE, {
         checkedKeys,
         tryFirst,
         prototype: true,

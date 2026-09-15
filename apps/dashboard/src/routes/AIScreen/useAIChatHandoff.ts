@@ -4,7 +4,7 @@ import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage
 
 export function useAIChatHandoff(): {
   onCreateChat: () => void;
-  onSelectSession: (sessionId: string, _agentSlug?: string) => void;
+  onSelectSession: (sessionId: string) => void;
 } {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -17,12 +17,18 @@ export function useAIChatHandoff(): {
   }, [navigate, chatPath]);
 
   const onSelectSession = useCallback(
-    (sessionId: string, _agentSlug?: string): void => {
+    (sessionId: string): void => {
+      // The thread lives in the URL now — navigate to it directly. The old
+      // write-to-storage-then-open-chat/new dance depended on AIScreen
+      // restoring the id on mount, which is gone (it made "new" mean "most
+      // recent"). The storage writes remain only as a mirror for anything
+      // still reading them.
       sessionStorage.setItem(AI_ACTIVE_SESSION_KEY, sessionId);
       sessionStorage.setItem(AI_SHOW_CHAT_VIEW_KEY, '1');
-      void navigate(chatPath);
+      const base = workspaceId ? `/${workspaceId}/ai/chat` : '/ai/chat';
+      void navigate(`${base}/${encodeURIComponent(sessionId)}`);
     },
-    [navigate, chatPath],
+    [navigate, workspaceId],
   );
 
   return { onCreateChat, onSelectSession };

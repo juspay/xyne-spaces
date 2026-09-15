@@ -1,5 +1,7 @@
 import {
   MessagesExchangedData,
+  CallsBreakdown,
+  CallsTimeSeriesPoint,
   CurrentActiveUsersData,
   TimeSeriesDataPoint,
   AnalyticsResponse,
@@ -158,6 +160,64 @@ export const processMessagesExchangedData = (
     isLoading: false,
     error: null,
   };
+};
+
+/**
+ * Unpacks the /number-of-calls payload into its two cards - calls and note taker
+ * recordings - which the backend returns together since they share the calls table
+ */
+export const processCallsData = (
+  data: CallsBreakdown | CallsTimeSeriesPoint[] | undefined,
+  isLoading: boolean,
+  error: unknown,
+  groupBy: GroupByOption,
+): {
+  calls: number;
+  recordings: number;
+  callsChartData: Array<{ value: number; name: string }>;
+  recordingsChartData: Array<{ value: number; name: string }>;
+  isLoading: boolean;
+  error: unknown;
+} => {
+  const empty = {
+    calls: 0,
+    recordings: 0,
+    callsChartData: [],
+    recordingsChartData: [],
+  };
+
+  if (isLoading) return { ...empty, isLoading: true, error: null };
+  if (error) return { ...empty, isLoading: false, error };
+  if (!data) return { ...empty, isLoading: false, error: null };
+
+  // Aggregate payload - returned when no time-series groupBy was requested
+  if (!Array.isArray(data)) {
+    return {
+      ...empty,
+      calls: data.calls || 0,
+      recordings: data.recordings || 0,
+      isLoading: false,
+      error: null,
+    };
+  }
+
+  let calls = 0;
+  let recordings = 0;
+  const callsChartData: Array<{ value: number; name: string }> = [];
+  const recordingsChartData: Array<{ value: number; name: string }> = [];
+
+  if (groupBy !== 'none') {
+    data.forEach(item => {
+      calls += item.calls || 0;
+      recordings += item.recordings || 0;
+
+      const formattedDate = formatChartDate(item.date, groupBy);
+      callsChartData.push({ value: item.calls || 0, name: formattedDate });
+      recordingsChartData.push({ value: item.recordings || 0, name: formattedDate });
+    });
+  }
+
+  return { calls, recordings, callsChartData, recordingsChartData, isLoading: false, error: null };
 };
 
 export const processCurrentActiveUsersData = (

@@ -1,6 +1,17 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../../shared/librarySearch';
+import {
+  BROWSE_CARD,
+  BROWSE_CARD_IDLE,
+  BROWSE_CARD_SELECTED,
+} from '../../../shared/primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { BrowseDialog, type FilterOption } from '../../../shared/primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../../shared/primitives/BrowseDialog';
 import { Pill } from '../../../shared/primitives/Pill';
 import { humanizeToolName } from '../../../shared/primitives/ToolRow';
 import { BuiltinChip } from '../../../shared/pickers/builtin/BuiltinChip';
@@ -15,10 +26,11 @@ import {
   type SubagentToolSectionData,
 } from './subagentToolCatalog';
 
-function matchesSearch(group: SubagentToolGroup, query: string): boolean {
-  if (!query) return true;
-  if (humanizeSource(group.source).toLowerCase().includes(query)) return true;
-  return group.tools.some(tool => humanizeToolName(tool.name).toLowerCase().includes(query));
+function groupSearchFields(group: SubagentToolGroup) {
+  return {
+    name: humanizeSource(group.source),
+    extras: group.tools.map(tool => humanizeToolName(tool.name)),
+  };
 }
 
 const GroupCard = ({
@@ -40,7 +52,7 @@ const GroupCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create subagent v2: open tool group detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
@@ -117,11 +129,11 @@ export function BrowseSubagentToolsDialog({
     [section.groups],
   );
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const visible = useMemo(
     () =>
-      section.groups.filter(
-        group => matchesSearch(group, q) && (source === null || group.source === source),
+      searchByNameThenDescription(section.groups, q, groupSearchFields).filter(
+        group => source === null || group.source === source,
       ),
     [section.groups, q, source],
   );
@@ -134,10 +146,13 @@ export function BrowseSubagentToolsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenSource(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setSource(null);
+          setOpenSource(null);
+        })
+      }
       title={`Browse ${section.title}`}
       description={section.caption}
       testId={`browse-subagent-${section.kind}-tools-dialog`}

@@ -81,7 +81,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
   if (!currentUpload) return null;
 
   // ── Derived state ────────────────────────────────────────────────
-  const { isUploading, collectionName, batchProgress, files } = currentUpload;
+  const { isUploading, collectionName, batchProgress, files, statusLabel } = currentUpload;
   const { total, current } = batchProgress;
   const progressPct = total > 0 ? Math.round((current / total) * 100) : 0;
 
@@ -172,7 +172,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
               ? hasErrors
                 ? 'Upload finished with errors'
                 : 'Upload complete'
-              : `Uploading ${current} of ${total} files`}
+              : (statusLabel ?? `Uploading ${current} of ${total} files`)}
           </span>
         </div>
 

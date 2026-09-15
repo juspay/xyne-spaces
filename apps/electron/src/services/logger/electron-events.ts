@@ -25,6 +25,20 @@ const ElectronEvent = {
     MEETING_DETECTOR_RESTART: 'meeting_detector_restart',
     MEETING_DETECTED: 'meeting_detected',
     MEETING_ENDED: 'meeting_ended',
+    MEETING_DETECTION_ENABLED: 'meeting_detection_enabled',
+    MEETING_DETECTION_DISABLED: 'meeting_detection_disabled',
+    MEETING_MIC_ACTIVE: 'meeting_mic_active',
+    MEETING_MIC_INACTIVE: 'meeting_mic_inactive',
+    MEETING_APP_UNIDENTIFIED: 'meeting_app_unidentified',
+    MEETING_SCREEN_RECORDING_IGNORED: 'meeting_screen_recording_ignored',
+    MEETING_NON_MEETING_APP_IGNORED: 'meeting_non_meeting_app_ignored',
+    MEETING_APP_IDENTIFIED: 'meeting_app_identified',
+    MEETING_POPUP_SHOWN: 'meeting_popup_shown',
+    MEETING_POPUP_SKIPPED_LOGGED_OUT: 'meeting_popup_skipped_logged_out',
+    MEETING_POPUP_SKIPPED_RECORDING: 'meeting_popup_skipped_recording',
+    MEETING_POPUP_DISMISSED: 'meeting_popup_dismissed',
+    MEETING_POPUP_START_RECORDING: 'meeting_popup_start_recording',
+    MEETING_POPUP_HIDDEN: 'meeting_popup_hidden',
 
     // UI Update events
     UI_UPDATE_CHECK_START: 'ui_update_check_start',
@@ -43,6 +57,9 @@ const ElectronEvent = {
     // Security guard rail events
     OPEN_EXTERNAL_BLOCKED: 'open_external_blocked',
     DEEP_LINK_INVITATION_REJECTED: 'deep_link_invitation_rejected',
+    DEEP_LINK_PARAM_REJECTED: 'deep_link_param_rejected',
+    AGENT_AUTH_PEER_MISMATCH: 'agent_auth_peer_mismatch',
+    AGENT_AUTH_COOLDOWN_BLOCKED: 'agent_auth_cooldown_blocked',
     } as const;
 
 export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];

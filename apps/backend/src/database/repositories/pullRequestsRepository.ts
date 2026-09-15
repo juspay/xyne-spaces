@@ -23,6 +23,11 @@ interface PRCrudProps extends BasePRProps {
   numberOfComments: number;
 }
 
+type PRStatusUpdateProps = Pick<
+  PRCrudProps,
+  'prId' | 'repoUrl' | 'prUrl' | 'numberOfComments'
+> & Partial<Pick<PRCrudProps, 'repoName' | 'destinationBranchName' | 'sourceBranchName'>>;
+
 
 export class PRMetricsRepository {
   private prisma: PrismaClient;
@@ -154,7 +159,7 @@ export class PRMetricsRepository {
     repoUrl,
     prUrl,
     numberOfComments
-  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+  }: PRStatusUpdateProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({
@@ -247,7 +252,7 @@ export class PRMetricsRepository {
     repoUrl,
     numberOfComments,
     prUrl
-  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+  }: PRStatusUpdateProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
       const currentPr = await this.prisma.pullRequests.findFirst({

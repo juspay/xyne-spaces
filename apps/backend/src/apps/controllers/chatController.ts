@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
-import { findOrCreateConversation, updateConversation, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
+import { findOrCreateConversation, updateConversation, deleteConversationMessage, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
 import { repositories } from '@/database/repositories';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
@@ -14,7 +14,7 @@ import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -74,6 +74,15 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] }
 );
 
+const DeleteMessageBodySchema = z.object({
+  messageId: z.string().min(1, 'Message ID is required').trim(),
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required', path: ['channelId'] }
+);
+
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
@@ -94,6 +103,7 @@ const AgentProgressBodySchema = z.object({
   conversationId: z.string().min(1).trim(),
   channelId: z.string().min(1).trim().optional(),
   agentSlug: z.string().min(1).trim().optional(),
+  agentName: z.string().min(1).trim().optional(),
   toolLabel: z.string().optional(),
   status: z.enum(['working', 'done']).default('working'),
   triggeredByUserId: z.string().min(1).trim().optional(), // human who started the run — gates the Stop button
@@ -403,6 +413,56 @@ export class ChatController {
     }
   };
 
+
+  /**
+   * Delete an app-authored bot message.
+   * POST /api/external-event/chat/deleteMessage
+   */
+  deleteMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = DeleteMessageBodySchema.safeParse(req.body);
+      if (!bodyResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+        return;
+      }
+
+      const { messageId, channelId, channelName } = bodyResult.data;
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
+      const message = await repositories.messages.findById(messageId);
+      if (!message) {
+        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      const conversation = await repositories.conversations.findById(message.conversationId);
+      if (!conversation || conversation.channelId !== resolvedChannelId) {
+        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
+        return;
+      }
+
+      if (message.senderId !== userId || message.msgType !== MessageType.BOT) {
+        res.status(403).json({ error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
+        return;
+      }
+
+      const result = await deleteConversationMessage(messageId, userId);
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error deleting message:', error);
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
+        return;
+      }
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   /**
    * Publish an ephemeral agent progress signal (no DB write).
    * POST /api/apps/chat/agentProgress
@@ -419,7 +479,7 @@ export class ChatController {
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
         return;
       }
-      const { conversationId, channelId, agentSlug, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
+      const { conversationId, channelId, agentSlug, agentName, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
       const userId = req.user!.id; // agent's spacesAppUserId from the verified app token
 
       // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
@@ -443,15 +503,18 @@ export class ChatController {
         return;
       }
 
-      // Tool-label updates from the runner don't carry the triggerer; carry it
-      // forward from the existing hash field so the Stop button stays visible to
-      // the initiator across the whole run (and after a thread reopen/rehydrate).
+      // Tool-label updates from the runner don't carry all presentation metadata;
+      // carry it forward from the existing hash field so the Stop button and display
+      // name survive across the whole run (and after a thread reopen/rehydrate).
       let resolvedTriggeredBy = triggeredByUserId ?? null;
-      if (!resolvedTriggeredBy && status !== 'done') {
+      let resolvedAgentName = agentName ?? null;
+      if ((!resolvedTriggeredBy || !resolvedAgentName) && status !== 'done') {
         const existingRaw = await redisService.getHashField(stateKey, userId);
         if (existingRaw) {
           try {
-            resolvedTriggeredBy = (JSON.parse(existingRaw) as { triggeredByUserId?: string }).triggeredByUserId ?? null;
+            const existing = JSON.parse(existingRaw) as { triggeredByUserId?: string; agentName?: string };
+            resolvedTriggeredBy = resolvedTriggeredBy ?? existing.triggeredByUserId ?? null;
+            resolvedAgentName = resolvedAgentName ?? existing.agentName ?? null;
           } catch { /* ignore malformed */ }
         }
       }
@@ -461,6 +524,7 @@ export class ChatController {
         conversationId,
         channelId: resolvedChannelId,
         agentSlug,
+        agentName: resolvedAgentName ?? agentSlug ?? null,
         agentUserId: userId,
         sessionId: sessionId ?? null,
         toolLabel: toolLabel ?? null,
@@ -485,7 +549,7 @@ export class ChatController {
         messageId: `agent_progress_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         conversationId,
         senderId: userId,
-        senderName: agentSlug ?? 'agent',
+        senderName: resolvedAgentName ?? agentSlug ?? 'agent',
         content: JSON.stringify({ type: 'agent_progress', data: payload }),
         msgType: MessageType.SYSTEM as const,
         createdAt: new Date(),
@@ -622,7 +686,8 @@ export class ChatController {
 
     // Forward to the external URL server-side (no CORS issues)
     // callerUserId is derived from the authenticated session (XYNE-12145)
-    // `actionableUrl` is caller-supplied, so it goes through `assertWebhookUrlSafe`.
+    // `actionableUrl` is caller-supplied, so it is dispatched via `safeWebhookFetch`,
+    // which validates the destination and pins the connection to it (rebinding-safe).
     // The first-party internal callback (same origin as backendUrl, authenticated
     // with the S2S key) is exempt so it works even when backendUrl is a private/dev host.
     try {
@@ -634,11 +699,6 @@ export class ChatController {
         }
       })();
 
-      if (!isInternalSpacesCallback) {
-        // Throws on a blocked target; caught below, so the action simply isn't dispatched.
-        await assertWebhookUrlSafe(actionableUrl);
-      }
-
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (isInternalSpacesCallback) {
         const s2sKey = config.internalS2sKey;
@@ -649,13 +709,18 @@ export class ChatController {
         }
       }
 
-      const callbackRes = await fetch(actionableUrl, {
+      const callbackInit: RequestInit = {
         method: 'POST',
         headers,
         body: JSON.stringify({ actionId, context, messageId, conversationId, callerUserId }),
         redirect: 'manual', // don't follow 3xx redirects
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      // Internal S2S callbacks are trusted-config hosts (kept on the plain client);
+      // external targets are caller-supplied, so validate + pin (rebinding-safe).
+      const callbackRes = isInternalSpacesCallback
+        ? await fetch(actionableUrl, callbackInit)
+        : await safeWebhookFetch(actionableUrl, callbackInit);
       if (!callbackRes.ok) {
         const text = await callbackRes.text().catch(() => '');
         logger.error(`[dispatchAction] Callback failed ${callbackRes.status}: ${text.slice(0, 300)}`);

@@ -4,13 +4,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
 import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { addHHMMDuration } from '@/utils/dateUtils';
 import { DatabaseClient } from '@/database/client';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { runWithContext } from '@/database/tenant/context';
+import { buildCallInviteUrl } from '@/utils/urlUtils';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -70,8 +71,8 @@ class RecurringCallService {
   ): Promise<string> {
     const callId = uuidv4();
     const externalId = uuidv4();
-    const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
-    const { targetUserIds, externalInvitees } =
+    const roomLink = buildCallInviteUrl(externalId);
+    const { targetUserIds, participantInviters, externalInvitees } =
       await repositories.recurringCallParticipants.findInstanceSeed(recurringSeries.id, tx);
 
     // Background schedulers (callValidationWorker setInterval, scheduledCallNotificationService
@@ -112,11 +113,16 @@ class RecurringCallService {
         startsAt,
         endsAt,
         targetUserIds,
+        participantInviters,
         ...(externalInvitees.length > 0 && { externalInvitees }),
         callUpdatesChannel: callUpdatesChannel ?? null,
       }, tx);
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
+      // Every materialized instance — first creation, buffer replenishment,
+      // regeneration, the auto-end chain — passes through here, so this one
+      // hook puts the whole series on the organizer's calendar.
+      queueCallCalendarPush(callId, 'recurringCallService.createInstance');
 
       // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
       if (notifyParticipants) {
@@ -421,6 +427,12 @@ class RecurringCallService {
     scheduledInstanceIds.forEach((callId) => queueCallVespaFeed(callId, {
       source: CallVespaFeedSource.RecurringCallServiceRegenerateFutureInstancesCancelledInstance,
     }));
+    // The replacements were pushed by createInstance; these are the instances
+    // the new rule superseded, so withdraw their calendar events.
+    queueCallCalendarPushMany(
+      scheduledInstanceIds,
+      'recurringCallService.regenerateFutureInstances',
+    );
 
     return callIds;
   }
@@ -521,6 +533,8 @@ class RecurringCallService {
       repositories.scheduledCalls.cancelSeries({ seriesId, now, tx }),
     );
 
+    queueCallCalendarPushMany(futureInstanceIds, 'recurringCallService.cancelSeries');
+
     return result;
   }
 
@@ -546,9 +560,13 @@ class RecurringCallService {
       }
     }
 
-    return db.$transaction(async (tx) =>
+    const result = await db.$transaction(async (tx) =>
       repositories.scheduledCalls.deleteSeries({ seriesId, tx }),
     );
+
+    queueCallCalendarPushMany(instanceIds, 'recurringCallService.deleteSeries');
+
+    return result;
   }
 }
 

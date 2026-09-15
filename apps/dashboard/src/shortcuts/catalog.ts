@@ -2,6 +2,8 @@ import type { ShortcutScope } from './shortcutsRegistry';
 
 export interface ShortcutDefinition {
   keys: string | string[];
+  displayKeys?: string[];
+  electronOnly?: boolean;
   scope?: ShortcutScope;
   priority?: number;
   allowInInputs?: boolean;
@@ -42,6 +44,8 @@ export const shortcuts = {
   },
   'global.openCanvasTab': {
     keys: ['mod+shift+n'],
+    // Browsers reserve this for a new incognito/private window.
+    electronOnly: true,
     scope: 'channel',
     description: 'Open canvas tab',
     category: 'Navigation',
@@ -66,6 +70,17 @@ export const shortcuts = {
     allowInInputs: true,
     useKey: true,
   },
+  'global.goToRailItem': {
+    keys: ['mod+1', 'mod+2', 'mod+3', 'mod+4', 'mod+5', 'mod+6', 'mod+7', 'mod+8', 'mod+9'],
+    displayKeys: ['mod+1', 'mod+9'],
+    // In a browser these keys switch tabs, so the rail only claims them in Electron.
+    electronOnly: true,
+    scope: 'global',
+    allowInInputs: true,
+    priority: 50,
+    description: 'Jump to sidebar item 1-9',
+    category: 'Navigation',
+  },
   'global.openActivity': {
     keys: 'mod+shift+a',
     scope: 'global',
@@ -76,6 +91,8 @@ export const shortcuts = {
   },
   'global.openThreads': {
     keys: 'mod+shift+t',
+    // Browsers reserve this for "reopen closed tab".
+    electronOnly: true,
     scope: 'global',
     description: 'Open the Threads view',
     category: 'Navigation',
@@ -102,6 +119,8 @@ export const shortcuts = {
   },
   'global.composeMessage': {
     keys: 'mod+n',
+    // Browsers reserve this for a new window.
+    electronOnly: true,
     scope: 'global',
     description: 'Compose a new message',
     category: 'Navigation',
@@ -112,8 +131,11 @@ export const shortcuts = {
   },
   'recording.start': {
     keys: 'mod+alt+x',
+    // Bound by the Electron main process (RECORDING_SHORTCUT), never by the
+    // renderer — so the combo does not exist in a browser tab.
+    electronOnly: true,
     scope: 'global',
-    description: 'Start recording',
+    description: 'Start or stop recording',
     category: 'Recording',
     priority: 50,
     preventDefault: true,
@@ -155,6 +177,157 @@ export const shortcuts = {
     priority: 50,
     allowInInputs: true,
     useKey: true,
+  },
+  // ===== SDLC HUB =====
+  'sdlc.toggleSidebarDock': {
+    keys: 'mod+\\',
+    scope: 'global',
+    description: 'Dock or undock the hub sidebar',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'sdlc.focusSidebar': {
+    keys: 'mod+shift+s',
+    scope: 'global',
+    description: 'Focus the hub sidebar',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'sdlc.sidebarDown': {
+    keys: ['down', 'j'],
+    scope: 'sdlc-sidebar',
+    description: 'Next item in the sidebar',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'sdlc.sidebarUp': {
+    keys: ['up', 'k'],
+    scope: 'sdlc-sidebar',
+    description: 'Previous item in the sidebar',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'sdlc.focusTickets': {
+    keys: 'mod+shift+k',
+    scope: 'global',
+    description: 'Focus the ticket list',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'sdlc.focusFinder': {
+    keys: 'mod+shift+e',
+    scope: 'global',
+    description: 'Focus the artifact browser',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.down': {
+    keys: ['down', 'j'],
+    scope: 'sdlc-finder',
+    description: 'Next item',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.up': {
+    keys: ['up', 'k'],
+    scope: 'sdlc-finder',
+    description: 'Previous item',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.into': {
+    keys: ['right', 'l'],
+    scope: 'sdlc-finder',
+    description: 'Go into folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.out': {
+    keys: ['left', 'h'],
+    scope: 'sdlc-finder',
+    description: 'Back to parent folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.open': {
+    keys: 'enter',
+    scope: 'sdlc-finder',
+    description: 'Open without leaving this level',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.rename': {
+    keys: 'r',
+    scope: 'sdlc-finder',
+    description: 'Rename folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.preview': {
+    keys: 'shift+enter',
+    scope: 'sdlc-finder',
+    description: 'Preview artifact',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.closePreview': {
+    keys: 'escape',
+    scope: 'global',
+    description: 'Close the artifact preview',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.openInWindow': {
+    keys: 'mod+enter',
+    scope: 'sdlc-finder',
+    description: 'Open artifact in a new window',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'finder.newFolder': {
+    keys: 'n',
+    scope: 'sdlc-finder',
+    description: 'New folder here',
+    category: 'SDLC',
+  },
+  'finder.newArtifact': {
+    keys: 'shift+n',
+    scope: 'sdlc-finder',
+    description: 'New artifact here',
+    category: 'SDLC',
+  },
+  'finder.discuss': {
+    keys: 'd',
+    scope: 'sdlc-finder',
+    description: "Open the folder's conversations",
+    category: 'SDLC',
+  },
+  'finder.trackDiscuss': {
+    keys: 'shift+d',
+    scope: 'sdlc-finder',
+    description: "Open the track's conversations",
+    category: 'SDLC',
+  },
+  'tickets.down': {
+    keys: ['down', 'j'],
+    scope: 'sdlc-tickets',
+    description: 'Next ticket',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'tickets.up': {
+    keys: ['up', 'k'],
+    scope: 'sdlc-tickets',
+    description: 'Previous ticket',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'tickets.open': {
+    keys: 'enter',
+    scope: 'sdlc-tickets',
+    description: 'Open ticket',
+    category: 'SDLC',
+    preventDefault: true,
   },
   // ===== SIDEBAR NAVIGATION =====
   'sidebar.resizeLeft': {
@@ -265,6 +438,7 @@ export const shortcuts = {
 
   // ===== COMPOSER SHORTCUTS =====
   'composer.attach': {
+    // Not mod+u: that is TipTap's underline binding inside the composer.
     keys: 'mod+o',
     scope: 'composer',
     allowInInputs: true,

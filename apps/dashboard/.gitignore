@@ -2,3 +2,10 @@
 
 # Local-only component inventory (served by Vite at /component-gallery/)
 component-gallery/
+
+# On-device embedding model weights — vendored by `pnpm fetch-model`, not committed.
+# See docs/ON_DEVICE_INTENT.md §5.1.
+public/models/
+
+# Throwaway worker smoke page (no auth needed) — not part of the app
+intent-test.html

@@ -27,7 +27,7 @@ export function LibraryIconTile({
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-normal shadow-sm',
+        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-medium shadow-sm',
         TILE_SIZE[size],
 
         color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
@@ -66,9 +66,16 @@ export interface LibraryCardProps {
   testId?: string;
   icon: ReactNode;
   name: string;
-  meta?: string | undefined;
+  meta?: ReactNode | string | undefined;
   statusDot?: ReactNode;
   description?: string | undefined;
+  /**
+   * Replaces the description line when a tab needs more than text there — the
+   * apps tab puts an avatar and the creator's name on it. A slot rather than
+   * widening `description` to ReactNode: the description renders inside a <p>
+   * with truncation, which is wrong markup for an element containing an avatar.
+   */
+  footer?: ReactNode;
   dimmed?: boolean;
 }
 
@@ -80,6 +87,7 @@ export function LibraryCard({
   meta,
   statusDot,
   description,
+  footer,
   dimmed = false,
 }: LibraryCardProps): ReactElement {
   return (
@@ -98,15 +106,21 @@ export function LibraryCard({
             {name}
           </span>
           {meta ? (
-            <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
-              {meta}
-            </span>
+            typeof meta === 'string' ? (
+              <span className='shrink-0 whitespace-nowrap text-xs leading-[22px] text-foreground/80 opacity-70'>
+                {meta}
+              </span>
+            ) : (
+              meta
+            )
           ) : null}
           {statusDot}
         </div>
-        <p className='truncate text-sm leading-5 text-foreground/60'>
-          {description || 'No description added'}
-        </p>
+        {footer ?? (
+          <p className='truncate text-sm leading-5 text-foreground/60'>
+            {description || 'No description added'}
+          </p>
+        )}
       </div>
     </Link>
   );

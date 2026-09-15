@@ -3,8 +3,8 @@ import { Staroflife } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawSkillFiles } from '@/hooks/useClawSkills';
-import { ProseBox } from '../../primitives/ProseBox';
-import { SectionHeading, Separator } from '../../primitives/Section';
+import { ScrollFadeBox } from '../../primitives/ProseBox';
+import { SectionHeading } from '../../primitives/Section';
 import { SkillFileTree } from './SkillFileTree';
 import {
   buildSkillFileTree,
@@ -23,29 +23,6 @@ const SKILL_MD_NODE: SkillTreeFile = {
   path: SKILL_MD,
   fileId: null,
 };
-
-const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-});
-
-function formatDate(value: string | undefined): string {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? '—' : DATE_FORMAT.format(parsed);
-}
-
-const MetaRow = ({ label, children }: { label: string; children: ReactNode }): ReactElement => (
-  <div className='flex h-7 w-full items-center justify-between gap-3'>
-    <span className='shrink-0 text-sm font-medium leading-[1.2] text-muted-foreground'>
-      {label}
-    </span>
-    <span className='min-w-0 truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-      {children}
-    </span>
-  </div>
-);
 
 const Body = ({ children }: { children: string }): ReactElement => (
   <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
@@ -111,10 +88,17 @@ export function SkillDetailPanel({
           </span>
           <div className='flex min-w-0 flex-col gap-1.5 py-px'>
             <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
-              {entry.label}
+              /{entry.label}
             </span>
             <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-              {entry.scope === 'global' ? 'Global' : 'Personal'}
+              Created by{' '}
+              {email ? (
+                <a href={`mailto:${email}`} className='underline underline-offset-2'>
+                  {entry.ownerName ?? email}
+                </a>
+              ) : (
+                <span className='underline underline-offset-2'>{entry.ownerName ?? 'Unknown'}</span>
+              )}
             </span>
           </div>
         </div>
@@ -129,7 +113,7 @@ export function SkillDetailPanel({
             'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
             selected
               ? 'border-border bg-card text-foreground hover:bg-muted'
-              : 'border-border bg-primary text-primary-foreground hover:bg-primary/90',
+              : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
           )}
         >
           {selected ? 'Remove' : 'Add'}
@@ -143,37 +127,6 @@ export function SkillDetailPanel({
       )}
 
       <div className='flex w-full flex-col gap-4'>
-        <section className='flex w-full flex-col gap-3'>
-          <SectionHeading label='Details' />
-          <div className='flex w-full flex-col gap-2'>
-            <MetaRow label='Owner'>{entry.ownerName ?? '—'}</MetaRow>
-            <MetaRow label='Contact'>
-              {email ? (
-                <a href={`mailto:${email}`} className='underline underline-offset-2'>
-                  {email}
-                </a>
-              ) : (
-                '—'
-              )}
-            </MetaRow>
-            <MetaRow label='Created'>{formatDate(entry.skill.createdAt)}</MetaRow>
-            <MetaRow label='Size'>{entry.skill.content.length.toLocaleString()} characters</MetaRow>
-          </div>
-        </section>
-
-        <Separator />
-
-        <section className='flex w-full flex-col gap-4'>
-          <SectionHeading label='Instructions' />
-          {entry.skill.content ? (
-            <ProseBox height={PANE_HEIGHT}>{entry.skill.content}</ProseBox>
-          ) : (
-            <Muted>This skill has no instructions yet.</Muted>
-          )}
-        </section>
-
-        <Separator />
-
         <section className='flex w-full flex-col gap-4'>
           <SectionHeading label='Files' />
 
@@ -194,23 +147,22 @@ export function SkillDetailPanel({
                 />
               </div>
 
-              <div
-                className='min-w-0 flex-1 overflow-auto rounded-2xl border border-border bg-card p-4'
-                style={{ height: PANE_HEIGHT }}
-              >
-                {!isSkillMd && fileContent.loading ? (
-                  <div className='flex flex-col gap-2'>
-                    <Skeleton className='h-4 w-full' />
-                    <Skeleton className='h-4 w-4/5' />
-                    <Skeleton className='h-4 w-2/3' />
-                  </div>
-                ) : !isSkillMd && fileContent.isError ? (
-                  <Muted>Couldn&apos;t load {openFile.name}.</Muted>
-                ) : preview ? (
-                  <Body>{preview}</Body>
-                ) : (
-                  <Muted>{openFile.name} is empty.</Muted>
-                )}
+              <div className='min-w-0 flex-1'>
+                <ScrollFadeBox height={PANE_HEIGHT} resetKeys={[preview, openFile.path]}>
+                  {!isSkillMd && fileContent.loading ? (
+                    <div className='flex flex-col gap-2'>
+                      <Skeleton className='h-4 w-full' />
+                      <Skeleton className='h-4 w-4/5' />
+                      <Skeleton className='h-4 w-2/3' />
+                    </div>
+                  ) : !isSkillMd && fileContent.isError ? (
+                    <Muted>Couldn&apos;t load {openFile.name}.</Muted>
+                  ) : preview ? (
+                    <Body>{preview}</Body>
+                  ) : (
+                    <Muted>{openFile.name} is empty.</Muted>
+                  )}
+                </ScrollFadeBox>
               </div>
             </div>
           )}

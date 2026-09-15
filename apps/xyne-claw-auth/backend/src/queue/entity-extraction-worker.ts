@@ -12,6 +12,7 @@
  */
 
 import { Worker, type Job } from "bullmq";
+import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -58,7 +59,7 @@ export function initEntityExtractionWorker(): Worker<EntityExtractionJobData> {
       jobId: job?.id,
       runId: job?.data?.runId,
       attemptsMade: job?.attemptsMade,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     void markFailed(job?.data?.runId, err, job?.attemptsMade ?? 0, job?.opts?.attempts);
   });
@@ -92,7 +93,7 @@ async function markFailed(
   } catch (updateErr) {
     logger.error("[entity-extraction] could not mark run failed", {
       runId,
-      err: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      err: errMsg(updateErr),
     });
   }
 }

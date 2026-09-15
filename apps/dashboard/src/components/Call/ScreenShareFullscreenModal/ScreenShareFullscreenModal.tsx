@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { Minimize2 } from 'lucide-react';
 import {
   TransformWrapper,
   TransformComponent,
@@ -142,7 +142,7 @@ export function ScreenShareFullscreenModal({
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       className={cn(
-        'fixed inset-0 z-50 bg-black/95 backdrop-blur-sm',
+        'fixed inset-0 z-[80] bg-black',
         !isDrawingEnabled && 'cursor-grab active:cursor-grabbing',
       )}
       onClick={handleBackdropClick}
@@ -165,7 +165,7 @@ export function ScreenShareFullscreenModal({
         ref={closeButtonRef}
         onClick={onClose}
         className={cn(
-          'absolute top-4 right-4 z-50',
+          'absolute top-4 right-4 z-10',
           'w-10 h-10 rounded-full',
           'bg-black/50 hover:bg-black/70',
           'border border-white/20',
@@ -178,13 +178,13 @@ export function ScreenShareFullscreenModal({
         data-track-category='CALLS'
         data-track-name='Close_ScreenShare_Fullscreen'
       >
-        <X className='w-5 h-5' />
+        <Minimize2 className='w-5 h-5' />
       </button>
 
       {/* Participant Name Label */}
       <div
         className={cn(
-          'absolute top-4 left-4 z-50',
+          'absolute top-4 left-4 z-10',
           'bg-black/50 backdrop-blur-sm',
           'rounded-lg px-4 py-2',
           'border border-white/10',
@@ -210,7 +210,7 @@ export function ScreenShareFullscreenModal({
       >
         <TransformComponent wrapperClass='!w-full !h-full'>
           <div
-            className='flex items-center justify-center px-4 pt-6 pb-24'
+            className='flex items-center justify-center'
             style={{ width: '100vw', height: '100vh' }}
           >
             <VideoTrack trackRef={trackRef} className='max-w-full max-h-full object-contain' />
@@ -227,7 +227,7 @@ export function ScreenShareFullscreenModal({
       {/* Hint Text - Positioned at top center, below the participant label */}
       <div
         className={cn(
-          'absolute top-16 left-1/2 -translate-x-1/2 z-50',
+          'absolute top-16 left-1/2 -translate-x-1/2 z-10',
           'bg-black/50 backdrop-blur-sm',
           'rounded-full px-4 py-2',
           'border border-white/10',

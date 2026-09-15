@@ -35,6 +35,7 @@ import {
   type ToolInvocation,
   type ContextItem,
   type ContextSearchType,
+  type AttachedContextRef,
   pollChatMessages,
   chatAttachmentDownloadUrl,
   sendChatMessage,
@@ -457,7 +458,7 @@ export function ErrorPipelinePageV3({ userId }: { userId: string }) {
   const removeFile = useCallback((idx: number) => {
     setPendingFiles((prev) => {
       const removed = prev[idx];
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return prev.filter((_, i) => i !== idx);
     });
   }, []);
@@ -495,10 +496,12 @@ export function ErrorPipelinePageV3({ userId }: { userId: string }) {
       if (pendingFiles.length) {
         const metas = await uploadChatAttachments("doctor-agent", userId, pendingFiles.map((p) => p.file));
         attachmentIds = metas.map((m) => m.id);
-        pendingFiles.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+        pendingFiles.forEach((p) => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
         setPendingFiles([]);
       }
-      const attachedContext = selectedContext.map((c) => ({ type: c.type, id: c.id, title: c.title }));
+      const attachedContext: AttachedContextRef[] = selectedContext
+        .filter((c) => c.type !== "repository")
+        .map((c) => ({ type: c.type, id: c.id, title: c.title } as AttachedContextRef));
       setSelectedContext([]);
       // Ensure the private fork exists (clones the run's session on first call)
       // and talk to IT — never the shared pipeline conversation.

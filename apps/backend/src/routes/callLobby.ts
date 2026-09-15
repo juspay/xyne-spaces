@@ -24,6 +24,11 @@ const JOINABLE_STATUSES: CallStatus[] = [
 
 const router = Router();
 
+// This routing probe is deliberately not behind resolveCallSession. It must
+// remain opaque and must authenticate against the call workspace's own cookie,
+// not against the external-participant session.
+router.post('/:externalId/resolve-internal', callLobbyController.resolveInternal);
+
 // ---------------------------------------------------------------------------
 // Layer 1: resolveCallSession
 //
@@ -150,6 +155,5 @@ router.get(
   requireCallParticipant,
   callLobbyController.getRecordingState
 );
-router.get('/:externalId/invite-url', resolveCallSession, callLobbyController.getInviteUrl);
 
 export default router;

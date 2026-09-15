@@ -178,7 +178,7 @@ const UserGroupsScreen = (): ReactElement => {
     <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md flex flex-col'>
       {/* Header */}
       <div className='shrink-0'>
-        <div className='mx-auto flex w-full max-w-[832px] flex-col gap-5 px-4 pt-5'>
+        <div className='flex w-full flex-col gap-5 px-6 pt-5'>
           <div className='flex items-center gap-5'>
             <div className='flex min-w-0 flex-1 flex-col gap-1'>
               <h2 className='text-base font-bold leading-7 tracking-[-0.32px] text-foreground'>
@@ -221,7 +221,7 @@ const UserGroupsScreen = (): ReactElement => {
 
       {/* User Groups */}
       <div className='flex-1 overflow-y-auto'>
-        <div className='mx-auto w-full max-w-[832px] px-4 pb-8 pt-8'>
+        <div className='w-full px-6 pb-8 pt-8'>
           {filteredUserGroups.length > 0 ? (
             <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
               {filteredUserGroups.map((userGroup: ZeroUserGroup) => (

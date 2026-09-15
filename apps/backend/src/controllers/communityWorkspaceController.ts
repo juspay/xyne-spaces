@@ -16,6 +16,7 @@ import { channelService } from '@/services/channelService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
+import { setOnboardingCookie } from '@/utils/onboardingCookie';
 
 type PendingAuth = {
   userData: {
@@ -125,7 +126,7 @@ export class CommunityWorkspaceController {
       });
       res.cookie('xyne_last_workspace', workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
@@ -133,15 +134,10 @@ export class CommunityWorkspaceController {
           maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
-      if (joinResult.isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict' as const,
-          path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
-      }
+      setOnboardingCookie(res, Boolean(joinResult.isNewUser), {
+        secure: isProduction,
+        sameSite: 'strict' as const,
+      });
       if (pendingAuth.tokenKey) {
         await redisService.del(
           `${config.pendingOAuthTokens.redisKeyPrefix}${pendingAuth.tokenKey}`,
@@ -370,7 +366,7 @@ export class CommunityWorkspaceController {
 
     try {
       const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
       const session = await this.userSessionService.createSession({
         userId,

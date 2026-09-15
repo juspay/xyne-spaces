@@ -3,14 +3,12 @@ import type {
   AdminAccessFlags,
   AdminDateRange,
   AdminOrgScope,
-  AdminRole,
   AdminScheduledJob,
   AgentRequestItem,
   AdminMcpServerSummary,
   AgentUsageStat,
   AuditLogEntry,
   CredentialField,
-  GrantableRole,
   McpGlobalCredsDetail,
   McpPublishRequest,
   WorkflowGlobalRequest,
@@ -27,36 +25,6 @@ export async function checkAdminAccess(userId: string): Promise<AdminAccessFlags
   } catch {
     return { isAdmin: false, hasSearchEvalAccess: false };
   }
-}
-
-export async function listAdminRoles(
-  userId: string,
-  role: GrantableRole = 'CLAW_ADMIN',
-): Promise<AdminRole[]> {
-  return clawApiRequest<AdminRole[]>(`/admin/roles?role=${encodeURIComponent(role)}`, { userId });
-}
-
-export async function grantAdminRole(
-  userId: string,
-  userIdOrEmail: string,
-  role: GrantableRole,
-): Promise<AdminRole> {
-  return clawApiRequest<AdminRole>('/admin/roles', {
-    userId,
-    method: 'POST',
-    body: JSON.stringify({ userIdOrEmail, role }),
-  });
-}
-
-export async function revokeAdminRole(
-  userId: string,
-  targetUserId: string,
-  role: GrantableRole,
-): Promise<void> {
-  await clawApiRequest<unknown>(
-    `/admin/roles/${encodeURIComponent(targetUserId)}?role=${encodeURIComponent(role)}`,
-    { userId, method: 'DELETE' },
-  );
 }
 
 export async function listPendingRequests(

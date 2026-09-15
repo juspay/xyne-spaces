@@ -62,6 +62,8 @@ COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw/tsconfig.json apps/xyne-claw/
 COPY apps/xyne-claw/src           apps/xyne-claw/src
 COPY apps/xyne-claw/skills        apps/xyne-claw/skills
+COPY apps/xyne-claw/design-skills apps/xyne-claw/design-skills
+COPY apps/xyne-claw/understanding-skills apps/xyne-claw/understanding-skills
 COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
 # @xyne/storage ships built output (main: dist/index.js); --ignore-scripts
 # skipped its prepare hook, so build it explicitly before the typecheck.

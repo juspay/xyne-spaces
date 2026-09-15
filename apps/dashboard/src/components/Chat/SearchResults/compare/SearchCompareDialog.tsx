@@ -71,6 +71,8 @@ export function SearchCompareDialog({
           <div
             className='absolute inset-0 bg-background/70 backdrop-blur-sm'
             onClick={onClose}
+            data-track-category='SEARCH_COMPARE'
+            data-track-name='CLOSE_COMPARE_BACKDROP'
             aria-hidden
           />
 
@@ -102,6 +104,8 @@ export function SearchCompareDialog({
               </div>
               <button
                 onClick={onClose}
+                data-track-category='SEARCH_COMPARE'
+                data-track-name='CLOSE_COMPARE_DIALOG'
                 title='Close'
                 className='ml-auto shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted active:scale-[0.96] transition'
               >
@@ -162,6 +166,8 @@ export function SearchCompareDialog({
                           </span>
                           <button
                             onClick={() => onToggleRelevant(r.id)}
+                            data-track-category='SEARCH_COMPARE'
+                            data-track-name='TOGGLE_RESULT_RELEVANT'
                             title={
                               isRelevant ? 'Unmark relevant' : 'Mark as a correct / relevant result'
                             }
@@ -178,6 +184,8 @@ export function SearchCompareDialog({
                           </button>
                           <button
                             onClick={() => onRemove(r.id)}
+                            data-track-category='SEARCH_COMPARE'
+                            data-track-name='REMOVE_FROM_COMPARISON'
                             title='Remove from comparison'
                             className='ml-auto shrink-0 p-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.96] transition'
                           >

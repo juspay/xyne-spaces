@@ -82,6 +82,16 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
       description: 'Code generation and editing',
       icon: Code2,
     },
+    openrouter: {
+      name: 'OpenRouter',
+      description: 'Route across many model providers',
+      icon: Plug,
+    },
+    litellm: {
+      name: 'LiteLLM',
+      description: 'OpenAI-compatible model gateway',
+      icon: Search,
+    },
   };
 
 const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex'];

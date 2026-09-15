@@ -24,13 +24,22 @@ export const DisableModal = ({
       description='Disabling stops the Twin from responding to mentions and pauses nightly learning. Your approved memories, Persona files, and review history remain available.'
       footer={
         <>
-          <Button variant='ghost' size='sm' onClick={onClose} disabled={disableMutation.isPending}>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={onClose}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_DISABLE_DIGITAL_TWIN'
+            disabled={disableMutation.isPending}
+          >
             Cancel
           </Button>
           <Button
             variant='destructive'
             size='sm'
             onClick={submit}
+            data-track-category='Claw Agents'
+            data-track-name='DISABLE_DIGITAL_TWIN'
             loading={disableMutation.isPending}
           >
             Disable

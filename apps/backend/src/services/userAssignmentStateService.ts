@@ -3,6 +3,10 @@ import { logger } from '@/utils/logger';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { redisService } from './redisService';
+import { activityService } from '@/services/activity/activityService';
+import { notificationService } from '@/services/notificationService';
+import { ActivityClassification } from '@xyne/shared';
+import { v4 as uuidv4 } from 'uuid';
 import type { UpdateUserPresenceInput } from '@/types/database';
 
 export class UserAssignmentStateService {
@@ -122,6 +126,9 @@ export class UserAssignmentStateService {
         }
       }
 
+      // Notify subscribers (user_group_mappings.isNotified) of all user groups
+      await this.notifySubscribersOfPause(userId, userGroupIds, unavailableUntil);
+
       logger.info(
         `⏸️ [ASSIGNMENT-STATE] User ${userId} set unavailable for assignment in ${userGroupIds.length} group(s) until ${new Date(unavailableUntil).toISOString()}${reassignGroups.length ? `; queued reassignment for ${reassignGroups.length} group(s)` : ''}`
       );
@@ -129,6 +136,68 @@ export class UserAssignmentStateService {
       return userGroupIds;
     } catch (error) {
       logger.error(`❌ [ASSIGNMENT-STATE] Error setting user unavailable:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Hand off a member's open tickets in one group after an admin deactivates them.
+   * Called from assignmentConfig.batchUpdate's post-commit hook, so every lookup here
+   * reads committed rows. Same policy as the member pause flow: the group must allow it,
+   * and the member must already be inactive for assignment.
+   * @param userId - Member being deactivated
+   * @param userGroupId - Group whose open tickets should be handed off
+   * @param workspaceId - Caller's workspace, used to scope the group lookup
+   */
+  async reassignMemberTicketsInGroup(
+    userId: string,
+    userGroupId: string,
+    workspaceId: string
+  ): Promise<{ scheduled: boolean; reason?: string }> {
+    try {
+      const group = await this.prisma.userGroup.findFirst({
+        where: { id: userGroupId, workspaceId },
+        select: { id: true, reassignOnUnavailable: true },
+      });
+
+      if (!group) {
+        return { scheduled: false, reason: 'GROUP_NOT_FOUND' };
+      }
+
+      if ((group.reassignOnUnavailable ?? false) !== true) {
+        return { scheduled: false, reason: 'REASSIGNMENT_NOT_ALLOWED' };
+      }
+
+      const membership = await this.prisma.userGroupMapping.findFirst({
+        where: { userId, userGroupId },
+        select: { id: true },
+      });
+
+      if (!membership) {
+        return { scheduled: false, reason: 'NOT_A_GROUP_MEMBER' };
+      }
+
+      // Only hand off for a member who has actually stopped taking new work, so the
+      // method cannot redistribute an active member's tickets. A missing row counts as
+      // inactive - the assignment engine treats it that way.
+      const state = await this.prisma.userAssignmentState.findFirst({
+        where: { userId, userGroupId },
+        select: { isActiveForAssignment: true },
+      });
+
+      if (state?.isActiveForAssignment === true) {
+        return { scheduled: false, reason: 'MEMBER_STILL_ACTIVE' };
+      }
+
+      await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
+
+      logger.info(
+        `⏳ [ASSIGNMENT-STATE] Admin-initiated reassignment queued for user ${userId} in group ${userGroupId}`
+      );
+
+      return { scheduled: true };
+    } catch (error) {
+      logger.error(`❌ [ASSIGNMENT-STATE] Error scheduling admin reassignment:`, error);
       throw error;
     }
   }
@@ -252,6 +321,9 @@ export class UserAssignmentStateService {
       // Delete Redis backup
       await redisService.deleteAssignmentStateBackup(userId);
 
+      // Notify subscribers (user_group_mappings.isNotified) that user is available again
+      await this.notifySubscribersOfResume(userId, userGroupIds);
+
       logger.info(
         `▶️ [ASSIGNMENT-STATE] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`
       );
@@ -259,6 +331,158 @@ export class UserAssignmentStateService {
     } catch (error) {
       logger.error(`❌ [ASSIGNMENT-STATE] Error setting user available:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Get all subscribers for given user groups — members with
+   * user_group_mappings.isNotified = true. Replaces the pre-role-framework
+   * `getManagersForUserGroups` (responsibility === MANAGER), which was removed
+   * when responsibility moved to the roles table.
+   * @param userGroupIds - Array of user group IDs
+   * @returns Array of unique subscriber user IDs
+   */
+  private async getSubscribersForUserGroups(userGroupIds: string[]): Promise<string[]> {
+    if (userGroupIds.length === 0) return [];
+
+    try {
+      const subscriberMappings = await this.prisma.userGroupMapping.findMany({
+        where: {
+          userGroupId: { in: userGroupIds },
+          isNotified: true,
+        },
+        select: { userId: true },
+      });
+
+      return [...new Set(subscriberMappings.map((m) => m.userId))];
+    } catch (error) {
+      logger.error(`❌ [ASSIGNMENT-STATE] Error getting subscribers for user groups:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Notify subscribers when a user pauses from ticket assignment: an
+   * Activities-tab entry (matching AssignmentPauseActivity's expected shape)
+   * plus a desktop/mobile push via notificationService.
+   * @param userId - User ID who paused
+   * @param userGroupIds - User groups the user belongs to
+   * @param unavailableUntil - Timestamp when user will be available again
+   */
+  private async notifySubscribersOfPause(
+    userId: string,
+    userGroupIds: string[],
+    unavailableUntil: number
+  ): Promise<void> {
+    try {
+      const subscriberIds = await this.getSubscribersForUserGroups(userGroupIds);
+
+      if (subscriberIds.length === 0) {
+        logger.debug(`ℹ️ [ASSIGNMENT-STATE] No subscribers found for user groups: ${userGroupIds.join(', ')}`);
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, email: true, workspaceId: true },
+      });
+
+      const userName = user?.name || user?.email || 'A team member';
+      const availableAt = new Date(unavailableUntil).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+
+      const recipientIds = subscriberIds.filter((subscriberId) => subscriberId !== userId); // Don't notify the user themselves
+
+      const activities = recipientIds.map((subscriberId) => ({
+        id: uuidv4(),
+        userId: subscriberId,
+        actorAction: 'paused_from_assignment',
+        actionSource: 'assignment',
+        actionSourceId: userId,
+        actorId: userId,
+        classification: ActivityClassification.FYI,
+      }));
+
+      if (activities.length > 0) {
+        await activityService.createActivities(activities);
+        logger.info(
+          `📢 [ASSIGNMENT-STATE] Notified ${activities.length} subscriber(s) that ${userName} paused from ticket assignment until ${availableAt}`
+        );
+      }
+
+      if (user?.workspaceId) {
+        await notificationService.sendAssignmentPauseNotification(
+          userId,
+          userName,
+          user.workspaceId,
+          recipientIds,
+          unavailableUntil,
+        );
+      }
+    } catch (error) {
+      // Don't throw - notification failure shouldn't break the pause action
+      logger.error(`❌ [ASSIGNMENT-STATE] Error notifying subscribers of pause:`, error);
+    }
+  }
+
+  /**
+   * Notify subscribers when a user resumes from ticket assignment: an
+   * Activities-tab entry plus a desktop/mobile push via notificationService.
+   * @param userId - User ID who resumed
+   * @param userGroupIds - User group IDs the user belongs to
+   */
+  private async notifySubscribersOfResume(
+    userId: string,
+    userGroupIds: string[]
+  ): Promise<void> {
+    try {
+      const subscriberIds = await this.getSubscribersForUserGroups(userGroupIds);
+
+      if (subscriberIds.length === 0) {
+        logger.debug(`ℹ️ [ASSIGNMENT-STATE] No subscribers found for user groups: ${userGroupIds.join(', ')}`);
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true, email: true, workspaceId: true },
+      });
+
+      const userName = user?.name || user?.email || 'A team member';
+      const recipientIds = subscriberIds.filter((subscriberId) => subscriberId !== userId); // Don't notify the user themselves
+
+      const activities = recipientIds.map((subscriberId) => ({
+        id: uuidv4(),
+        userId: subscriberId,
+        actorAction: 'resumed_from_assignment',
+        actionSource: 'assignment',
+        actionSourceId: userId,
+        actorId: userId,
+        classification: ActivityClassification.FYI,
+      }));
+
+      if (activities.length > 0) {
+        await activityService.createActivities(activities);
+        logger.info(
+          `📢 [ASSIGNMENT-STATE] Notified ${activities.length} subscriber(s) that ${userName} resumed from ticket assignment`
+        );
+      }
+
+      if (user?.workspaceId) {
+        await notificationService.sendAssignmentResumeNotification(
+          userId,
+          userName,
+          user.workspaceId,
+          recipientIds,
+        );
+      }
+    } catch (error) {
+      // Don't throw - notification failure shouldn't break the resume action
+      logger.error(`❌ [ASSIGNMENT-STATE] Error notifying subscribers of resume:`, error);
     }
   }
 }

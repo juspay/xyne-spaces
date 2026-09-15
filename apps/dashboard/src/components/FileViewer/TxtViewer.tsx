@@ -30,6 +30,7 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
           className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
           data-track-category='FileViewer'
           data-track-name='RetryLoadTxt'
+          data-ph-capture-attribute-track-id='retry_load_txt'
         >
           Try Again
         </button>
@@ -254,7 +255,11 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source, searchable }) => {
                 </span>
                 <span className='flex-1 whitespace-pre-wrap break-words'>
                   {/* Non-breaking space keeps empty lines from collapsing */}
-                  <HighlightedText text={line} ranges={matchesByRow.get(index)} fallback='\u00A0' />
+                  <HighlightedText
+                    text={line}
+                    ranges={matchesByRow.get(index)}
+                    fallback={'\u00A0'}
+                  />
                 </span>
               </div>
             ))}

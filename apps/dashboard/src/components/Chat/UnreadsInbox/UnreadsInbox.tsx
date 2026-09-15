@@ -67,7 +67,12 @@ const UnreadsInbox = (): ReactElement => {
         isUnread = true;
       }
 
-      return isUnread && !isDeskChannelType(c.type) && c.type !== ChannelType.SUPPORT;
+      return (
+        isUnread &&
+        !isDeskChannelType(c.type) &&
+        c.type !== ChannelType.SUPPORT &&
+        c.type !== ChannelType.SDLC
+      );
     });
   }, [
     starred,
@@ -145,6 +150,8 @@ const UnreadsInbox = (): ReactElement => {
                               e.stopPropagation();
                               handleMarkAsRead(channel.id);
                             }}
+                            data-track-category='UNREADS_INBOX'
+                            data-track-name='MARK_AS_READ'
                           >
                             <Check className='w-3.5 h-3.5' />
                           </Button>

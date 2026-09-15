@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { websocketService } from '../services/clients/socketClient';
@@ -91,7 +92,11 @@ export function useActivityTracking() {
           websocketService.emit(WS_ACTIVITY_EVENT, event);
         }
       } catch (error) {
-        console.error('[ActivityTracking] Failed to track event:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[ActivityTracking] Failed to track event:'),
+          error: error,
+        });
       }
     },
     [currentUser?.id, buildActivityEvent],

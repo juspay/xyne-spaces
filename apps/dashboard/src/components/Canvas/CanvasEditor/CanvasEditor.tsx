@@ -12,10 +12,14 @@ import {
   useCreateBlockNote,
   SuggestionMenuController,
   FormattingToolbarController,
+  FilePanelController,
+  LinkToolbarController,
   getDefaultReactSlashMenuItems,
   DefaultReactSuggestionItem,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block';
+import { getMathSlashMenuItems } from '@blocknote/math-block';
 import {
   InlineContentSchema,
   PartialBlock,
@@ -32,6 +36,10 @@ import { getWhiteboardSlashMenuItems } from 'blocknote-layout-extensions';
 import { getMentionSuggestionMenuItems, insertGroupMention } from 'blocknote-layout-extensions';
 import { asBlockNoteEditorForView } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
+import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
+import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
+import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
+import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
   canvasSchema,
   canvasTableOptions,
@@ -72,9 +80,14 @@ import { useSelector } from '@xstate/react';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useCanvasEditorMentionSharing } from '@/hooks/useCanvasEditorMentionSharing';
 import { CanvasCommentsPanel } from '../CanvasCommentsPanel/CanvasCommentsPanel';
+import { AnimatePresence } from 'framer-motion';
+
 import { CanvasInlineCommentThread } from '../CanvasInlineCommentThread/CanvasInlineCommentThread';
 import { createCanvasFormattingToolbar } from '../CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
+import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
+import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 
 const canvasDictionary = {
   ...en,
@@ -215,20 +228,27 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       if (!editor) return [];
       const editorTyped = asBlockNoteEditorForView(editor);
       const whiteboardItems = getWhiteboardSlashMenuItems(editorTyped);
-      return [...whiteboardItems];
+      const mathItems = getMathSlashMenuItems(editorTyped);
+      const diagramItems = getDiagramSlashMenuItems(editorTyped);
+      return [...whiteboardItems, ...mathItems, ...diagramItems];
     }, [editor]);
 
-    // Get slash menu items with custom blocks
+    // Every slash item, each already showing the key that reaches it.
+    const allSlashItems = useMemo(() => {
+      if (!editor) return [];
+      const defaultItems = getDefaultReactSlashMenuItems(asBlockNoteEditorForView(editor));
+      return withBlockShortcutBadges(
+        withHeadingsTogether([...withUnifiedUpload(defaultItems), ...customSlashItems]),
+      );
+    }, [editor, customSlashItems]);
+
     const getSlashMenuItems = useCallback(
-      (query: string): Promise<DefaultReactSuggestionItem[]> => {
-        if (!editor) return Promise.resolve([]);
-        const defaultItems = getDefaultReactSlashMenuItems(asBlockNoteEditorForView(editor));
-        return Promise.resolve(
-          filterSuggestionItems([...defaultItems, ...customSlashItems], query),
-        );
-      },
-      [editor, customSlashItems],
+      (query: string): Promise<DefaultReactSuggestionItem[]> =>
+        Promise.resolve(filterSuggestionItems(allSlashItems, query)),
+      [allSlashItems],
     );
+
+    useCanvasBlockShortcuts(editor, allSlashItems);
 
     // Get mention suggestion menu items for '@' trigger – same list as DM/channel: users + user groups
     // Event-based: on mention selection, insert + notify (blockId for activity redirect)
@@ -388,6 +408,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       openCommentsForCurrentBlock,
       focusCommentBlock,
       clearActiveCommentAnchor,
+      finishInlineCommentDraft,
       closeInlineCommentThread,
       applyCommentAnchorStyle,
       removeCommentAnchorStyle,
@@ -398,6 +419,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       initialBlockIdToFocus,
       initialCommentThreadId,
       onOpenCommentCountChange,
+    });
+    const {
+      activeTicketAnchor,
+      isTicketChannelArchived,
+      openTicketForCurrentSelection,
+      closeTicketModal,
+      handleTicketCreated,
+    } = useCanvasTicketEditorBridge({
+      channelId,
+      containerRef,
+      getEditor: getCanvasCommentEditor,
     });
 
     // Expose presentation and comment drawer methods via ref
@@ -530,8 +562,17 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           ...(canvasId && { canvasId }),
           ...(_canvasTitle && { canvasTitle: _canvasTitle }),
           canComment: editable,
+          canCreateTicket: editable && !isTicketChannelArchived,
+          onCreateTicket: openTicketForCurrentSelection,
         }),
-      [_canvasTitle, canvasId, editable, openCommentsForCurrentBlock],
+      [
+        _canvasTitle,
+        canvasId,
+        editable,
+        isTicketChannelArchived,
+        openCommentsForCurrentBlock,
+        openTicketForCurrentSelection,
+      ],
     );
 
     const handleSave = useCallback((): void => {
@@ -567,8 +608,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         onBlurCapture={handleBlurCapture}
         data-testid='canvas-editor'
       >
-        <div className='flex min-h-0 flex-1 overflow-hidden'>
+        <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
+            <CanvasWidthHandles surfaceRef={containerRef} />
             <CanvasMentionContext.Provider value={mentionContextValue}>
               <BlockNoteView
                 editor={asBlockNoteEditorForView(editor)}
@@ -578,30 +620,37 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
                 formattingToolbar={false}
                 tableHandles={editable}
                 slashMenu={false}
+                linkToolbar={false}
+                filePanel={false}
               >
                 <FormattingToolbarController formattingToolbar={canvasFormattingToolbar} />
+                <LinkToolbarController linkToolbar={CanvasLinkToolbar} />
+                <CanvasPastedLinkToolbar />
+                <FilePanelController filePanel={CanvasFilePanel} />
                 <SuggestionMenuController triggerCharacter='/' getItems={getSlashMenuItems} />
                 <SuggestionMenuController triggerCharacter='@' getItems={getMentionItems} />
               </BlockNoteView>
             </CanvasMentionContext.Provider>
           </div>
 
-          {canvasId && isCommentsOpen && (
-            <CanvasCommentsPanel
-              canvasId={canvasId}
-              canvasTitle={_canvasTitle}
-              channelId={channelId}
-              activeBlockId={activeCommentBlockId}
-              activeThreadId={activeCommentThreadId}
-              activeAnchor={activeCommentAnchor}
-              editable={editable}
-              onClose={() => setIsCommentsOpen(false)}
-              onSelectBlock={focusCommentBlock}
-              onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
-              onCreateThreadFailed={removeCommentAnchorStyle}
-            />
-          )}
+          <AnimatePresence>
+            {canvasId && isCommentsOpen && (
+              <CanvasCommentsPanel
+                canvasId={canvasId}
+                canvasTitle={_canvasTitle}
+                channelId={channelId}
+                activeBlockId={activeCommentBlockId}
+                activeThreadId={activeCommentThreadId}
+                activeAnchor={activeCommentAnchor}
+                editable={editable}
+                onClose={() => setIsCommentsOpen(false)}
+                onSelectBlock={focusCommentBlock}
+                onBeforeCreateThread={applyCommentAnchorStyle}
+                onCreateThreadCreated={clearActiveCommentAnchor}
+                onCreateThreadFailed={removeCommentAnchorStyle}
+              />
+            )}
+          </AnimatePresence>
 
           {canvasId && inlineCommentThread && (
             <CanvasInlineCommentThread
@@ -618,11 +667,18 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               editable={editable}
               onClose={closeInlineCommentThread}
               onBeforeCreateThread={applyCommentAnchorStyle}
-              onCreateThreadCreated={clearActiveCommentAnchor}
+              onCreateThreadCreated={finishInlineCommentDraft}
               onCreateThreadFailed={removeCommentAnchorStyle}
             />
           )}
         </div>
+
+        <CanvasTicketCreationFlow
+          anchor={activeTicketAnchor}
+          channelId={channelId}
+          onClose={closeTicketModal}
+          onTicketCreated={handleTicketCreated}
+        />
 
         {/* Presentation Modal */}
         {showPresentation && (
@@ -647,7 +703,12 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         )}
 
         {/* Copy button overlay for code blocks */}
-        <CanvasCodeCopyButton containerRef={containerRef} />
+        {editor && (
+          <CanvasCodeCopyButton
+            containerRef={containerRef}
+            editor={asBlockNoteEditorForView(editor)}
+          />
+        )}
       </div>
     );
   },

@@ -11,19 +11,14 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener);
 };
 
-const getSnapshot = (): SearchMode =>
-  (localStorage.getItem(SEARCH_MODE_KEY) as SearchMode | null) ?? 'popup';
+// The quick-search popup is the only supported mode. Read nothing from storage: a
+// `screen` value written by an older build (the setting used to be user-facing) would
+// otherwise keep routing people to the full-screen palette forever, with no UI left to
+// turn it back off. Forcing it here rather than at each call site means every
+// `searchMode === 'screen'` branch in the tree evaluates false from one place.
+const getSnapshot = (): SearchMode => 'popup';
 
-export const useSearchMode = (): {
-  searchMode: SearchMode;
-  setSearchMode: (mode: SearchMode) => void;
-} => {
+export const useSearchMode = (): { searchMode: SearchMode } => {
   const searchMode = useSyncExternalStore(subscribe, getSnapshot);
-
-  const setSearchMode = (mode: SearchMode): void => {
-    localStorage.setItem(SEARCH_MODE_KEY, mode);
-    listeners.forEach(l => l());
-  };
-
-  return { searchMode, setSearchMode };
+  return { searchMode };
 };

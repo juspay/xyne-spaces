@@ -6,5 +6,5 @@ av>=9.0.0
 # GPU-enabled PyTorch wheels (CUDA 12.1). Switch to cu118 if the node has CUDA 11.8.
 # The extra index URL must come before the package lines so pip resolves +cu121 builds.
 --extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.5.1+cu121
+torch==2.13.0
 torchaudio==2.5.1+cu121

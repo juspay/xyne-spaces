@@ -1,6 +1,13 @@
 import { Fragment, useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
+import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
 import { SectionHeading, Separator } from '../../primitives/Section';
 import { SkillChip } from './SkillChip';
@@ -17,11 +24,6 @@ const SECTIONS = [
   { key: 'personal', label: 'My skills' },
   { key: 'global', label: 'Global skills' },
 ] as const;
-
-function matchesSearch(entry: SkillCatalogEntry, query: string): boolean {
-  if (!query) return true;
-  return `${entry.label} ${entry.slug} ${entry.description}`.toLowerCase().includes(query);
-}
 
 const SkillCard = ({
   entry,
@@ -40,7 +42,7 @@ const SkillCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open skill detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, selected ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
@@ -74,7 +76,7 @@ const SkillCard = ({
       title={`${selected ? 'Remove' : 'Add'} ${entry.label}`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle skill'
-      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {selected ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -112,10 +114,14 @@ export function BrowseSkillsDialog({
 
   const openEntry = catalog.find(entry => entry.id === openId) ?? null;
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const visible = useMemo(
     () =>
-      catalog.filter(entry => matchesSearch(entry, q) && (scope === null || entry.scope === scope)),
+      searchByNameThenDescription(catalog, q, entry => ({
+        name: entry.label,
+        description: entry.description,
+        ...(entry.slug && entry.slug !== entry.label ? { aliases: [entry.slug] as const } : {}),
+      })).filter(entry => scope === null || entry.scope === scope),
     [catalog, q, scope],
   );
 
@@ -136,10 +142,13 @@ export function BrowseSkillsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenId(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setScope(null);
+          setOpenId(null);
+        })
+      }
       title='Browse skills'
       description='Search and select the skills this agent can draw on.'
       testId='browse-skills-dialog'

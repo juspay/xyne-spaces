@@ -2,10 +2,15 @@ import { z } from 'zod';
 import type { StepType } from '../types/step-types';
 import type { AutomationContext } from '../types/context';
 import type { AutomationStepConfig } from '../types/automation-config';
+import type { BranchKey } from '../engine/pause-step';
 import { StepCategory } from '../types/categories';
 
 export interface ControlFlowExecutionContext {
-  walkBranch(steps: AutomationStepConfig[], context: AutomationContext): Promise<void>;
+  walkBranch(
+    steps: AutomationStepConfig[],
+    context: AutomationContext,
+    branchKey: BranchKey,
+  ): Promise<void>;
 }
 
 export enum StepKind {

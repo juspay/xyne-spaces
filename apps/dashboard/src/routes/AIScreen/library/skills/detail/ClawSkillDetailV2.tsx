@@ -43,7 +43,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSkillDetailV2'>
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
-        <div className='sticky top-0 z-10 flex flex-col gap-6 bg-background pb-3 pt-6'>
+        <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
           <div className='flex w-full items-center justify-between gap-4'>
             <button
               type='button'

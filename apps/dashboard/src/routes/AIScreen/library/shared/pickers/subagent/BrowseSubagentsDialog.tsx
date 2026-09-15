@@ -1,6 +1,13 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
+import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
 import { SubagentChip } from './SubagentChip';
 import { SubagentDetailPanel } from './SubagentDetailPanel';
@@ -30,11 +37,6 @@ const RISK_TONE = {
   destructive: 'danger',
 } as const;
 
-function matchesSearch(entry: SubagentCatalogEntry, query: string): boolean {
-  if (!query) return true;
-  return `${entry.name} ${entry.description}`.toLowerCase().includes(query);
-}
-
 const SubagentCard = ({
   entry,
   selected,
@@ -52,7 +54,7 @@ const SubagentCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open subagent detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, selected ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
@@ -85,7 +87,7 @@ const SubagentCard = ({
       title={`${selected ? 'Remove' : 'Add'} ${entry.name}`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle subagent'
-      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {selected ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -125,12 +127,13 @@ export function BrowseSubagentsDialog({
 
   const openEntry = catalog.find(entry => entry.name === openName) ?? null;
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const visible = useMemo(
     () =>
-      catalog.filter(
-        entry => matchesSearch(entry, q) && (source === null || entry.source === source),
-      ),
+      searchByNameThenDescription(catalog, q, entry => ({
+        name: entry.name,
+        description: entry.description,
+      })).filter(entry => source === null || entry.source === source),
     [catalog, q, source],
   );
 
@@ -148,10 +151,13 @@ export function BrowseSubagentsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenName(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setSource(null);
+          setOpenName(null);
+        })
+      }
       title='Browse Subagent'
       description='Search and select the subagents this agent can delegate to.'
       testId='browse-subagents-dialog'

@@ -14,6 +14,7 @@ WORKDIR /repo
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json            packages/shared/
+COPY packages/icons/package.json             packages/icons/
 COPY apps/dashboard/package.json             apps/dashboard/
 COPY apps/dashboard-external/package.json    apps/dashboard-external/
 
@@ -24,10 +25,14 @@ COPY apps/dashboard-external/package.json    apps/dashboard-external/
 # with no sources or tsconfig.json. The explicit build steps after the source
 # COPY below do that work instead.
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts \
-      --filter xyne-spaces-dashboard-external... --filter xyne-spaces-dashboard
+      --filter xyne-spaces-dashboard-external... --filter xyne-spaces-dashboard...
 
 COPY packages/shared packages/shared
 RUN pnpm --filter @xyne/shared run build
+
+# dashboard/src imports @xyne/icons (workspace dep of dashboard), consumed from dist/
+COPY packages/icons packages/icons
+RUN pnpm --filter @xyne/icons run build
 
 # dashboard/src is aliased as @/ in vite.config.ts
 COPY apps/dashboard/src apps/dashboard/src
@@ -44,8 +49,10 @@ ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 # Target domain — overridable at build time with --build-arg
 ARG API_BASE_URL=https://spaces.xyne.juspay.net/api
 ARG CALL_INVITE_BASE_URL=https://call.xyne.juspay.net/external
+ARG INTERNAL_DASHBOARD_BASE_URL=https://spaces.xyne.juspay.net
 ENV VITE_API_BASE_URL=$API_BASE_URL
 ENV VITE_CALL_INVITE_BASE_URL=$CALL_INVITE_BASE_URL
+ENV VITE_INTERNAL_DASHBOARD_BASE_URL=$INTERNAL_DASHBOARD_BASE_URL
 
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN pnpm --filter xyne-spaces-dashboard-external run build

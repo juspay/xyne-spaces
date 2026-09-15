@@ -1,6 +1,13 @@
 import { ReactElement, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
-import { ChevronDown, Plus, Star, Share2, Pencil, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  PlusDefault as Plus,
+  Star,
+  Share02 as Share2,
+  PencilEdit as Pencil,
+  DeleteDustbin01 as Trash2,
+} from '@xyne/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { SavedConfigEntityName } from '@xyne/shared';
@@ -8,9 +15,9 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useViewStar, isViewStarred } from '../../../hooks/useViewStar';
+import { ShareViewDialog } from '../ShareViewDialog/ShareViewDialog';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
-import { buildShareLink } from '../../../utils/savedViewSerialization';
 import { cn } from '../../../utils/classNames';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
@@ -161,16 +168,27 @@ const ViewsSidebarSection = (): ReactElement => {
   const [views] = useCachedQuery(queries.savedConfigsByUser({ userId: user?.id ?? '' }), {
     enabled: !!user?.id,
   });
+  const [sharedViews] = useCachedQuery(
+    queries.savedConfigsSharedWithUser({ userId: user?.id ?? '' }),
+    { enabled: !!user?.id },
+  );
 
   const [isViewsExpanded, setIsViewsExpanded] = useState(true);
   const [isFavoritesExpanded, setIsFavoritesExpanded] = useState(true);
+  const [isSharedExpanded, setIsSharedExpanded] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
 
   const allViews = useMemo(() => (views ?? []) as readonly SavedView[], [views]);
+  const allSharedViews = useMemo(
+    () =>
+      (sharedViews ?? []).map(va => va.view).filter((v): v is NonNullable<typeof v> => Boolean(v)),
+    [sharedViews],
+  );
 
   // Starred-first; Array.sort is stable so each group keeps the query's createdAt-desc order.
   const sortedViews = useMemo(
@@ -188,10 +206,7 @@ const ViewsSidebarSection = (): ReactElement => {
   const isCreateActive = location.pathname.endsWith('/projects/views/new');
 
   const handleShare = (view: SavedView): void => {
-    void navigator.clipboard.writeText(buildShareLink(view)).then(
-      () => toast.success('Share link copied to clipboard'),
-      () => toast.error('Failed to copy link'),
-    );
+    setShareTarget({ id: view.id, name: view.name });
   };
 
   const openRename = (view: SavedView): void => {
@@ -326,6 +341,48 @@ const ViewsSidebarSection = (): ReactElement => {
         )}
       </div>
 
+      {/* SHARED WITH ME — views shared with the current user via view_access. */}
+      <AnimatePresence initial={false}>
+        {allSharedViews.length > 0 && (
+          <motion.div
+            key='shared'
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
+            className='mb-4'
+          >
+            <DirectorySectionHeader
+              title='Shared with me'
+              isExpanded={isSharedExpanded}
+              onToggle={() => setIsSharedExpanded(prev => !prev)}
+            />
+            {isSharedExpanded && (
+              <div className='mt-1'>
+                {allSharedViews.map(view => (
+                  <SidebarItem
+                    key={view.id}
+                    label={view.name}
+                    isActive={isOnView(view.id)}
+                    onClick={() => void navigate(`/projects/views/${view.id}`)}
+                  />
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Share view dialog */}
+      {shareTarget && (
+        <ShareViewDialog
+          isOpen={!!shareTarget}
+          onClose={() => setShareTarget(null)}
+          viewId={shareTarget.id}
+          viewName={shareTarget.name}
+        />
+      )}
+
       {/* Rename dialog */}
       <Dialog
         open={!!renameTarget}
@@ -357,10 +414,22 @@ const ViewsSidebarSection = (): ReactElement => {
             )}
           />
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setRenameTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setRenameTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_RENAME_VIEW'
+            >
               Cancel
             </Button>
-            <Button size='sm' onClick={() => void submitRename()} disabled={!renameDraft.trim()}>
+            <Button
+              size='sm'
+              onClick={() => void submitRename()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_RENAME_VIEW'
+              disabled={!renameDraft.trim()}
+            >
               Save
             </Button>
           </div>
@@ -389,10 +458,22 @@ const ViewsSidebarSection = (): ReactElement => {
             </div>
           </div>
           <div className='flex justify-end gap-2'>
-            <Button variant='ghost' size='sm' onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setDeleteTarget(null)}
+              data-track-category='Projects'
+              data-track-name='CANCEL_DELETE_VIEW'
+            >
               Cancel
             </Button>
-            <Button variant='destructive' size='sm' onClick={() => void confirmDelete()}>
+            <Button
+              variant='destructive'
+              size='sm'
+              onClick={() => void confirmDelete()}
+              data-track-category='Projects'
+              data-track-name='CONFIRM_DELETE_VIEW'
+            >
               Delete
             </Button>
           </div>

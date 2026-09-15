@@ -120,6 +120,8 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
         <Button
           variant='outline'
           onClick={onCancel}
+          data-track-category='Apps'
+          data-track-name='CANCEL_CREATE_APP'
           disabled={createAppMutation.isPending}
           type='button'
         >

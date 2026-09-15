@@ -2,10 +2,12 @@
 export const NAMESPACE = process.env.VESPA_NAMESPACE || "namespace"
 export const CLUSTER = process.env.CLUSTER || "my_content"
 export default {
-  nativeRankThreshold: 0.001,
+  nativeRankThreshold: 0,
   vespaMaxRetryAttempts: 3,
   vespaRetryDelay: 1000, // 1 sec
   vespaBaseHost: "localhost",
+  vespaMaxRetryDelay: 30000, // 30 sec
+  vespaRetryJitter: 0.25,
   page: 8,
   isDebugMode: false,
   userQueryUpdateInterval: 60 * 1000, // 1 minute,

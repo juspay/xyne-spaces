@@ -7,9 +7,6 @@ const router = Router();
 // All notification endpoints require authentication
 router.use(authMiddleware.authenticate);
 
-// VAPID public key - now requires auth (only logged-in users can set up notifications)
-router.get('/vapid-public-key', notificationController.getVapidPublicKey);
-
 // Subscription management
 router.post('/subscribe', notificationController.subscribe);
 router.delete('/unsubscribe', notificationController.unsubscribe);

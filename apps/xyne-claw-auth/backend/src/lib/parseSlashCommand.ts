@@ -13,8 +13,10 @@
  * as `/goal status`.
  */
 
+export type ProviderOverride = { provider: string; model?: string };
+
 export type SlashCommand =
-  | { kind: "goalStart"; condition: string }
+  | { kind: "goalStart"; condition: string; providerOverride?: ProviderOverride }
   | { kind: "goalStatus" }
   | { kind: "goalClear" }
   // `/clear` — wipe this thread's agent session (forget prior context).
@@ -25,11 +27,19 @@ export type SlashCommand =
   // `/queue` — show the messages currently waiting behind the active run for
   // this conversation (the mid-run message queue). Read-only; short-circuits.
   | { kind: "queueShow" }
+  // `/queue <message>` — append a message behind the active run without
+  // interrupting it. Short-circuits after enqueueing.
+  | { kind: "queueAdd"; message: string }
   // `/queue clear` — drop the messages waiting behind the active run (does NOT
   // stop the current run — that's `/stop`). Short-circuits.
   | { kind: "queueClear" }
   // `/help` — list the available slash commands.
   | { kind: "help" }
+  | { kind: "status" }
+  // `/debug` — attach one HTML file with the latest run's execution trace.
+  // `/debug all` — every checkpointed session in the thread, newest first,
+  // each expandable, so an issue can be traced across runs.
+  | { kind: "debug"; scope?: "latest" | "all" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
   | { kind: "fastModeUsage" };
@@ -51,6 +61,7 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 // would hijack a normal question into a goal-loop start. A trailing bare
 // /stop//help//clear cannot be prose.
 const TRAILING_COMMAND_TOKEN = /(?:^|\s)(\/(?:stop|help|clear))\s*$/i;
+const GOAL_OVERRIDABLE_PROVIDERS = new Set(["spaces", "litellm", "claude", "codex", "copilot"]);
 
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
@@ -82,6 +93,15 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower === "/help") {
     return { kind: "help" };
   }
+  if (lower === "/status") {
+    return { kind: "status" };
+  }
+  if (lower === "/debug") {
+    return { kind: "debug" };
+  }
+  if (lower === "/debug all" || lower === "/debug sessions") {
+    return { kind: "debug", scope: "all" };
+  }
   if (lower === "/fast" || lower === "/fast on") {
     return { kind: "fastMode", enabled: true };
   }
@@ -91,8 +111,8 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower.startsWith("/fast ")) {
     const rest = trimmed.slice("/fast ".length).trim();
     // Obvious on/off typos get the usage hint; anything else is
-    // "/fast <task>" — enable fast mode AND run the task in one message
-    // (mirrors `/upgrade [task]`). Handled by the webhook's FAST_RE block,
+    // "/fast <task>" — enable fast mode AND run the task in one message.
+    // Handled by the webhook's FAST_RE block,
     // so fall through as a normal message here.
     if (/^o(n+|f+)$/i.test(rest)) {
       return { kind: "fastModeUsage" };
@@ -112,6 +132,13 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower === "/queue") {
     return { kind: "queueShow" };
   }
+  // `/queue <message>` — explicit opt-out from same-user interrupt-with-reply.
+  // It appends the message behind the active run and does not touch that run.
+  if (lower.startsWith("/queue ")) {
+    const message = trimmed.slice("/queue ".length).trim();
+    if (message.length === 0) return { kind: "queueShow" };
+    return { kind: "queueAdd", message: message.slice(0, 20_000) };
+  }
   // `/compact` or `/compact <instructions>`.
   if (lower === "/compact") {
     return { kind: "compact", instructions: "" };
@@ -127,11 +154,48 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
     return { kind: "goalStatus" };
   }
   if (lower.startsWith("/goal ")) {
-    const condition = trimmed.slice("/goal ".length).trim();
+    const parsed = parseGoalStart(trimmed.slice("/goal ".length));
+    const condition = parsed.condition;
     if (condition.length === 0) return null;
     // Defensive: cap absurdly long conditions; the DB column has no length
     // limit but the boss prompt has finite attention.
-    return { kind: "goalStart", condition: condition.slice(0, 2_000) };
+    return {
+      kind: "goalStart",
+      condition: condition.slice(0, 2_000),
+      ...(parsed.providerOverride ? { providerOverride: parsed.providerOverride } : {}),
+    };
   }
   return null;
+}
+
+/** Extract the same provider/model tokens as `/experiment` while leaving the
+ * remaining text as the goal's exit condition. A model-only override uses the
+ * Spaces provider, matching `/experiment`'s default. */
+function parseGoalStart(raw: string): { condition: string; providerOverride?: ProviderOverride } {
+  let provider: string | undefined;
+  let model: string | undefined;
+  const conditionParts: string[] = [];
+  for (const part of raw.trim().split(/\s+/)) {
+    const match = /^([^=]+)=(.*)$/u.exec(part);
+    const key = match?.[1]?.toLowerCase();
+    if (key === "provider") {
+      const candidate = (match?.[2] ?? "").toLowerCase();
+      if (GOAL_OVERRIDABLE_PROVIDERS.has(candidate)) provider = candidate;
+      else conditionParts.push(part); // Preserve invalid input as part of the goal, never silently select a provider.
+      continue;
+    }
+    if (key === "model") {
+      const candidate = match?.[2] ?? "";
+      if (candidate) model = candidate;
+      else conditionParts.push(part);
+      continue;
+    }
+    conditionParts.push(part);
+  }
+  const condition = conditionParts.join(" ").replace(/^focus=/i, "").trim();
+  const resolvedProvider = provider ?? (model ? "spaces" : undefined);
+  return {
+    condition,
+    ...(resolvedProvider ? { providerOverride: { provider: resolvedProvider, ...(model ? { model } : {}) } } : {}),
+  };
 }

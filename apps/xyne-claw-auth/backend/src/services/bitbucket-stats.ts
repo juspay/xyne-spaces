@@ -19,6 +19,7 @@
  */
 
 import { CONFIG } from "../config.js";
+import { errMsg } from "../lib/errors.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("bitbucket-stats");
@@ -272,7 +273,7 @@ export async function getDoctorBitbucketStats(): Promise<DoctorBitbucketStats> {
     const entry = await inFlight;
     return envelope(entry);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error("[bitbucket-stats] refresh failed:", msg);
     // Serve stale cache if available so the dashboard isn't a black hole during
     // a transient Bitbucket outage.
@@ -321,7 +322,7 @@ function scheduleNextDailyRefresh(): void {
     try {
       await refreshNow();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errMsg(err);
       log.error("[bitbucket-stats] daily refresh failed:", msg);
     } finally {
       backgroundTimer = null;

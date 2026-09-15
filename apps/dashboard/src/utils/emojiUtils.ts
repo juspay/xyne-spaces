@@ -140,8 +140,15 @@ export function isEmojiOnly(text: string): boolean {
   // Remove custom emoji images from HTML
   const textWithoutCustomEmojis = text.replace(customEmojiPattern, '');
 
-  // Now process as before
-  const strippedText = htmlToPlainText(textWithoutCustomEmojis);
+  // Avoid a full DOMParser round-trip for plain-text messages (the common
+  // emoji-only case, e.g. "🎉🎉🎉"). With no tags and no HTML entities
+  // there is nothing for htmlToPlainText to strip or decode, so the trimmed
+  // string is already the plain text. This removes the throwaway detached
+  // Document that was profiled as heap churn during message rendering.
+  const strippedText =
+    textWithoutCustomEmojis.includes('<') || textWithoutCustomEmojis.includes('&')
+      ? htmlToPlainText(textWithoutCustomEmojis)
+      : textWithoutCustomEmojis.trim();
 
   if (!strippedText && customEmojiCount === 0) {
     return false;

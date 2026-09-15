@@ -148,7 +148,10 @@ class EmailClassificationWorker {
         // AI resolution (null when unmapped) — the default-group fallback is
         // an assignment concern, not part of the classification result.
         if (result && Object.keys(result.rawOutput ?? {}).length > 0) {
-          await emailClassificationService.storeOnTicket(ticketId, result, resolvedGroupId);
+          await emailClassificationService.storeOnTicket(ticketId, result, resolvedGroupId, {
+            config,
+            actorId: systemActorId,
+          });
         }
       }
     }

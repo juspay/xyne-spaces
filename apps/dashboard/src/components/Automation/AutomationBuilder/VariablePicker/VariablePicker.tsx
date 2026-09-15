@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
@@ -82,10 +83,16 @@ export function VariablePicker({
     : groups;
 
   const handlePick = (entry: VariableEntry): void => {
-    console.info('[automations] variable inserted', {
-      sourceKey: entry.sourceKey,
-      role: entry.role,
-      path: entry.path,
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_info',
+      message: String('[automations] variable inserted'),
+      context: [
+        {
+          sourceKey: entry.sourceKey,
+          role: entry.role,
+          path: entry.path,
+        },
+      ],
     });
     onSelect(entry);
     onClose();

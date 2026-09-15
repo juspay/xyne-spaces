@@ -8,6 +8,7 @@ import { copyTextToClipboard } from './clipboardUtils';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
 import { D2Block } from '../components/Markdown/D2Block';
+import { ChartBlock } from '../components/Markdown/ChartBlock';
 import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/ClawCitationGroup';
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
@@ -67,7 +68,10 @@ const FencedCodeBlock = ({
         resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
       })
       .catch((error: unknown) => {
-        console.error('Failed to copy code snippet to clipboard', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          message: 'Failed to copy code snippet to clipboard',
+          error,
+        });
       });
   };
 
@@ -143,6 +147,7 @@ const CodeBlock = ({
   className,
   children,
   node: _node,
+  messageId,
   ...props
 }: CodeProps & { messageId: string }): React.ReactElement => {
   const match = /language-(\w+)/.exec(String(className ?? ''));
@@ -156,30 +161,25 @@ const CodeBlock = ({
 
   // ── Mermaid ──
   if (language === 'mermaid') {
-    return (
-      <MermaidBlock chart={codeString} messageId={(props as { messageId: string }).messageId} />
-    );
+    return <MermaidBlock chart={codeString} messageId={messageId} />;
   }
 
   if (language === 'filesystem') {
-    return (
-      <FilesystemBlock
-        jsonSource={codeString}
-        messageId={(props as { messageId: string }).messageId}
-      />
-    );
+    return <FilesystemBlock jsonSource={codeString} messageId={messageId} />;
   }
 
   if (language === 'd2') {
     const looksLikeFilesystemJson = codeString.trimStart().startsWith('{');
     return looksLikeFilesystemJson ? (
-      <FilesystemBlock
-        jsonSource={codeString}
-        messageId={(props as { messageId: string }).messageId}
-      />
+      <FilesystemBlock jsonSource={codeString} messageId={messageId} />
     ) : (
-      <D2Block source={codeString} messageId={(props as { messageId: string }).messageId} />
+      <D2Block source={codeString} messageId={messageId} />
     );
+  }
+
+  // ── Chart (visualize tool output) ──
+  if (language === 'chart') {
+    return <ChartBlock jsonSource={codeString} messageId={messageId} />;
   }
 
   // ── Inline code — no className means no language fence ──
@@ -318,9 +318,6 @@ export const createMarkdownComponents = (
       const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
         if (!href) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey) {
-          logger.info(Event.BROWSER_LINK_CMD_CLICK, { url: href });
-        }
         openLink(href, event);
       };
       return (

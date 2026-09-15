@@ -235,13 +235,21 @@ export const OnCallRotationModal = ({
             <p className='text-xs text-muted-foreground mt-0.5'>{groupName}</p>
           </div>
           <div className='flex items-center gap-2'>
-            <Button variant='secondary' size='sm' onClick={onClose}>
+            <Button
+              variant='secondary'
+              size='sm'
+              onClick={onClose}
+              data-track-category='UserGroups'
+              data-track-name='CANCEL_ON_CALL_ROTATION'
+            >
               Cancel
             </Button>
             <Button
               variant='default'
               size='sm'
               onClick={handleDone}
+              data-track-category='UserGroups'
+              data-track-name='SAVE_ON_CALL_ROTATION'
               disabled={hasEmptySet}
               className='bg-[#6276BE] hover:bg-[#5060A0]'
             >
@@ -252,7 +260,13 @@ export const OnCallRotationModal = ({
 
         {/* Action Bar */}
         <div className='px-6 py-4 bg-muted/30 border-b border-border flex items-end justify-end'>
-          <Button variant='outline' size='sm' onClick={handleCreateSet}>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={handleCreateSet}
+            data-track-category='UserGroups'
+            data-track-name='CREATE_ON_CALL_SET'
+          >
             <Plus className='w-4 h-4' />
             Create New Set
           </Button>

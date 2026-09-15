@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
 }
 
 datasource db {
@@ -126,6 +126,7 @@ model Ticket {
   statusUpdatedAt  DateTime          @default(now()) // Timestamp when statusV2 was last changed
   merchantId       String?           // Merchant ID to which the ticket is linked
   conversationId   String            // The xyne chat conversation to which the ticket is linked
+  messageId        String?           @unique 
   channelId        String            // The channel to which the ticket is linked
   eta              DateTime?         // Calculated ETA for a ticket based on ETA of task Type
   firstRespondedAt DateTime?         // Timestamp of the first outbound agent reply (set once, never overwritten)
@@ -141,6 +142,7 @@ model Ticket {
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
+  isStageOverdue   Boolean?          // Derived from the active ticket_stage_eta row for the current stage
   ticketType       String?
   isArchived       Boolean           @default(false)
   kanbanPosition   String?
@@ -195,7 +197,10 @@ model Ticket {
 
   @@index([isArchived, createdAt(sort: Desc), id])
   @@index([projectId, createdAt(sort: Desc), id])
+  @@index([projectId, isArchived, statusV2, createdAt(sort: Desc), id])
   @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, statusV2, isArchived, rootId, createdAt(sort: Desc), id])
+  @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
@@ -243,6 +248,8 @@ model TicketSubTicketMapping {
   ticket    Ticket    @relation(fields: [ticketId], references: [id])
   subTicket SubTicket @relation(fields: [subTicketId], references: [id])
 
+  // A parent -> sub-ticket edge is meaningless more than once.
+  @@unique([ticketId, subTicketId])
   @@index([ticketId])
   @@index([subTicketId])
 
@@ -432,12 +439,15 @@ model Workflow {
   eventType        String            @default("NO_OP")
   automationSeriesId String?
   scheduledAt      DateTime? // Do the deployment only after 12 AM
+  folderId         String?
+  summary          String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   // Relations
   workflowExecutions WorkflowExecution[]
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   @@index([ticketId])
   @@index([ticketId, createdAt, id])
@@ -478,12 +488,13 @@ model WorkflowExecution {
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
   @@map("workflow_executions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model WorkflowExecutionState {
@@ -493,6 +504,8 @@ model WorkflowExecutionState {
   context             String? // For child executions - initial context (JSON)
   output              String? // Execution-specific output (typed result)
   currentStepIndex    Int     @default(0)
+  pausePath           String?
+  pauseType           String?
 
   @@index([workflowExecutionId])
   @@map("workflow_execution_states")
@@ -594,6 +607,37 @@ model WorkflowKnowledge {
   createdAt           DateTime @default(now())
 
   @@map("workflow_knowledge")
+  @@schema("workflow")
+}
+
+model WorkflowFolder {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  name        String
+  metadata    String? // JSON: host metadata
+  parentId    String? // null = top-level folder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@index([workspaceId])
+  @@index([workspaceId, parentId])
+  @@map("workflow_folders")
+  @@schema("workflow")
+}
+
+model WorkflowCredential {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String @id @default(cuid())
+  name        String
+  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  data        String // ENCRYPTED JSON — auth values
+  status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("workflow_credentials")
   @@schema("workflow")
 }
 
@@ -701,6 +745,7 @@ model UserGroup {
   rotationInterval     String?           // Only set when autoRotationEnabled is true
   rotationStartDate    DateTime?
   reassignOnUnavailable Boolean?         // When true, a member going unavailable triggers reassignment of their open tickets in this group
+  maxWorkload          Int?              // Max weighted workload Σ(tickets × board weight) per member; null = unlimited. At or above it, a member is skipped for assignment
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdBy   String?  // User ID of the group creator (no FK constraint; relationMode="prisma"). Nullable: pre-existing groups have no known creator.
@@ -921,12 +966,15 @@ model QuestionnaireResponse {
   workspaceId       String
   id                String   @id @default(cuid())
   userId            String
+  email             String?
   questionnaireType String
   payload           Json
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   @@unique([workspaceId, questionnaireType, userId])
+  @@unique([email, questionnaireType])
+  @@index([userId])
   @@map("questionnaire_responses")
   @@schema("non_zero")
 }
@@ -938,7 +986,9 @@ model ScheduledMessage {
   title          String
   messageContent String   @db.Text
   channelId      String
-  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat)
+  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat); "-" = monthly
+  monthlyMode    String?  // "DAY_OF_MONTH" | "NTH_WEEKDAY"
+  monthlyValue   Int?     // encoded monthly schedule (see cronUtils)
   scheduledTime  String   // "HH:mm" in UTC
   isActive       Boolean  @default(true)
   createdBy      String
@@ -975,6 +1025,8 @@ model UserGroupMapping {
   responsibility String?             // Legacy column; new writes set roleId instead
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
+  startOffset    Int?                // Cold-start fairness offset, added once for brand-new members with zero prior workload history
+  isNotified     Boolean  @default(false) // Subscriber flag: when true, this member is notified whenever the group's maxWorkload cap blocks an assignment
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -1230,6 +1282,7 @@ model PullRequests {
 
   @@index([workflowExecutionId])
   @@index([date])
+  @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
   @@map("pull_requests")
   @@schema("public")
 }
@@ -1259,6 +1312,7 @@ model PrThreadLink {
 
 model TeamIntelligenceIngestionBatchV2 {
   id              String                           @id @default(cuid())
+  orgId           String?
   reportDate      DateTime
   source          String
   idempotencyKey  String                           @unique
@@ -1282,6 +1336,7 @@ model TeamIntelligenceIngestionBatchV2 {
   teamSummaries TeamIntelligenceTeamSummaryV2[]
   orgSummary    TeamIntelligenceOrgSummaryV2?
 
+  @@index([orgId])
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, receivedAt])
@@ -1290,7 +1345,7 @@ model TeamIntelligenceIngestionBatchV2 {
 }
 
 model TeamIntelligenceUserIngestionV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId            String? // denormalized org scoping key (nullable; stamped on insert)
   id               String                                @id @default(cuid())
   batchId          String
   reportDate       DateTime
@@ -1316,6 +1371,7 @@ model TeamIntelligenceUserIngestionV2 {
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userEmail])
+  @@index([orgId])
   @@index([reportDate, userEmail])
   @@index([batchId, processingStatus])
   @@index([source, reportDate])
@@ -1324,7 +1380,7 @@ model TeamIntelligenceUserIngestionV2 {
 }
 
 model TeamIntelligenceTeamSummaryV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId           String? // denormalized org scoping key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String
   reportDate      DateTime
@@ -1351,6 +1407,7 @@ model TeamIntelligenceTeamSummaryV2 {
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, teamId])
+  @@index([orgId])
   @@index([reportDate, teamId])
   @@index([batchId, status])
   @@index([source, reportDate])
@@ -1359,7 +1416,7 @@ model TeamIntelligenceTeamSummaryV2 {
 }
 
 model TeamIntelligenceOrgSummaryV2 {
-  workspaceId String? // denormalized tenant key (nullable; stamped on insert)
+  orgId           String? // denormalized org scoping key (nullable; stamped on insert)
   id              String                        @id @default(cuid())
   batchId         String                        @unique
   reportDate      DateTime
@@ -1383,6 +1440,7 @@ model TeamIntelligenceOrgSummaryV2 {
 
   batch TeamIntelligenceIngestionBatchV2 @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
+  @@index([orgId])
   @@index([reportDate])
   @@index([source, reportDate])
   @@index([status, createdAt])
@@ -1627,6 +1685,7 @@ model Project {
   globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
+  repos         Repo[]
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
@@ -1663,6 +1722,7 @@ model Board {
   mainReleaseApplications Application[] @relation("MainReleaseBoardApplications")
   ownedApplication        Application?  @relation("ApplicationBoard")
   incomingWebhooks      AppIncomingWebhook[]
+  channelMappings       ChannelBoardMapping[]
 
   @@unique([name, projectId])
   @@index([projectId])
@@ -1774,6 +1834,12 @@ model Channel {
   incomingWebhooks   AppIncomingWebhook[]
   canvasFolders      CanvasFolder[]
   emails             Email[]
+  boardMappings      ChannelBoardMapping[]
+  /// @deprecated -> back-relation of the legacy 1:1 Repo.channelId
+  sdlcRepos          Repo[]           @relation("RepoSdlcChannel")
+  // SDLC channel membership: the CHANNEL -> REPOSITORY edges in sdlcEntityLinks.
+  sdlcEntityLinks    SdlcEntityLink[] @relation("SdlcChannelLink")
+  collectionPermissions CollectionPermission[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -1783,6 +1849,27 @@ model Channel {
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
   @@map("channels")
+  @@schema("public")
+}
+
+// Additive channel-to-board association. Board.projectId remains the source of
+// project ownership for ticket-producing operations.
+model ChannelBoardMapping {
+  id          String   @id @default(cuid())
+  channelId   String
+  boardId     String
+  workspaceId String
+  isDefault   Boolean
+  createdBy   String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  channel Channel @relation(fields: [channelId], references: [id])
+  board   Board   @relation(fields: [boardId], references: [id])
+
+  @@unique([channelId, boardId])
+  @@index([channelId])
+  @@map("channel_board_mappings")
   @@schema("public")
 }
 
@@ -1897,6 +1984,27 @@ model ChannelSection {
   @@schema("public")
 }
 
+model AgentConversationShare {
+  id                   String   @id @default(cuid())
+  workspaceId          String
+  sourceConversationId String
+  sourceTipMessageId   String
+  agentSlug            String
+  targetChannelId      String
+  targetConversationId String   @unique
+  targetMessageId      String   @unique
+  sharedBy             String
+  shareOperationId     String
+  sharedMessageCount   Int
+  agentAdded           Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  @@unique([workspaceId, targetChannelId, sharedBy, shareOperationId])
+  @@index([workspaceId, sourceConversationId, targetChannelId, createdAt(sort: Desc)])
+  @@map("agent_conversation_shares")
+  @@schema("public")
+}
+
 // Conversation Models (threads within channels)
 model Conversation {
   conversationId    String   @id @default(cuid())
@@ -1915,6 +2023,7 @@ model Conversation {
   ticket_md         String?
   initial_message_md String?
   parent_message_md  String?
+  sub_tickets_md     String?
   doNotPostToChannel Boolean?
   createdAt         DateTime @default(now())
   threadType        String?
@@ -2001,6 +2110,7 @@ model Email {
   @@index([channelId, rfcMessageId])
   @@index([conversationId, id])
   @@index([sentByUserId, createdAt(sort: Desc)]) // "Sent by me" list, ordered newest-first
+  @@index([channelId, type, id, createdAt]) // desk auto-label backfill: keyset walk of one channel's inbound mail, within the lookback window
   @@map("emails")
   @@schema("public")
 }
@@ -2056,11 +2166,12 @@ model ConversationLabel {
   name        String
   color       String?  // hex color, mirrors Gmail label color
   channelId   String   // Channel (desk) scope — labels belong to a desk (no FK constraint)
-  projectId   String   // Project (denormalized from channel)
+  projectId   String?  // Project (denormalized from channel)
   workspaceId String   // Workspace for ACL optimization (denormalized from channel)
   createdBy   String   // Owner — labels are private to this user (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime // Set manually in code — written only by Zero mutators, never Prisma Client
+  deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
 
   // Also serves per-user catalog reads + ACL via its (channelId, createdBy) prefix,
   // with the trailing "name" matching the catalog query's orderBy('name').
@@ -2084,6 +2195,30 @@ model ConversationLabelMapping {
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
   @@map("conversation_label_mappings")
   @@schema("public")
+}
+
+// Server-only index of personal Desk auto-label rules targeting private conversation labels.
+// The datasource uses relationMode = "prisma", so migrations do not create database FKs.
+model DeskAutoLabelRuleReference {
+  id                String   @id @default(cuid())
+  workflowId        String
+  labelId           String
+  workspaceId       String
+  ownerId           String
+  channelId         String
+  filterFingerprint String
+  createdAt         DateTime
+
+  workflow Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  label    ConversationLabel @relation(fields: [labelId], references: [id], onDelete: Restrict)
+
+  @@unique([workflowId, labelId])
+  @@unique([workspaceId, ownerId, channelId, labelId, filterFingerprint], map: "desk_auto_label_rule_refs_filter_key")
+  @@index([workspaceId, ownerId, channelId, createdAt(sort: Desc), id(sort: Desc)], map: "desk_auto_label_rule_refs_owner_channel_idx")
+  @@index([workspaceId, channelId], map: "desk_auto_label_rule_refs_channel_idx")
+  @@index([workspaceId, labelId], map: "desk_auto_label_rule_refs_label_idx")
+  @@map("desk_auto_label_rule_references")
+  @@schema("non_zero")
 }
 
 // Gmail-style mailbox overlay: a per-user, per-desk filing of a shared ticket
@@ -2146,6 +2281,10 @@ model EmailChannelPreference {
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
+  appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
+  deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
+  deskReportAgentSlug    String?
+  deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2238,6 +2377,32 @@ model Message {
   @@schema("public")
 }
 
+// Lifecycle row for structured message artifacts (slash commands). The banner
+// renders and authorizes from this row alone: relating it to `messages` would
+// push every message delta through the global artifact subscription, so the few
+// fields needed to route to the message are projected here instead.
+// `status`/`callExternalId` are the single source of truth for lifecycle and are
+// never mirrored back into message content.
+model MessageArtifact {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  messageId        String   @unique
+  channelId        String
+  conversationId   String
+  isInitialMessage Boolean
+  messagePreview   String
+  messageCreatedAt DateTime
+  command          String
+  status           String
+  callExternalId   String?
+  updatedAt        DateTime
+
+  @@index([workspaceId, status, messageCreatedAt])
+  @@index([channelId])
+  @@map("message_artifacts")
+  @@schema("public")
+}
+
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
@@ -2259,6 +2424,7 @@ model MessageAttachment {
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
+  position           Int?                  // Display order within a message (lower = earlier); null for legacy rows
 
   // Relations
   conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
@@ -2267,6 +2433,7 @@ model MessageAttachment {
   @@index([conversationId])
   @@index([entityId])
   @@index([entityId, id])
+  @@index([entityId, position])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2343,6 +2510,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
   classification  String                 @default("PENDING")
@@ -2351,7 +2519,11 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  // NOT @updatedAt: clients sort, cursor-paginate AND render the row timestamp from
+  // this column (zero/queries.ts userActivitiesPaginatedV2, ActivityItemCard.tsx),
+  // so bumping it is user-visible. Set it explicitly at the few sites that intend to
+  // re-surface a row; bookkeeping writes must leave it alone.
+  updatedAt       DateTime @default(now())
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
@@ -2414,7 +2586,7 @@ model ExternalSource {
   displayName     String                    // "Zoho (Euler Team)" or user email for calendar sources
   channelId       String?                   // Target workspace channel for messages
   externalIdentifier String?                // External provider identifier: Google Calendar channel id, Microsoft subscription id, etc.
-  workspaceId     String?
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
   ownerUserId     String?                   // Owner for user-scoped integrations (calendar, gmail search)
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
@@ -2493,12 +2665,11 @@ model SurfaceNudge {
   state       String            @default("ACTIVE")
   visibleTo   String?
   surfaceNudgeCountId String?
-  projectId   String
+  projectId   String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
-  @@index([projectId, state])
   @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
@@ -2547,8 +2718,6 @@ model Notification {
   id                String                      @id @default(cuid())
   userId            String                      // User receiving the notification (no FK constraint)
   type              String
-  title             String
-  message           String
   status            String                      @default("UNREAD")
   deliveryMethods   String[]
   metadata          Json?                       // Additional context data
@@ -2638,9 +2807,12 @@ model Call {
   callUpdatesChannel String?   // Non-null = post call updates to this channel (Case 3); null = no broadcast
   participantCount Int?        // Denormalized total CallParticipant rows; nullable until backfilled
   participantPreviewUserIds String? // Stringified JSON: list of { userId: string , hasJoined: boolean }
+  recordingParticipants String @default("[]") // Stringified JSON: string[] of user ids this recording is about
   summaryTemplateId String?
   labels            String[]    @default([]) // Tag ids (see Tag model); no FK constraint
   markedItems       Json[]      @default([]) // Marked moments/decisions/actions surfaced during the call
+  xyneManaged       Boolean     @default(false) // True when Xyne owns this Call's conference link on the source Calendar event (Xyne Call Link Auto-Injection)
+  visibility        String?     @default("PRIVATE") // PRIVATE | PUBLIC (see CallVisibility in @xyne/shared; app-validated, no DB enum). Nullable: treated as PRIVATE everywhere it's read, so old Zero mutator bundles omitting it during a rolling deploy don't get rejected by a NOT NULL constraint.
 
   // Relations
   channel      Channel?          @relation(fields: [channelId], references: [id])
@@ -2684,6 +2856,7 @@ model EntityAccess {
   channelId           String?  // Shared with a channel (no FK constraint)
 
   entityUserAccess    String   @default("VIEW") // VIEW/EDIT/ADMIN/REVOKED (see EntityUserAccess in @xyne/shared; app-validated, no DB enum)
+  metadata            Json?    // Share-specific metadata
   createdAt           DateTime @default(now())
   updatedAt           DateTime
 
@@ -2763,6 +2936,7 @@ model CallRecording {
   storagePath   String?                          // final MP4 object key, set only on UPLOADED (read by all consumers)
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
+  attachmentId  String?                          // RECORDING message_attachments row (note-taker recordings)
   startedAt     DateTime                         // Set explicitly in code (no DB default — team convention)
   endedAt       DateTime?
   createdAt     DateTime                         // Set explicitly in code (no DB default — team convention)
@@ -2876,6 +3050,7 @@ model Canvas {
   editAccessId String? @unique // Random ID for edit access
   visibility   String           @default("PRIVATE")
   isTemplate   Boolean          @default(false)
+  isArchived   Boolean          @default(false)
   lastEditedBy String? // Last user who edited (no FK constraint)
   lastEditedAt DateTime?
   createdAt    DateTime         @default(now())
@@ -2893,6 +3068,9 @@ model Canvas {
   commentThreads CanvasCommentThread[]
   folder       CanvasFolder? @relation("FolderCanvases", fields: [folderId], references: [id])
   project      Project?      @relation(fields: [projectId], references: [id])
+  // SDLC kind/lifecycle + provenance live on the artifact row, keyed by canvas id.
+  // Emulated (relationMode="prisma"), no DB FK.
+  sdlcArtifact SdlcArtifact?
   // Quarto Doc fields - when docType is Quarto
   userRepo     String?          // Combined org/repo/branch identifier (for backward compatibility)
   repoId       String?          // Repo ID (no FK constraint) - for editing capability
@@ -2942,6 +3120,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
+  workspaceId     String?                   // denormalized tenant key (stamped on insert; nullable during backfill release)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -2959,13 +3138,14 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([canvasId, createdAt])
+  @@index([ canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
 
 model CanvasComment {
   id               String   @id @default(cuid())
+  workspaceId      String?  // denormalized tenant key (stamped on insert; nullable during backfill release)
   threadId         String
   canvasId         String
   body             String
@@ -3118,16 +3298,152 @@ model VespaInsertionLogs {
 // Repository Configuration for IDE Integration
 model Repo {
   workspaceId String // denormalized tenant key (stamped on insert)
-  id         String @id @default(cuid())
-  name       String         // e.g., "xyne-spaces"
-  url        String         // SSH or HTTPS URL
-  baseBranch Json           // Base branches to checkout from: ["main", "develop"]
-  prefix     String         // Branch prefix: "feature"
-  createdBy  String         // User who added the repo
+  id                   String @id @default(cuid())
+  name                 String // e.g., "xyne-spaces"
+  url                  String // SSH or HTTPS URL
+  canonicalUrl         String?
+  baseBranch           Json // Base branches to checkout from: ["main", "develop"]
+  prefix               String // Branch prefix: "feature"
+  createdBy            String // User who added the repo
+  projectId            String?
+  /// @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links; never written since multi-repo
+  channelId            String?
+  sdlcSetupExecutionId String? @unique
+  accessCapabilities   Json?
+
+  project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
+  channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
+  /// @deprecated -> back-relation of the legacy sdlc_entity_links.repoId
+  sdlcEntityLinks SdlcEntityLink[]
+  /// @deprecated -> back-relation of the legacy sdlc_artifacts.repoId
+  sdlcArtifacts   SdlcArtifact[]
+  /// @deprecated -> back-relation of the legacy sdlc_tracks.repoId
+  sdlcTracks      SdlcTrack[]
 
   @@unique([url, createdBy]) // Same repo can be added by different users
+  @@unique([workspaceId, canonicalUrl])
   @@index([name])
+  @@index([projectId])
+  @@index([workspaceId, projectId])
   @@map("repos")
+  @@schema("public")
+}
+
+// Generic, repository-scoped trace and evidence links for the SDLC hub.
+// Entity and relation kinds remain strings so v1 can grow without DB enum churn.
+model SdlcEntityLink {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  /// @deprecated -> scope is channelId; the repository is an endpoint of the edge, not a column
+  repoId       String?
+  /// Nullable in Postgres for pre-multirepo rows; required here so no new write
+  /// can omit the edge's scope.
+  channelId    String
+  sourceType   String
+  sourceId     String
+  targetType   String
+  targetId     String
+  relationType String
+  createdBy    String
+  createdAt    DateTime @default(now())
+
+  /// @deprecated -> navigation for the legacy repoId; SetNull so deleting a repository keeps the edge
+  repo    Repo?    @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  channel Channel? @relation("SdlcChannelLink", fields: [channelId], references: [id], onDelete: Cascade)
+
+  // The repository an edge is about is an endpoint, not a column: sourceId/targetId are
+  // polymorphic, so no relation covers them and readers filter on relationType.
+  @@unique([channelId, sourceType, sourceId, targetType, targetId, relationType], map: "sdlc_entity_links_channel_edge_key")
+  @@unique([repoId, sourceType, sourceId, targetType, targetId, relationType]) // deprecated
+  @@index([workspaceId])
+  @@index([channelId, relationType])
+  @@index([sourceType, sourceId, relationType])
+  @@index([targetType, targetId, relationType])
+  @@index([workspaceId, repoId]) // deprecated
+  @@index([repoId, sourceType, sourceId]) // deprecated
+  @@index([repoId, targetType, targetId]) // deprecated
+  @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// Provenance for SDLC-owned entities (one row per entity).
+// entityType is 'CANVAS' for now; 'TICKET' reserved for future flows.
+// sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]
+model SdlcArtifact {
+  workspaceId         String
+  artifactId          String   @id // canvas id (the only artifact kind for now) - Primary key
+  /// @deprecated -> repository comes from the link table; no new reads or writes. Still set, and still
+  /// read by the wiki and baseline lookups, until per-repo Wiki/Baseline folders replace it.
+  repoId              String?
+  artifactType        String   @default("DEFAULT")
+  artifactStatus      String   @default("ACTIVE")
+  workflowExecutionId String?
+  generationCommit    String?
+  sourceReferences    String?
+  sourcePaths         String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  /// @deprecated -> navigation for the legacy repoId
+  repo   Repo?  @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  canvas Canvas @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@index([repoId])
+  @@index([workflowExecutionId])
+  @@index([workspaceId])
+  @@index([artifactType, artifactStatus])
+  @@map("sdlc_artifacts")
+  @@schema("public")
+}
+
+// SDLC track: a named workstream inside a hub. Which hub is the CHANNEL -> TRACK edge in
+// sdlc_entity_links; the track row itself carries no scope. Groups canvases and tickets
+// through TRACK -> * TRACK_ITEM edges in the same table.
+/// A user-made folder for grouping artifacts inside a track.
+///
+/// Carries a name and nothing else. Where a folder sits — at a track's root or
+/// inside another folder — is an edge in sdlc_entity_links, and that edge holds
+/// the hub, so no scope column belongs here: the same arrangement as SdlcTrack,
+/// which is placed by its CHANNEL -> TRACK edge. Keeping placement in one place
+/// also keeps nesting and the set of things a folder can hold open, rather than
+/// fixing either in columns.
+///
+/// Distinct from CanvasFolder, which classifies artifacts by type (PRDs, Tech
+/// Docs) and is not user-made.
+model SdlcFolder {
+  workspaceId String
+  id          String   @id @default(cuid())
+  name        String
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@map("sdlc_folders")
+  @@schema("public")
+}
+
+model SdlcTrack {
+  workspaceId String
+  id          String   @id @default(cuid())
+  /// @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links; never written since multi-repo
+  repoId      String?
+  name        String
+  description String?
+  status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// @deprecated -> navigation for the legacy repoId; SetNull so deleting a repository keeps the track
+  repo Repo? @relation(fields: [repoId], references: [id], onDelete: SetNull)
+
+  @@index([repoId, status]) // deprecated
+  @@index([workspaceId])
+  @@map("sdlc_tracks")
   @@schema("public")
 }
 
@@ -3453,6 +3769,10 @@ model CollectionPermission {
   collectionId String
   userId       String?
   userGroupId  String?
+  // Grants every current+future member of this channel access — always
+  // VIEWER (enforced in the grantPermission mutator), and only offered for
+  // workspace-scoped collections (no home channel of their own) in the UI.
+  channelId    String?
   role         String
   canShare     Boolean        @default(false)
   grantedBy    String?
@@ -3462,10 +3782,13 @@ model CollectionPermission {
   collection Collection  @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   userGroup  UserGroup?  @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  channel    Channel?    @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([collectionId, userId])
   @@unique([collectionId, userGroupId])
+  @@unique([collectionId, channelId])
   @@index([userGroupId])
+  @@index([channelId])
   @@index([collectionId, userId, id], map: "idx_collection_permissions_collection_user_id")
   @@map("collection_permissions")
   @@schema("public")
@@ -3556,6 +3879,24 @@ model ApplicationReleaseTicket {
   @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "application_release_tickets_releaseId_createdAt_id_idx")
   @@map("application_release_tickets")
   @@schema("public")
+}
+
+model ReleaseRepository {
+  workspaceId        String
+  id                 String    @id @default(cuid())
+  releaseId          String
+  mainReleaseBoardId String
+  branch             String
+  deployedCommit     String
+  newCommit          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime? @updatedAt
+
+  @@unique([releaseId, mainReleaseBoardId])
+  @@index([releaseId])
+  @@index([releaseId, createdAt(sort: Desc), id(sort: Desc)], map: "release_repositories_releaseId_createdAt_id_idx")
+  @@map("release_repositories")
+  @@schema("non_zero")
 }
 
 // Captures all events tied to the release for audit trail
@@ -3757,6 +4098,7 @@ model Recap {
   @@index([recapDate])
   @@index([userId])
   @@index([entityType])
+  @@index([entityType, recapDate, entityId], map: "recaps_entityType_recapDate_entityId_idx")
   @@map("recaps")
   @@schema("public")
 }
@@ -3825,13 +4167,12 @@ model SurfaceLink {
 
   linkKind    String
   createdBy   String
-  projectId   String
+  projectId   String?
   createdAt   DateTime        @default(now())
 
   @@unique([sourceType, sourceId, targetType, targetId, linkKind])
   @@index([sourceType, sourceId])
   @@index([targetType, targetId])
-  @@index([projectId])
   @@map("surface_links")
   @@schema("public")
 }
@@ -3976,6 +4317,7 @@ model SavedUserConfiguration {
   updatedAt   DateTime
 
   values      SavedUserConfigurationValue[]
+  viewAccess  ViewAccess[]
 
   @@unique([userId, contextId, name])
   @@index([contextType, contextId])
@@ -3998,6 +4340,23 @@ model SavedUserConfigurationValue {
 
   @@index([configId])
   @@map("saved_user_configuration_values")
+  @@schema("public")
+}
+
+model ViewAccess {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String                @id @default(cuid())
+  viewId      String
+  entityType  String
+  entityId    String
+  sharedBy    String
+  createdAt   DateTime
+
+  view        SavedUserConfiguration @relation(fields: [viewId], references: [id], onDelete: Cascade)
+
+  @@index([viewId])
+  @@index([entityType, entityId])
+  @@map("view_access")
   @@schema("public")
 }
 
@@ -4322,6 +4681,29 @@ model TagsConfig {
   @@schema("non_zero")
 }
 
+model ThreadTypeVocabulary {
+  id          String   @id @default(cuid())
+  scope       String
+  scopeId     String
+  workspaceId String
+  name        String
+  label       String
+  summary     String
+  color       String
+  description String
+  status      String   @default("APPROVED")
+  isDeleted   Boolean  @default(false)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+
+  @@unique([scope, scopeId, name])
+  @@index([workspaceId, scope, status])
+  @@map("thread_type_vocabulary")
+  @@schema("non_zero")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Async OCR (Docling/LightOn) scheduler state machine
 // Ported from xyne-search. Two tables drive the splitter→submitter→result→
@@ -4447,3 +4829,120 @@ model EntityAlias {
   @@map("entity_aliases")
   @@schema("non_zero")
 }
+
+// ─── Radar execution engine (Part A) ─────────────────────────────────────────
+// Execution items: one row per actionable ask, carrying the ownership tuple
+// (requestedBy, pendingOn). Written only by the transactional applier (LLM
+// parser output post-validation, or manual CTAs); read by the feed queries.
+model ExecutionItem {
+  workspaceId     String // denormalized tenant key (stamped on insert)
+  id              String    @id @default(cuid())
+  conversationId  String // thread this item lives in (no FK constraint)
+  // Denormalized for ACL joins (no FK constraint). Kept in step with the
+  // conversation: reparenting rewrites it in the same transaction that moves
+  // the thread, so a feed may scope on it directly.
+  channelId       String
+  sourceMessageId String // message that created the ask; >1 item per source = split
+  title           String
+  contextSummary  String?
+  status          String    @default("OPEN") // OPEN | RESOLVED (String: no new PG enums)
+  requestedBy     String[]  @default([]) // who asked (userIds); NOT NULL — see migration
+  pendingOn       String[]  @default([]) // whose turn it is; [] = ownerless or resolved
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  resolvedAt      DateTime?
+
+  // Only indexes an actual query drives off. Most reads pair workspaceId with
+  // a GIN array match, a conversationId, or an id, so the planner drives off
+  // that and applies workspaceId as a filter. The one exception is the Pending
+  // Others feed: its array predicates are a negation and an emptiness test
+  // that GIN cannot serve, so nothing narrows it before the ORDER BY. The last
+  // index below lets that walk updatedAt in order and stop at the limit rather
+  // than sorting everything the channel scope leaves standing.
+  @@index([conversationId, status]) // gate: tracked-thread check + resolve-all
+  @@index([channelId, status]) // DM scope: open items, debug, bulk actions
+  @@index([pendingOn], type: Gin) // feed: Pending Me membership
+  @@index([requestedBy], type: Gin) // feed: Waiting On membership
+  @@index([workspaceId, status, updatedAt(sort: Desc)]) // feed: Pending Others ordering
+  @@map("execution_items")
+  @@schema("non_zero")
+}
+
+// Per-thread parse watermark ("bookmark"): the last message the parser has
+// consumed. messageId is a cuid (not monotonic), so ordering is the composite
+// (createdAt, messageId) compared lexicographically — the same comparator the
+// window query and the advance use. Separate from items so it survives
+// all-resolved threads.
+model ExecutionThreadState {
+  workspaceId        String // denormalized tenant key (stamped on insert)
+  conversationId     String   @id
+  watermarkCreatedAt DateTime
+  watermarkMsgId     String
+  // Circuit breaker for a window the parser cannot handle. A failed parse
+  // leaves the watermark where it is (that is what makes retries safe), so a
+  // window that fails DETERMINISTICALLY would be re-parsed by every later
+  // message forever, billing a shared LLM quota with no upper bound. Counting
+  // consecutive failures lets the drain give up on that window and move on.
+  consecutiveFailures Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  // No secondary index: every access is a lookup by the conversationId PK.
+  @@map("execution_thread_states")
+  @@schema("non_zero")
+}
+
+// Radar execution engine: append-only audit of every ledger mutation — who/what
+// changed an item and from which message. The watermark arbitration between the
+// LLM parser and manual CTAs is only auditable because every write lands here
+// in the same transaction as the item change.
+model ExecutionItemMutation {
+  workspaceId     String // denormalized tenant key (stamped on insert)
+  id              String   @id @default(cuid())
+  itemId          String
+  conversationId  String
+  op              String // create | resolve | reassign | reopen (String: no new PG enums)
+  actorType       String // llm | manual
+  actorId         String? // userId for manual CTAs, null for the parser
+  sourceMessageId String?
+  payload         Json? // op fields as proposed (title, pendingOn, ...) for replay/debug
+  createdAt       DateTime @default(now())
+
+  // The only reader is the debug trail, which fetches one item's history.
+  @@index([itemId, createdAt])
+  @@map("execution_item_mutations")
+  @@schema("non_zero")
+}
+
+// Radar execution engine: one row per worker drain pass — the debug trail the
+// Radar debug panel reads. Captures the gate decision, the parser's proposed
+// operations, what the validator dropped and what was applied, so "did it
+// process and what did the LLM say" is answerable without grepping logs.
+model ExecutionRunLog {
+  workspaceId    String // denormalized tenant key (stamped on insert)
+  id             String   @id @default(cuid())
+  conversationId String
+  gatePassed     Boolean
+  gateReason     String // tracked-thread | new-mention | skip
+  windowSize     Int
+  parserRan      Boolean  @default(false)
+  proposedOps    Json? // parser output post schema-validation
+  validOps       Json? // survivors of the validator
+  droppedOps     Json? // validator rejects, with reasons
+  applied        Json? // applier counts { created, resolved, reassigned }
+  assessment     String? // model's one-sentence read of the window (why ops / why none)
+  error          String?
+  durationMs     Int?
+  createdAt      DateTime @default(now())
+
+  // Debug is thread-scoped only, so a workspace-led index has no reader.
+  @@index([conversationId, createdAt])
+  // The retention sweep filters on createdAt alone, which neither composite
+  // above can serve (wrong leading column) — without this, every hourly sweep
+  // seq-scans the whole table, including the majority that delete nothing.
+  // Near-free to maintain: createdAt only increases, so inserts always land on
+  // the rightmost leaf.
+  @@index([createdAt])
+  @@map("execution_run_logs")
+  @@schema("non_zero")
+}
+

@@ -7,6 +7,7 @@ import AgentsV2 from './agents/AgentsV2';
 import SubagentsV2 from './subagents/SubagentsV2';
 import SkillsV2 from './skills/SkillsV2';
 import McpV2 from './mcp/McpV2';
+import AppsV2 from './apps/AppsV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 
 interface LibraryTab {
@@ -44,6 +45,14 @@ const LIBRARY_TABS = [
     label: 'MCP',
     content: McpV2,
     searchPlaceholder: 'Search MCP servers',
+    create: null,
+  },
+  {
+    id: 'apps',
+    label: 'Apps',
+    content: AppsV2,
+    searchPlaceholder: 'Search apps',
+    // Apps are created by saving one out of a chat, never from a blank form.
     create: null,
   },
 ] as const satisfies readonly LibraryTab[];
@@ -96,11 +105,11 @@ const LibraryV2 = (): ReactElement => {
 
   return (
     <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
-      <div className='sticky top-0 z-10 flex flex-col bg-background'>
+      <div className='bg-background sticky top-0 z-10 flex flex-col'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
             <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-              Library
+              Agent Hub
             </h1>
             <p className='text-[15px] leading-[1.2] text-muted-foreground'>
               View and manage agents, subagent, skills and MCP.

@@ -1,10 +1,9 @@
-import { toast } from 'sonner';
 import { isElectronApp } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
+import { logger, Event } from './logger';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
-const LINK_OPEN_HINT_DISMISSED_KEY = 'xyne:link-open-hint-dismissed';
 
 const listeners = new Set<() => void>();
 const notify = (): void => {
@@ -19,7 +18,7 @@ export const subscribeLinkOpenPref = (listener: () => void): (() => void) => {
 };
 
 export const getLinkOpenExternalDefault = (): boolean =>
-  localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) === 'true';
+  localStorage.getItem(LINK_OPEN_EXTERNAL_KEY) !== 'false';
 
 const syncLinkOpenPrefToMain = (value: boolean): void => {
   if (!isElectronApp()) return;
@@ -34,34 +33,42 @@ export const setLinkOpenExternalDefault = (value: boolean): void => {
   notify();
 };
 
-const getHintDismissed = (): boolean =>
-  localStorage.getItem(LINK_OPEN_HINT_DISMISSED_KEY) === 'true';
-
-const markHintDismissed = (): void => {
-  localStorage.setItem(LINK_OPEN_HINT_DISMISSED_KEY, 'true');
-  notify();
-};
-
 type MouseLike = Pick<MouseEvent, 'metaKey' | 'ctrlKey'>;
 
 export interface OpenLinkOpts {
   force?: 'in-app' | 'external';
-  silent?: boolean;
 }
 
 export const linkOpenPrefIsRelevant = (): boolean => isElectronApp() || detectReactNativeWebView();
 
-export const openLink = (url: string, event?: MouseLike | null, opts?: OpenLinkOpts): void => {
+const wantsExternal = (event?: MouseLike | null, opts?: OpenLinkOpts): boolean => {
   const externalDefault = getLinkOpenExternalDefault();
   const modifier = !!(event?.metaKey || event?.ctrlKey);
 
-  const wantExternal = opts?.force ? opts.force === 'external' : externalDefault !== modifier;
+  return opts?.force ? opts.force === 'external' : externalDefault !== modifier;
+};
+
+// Where the link actually lands: the in-app panel only exists in Electron, so off
+// it both branches of openLink end up in the system browser.
+export const resolveLinkTarget = (
+  event?: MouseLike | null,
+  opts?: OpenLinkOpts,
+): 'external' | 'in-app' =>
+  !wantsExternal(event, opts) && isElectronApp() ? 'in-app' : 'external';
+
+export const openLink = (url: string, event?: MouseLike | null, opts?: OpenLinkOpts): void => {
+  const wantExternal = wantsExternal(event, opts);
+  const modifier = !!(event?.metaKey || event?.ctrlKey);
+
+  logger.info(modifier ? Event.BROWSER_LINK_CMD_CLICK : Event.BROWSER_LINK_CLICK, {
+    url,
+    openedIn: resolveLinkTarget(event, opts),
+  });
 
   if (wantExternal) {
     openExternal(url);
   } else {
     openInApp(url);
-    if (!opts?.silent) maybeShowHint();
   }
 };
 
@@ -87,24 +94,4 @@ const openInApp = (url: string): void => {
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
-};
-
-const maybeShowHint = (): void => {
-  if (!isElectronApp()) return;
-  if (getHintDismissed()) return;
-
-  toast.info('⌘/Ctrl-click for external browser', {
-    duration: Infinity,
-    style: { width: '360px', maxWidth: 'calc(100vw - 32px)' },
-    cancel: {
-      label: 'Open Preferences',
-      onClick: () => {
-        markHintDismissed();
-        window.dispatchEvent(
-          new CustomEvent('xyne-open-preferences', { detail: { section: 'messaging' } }),
-        );
-      },
-    },
-    onDismiss: markHintDismissed,
-  });
 };

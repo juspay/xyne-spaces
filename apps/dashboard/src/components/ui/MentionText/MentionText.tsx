@@ -131,6 +131,8 @@ export const MentionText: React.FC<MentionTextProps> = props => {
           role='button'
           tabIndex={0}
           onClick={handleChannelClick}
+          data-track-category='MENTION'
+          data-track-name='OPEN_CHANNEL_FROM_MENTION'
           onKeyDown={handleKeyDown}
           className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
         >
@@ -159,7 +161,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
         preserveThreadRoute={props.preserveThreadRoute ?? false}
       >
         <span
-          className={`${isCurrentUser ? 'bg-[var(--mention-current-user-bg)] text-[color:var(--mention-current-user-color,var(--mention-color))]' : 'bg-[var(--mention-bg)] text-[color:var(--mention-color)]'} px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]`}
+          className={`${isCurrentUser ? 'bg-[var(--mention-current-user-bg)] text-[color:var(--mention-current-user-color,var(--mention-color))]' : 'bg-[var(--mention-bg)] text-[color:var(--mention-color)]'} px-1 py-[2px] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)] ${props.className ?? ''}`}
         >
           @{displayUsername}
         </span>
@@ -186,6 +188,8 @@ export const MentionText: React.FC<MentionTextProps> = props => {
         role='button'
         tabIndex={0}
         onClick={handleGroupClick}
+        data-track-category='MENTION'
+        data-track-name='OPEN_GROUP_FROM_MENTION'
         onKeyDown={handleKeyDown}
         className='text-[color:var(--mention-group-color)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'
       >

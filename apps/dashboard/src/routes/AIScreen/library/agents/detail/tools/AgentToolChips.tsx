@@ -1,7 +1,11 @@
 import { useMemo, type ReactElement } from 'react';
 import { Tools, UserBot } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
-import type { IntegrationToolEntry } from '@/services/claw/clawToolsTypes';
+import type {
+  IntegrationToolEntry,
+  AgentToolboxSelection,
+  ToolboxSelection,
+} from '@/services/claw/clawToolsTypes';
 import { BrowseBuiltinToolsDialog } from '../../../shared/pickers/builtin/BrowseBuiltinToolsDialog';
 import {
   selectedTools as selectedBuiltinTools,
@@ -30,6 +34,17 @@ import {
 import type { DetailTypeScale } from '../../../shared/primitives/DetailPrimitives';
 import { ChipIconTile } from '../../../shared/primitives/TokenChip';
 import type { AgentToolSelection } from './useAgentToolSelection';
+
+const withCallableAgents = (
+  saved: AgentToolboxSelection,
+  next: ToolboxSelection,
+): AgentToolboxSelection => ({
+  subagents: next.subagents,
+  direct: next.direct,
+  custom: next.custom,
+  gateway: next.gateway ?? [],
+  callableAgents: saved.callableAgents,
+});
 
 export function AgentToolChips({
   canEdit,
@@ -97,7 +112,7 @@ export function AgentToolChips({
                   canEdit
                     ? (): void =>
                         tools.commit(
-                          disableMcpEntry(mcp.entries, saved, entry),
+                          withCallableAgents(saved, disableMcpEntry(mcp.entries, saved, entry)),
                           `${entry.label} removed`,
                         )
                     : undefined
@@ -133,7 +148,10 @@ export function AgentToolChips({
                 onRemove={
                   canEdit
                     ? (): void =>
-                        tools.commit(disableSubagent(saved, entry), `${entry.name} removed`)
+                        tools.commit(
+                          withCallableAgents(saved, disableSubagent(saved, entry)),
+                          `${entry.name} removed`,
+                        )
                     : undefined
                 }
               />
@@ -169,7 +187,7 @@ export function AgentToolChips({
                   canEdit
                     ? (): void =>
                         tools.commit(
-                          setBuiltinToolsSelected(saved, [tool], false),
+                          withCallableAgents(saved, setBuiltinToolsSelected(saved, [tool], false)),
                           `${humanizeToolName(tool.name)} removed`,
                         )
                     : undefined
@@ -200,7 +218,9 @@ export function AgentToolChips({
             isError={mcp.isError}
             onRetry={mcp.refetch}
             selection={tools.draft}
-            onSelectionChange={tools.setDraft}
+            onSelectionChange={(next): void =>
+              tools.setDraft(withCallableAgents(tools.draft, next))
+            }
             suggested={[]}
           />
 
@@ -214,7 +234,9 @@ export function AgentToolChips({
             isError={subagents.isError}
             onRetry={subagents.refetch}
             selection={tools.draft}
-            onSelectionChange={tools.setDraft}
+            onSelectionChange={(next): void =>
+              tools.setDraft(withCallableAgents(tools.draft, next))
+            }
             suggested={[]}
           />
 
@@ -228,7 +250,9 @@ export function AgentToolChips({
             isError={builtin.isError}
             onRetry={builtin.refetch}
             selection={tools.draft}
-            onSelectionChange={tools.setDraft}
+            onSelectionChange={(next): void =>
+              tools.setDraft(withCallableAgents(tools.draft, next))
+            }
             suggested={[]}
           />
         </>

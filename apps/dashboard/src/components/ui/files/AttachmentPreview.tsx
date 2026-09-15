@@ -337,6 +337,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
                     e.stopPropagation();
                     onRemove();
                   }}
+                  data-track-category='MESSAGE_ATTACHMENT'
+                  data-track-name='REMOVE_ATTACHMENT'
                 >
                   <X className='size-3.5 text-red-600' strokeWidth={2.33} />
                 </button>
@@ -361,6 +363,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             type='button'
             className='absolute inset-0 cursor-default'
             onClick={() => setVideoLightboxUrl(null)}
+            data-track-category='MESSAGE_ATTACHMENT'
+            data-track-name='CLOSE_VIDEO_LIGHTBOX'
             aria-label='Close video lightbox'
             tabIndex={-1}
           />
@@ -368,6 +372,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             <button
               type='button'
               onClick={() => setVideoLightboxUrl(null)}
+              data-track-category='MESSAGE_ATTACHMENT'
+              data-track-name='CLOSE_VIDEO_LIGHTBOX'
               className='absolute -top-3 -right-3 z-10 flex items-center justify-center size-7 rounded-full bg-black/70 hover:bg-black text-white transition-colors border border-white/20'
               aria-label='Close video'
             >
@@ -395,6 +401,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             onPreview?.();
           }
         }}
+        data-track-category='MESSAGE_ATTACHMENT'
+        data-track-name='OPEN_ATTACHMENT_PREVIEW'
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -430,6 +438,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
               e.stopPropagation();
               onRemove();
             }}
+            data-track-category='MESSAGE_ATTACHMENT'
+            data-track-name='REMOVE_ATTACHMENT'
             className={`absolute -top-2 -right-2 p-1 bg-background hover:bg-destructive/10 rounded-full transition-colors shadow-md border border-border z-10 ${
               isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}

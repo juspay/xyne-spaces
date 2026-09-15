@@ -1,5 +1,10 @@
 import { apiInstance } from '../clients/apiClient';
 import { DeskType, ChannelScopeType } from '@xyne/shared';
+import type {
+  AddGroupDmParticipantsRequest,
+  AddGroupDmParticipantsResponse,
+  HistoryPreviewResponse,
+} from '@xyne/shared';
 
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
@@ -83,18 +88,12 @@ export interface CreateDmResponse {
   isExisting: boolean;
 }
 
-export interface AddGroupDmParticipantsRequest {
-  userIds: string[];
-  includeHistory: boolean;
-}
-
-export interface AddGroupDmParticipantsResponse {
-  channelId: string;
-  isExisting: boolean;
-  participantsAdded: number;
-  conversationsMigrated?: number;
-  message: string;
-}
+export type {
+  AddGroupDmParticipantsRequest,
+  AddGroupDmParticipantsResponse,
+  HistoryPreviewEntry,
+  HistoryPreviewResponse,
+} from '@xyne/shared';
 
 export interface PromoteGroupDmRequest {
   name: string;
@@ -110,13 +109,10 @@ export interface ChannelMember {
 }
 
 export class ChannelService {
-  async checkDuplicateChannel(
-    title: string,
-    orgName: string,
-  ): Promise<CheckDuplicateChannelResponse> {
+  async checkDuplicateChannel(title: string): Promise<CheckDuplicateChannelResponse> {
     const response = await apiInstance.post<CheckDuplicateChannelResponse>(
       '/channels/check-duplicate',
-      { name: title, projectId: orgName || 'default' },
+      { name: title },
     );
     return response.data;
   }
@@ -163,6 +159,17 @@ export class ChannelService {
 
   async createDm(data: CreateDmRequest): Promise<CreateDmResponse> {
     const response = await apiInstance.post<CreateDmResponse>('/users/me/dms', data);
+    return response.data;
+  }
+
+  async getDmHistoryPreview(
+    channelId: string,
+    params: { since: number | null; limit?: number },
+  ): Promise<HistoryPreviewResponse> {
+    const response = await apiInstance.get<HistoryPreviewResponse>(
+      `/users/me/dms/${channelId}/history-preview`,
+      { params: { ...(params.since !== null && { since: params.since }), limit: params.limit } },
+    );
     return response.data;
   }
 

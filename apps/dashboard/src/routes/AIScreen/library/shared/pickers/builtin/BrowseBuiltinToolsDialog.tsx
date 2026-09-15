@@ -1,6 +1,13 @@
 import { useMemo, useState, type ReactElement } from 'react';
+import { cn } from '@/utils/classNames';
+import { searchByNameThenDescription } from '../../librarySearch';
+import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
-import { BrowseDialog, type FilterOption } from '../../primitives/BrowseDialog';
+import {
+  BrowseDialog,
+  handleBrowseDialogOpenChange,
+  type FilterOption,
+} from '../../primitives/BrowseDialog';
 import { Pill } from '../../primitives/Pill';
 import { BuiltinChip } from './BuiltinChip';
 import { BuiltinDetailPanel } from './BuiltinDetailPanel';
@@ -24,10 +31,11 @@ const FILTER_OPTIONS: readonly FilterOption[] = [
 const RISK_LABEL = { read: 'Read', write: 'Write', destructive: 'Destructive' } as const;
 const RISK_TONE = { read: 'success', write: 'warning', destructive: 'danger' } as const;
 
-function matchesSearch(entry: BuiltinCatalogEntry, query: string): boolean {
-  if (!query) return true;
-  if (entry.label.toLowerCase().includes(query)) return true;
-  return entry.tools.some(tool => tool.name.toLowerCase().replace(/_/g, ' ').includes(query));
+function builtinSearchFields(entry: BuiltinCatalogEntry) {
+  return {
+    name: entry.label,
+    extras: entry.tools.map(tool => tool.name.replace(/_/g, ' ')),
+  };
 }
 
 const BuiltinCard = ({
@@ -49,7 +57,7 @@ const BuiltinCard = ({
       onClick={onOpen}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: open built-in detail'
-      className='flex w-full flex-col items-start justify-center gap-2 overflow-hidden rounded-[10px] p-2.5 text-left transition-colors hover:bg-muted/50'
+      className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
       <span className='flex w-full items-center justify-between gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
@@ -84,7 +92,7 @@ const BuiltinCard = ({
       title={enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle built-in group'
-      className='absolute right-9 top-2.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -130,13 +138,11 @@ export function BrowseBuiltinToolsDialog({
     return states;
   }, [catalog, selection]);
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const visible = useMemo(
     () =>
-      catalog.filter(
-        entry =>
-          matchesSearch(entry, q) &&
-          (risk === null || entry.tools.some(tool => tool.riskLevel === risk)),
+      searchByNameThenDescription(catalog, q, builtinSearchFields).filter(
+        entry => risk === null || entry.tools.some(tool => tool.riskLevel === risk),
       ),
     [catalog, q, risk],
   );
@@ -155,10 +161,13 @@ export function BrowseBuiltinToolsDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setOpenSource(null);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setRisk(null);
+          setOpenSource(null);
+        })
+      }
       title='Browse built in tools'
       description='Search and select the built-in tools this agent can use.'
       testId='browse-builtin-tools-dialog'

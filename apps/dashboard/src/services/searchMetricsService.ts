@@ -11,6 +11,7 @@ import type {
   SearchClickEvent,
   SearchSessionEndEvent,
   SearchTabClickEvent,
+  SearchShowResultsEvent,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
@@ -260,6 +261,33 @@ class SearchMetricsService {
         tab: params.tab,
       });
     });
+  }
+
+  /**
+   * Track when a user leaves the palette for the full-screen results page via the
+   * "Show results for" row. Log-only by design — the OTel counters carry the search
+   * funnel (impression → click), and this is a navigation signal read from the logs.
+   */
+  trackShowResults(params: {
+    searchSessionId: string;
+    userId: string;
+    queryText: string;
+    tab: TabType;
+    trigger: 'click' | 'keyboard';
+    searchMode: 'popup' | 'screen';
+    filtersUsed: number;
+  }): void {
+    const event: SearchShowResultsEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      query_text: params.queryText,
+      query_text_length: countWords(params.queryText),
+      tab: params.tab,
+      trigger: params.trigger,
+      search_mode: params.searchMode,
+      filters_used: params.filtersUsed,
+    };
+    logger.info(Event.VESPA_SEARCH_SHOW_RESULTS, event as unknown as Record<string, unknown>);
   }
 }
 

@@ -25,18 +25,16 @@ class TeamIntelligenceTeamSummaryQueue {
           lazyConnect: false,
         },
         defaultJobOptions: {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
+          attempts: 1,
           removeOnComplete: true,
           removeOnFail: { count: 100 },
         },
         settings: {
-          lockDuration: 60000,
-          stalledInterval: 30000,
-          maxStalledCount: 1,
+          // Team summaries are LLM-backed and may wait on long provider calls.
+          // Keep the lock above the configured Team Intelligence LLM timeout.
+          lockDuration: 30 * 60 * 1000,
+          stalledInterval: 5 * 60 * 1000,
+          maxStalledCount: 3,
         },
       });
 
@@ -110,10 +108,15 @@ class TeamIntelligenceTeamSummaryQueue {
         return;
       }
 
-      logger.error(
-        `[TEAM-INTEL-TEAM-QUEUE] Job ${job.id} failed batchId=${job.data.batchId} teamName=${job.data.teamName}:`,
-        err
-      );
+      const configuredAttempts = job.opts.attempts ?? 1;
+      const message =
+        `[TEAM-INTEL-TEAM-QUEUE] Job ${job.id} attempt ${job.attemptsMade}/${configuredAttempts} failed ` +
+        `batchId=${job.data.batchId} teamName=${job.data.teamName}`;
+      if (job.attemptsMade >= configuredAttempts) {
+        logger.error(`${message}; no attempts remain:`, err);
+      } else {
+        logger.warn(`${message}; retry scheduled:`, err);
+      }
     });
 
     this.queue.on('stalled', (job) => {

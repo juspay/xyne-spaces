@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Download, Maximize2, X, FileText } from 'lucide-react';
 
@@ -36,7 +37,11 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
           const blobUrl = URL.createObjectURL(blob);
           setPreviewUrl(blobUrl);
         } catch (error) {
-          console.error('[PdfPageViewer] Failed to load PDF for preview:', error);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[PdfPageViewer] Failed to load PDF for preview:'),
+            error: error,
+          });
         }
       };
       void fetchPdf();
@@ -62,7 +67,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
   const exitPresent = useCallback(() => {
     setPresenting(false);
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
+      document.exitFullscreen().catch(() => undefined);
     }
   }, []);
 
@@ -119,7 +124,11 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
 
       URL.revokeObjectURL(blobUrl);
     } catch (error) {
-      console.error('[PdfPageViewer] Download failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[PdfPageViewer] Download failed:'),
+        error: error,
+      });
     }
   }, [downloadUrl, filename, base64Data]);
 

@@ -1,0 +1,49 @@
+{"text": "how do i actually start a call in this app", "expect": "platform-help", "topic": "start-call"}
+{"text": "can we hop on a call to discuss this", "expect": "start-call"}
+{"text": "anyone free for a quick huddle?", "expect": "start-call"}
+{"text": "should we just get on a quick call", "expect": "start-call"}
+{"text": "this would be way faster to explain live", "expect": "start-call"}
+{"text": "can somebody give me a ring", "expect": "start-call"}
+{"text": "is anybody around to talk this through", "expect": "start-call"}
+{"text": "want to jump on a zoom for 5 mins", "expect": "start-call"}
+{"text": "too much back and forth here, lets just talk", "expect": "start-call"}
+{"text": "how do i get everyone on a call", "expect": "start-call"}
+{"text": "I called the API and it 500d", "expect": null}
+{"text": "who is on call this week", "expect": null}
+{"text": "the on-call rotation needs updating", "expect": null}
+{"text": "there is a clear call to action on that page", "expect": null}
+{"text": "we should call this function after the retry", "expect": null}
+{"text": "that was a good call on the rollback", "expect": null}
+{"text": "the call site is in the auth middleware", "expect": null}
+{"text": "lets deploy the new build tonight", "expect": null}
+{"text": "can someone review my PR when free", "expect": null}
+{"text": "the meeting notes are in the canvas", "expect": null}
+{"text": "I will call out the risks in the doc", "expect": null}
+{"text": "recording of yesterdays call is uploaded", "expect": null}
+{"text": "please call the vendor support line yourself", "expect": null}
+{"text": "wow that is amazing work team", "expect": null}
+{"text": "deployed to staging, please verify", "expect": null}
+{"text": "Quarter close: we processed 18400 Cr, up 31 percent year on year, with our best-ever uptime. That is a lot of small careful decisions by a lot of people. Thank you genuinely. Lets connect to discuss about this once? Sana Qureshi Sanjay Iyengar", "expect": "start-call"}
+{"text": "Shipped the reconciliation fix to staging this morning, numbers look clean so far. Can we connect sometime today to walk through the rollout plan?", "expect": "start-call"}
+{"text": "How can I make a call", "expect": "platform-help", "topic": "start-call"}
+{"text": "how do I start a huddle in this channel", "expect": "platform-help", "topic": "start-call"}
+{"text": "where do I find the recording of yesterdays call", "expect": "platform-help", "topic": "unresolved"}
+{"text": "Great work everyone on the quarter close. Numbers are up 31 percent and uptime was our best ever.", "expect": null}
+{"text": "where do I click to start a video call", "expect": "platform-help", "topic": "start-call"}
+{"text": "whats the way to get a call going here", "expect": "platform-help", "topic": "start-call"}
+{"text": "how do I raise a ticket for this", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "how can I convert this into a ticket", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "where do I go to file a bug", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "is there a way to create a task from a message", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "how do i log an issue here", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "how do I add more people to this channel", "expect": "platform-help", "topic": "add-people"}
+{"text": "how can I invite my teammate here", "expect": "platform-help", "topic": "add-people"}
+{"text": "where do I add members", "expect": "platform-help", "topic": "add-people"}
+{"text": "is there a way to bring someone into this channel", "expect": "platform-help", "topic": "add-people"}
+{"text": "how do i get more folks into this channel", "expect": "platform-help", "topic": "add-people"}
+{"text": "how do i share my screen during a call", "expect": "platform-help", "topic": "unresolved"}
+{"text": "how do I set up a canvas here", "expect": "platform-help", "topic": "unresolved"}
+{"text": "what is the keyboard shortcut for search", "expect": "platform-help", "topic": "unresolved"}
+{"text": "how do i change my notification sound", "expect": "platform-help", "topic": "unresolved"}
+{"text": "how do i create a new ticket from here", "expect": "platform-help", "topic": "create-ticket"}
+{"text": "how do i create a new canvas from here", "expect": "platform-help", "topic": "unresolved"}

@@ -1,9 +1,9 @@
 {
   "appId": "com.xyne.spaces",
   "productName": "Xyne Spaces",
-    "directories": {
-      "output": "release/prod"
-    },
+  "directories": {
+    "output": "release/prod/${os}"
+  },
   "electronFuses": {
     "runAsNode": false,
     "enableNodeOptionsEnvironmentVariable": false,
@@ -33,14 +33,14 @@
     "icon": "assets/images/xyne.png",
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,
-    "notarize": true,
+    "notarize": false,
     "entitlements": "build/entitlements.mac.plist",
     "entitlementsInherit": "build/entitlements.mac.plist",
     "gatekeeperAssess": false,
     "darkModeSupport": true,
     "target": [
       {
-        "target": "dmg",
+        "target": "pkg",
         "arch": ["universal"]
       },
       {
@@ -68,7 +68,7 @@
   },
   "win": {
     "icon": "assets/images/xyne.png",
-    "signAndEditExecutable": false,
+    "signExecutable": false,
     "target": [
       {
         "target": "nsis",

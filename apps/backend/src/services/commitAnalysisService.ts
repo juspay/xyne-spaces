@@ -28,6 +28,7 @@ export type AnalyzeCommitsRequest =
     // updated yet.
     ticketPrefix?: string;
     branch?: string;
+    retryMissingPr?: boolean;
   }
   | {
     deployedCommitId: string;
@@ -37,6 +38,7 @@ export type AnalyzeCommitsRequest =
     workspaceId: string;
     ticketPrefix?: string;
     branch?: string;
+    retryMissingPr?: boolean;
   };
 
 export interface CommitAnalysisResult {
@@ -74,6 +76,19 @@ export interface PullRequestDiffFile {
 /** PR author shape (from BitbucketService) used to back local autostub users. */
 type StubAuthor = { id?: string | number; displayName?: string; emailAddress?: string };
 
+// Bounds for retrying an eventually-consistent PR lookup (see analyzeEachCommit).
+const PR_LOOKUP_MAX_RETRIES = 3;
+const PR_LOOKUP_RETRY_DELAY_MS = 2000;
+
+// Count distinct migration files (one row per file×commit is stored, so a file
+// touched across commits — e.g. schema.prisma — must collapse to one).
+export function countDistinctMigrationFiles(
+  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined | null
+): number {
+  return new Set(
+    (migrationLinks ?? []).map(link => `${link.diffUrl.replace(/\/commits?\/[^/#?]+/, '')}::${link.filePath}`),
+  ).size;
+}
 
 export class CommitAnalysisService {
   // Structurally typed so a BitbucketService or GitHubService can be passed —
@@ -401,6 +416,7 @@ export class CommitAnalysisService {
     workspaceId: string,
     ticketPrefix: string,
     branch?: string,
+    retryMissingPr = false,
   ): Promise<CommitAnalysisResult> {
     const result: CommitAnalysisResult = {
       commitId,
@@ -417,12 +433,18 @@ export class CommitAnalysisService {
 
     try {
       logger.debug(`Analyzing commit ${commitId}: Finding pull request...`);
-      const pullRequest = await this.bitbucketService.getMergedPullRequest(
+      let pullRequest = await this.bitbucketService.getMergedPullRequest(
         projectKey,
         repositorySlug,
         commitId,
         branch
       );
+
+      // GitHub's commit-to-PR API is eventually consistent; a hotfix sync fires right after merge, so retry before giving up.
+      for (let attempt = 0; !pullRequest && retryMissingPr && attempt < PR_LOOKUP_MAX_RETRIES; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, PR_LOOKUP_RETRY_DELAY_MS));
+        pullRequest = await this.bitbucketService.getMergedPullRequest(projectKey, repositorySlug, commitId, branch);
+      }
 
       if (!pullRequest) {
         result.error = 'No merged pull request found for commit';
@@ -566,7 +588,7 @@ export class CommitAnalysisService {
           commitIds
             .slice(i, i + CONCURRENCY)
             .map((commitId) =>
-              this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch)
+              this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch, request.retryMissingPr ?? false)
             )
         );
         results.push(...batch);
@@ -1158,6 +1180,7 @@ export class CommitAnalysisService {
     projectKey: string,
     repositorySlug: string,
     releaseId: string,
+    mainReleaseBoardId: string,
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
@@ -1165,8 +1188,15 @@ export class CommitAnalysisService {
     envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
   }> {
     const db = DatabaseClient.getInstance();
+    // Scope to this repo's applications — release_change_types is releaseId-wide, so
+    // an unscoped read would mis-attribute and double-count sibling repos' rows.
+    const boardApps = await this.applicationRepository!.findByMainReleaseBoardId(mainReleaseBoardId);
+    const applicationIds = boardApps.map(a => a.id);
+    if (applicationIds.length === 0) {
+      return { envChangeCount: 0, migrationChangeCount: 0, migrationLinks: [], envChanges: [] };
+    }
     const changes = await db.releaseChangeType.findMany({
-      where: { releaseId },
+      where: { releaseId, applicationId: { in: applicationIds } },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -1214,7 +1244,7 @@ export class CommitAnalysisService {
 
     return {
       envChangeCount: envChanges.length,
-      migrationChangeCount: migrationLinks.length,
+      migrationChangeCount: countDistinctMigrationFiles(migrationLinks),
       migrationLinks,
       envChanges,
     };

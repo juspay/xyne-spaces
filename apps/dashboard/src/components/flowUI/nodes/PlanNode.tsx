@@ -180,6 +180,7 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_APPROVE'
+        data-ph-capture-attribute-track-id='plan_approve'
       >
         {(pending === 'approve' || agentRunning) && <Spinner size={14} className='animate-spin' />}
         {approveLabel}
@@ -196,6 +197,7 @@ const ProposedPlan: React.FC<{
         )}
         data-track-category='PLAN_ARTIFACT'
         data-track-name='CLICK_REJECT'
+        data-ph-capture-attribute-track-id='plan_reject'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {rejectLabel}
@@ -463,13 +465,9 @@ const Header: React.FC<{ chip?: React.ReactNode; onExpand?: (() => void) | undef
   onExpand,
 }) => (
   <div className='flex items-center justify-between'>
-    <div className='flex items-center gap-2'>
-      <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
-        Plan
-      </span>
-      {chip}
-    </div>
-    {/* No Maximize when the card is rendered inside a widget preview's own thread
+    {/* No "Plan" label — the card's own title says what it is. */}
+    <div className='flex items-center gap-2'>{chip}</div>
+    {/* No Maximize when the card is rendered inside a PlanPreview's own thread
         panel (onExpand omitted) — prevents stacking a second full-screen preview. */}
     {onExpand && (
       <button

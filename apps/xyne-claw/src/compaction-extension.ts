@@ -108,6 +108,31 @@ export function evaluateCompaction(
   return { freshStart, summarizeSet, keptTokens: tail.tokens, keptCount: tail.messages.length };
 }
 
+const HEADING_RE = /^#{1,2} /m;
+
+export function trimSummarizerPreamble(text: string): { text: string; trimmed: number } {
+  const match = HEADING_RE.exec(text);
+  if (!match || match.index === undefined || match.index === 0) return { text, trimmed: 0 };
+  const trimmedText = text.slice(match.index).trim();
+  if (!/[^#\s]/.test(trimmedText)) return { text, trimmed: 0 };
+  return { text: trimmedText, trimmed: match.index };
+}
+
+export const RESUME_ANCHOR =
+  "You are resuming after context compaction. The checkpoint above is your own working summary, NOT the answer to the task. " +
+  "Do not restate it, reformat it, or send it to the user. " +
+  "Continue the outstanding steps and deliver the final result the task requires";
+
+export function buildResumeAnchor(submitToolName?: string): string {
+  return submitToolName ? `${RESUME_ANCHOR}, using the \`${submitToolName}\` tool to submit.` : `${RESUME_ANCHOR}.`;
+}
+
+let requiredSubmitToolName: string | undefined;
+
+export function setCompactionSubmitTool(name: string | undefined): void {
+  requiredSubmitToolName = name;
+}
+
 export const compactionExtension: ExtensionFactory = (pi) => {
   pi.on("session_before_compact", async (event, ctx) => {
     const ev = event as unknown as {
@@ -154,13 +179,42 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         undefined,
         signal,
       );
+
+      // Guard: a fresh start REPLACES the whole window with only this summary
+      // (firstKeptEntryId = FRESH_START_SENTINEL makes buildSessionContext yield
+      // just `[summary]`). If the summarizer returned an EMPTY summary — e.g. an
+      // oversized single-shot request whose output budget was spent on reasoning
+      // or truncated, or a provider that returned no text block — committing it
+      // would ERASE the entire context, and the next turn would see an empty
+      // summary and stop. Never commit an empty fresh-start summary: fall back to
+      // pi-native compaction, which keeps the window intact (safe; at worst we
+      // re-compact next turn).
+      const summaryText = (result as { summary?: string } | undefined)?.summary?.trim();
+      if (!summaryText) {
+        metric.count("agent_compaction", { kind: "fresh_start_empty" });
+        log.error(
+          `[compaction] Fresh start produced an EMPTY summary ` +
+          `(${keptCount} msgs ~${keptTokens} tok est) — refusing to drop the ` +
+          `window; falling back to pi-native compaction to preserve context.`,
+        );
+        return; // let default compaction proceed (keeps the messages)
+      }
+
+      const { text: cleanedSummary, trimmed } = trimSummarizerPreamble(summaryText);
+      if (trimmed > 0) {
+        metric.count("compaction_summary_preamble_trimmed");
+        log.info(`[compaction] trimmed ${trimmed} chars of summarizer preamble`);
+      }
+      const anchoredSummary = `${cleanedSummary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`;
+      const anchoredResult = { ...result, summary: anchoredSummary };
+
       metric.count("agent_compaction", { kind: "fresh_start" });
       log.info(
         `[compaction] Fresh start: pi would have kept the whole window ` +
         `(${keptCount} msgs ~${keptTokens} tok est, reduced nothing) — ` +
         `re-summarized it all, keeping only the summary.`,
       );
-      return { compaction: result };
+      return { compaction: anchoredResult };
     } catch (err) {
       log.error("[compaction] Custom compaction failed, falling back to default:", err);
       return; // let default compaction proceed

@@ -45,9 +45,16 @@ export class ClassificationMappingsACL extends BaseACL<'classification_mappings'
       throw new MutationACLError('Classification mapping update failed: mapping does not exist', 'classification_mappings');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'classification_mappings');
+    // Gate on the stored row's channel — non-participants of the private channel
+    // must not tamper with the classification mapping.
+    await this.verifyChannelAccess(row.channelId, tx);
+    // channelId can be repointed on update — re-verify access to the new channel.
+    if (args.channelId !== undefined) {
+      await this.verifyChannelAccess(args.channelId, tx);
+    }
     // userGroupId can be repointed on update — validate the new group's workspace.
     if (args.userGroupId !== undefined) {
-      await this.verifyUserGroupInWorkspace(args.userGroupId as string, tx);
+      await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     }
   }
 
@@ -57,6 +64,7 @@ export class ClassificationMappingsACL extends BaseACL<'classification_mappings'
       throw new MutationACLError('Classification mapping delete failed: mapping does not exist', 'classification_mappings');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'classification_mappings');
+    await this.verifyChannelAccess(row.channelId, tx);
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'classification_mappings'>>, _tx: Transaction<Schema>): Promise<void> {

@@ -130,7 +130,11 @@ export function useDraftAttachments() {
             duration = thumbnailResult.duration;
             thumbnailBlob = thumbnailResult.blob;
           } catch (error) {
-            console.warn('Failed to generate thumbnail for video:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to generate thumbnail for video:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -145,7 +149,11 @@ export function useDraftAttachments() {
             const blob = await generateDocumentThumbnail(file);
             if (blob) thumbnailBlob = blob;
           } catch (error) {
-            console.warn('Failed to generate thumbnail for document:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to generate thumbnail for document:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -163,7 +171,11 @@ export function useDraftAttachments() {
               height = dims.height;
             }
           } catch (error) {
-            console.warn('Failed to get image dimensions:', file.name, error);
+            logger.warn(Event.FRONTEND_ERROR, {
+              type: 'migrated_console_warn',
+              message: String('Failed to get image dimensions:'),
+              context: [file.name, error],
+            });
             logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
               fileType: file.type,
               extension: getFileExtension(file.name),
@@ -253,22 +265,9 @@ export function useDraftAttachments() {
 
         const formData = new FormData();
 
-        // Add all files
-        filesArray.forEach(file => {
-          formData.append('files', file);
-        });
-
-        // Add all thumbnails (if available)
-        processedFiles.forEach(({ thumbnailBlob, file }) => {
-          if (thumbnailBlob) {
-            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
-          } else {
-            // Add placeholder for consistent indexing
-            formData.append('thumbnails', new Blob([]), '');
-          }
-        });
-
-        // Add fileMetadata JSON with complete information for all files
+        // Text fields go in BEFORE the file bodies. Multipart parts are parsed in wire
+        // order, so on a mid-upload disconnect the server has already read the ids and
+        // can mark those rows FAILED; appended last, they would never arrive.
         const fileMetadataArray = processedFiles.map(
           ({ index, thumbnailBlob, width, height, duration }) => ({
             fileIndex: index,
@@ -289,6 +288,21 @@ export function useDraftAttachments() {
           formData.append('conversationId', conversationId);
         }
 
+        // Add all files
+        filesArray.forEach(file => {
+          formData.append('files', file);
+        });
+
+        // Add all thumbnails (if available)
+        processedFiles.forEach(({ thumbnailBlob, file }) => {
+          if (thumbnailBlob) {
+            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
+          } else {
+            // Add placeholder for consistent indexing
+            formData.append('thumbnails', new Blob([]), '');
+          }
+        });
+
         await apiInstance.post('/drafts/attachments/upload', formData);
 
         logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
@@ -304,7 +318,11 @@ export function useDraftAttachments() {
           file,
         }));
       } catch (error) {
-        console.error('Failed to upload files:', error);
+        logger.error(Event.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to upload files:'),
+          error: error,
+        });
         logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
           fileCount: filesArray.length,
           error: error instanceof Error ? error.message : String(error),

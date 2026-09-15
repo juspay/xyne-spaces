@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Bug, ChevronLeft, Send, Square, Loader2, Plus, MessageSquare, ImagePlus, X, AtSign, Hash, Ticket, FileText, Phone, RefreshCw } from "lucide-react";
+import { Bug, ChevronLeft, Send, Square, Loader2, Plus, MessageSquare, ImagePlus, X, AtSign, Hash, Ticket, FileText, Phone, RefreshCw, GitBranch } from "lucide-react";
 import {
   sendChatMessage,
   pollChatMessages,
@@ -28,6 +28,7 @@ import {
   type PendingAction,
   type ContextItem,
   type ContextSearchType,
+  type AttachedContextRef,
 } from "../lib/api";
 import type { AgentLight } from "../lib/types";
 import { resolveEffectiveParents } from "../lib/branching";
@@ -515,6 +516,10 @@ export function AgentChat({ userId }: Props) {
 
   const addSelectedContext = useCallback((item: ContextItem) => {
     if (selectedContext.some((ctx) => ctx.type === item.type && ctx.id === item.id)) return;
+    if (item.type === "repository") {
+      setSelectedContext((prev) => [...prev.filter((ctx) => ctx.type !== "repository"), item]);
+      return;
+    }
     if (selectedContext.length >= MAX_CONTEXT_TOTAL) {
       showContextOverflowToast(`Maximum ${MAX_CONTEXT_TOTAL} context items reached.`);
       return;
@@ -845,14 +850,17 @@ export function AgentChat({ userId }: Props) {
         : `Attached ${selectedContext.length} context item(s)`);
     const files = pendingFiles.map((p) => p.file);
     const previews = pendingFiles.map((p) => p.previewUrl);
-    const contextToSend = selectedContext.map((item) => ({
+    const repositoryContext = selectedContext.find((item) => item.type === "repository");
+    const contextToSend: AttachedContextRef[] = selectedContext
+      .filter((item) => item.type !== "repository")
+      .map((item) => ({
       type: item.type,
       id: item.id,
       title: item.title,
       ...(typeof item.meta?.["conversationId"] === "string" && item.meta["conversationId"].trim().length > 0
         ? { threadId: item.meta["conversationId"].trim() }
         : {}),
-    }));
+    } as AttachedContextRef));
     setInput("");
     setPendingFiles([]);
     setShowContextPicker(false);
@@ -1000,7 +1008,9 @@ export function AgentChat({ userId }: Props) {
       onDebugArtifactsReady: () => {
         setDebugArtifactsReadyVersion((version) => version + 1);
       },
-    }, attachmentIds.length > 0 ? attachmentIds : undefined, contextToSend.length > 0 ? contextToSend : undefined, undefined, undefined, parentAssistantMessageId, controller.signal).then(async (res) => {
+    }, attachmentIds.length > 0 ? attachmentIds : undefined, contextToSend.length > 0 ? contextToSend : undefined, undefined, undefined, parentAssistantMessageId, controller.signal, undefined, undefined, repositoryContext ? {
+      researchContext: { type: "repository", id: repositoryContext.id, name: repositoryContext.title },
+    } : undefined).then(async (res) => {
       setConvId(res.conversationId);
       setProgress(null);
       refreshConversations();
@@ -1669,6 +1679,7 @@ function contextBadgeClass(type: ContextItem["type"]): string {
   if (type === "channel") return "border-cyan-700/70 bg-cyan-500/10 text-cyan-300";
   if (type === "ticket") return "border-amber-700/70 bg-amber-500/10 text-amber-300";
   if (type === "canvas") return "border-emerald-700/70 bg-emerald-500/10 text-emerald-300";
+  if (type === "repository") return "border-blue-700/70 bg-blue-500/10 text-blue-300";
   return "border-fuchsia-700/70 bg-fuchsia-500/10 text-fuchsia-300";
 }
 
@@ -1676,5 +1687,6 @@ function contextIcon(type: ContextItem["type"]): ReactElement {
   if (type === "channel") return <Hash size={12} className="shrink-0" />;
   if (type === "ticket") return <Ticket size={12} className="shrink-0" />;
   if (type === "canvas") return <FileText size={12} className="shrink-0" />;
+  if (type === "repository") return <GitBranch size={12} className="shrink-0" />;
   return <Phone size={12} className="shrink-0" />;
 }

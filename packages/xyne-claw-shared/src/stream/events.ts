@@ -1,4 +1,5 @@
 import type { Todo } from "../flow/plan-flow.js";
+import type { UiWidget } from "../types/ui-widget.js";
 
 // Wire contract for the claw → claw-auth streaming channel.
 //
@@ -55,8 +56,10 @@ export type ClawStreamEvent =
   | { event: "delta";           seq: number; sessionId: string; textDelta: string }
   | { event: "attachment";      seq: number; sessionId: string; attachment: ClawAttachmentPayload }
   | { event: "sandbox-preview"; seq: number; sessionId: string; payload: ClawSandboxPreviewPayload }
+  /** @deprecated Rolling-deploy compatibility for claw pods predating ui-widget. */
   | { event: "plan";            seq: number; sessionId: string; todos: Todo[] }
   | { event: "pr";              seq: number; sessionId: string; pr: Record<string, unknown> }
+  | { event: "ui-widget";       seq: number; sessionId: string; widget: UiWidget }
   | { event: "progress-label";  seq: number; sessionId: string; payload: ClawProgressLabelPayload }
   | { event: "debug";           seq: number; sessionId: string; debugEvent: unknown }
   | { event: "cancelled";       seq: number; sessionId: string; reason?: string | undefined }

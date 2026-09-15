@@ -91,8 +91,8 @@ export function SendMessageStepForm({
           value={cfg.senderId}
           onChange={next => setField('senderId', next)}
           variableSources={variableSources}
-          entityKind={EntityKind.USER}
-          placeholder='Pick a user (defaults to the automations bot)'
+          entityKind={EntityKind.SENDER}
+          placeholder='Pick a bot (defaults to the automations bot)'
         />
       </FieldRow>
 

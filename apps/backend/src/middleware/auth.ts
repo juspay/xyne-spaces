@@ -186,7 +186,7 @@ export class AuthMiddleware {
         isApiKeyUser: false,
         scopes: [],
         role: user.role,
-        orgRole: user.orgRole!,
+        orgRole: user.orgRole,
         memberId: user.orgMemberId,
       };
 
@@ -480,7 +480,7 @@ export class AuthMiddleware {
 
       let effectiveWorkspaceId: string | undefined = payload.workspaceId;
       let effectiveMemberId: string | undefined = payload.memberId;
-      let effectiveOrgRole: string | undefined = payload.orgRole;
+      let effectiveOrgRole: string = user.orgMember.role;
 
       if (!hasWorkspaceClaims) {
         logger.info(`[AUTH] LEGACY JWT FORMAT - User ${payload.sub} using pre-workspace client`, {
@@ -492,7 +492,7 @@ export class AuthMiddleware {
         // Use user's workspace and orgMember from DB (already fetched at line 456)
         effectiveWorkspaceId = user.workspaceId ?? undefined;
         effectiveMemberId = user.orgMemberId ?? undefined;
-        effectiveOrgRole = user.orgMember?.role;
+        effectiveOrgRole = user.orgMember.role;
       }
 
       if (!effectiveWorkspaceId || !effectiveMemberId) {
@@ -521,7 +521,7 @@ export class AuthMiddleware {
         isApiKeyUser: false,
         scopes: [],
         role: user.role,
-        orgRole: effectiveOrgRole ?? 'MEMBER',
+        orgRole: effectiveOrgRole,
         memberId: effectiveMemberId,
       };
 

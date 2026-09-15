@@ -36,13 +36,7 @@ function plainText(value: string): string {
 class SocialMediaService {
   private async getSourceContext(sourceId: string): Promise<SocialMediaSource> {
     const source = await db.externalSource.findUnique({ where: { id: sourceId } });
-    if (
-      !source ||
-      !source.isActive ||
-      !source.channelId ||
-      !source.workspaceId ||
-      !source.ownerUserId
-    ) {
+    if (!source || !source.isActive || !source.channelId || !source.ownerUserId) {
       throw new Error('Active social media source is not configured');
     }
     return source as SocialMediaSource;

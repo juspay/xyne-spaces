@@ -31,7 +31,7 @@ jobs:
   # Cheap gate: authorize the launcher + resolve the matrix before heavy builds.
   prepare:
     name: Authorize + resolve images
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
@@ -76,7 +76,7 @@ jobs:
   build:
     name: Build ${{ matrix.name }} image
     needs: prepare
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # tsc / vite need a larger V8 heap (mirrors ci.yml).
     env:
       NODE_OPTIONS: "--max-old-space-size=8192"

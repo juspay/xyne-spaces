@@ -1,29 +1,33 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
+import { Archive } from 'lucide-react';
+import { KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Tag,
-  Plus,
-  X,
-  Check,
+  PlusDefault as Plus,
+  MultipleCrossCancelDefault as X,
+  CheckTickSingle as Check,
   FileText,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  LinkIcon,
-  Minimize2,
-  Sparkles,
-  Calendar,
-  SquareKanban,
-  Clock,
-  Eye,
+  LinkChainHorizontal as LinkIcon,
+  MinimizeTwoArrow as Minimize2,
+  SparkleAi02 as Sparkles,
+  CalendarDefault as Calendar,
+  ClockDefault as Clock,
+  EyeOn as Eye,
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
-  Archive,
+  ExternalLink as SquareArrowOutUpRight,
   GitBranch,
-} from 'lucide-react';
+  LockClose as Lock,
+  LinkBrokenSlant as Unlink,
+} from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
   SubTicket,
@@ -47,6 +51,8 @@ import {
   RCAStatus,
   LookupType,
   BoardType,
+  isManualSubTicketBoard,
+  linkedSubTicketId,
   ApproverType,
   ReenterMode,
   isFieldActive,
@@ -55,6 +61,9 @@ import {
   normalizeFlowPlan,
   flowGateOf,
   FLOW_STAGE_NAMES,
+  deriveEtaManagementView,
+  parseTicketEtaManagement,
+  parseBoardEtaManagement,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -69,26 +78,32 @@ import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { MappedTicketModal } from '../MappedTicketModal/MappedTicketModal';
 import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
-import { useChannel } from '../../../hooks/useChannels';
+import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
-import { TicketPriorityIcon, TicketStatusIcon } from '../../../assets/icons';
+import { TicketPriorityIcon } from '../../../assets/icons';
+import { StageIndicator } from '../../../utils/board/stageStatusIcon';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { getReachableStageIds, findMatchingTransition } from '../../../utils/stageTransitionUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
+import {
+  useProjectTicketSearch,
+  VESPA_MAX_BOARD_FILTER_VALUES,
+} from '../../../hooks/useProjectTicketSearch';
+import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import {
   formatIncomingReferenceLabel,
   formatReferenceLabel,
   useTicketReferences,
 } from '../../../hooks/useTicketReferences';
-import { TicketStatusIcon as TicketStageIcon } from '../TicketStatus/TicketStatusIcon';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils/etaCalculation';
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
@@ -105,7 +120,7 @@ import { BoardTicketNav } from '../BoardTicketNav';
 import Tooltip from '../../ui/Tooltip';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
-import { isReleaseTicket } from '@xyne/shared';
+import { isReleaseTicket, isDeskChannelType } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
 import { AIClassificationPanel } from './AIClassificationPanel';
@@ -113,7 +128,9 @@ import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   resolveBoardAdditionalFields,
+  resolveLeftoverFieldValues,
   type ResolvedBoardAdditionalField,
+  type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
@@ -121,6 +138,8 @@ type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
 
 interface SubTicketTreeNode {
   subTicket: SubTicketTreeSubTicket;
+  /** ticket_sub_ticket_mappings row id — the edge that `subTicket.unlink` removes. */
+  mappingId: string;
   parentTicketId: string;
   depth: number;
   children: SubTicketTreeNode[];
@@ -151,18 +170,6 @@ interface StageInfo {
   eta: number | null;
 }
 
-const getStageProgress = (
-  currentStageName: string | null | undefined,
-  stages: StageInfo[] | undefined,
-): number => {
-  if (!stages || stages.length === 0 || !currentStageName) return 0;
-
-  const currentStage = stages.find(stage => stage.name === currentStageName);
-  if (!currentStage) return 0;
-
-  return Math.round((currentStage.sequenceNumber / stages.length) * 100);
-};
-
 const PRIORITY_OPTIONS: TicketPriority[] = [
   TicketPriority.LOW,
   TicketPriority.MEDIUM,
@@ -190,7 +197,7 @@ const toVespaProjectTicket = (result: {
   };
 }): VespaProjectTicket => ({
   id: result.id,
-  title: result.title,
+  title: result.title?.replace(/<\/?hi>/gi, '') ?? '',
   ...(result.searchContext?.xyneId !== undefined
     ? { xyneId: result.searchContext.xyneId ?? null }
     : {}),
@@ -198,7 +205,6 @@ const toVespaProjectTicket = (result: {
 });
 
 const fetchProjectTicketsPageFromVespa = async (
-  projectId: string,
   query: string,
   offset: number,
 ): Promise<{
@@ -211,7 +217,6 @@ const fetchProjectTicketsPageFromVespa = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     limit: 200,
     offset,
   });
@@ -310,6 +315,40 @@ const getFormEntityFieldEnum = (
     fieldValue.formField?.fieldEnum;
   const options = parseFieldOptionValues(fieldEnum);
   return options.length > 0 ? options : undefined;
+};
+
+/** Plain-text formatting for a retired field's read-only value — no edit affordance, so no need for the richer per-type widgets EditableFormField uses. */
+const formatLeftoverFieldValue = (
+  field: LeftoverFieldValue,
+  userById: ReadonlyMap<string, { id: string; name?: string | null; email?: string | null }>,
+): string => {
+  const raw = field.actualFieldValue ?? field.fieldValue;
+  if (raw === null || raw === undefined || raw === '') return '—';
+
+  if (field.fieldType === FormFieldType.BOOLEAN) {
+    if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
+    if (typeof raw === 'string') {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'yes') return 'Yes';
+      if (normalized === 'false' || normalized === 'no') return 'No';
+    }
+  }
+
+  if (field.fieldType === FormFieldType.USER) {
+    const ids = Array.isArray(raw) ? raw.map(String) : typeof raw === 'string' ? [raw] : [];
+    if (ids.length === 0) return '—';
+    return ids
+      .map(id => {
+        const normalizedId = id.startsWith('user:') ? id.slice('user:'.length) : id;
+        const user = userById.get(normalizedId);
+        return user ? getUserDisplayName(user) : id;
+      })
+      .join(', ');
+  }
+
+  if (Array.isArray(raw)) return raw.map(String).join(', ') || '—';
+  if (typeof raw === 'object') return JSON.stringify(raw);
+  return String(raw);
 };
 
 // ── Stage Form Submissions Component ──────────────────────────────────────────
@@ -411,6 +450,10 @@ interface TicketDetailsProps {
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
   onFillRCA?: () => void;
+  /** Display the current stage without exposing manual lifecycle transitions. */
+  stageReadOnly?: boolean;
+  /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
+  subTicketsOnly?: boolean;
 }
 
 const TicketKeyValuePair = ({
@@ -524,6 +567,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   onNavigateToTicket,
   expandedView = false,
   onFillRCA,
+  stageReadOnly = false,
+  subTicketsOnly = false,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
@@ -753,6 +798,64 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     !isNonLinearBoard &&
     ((boardData?.metadata as BoardMetadata | null | undefined)?.showNextStageFormInTicketDetails ??
       false) === true;
+
+  // ETA risk/overdue display state. The banner/badge is shown to everyone; the backend
+  // (`canUserModifyTicketControl`, wired into `acknowledgeEtaRisk`) is the sole authority
+  // on who may act, and rejects an unauthorized attempt with a clear error.
+  const etaManagementView = useMemo(() => {
+    if (!ticket) return null;
+    return deriveEtaManagementView({
+      ticketEtaManagement: parseTicketEtaManagement(ticket.metadata),
+      boardEtaManagement: parseBoardEtaManagement(
+        boardData?.metadata ?? null,
+        boardData?.boardType ?? BoardType.DEFAULT,
+      ),
+      ticketEta: ticket.eta ?? null,
+      ticketStatus: ticket.statusV2,
+      now: Date.now(),
+    });
+  }, [ticket, boardData]);
+
+  const [acknowledgeReason, setAcknowledgeReason] = useState('');
+  const [showAcknowledgeInput, setShowAcknowledgeInput] = useState(false);
+  const [submittingAcknowledge, setSubmittingAcknowledge] = useState(false);
+
+  const handleAcknowledgeRisk = useCallback(async () => {
+    if (!ticket || !acknowledgeReason.trim()) return;
+    const ticketEtaManagement = parseTicketEtaManagement(ticket.metadata);
+    const fingerprint = ticketEtaManagement.planningRisk.fingerprint;
+    if (!fingerprint) return;
+    setSubmittingAcknowledge(true);
+    try {
+      const result = zero.mutate(
+        mutators.ticket.acknowledgeEtaRisk({
+          ticketId: ticket.id,
+          expectedFingerprint: fingerprint,
+          reason: acknowledgeReason.trim(),
+          clientTimestamp: Date.now(),
+        }),
+      );
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error('Failed to acknowledge planning risk', {
+          description:
+            res.error.message || 'The risk state may have changed - refresh and try again.',
+          duration: 6000,
+        });
+      } else {
+        toast.success('Planning risk acknowledged');
+        setShowAcknowledgeInput(false);
+        setAcknowledgeReason('');
+      }
+    } catch (error) {
+      toast.error('Failed to acknowledge planning risk', {
+        description: error instanceof Error ? error.message : 'An unexpected error occurred.',
+        duration: 6000,
+      });
+    } finally {
+      setSubmittingAcknowledge(false);
+    }
+  }, [ticket, acknowledgeReason, zero]);
 
   // Plan-node titles for FLOW boards — form values are scoped by planNodeId,
   // so submissions/activity resolve their label through this map.
@@ -1033,6 +1136,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const channelId = ticket?.conversation?.channelId;
   const channel = useChannel(channelId || '');
 
+  const allChannels = useAllChannels();
+  const channelTypeMap = useMemo(
+    () => new Map(allChannels.map(c => [c.id, c.type])),
+    [allChannels],
+  );
+
   // Detect if ticket belongs to an email/desk channel — title changes also update email subject
   // ticket.channelId is the direct field; ticket.conversation.channelId is the linked conversation's channel
   const emailChannelPreference = useEmailChannelPreference(
@@ -1064,14 +1173,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     setProjectTicketSearch('');
     setIsAddTicketMenuOpen(false);
     projectTicketsRequestIdRef.current += 1;
-  }, [ticket?.projectId]);
+  }, [ticket?.id]);
 
   const loadProjectTicketsPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!ticket?.projectId) {
-        return;
-      }
-
       const normalizedQuery = projectTicketSearch.trim();
       const requestId = ++projectTicketsRequestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -1083,11 +1188,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       try {
-        const response = await fetchProjectTicketsPageFromVespa(
-          ticket.projectId,
-          normalizedQuery,
-          offset,
-        );
+        const response = await fetchProjectTicketsPageFromVespa(normalizedQuery, offset);
 
         if (requestId !== projectTicketsRequestIdRef.current) {
           return;
@@ -1115,11 +1216,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           return;
         }
 
-        console.warn('[TicketDetails] Failed to load Vespa project tickets', {
-          projectId: ticket.projectId,
-          offset,
-          query: normalizedQuery || '*',
-          error,
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_warn',
+          message: String('[TicketDetails] Failed to load Vespa project tickets'),
+          context: [
+            {
+              offset,
+              query: normalizedQuery || '*',
+              error,
+            },
+          ],
         });
 
         if (replace) {
@@ -1135,11 +1241,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }
       }
     },
-    [projectTicketSearch, ticket?.projectId],
+    [projectTicketSearch],
   );
 
   useEffect(() => {
-    if (!isAddTicketMenuOpen || !ticket?.projectId) {
+    if (!isAddTicketMenuOpen) {
       return;
     }
 
@@ -1149,7 +1255,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (projectTicketSearch.trim()) {
       void loadProjectTicketsPage(0, true);
     }
-  }, [isAddTicketMenuOpen, loadProjectTicketsPage, ticket?.projectId, projectTicketSearch]);
+  }, [isAddTicketMenuOpen, loadProjectTicketsPage, projectTicketSearch]);
 
   const handleAddTicketMenuOpenChange = useCallback((open: boolean): void => {
     setIsAddTicketMenuOpen(open);
@@ -1185,7 +1291,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      enabled: !!ticket?.projectId && hasBoardDropdownOpened,
+      // Also needed by the sub-ticket picker, which must know each board's type.
+      enabled:
+        !!ticket?.projectId &&
+        (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
     },
   );
 
@@ -1274,9 +1383,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       const mappings = subTicketMappingsByParentTicketId.get(parentTicketId) ?? [];
 
       return mappings
-        .map(mapping => mapping.subTicket)
-        .filter((st): st is SubTicketTreeSubTicket => st !== null && st !== undefined)
-        .map(subTicket => {
+        .filter(
+          (mapping): mapping is SubTicketTreeMapping & { subTicket: SubTicketTreeSubTicket } =>
+            mapping.subTicket !== null && mapping.subTicket !== undefined,
+        )
+        .map(mapping => {
+          const subTicket = mapping.subTicket;
           const mappedTicketId = subTicket.mappedTicketId ?? undefined;
           const canRenderChildren =
             mappedTicketId &&
@@ -1285,6 +1397,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
           return {
             subTicket,
+            mappingId: mapping.id,
             parentTicketId,
             depth,
             children: canRenderChildren
@@ -1313,6 +1426,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
+  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
+  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
   const canCreateNestedSubTicket =
     (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
@@ -1400,6 +1515,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       return isFieldActive({ parentOptionId }, allFieldDefs, getFieldEffectiveValue);
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
+
+  // Values this ticket has saved for fields no longer part of the board's current form —
+  // e.g. left behind by a "Copy Board Configuration" run that swapped in another board's
+  // form. Never deleted, just unreachable through the lookup above; shown separately and
+  // read-only rather than silently dropped.
+  const leftoverFieldValues = useMemo(
+    () =>
+      resolveLeftoverFieldValues({
+        formMapping: formMapping ?? undefined,
+        formEntityValues: formEntityValues as FormEntityValueWithField[] | undefined,
+        boardId: ticket?.boardId,
+      }),
+    [formMapping, formEntityValues, ticket?.boardId],
+  );
+
+  const leftoverFieldUserById = useMemo(() => {
+    const list = Array.isArray(users) ? users : [];
+    return new Map(list.map(user => [user.id, user]));
+  }, [users]);
 
   // Group form values by stage+version — shared with the Messages thread (StageMoveFormBlock)
   // so both surfaces render the exact same "Form submission" block.
@@ -1862,6 +1996,137 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return (): void => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
+
+  // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
+  const manualBoardIds = useMemo(
+    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
+    [boards],
+  );
+  // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
+  const manualBoardIdsFilter = useMemo(
+    () =>
+      manualBoardIds.length > 0 && manualBoardIds.length <= VESPA_MAX_BOARD_FILTER_VALUES
+        ? manualBoardIds.join(',')
+        : '',
+    [manualBoardIds],
+  );
+
+  // Own search state — the Related Tickets picker below keeps its own.
+  const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
+  const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
+  const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
+  const subTicketSearch = useProjectTicketSearch({
+    projectId: ticket?.projectId ?? undefined,
+    boardIds: manualBoardIdsFilter,
+    isActive: isAddSubTicketMenuOpen,
+  });
+
+  // The component is reused across tickets rather than remounted.
+  useEffect(() => {
+    setIsAddSubTicketMenuOpen(false);
+    setIsLinkingSubTicket(false);
+    setUnlinkingMappingIds(new Set());
+  }, [ticketId]);
+
+  const handleAddSubTicketMenuOpenChange = useCallback((open: boolean): void => {
+    setIsAddSubTicketMenuOpen(open);
+  }, []);
+
+  // Everything already in the loaded tree, so a deeper child is not offered again.
+  const linkedSubTicketMappedIds = useMemo(() => {
+    const ids = new Set<string>();
+    loadedSubTickets.forEach(st => {
+      if (st.mappedTicketId) ids.add(st.mappedTicketId);
+    });
+    return ids;
+  }, [loadedSubTickets]);
+
+  const subTicketPickerOptions = useMemo<SelectorOption[]>(() => {
+    // Direct parents only — deeper ancestors aren't loaded here, and the server's
+    // ancestor walk rejects those with a toast rather than silently linking a loop.
+    const parentIds = new Set(parentTicketIds);
+    // Backstop for the Vespa board filter, which is dropped past its value cap.
+    const manualBoardIdSet = new Set(manualBoardIds);
+    return (subTicketSearch.tickets ?? [])
+      .filter(
+        candidate =>
+          candidate.id !== ticketId &&
+          !linkedSubTicketMappedIds.has(candidate.id) &&
+          !parentIds.has(candidate.id) &&
+          (manualBoardIdSet.size === 0 ||
+            !candidate.boardId ||
+            manualBoardIdSet.has(candidate.boardId)),
+      )
+      .map(candidate => ({
+        value: candidate.id,
+        label: candidate.title || candidate.xyneId || candidate.id,
+        subtitle: candidate.xyneId || candidate.id,
+        icon: null,
+      }));
+  }, [
+    subTicketSearch.tickets,
+    ticketId,
+    linkedSubTicketMappedIds,
+    parentTicketIds,
+    manualBoardIds,
+  ]);
+
+  const handleLinkSubTicket = useCallback(
+    (mappedTicketId: string | null): void => {
+      if (!mappedTicketId || !ticket?.id || isLinkingSubTicket) {
+        return;
+      }
+
+      const candidate = subTicketSearch.tickets?.find(entry => entry.id === mappedTicketId);
+      setIsAddSubTicketMenuOpen(false);
+      subTicketSearch.reset();
+      setIsLinkingSubTicket(true);
+
+      // The row appears once the write replicates back through Zero, not optimistically.
+      void subTicketService
+        .link(
+          ticket.id,
+          mappedTicketId,
+          // Fallback only — the row renders from the linked ticket itself.
+          candidate?.xyneId || candidate?.title || 'Subticket',
+        )
+        .catch((error: unknown) => {
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to link sub-ticket'));
+        })
+        .finally(() => {
+          setIsLinkingSubTicket(false);
+        });
+    },
+    [isLinkingSubTicket, subTicketSearch, ticket?.id],
+  );
+
+  const handleUnlinkSubTicket = useCallback(
+    (mappingId: string): void => {
+      if (unlinkingMappingIds.has(mappingId)) {
+        return;
+      }
+
+      setUnlinkingMappingIds(previous => new Set(previous).add(mappingId));
+
+      const clearInFlight = (): void => {
+        setUnlinkingMappingIds(previous => {
+          const next = new Set(previous);
+          next.delete(mappingId);
+          return next;
+        });
+      };
+
+      void subTicketService
+        .unlink(mappingId)
+        .catch((error: unknown) => {
+          toast.error(getSubTicketLinkErrorMessage(error, 'Failed to unlink sub-ticket'));
+        })
+        .finally(clearInFlight);
+    },
+    [unlinkingMappingIds],
+  );
 
   // Early return if no ticket data - after all hooks
   if (!ticket) {
@@ -2687,8 +2952,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = relatedTicket?.boardId
       ? stagesByBoardId.get(relatedTicket.boardId)
       : undefined;
-    const stageProgress = getStageProgress(relatedTicket?.stageName, boardStages);
-    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const assigneeId = relatedTicket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
     const priorityIcon = relatedTicket?.priority ? getPriorityIcon(relatedTicket.priority) : null;
 
@@ -2731,7 +2994,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
         <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
           <div className='flex items-center gap-3 min-w-0'>
-            <TicketStageIcon progressPercentage={displayProgress} size={18} />
+            <StageIndicator stages={boardStages} stageName={relatedTicket?.stageName} size={18} />
             <div className='flex items-center gap-4 min-w-0'>
               <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
                 {relatedTicket?.xyneId || relatedTicket?.id || '—'}
@@ -2776,6 +3039,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <button
               type='button'
               onClick={onUnmerge}
+              data-ph-capture-attribute-track-id='unmerge_ticket'
               className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
               data-track-category='Tickets'
               data-track-name='UnmergeTicket'
@@ -2788,6 +3052,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               type='button'
               className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
+              data-ph-capture-attribute-track-id='remove_ticket_reference'
               aria-label='Remove reference'
               data-track-category='Tickets'
               data-track-name='RemoveReference'
@@ -2801,8 +3066,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
-  const openMappedSubTicket = (mappedTicketId: string | null | undefined): void => {
+  const openMappedSubTicket = (
+    mappedTicketId: string | null | undefined,
+    mappedTicket?: {
+      channelId: string;
+      xyneId?: string | null;
+      conversationId?: string | null;
+    } | null,
+  ): void => {
     if (!mappedTicketId) return;
+
+    if (mappedTicket) {
+      const channelType = channelTypeMap.get(mappedTicket.channelId);
+      if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+        const workspaceId = location.pathname.split('/')[1];
+        void navigate(
+          `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+        );
+        return;
+      }
+    }
 
     if (onNavigateToTicket) {
       onNavigateToTicket(mappedTicketId);
@@ -2825,20 +3108,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const boardStages = mappedTicket?.boardId
       ? stagesByBoardId.get(mappedTicket.boardId)
       : undefined;
-    const stageProgress = getStageProgress(mappedTicket?.stageName, boardStages);
-    const displayProgress = stageProgress === 0 ? 1 : stageProgress;
     const priority = mappedTicket?.priority;
     const assignedTo = mappedTicket?.assignedTo;
     const priorityIcon = priority ? getPriorityIcon(priority) : null;
     const assigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+    // Mirrors subTicket.unlink: only rows carrying the derived id are unlinkable. Keyed on
+    // `node.parentTicketId`, so a nested row is checked against its own parent.
+    const canUnlink =
+      Boolean(mappedTicketId) &&
+      subTicket.id === linkedSubTicketId(node.parentTicketId, mappedTicketId ?? '');
+    const isUnlinking = unlinkingMappingIds.has(node.mappingId);
 
     const handleRowClick = (): void => {
       if (mappedTicketId) {
-        if (isFlowBoard) {
-          openMappedSubTicket(mappedTicketId);
-          return;
+        if (mappedTicket) {
+          const channelType = channelTypeMap.get(mappedTicket.channelId);
+          if (isDeskChannelType(channelType) && mappedTicket.xyneId) {
+            const pathParts = location.pathname.split('/');
+            const workspaceId = pathParts[1];
+            void navigate(
+              `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+            );
+          } else {
+            const workspaceId = location.pathname.split('/')[1];
+            const base = buildChannelRoute(
+              `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
+              { selectedTab: 'thread' },
+            );
+            void navigate(`/${workspaceId}${base}#origin=${mappedTicket.conversationId}`);
+          }
         }
-        toggleSubTicketBranch(mappedTicketId);
         return;
       }
 
@@ -2906,7 +3205,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
                   onClick={event => {
                     event.stopPropagation();
-                    openMappedSubTicket(mappedTicketId);
+                    openMappedSubTicket(mappedTicketId, mappedTicket);
                   }}
                   aria-label='Open mapped ticket'
                   data-track-category='Tickets'
@@ -2921,9 +3220,42 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </button>
               </Tooltip>
             )}
+            {canUnlink && (
+              <Tooltip content='Unlink sub-ticket'>
+                <button
+                  type='button'
+                  disabled={isUnlinking}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    isUnlinking
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'hover:bg-background hover:text-destructive',
+                  )}
+                  onClick={event => {
+                    event.stopPropagation();
+                    handleUnlinkSubTicket(node.mappingId);
+                  }}
+                  aria-label='Unlink sub-ticket'
+                  data-track-category='Tickets'
+                  data-track-name='UnlinkSubTicket'
+                  data-track-metadata={JSON.stringify({
+                    subTicketId: subTicket.id,
+                    mappingId: node.mappingId,
+                    mappedTicketId,
+                    depth: node.depth,
+                  })}
+                >
+                  <Unlink size={14} />
+                </button>
+              </Tooltip>
+            )}
             {boardStages && boardStages.length > 0 && (
               <div className='flex items-center gap-1.5'>
-                <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                <StageIndicator
+                  stages={boardStages}
+                  stageName={mappedTicket?.stageName}
+                  size={18}
+                />
                 <span className='text-xs font-medium text-foreground whitespace-nowrap'>
                   {boardStages.findIndex(stage => stage.name === mappedTicket?.stageName) + 1}/
                   {boardStages.length}
@@ -2950,6 +3282,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
+  // Hidden only on machine-owned boards. A sub-ticket can take sub-tickets of its own —
+  // trees nest, and the server rejects anything that would close a loop.
+  const addSubTicketPicker = !canManageSubTicketLinks ? null : (
+    <div
+      className={cn(
+        'mt-3 rounded-lg border border-border px-3 py-2 flex items-center',
+        isLinkingSubTicket ? 'opacity-60 pointer-events-none' : undefined,
+      )}
+      data-testid='add-sub-ticket-picker'
+    >
+      <EntitySelector
+        options={subTicketPickerOptions}
+        selectedValue={null}
+        onSelect={value => handleLinkSubTicket(value)}
+        placeholder='+ Add existing sub-ticket'
+        searchPlaceholder='Search by ticket ID or name'
+        isOpen={isAddSubTicketMenuOpen}
+        onOpenChange={handleAddSubTicketMenuOpenChange}
+        onSearchChange={subTicketSearch.handleSearchChange}
+        onScrollEnd={subTicketSearch.handleScrollEnd}
+        hasMore={subTicketSearch.hasMore}
+        isLoading={subTicketSearch.isLoading}
+        disableClientFiltering={true}
+        width='100%'
+        noBorder
+        testId='add-sub-ticket-selector'
+      />
+    </div>
+  );
+
   const createSubTicketButton =
     boardData?.boardType === BoardType.FLOW ? null : (
       <button
@@ -2957,7 +3319,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
-        data-track-category='TICKETS'
+        data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
         title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
@@ -2995,6 +3357,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleCopyTicketViewLink}
+                data-track-category='Tickets'
+                data-track-name='COPY_TICKET_LINK'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <LinkIcon size={20} />
@@ -3010,6 +3375,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
                   );
                 }}
+                data-track-category='Tickets'
+                data-track-name='SUMMARIZE_THREAD'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket?.id,
+                  channelId: ticket?.channelId,
+                })}
                 title='Summarize thread'
               >
                 <Sparkles size={20} />
@@ -3021,6 +3392,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={() => setShowArchiveConfirmDialog(true)}
+                data-track-category='Tickets'
+                data-track-name='OPEN_ARCHIVE_TICKET_CONFIRM'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 disabled={ticket?.isArchived}
                 aria-label='Archive Ticket'
               >
@@ -3033,6 +3407,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleMinimizeExpandedView}
+                data-track-category='Tickets'
+                data-track-name='MINIMIZE_EXPANDED_VIEW'
+                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
                 aria-label='Copy Ticket'
               >
                 <Minimize2 size={20} />
@@ -3042,17 +3419,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      <div className='relative'>
+      <div
+        className={cn(
+          'relative',
+          // Hide the sibling sections instead of re-parenting the sub-tickets one.
+          subTicketsOnly &&
+            '[&>*:not([data-testid=sub-tickets-section]):not(.archived-guard)]:hidden',
+        )}
+      >
         {/* Archived overlay - blocks all interactions on content */}
         {ticket?.isArchived && (
           <div
-            className='absolute inset-0 z-50 cursor-not-allowed'
+            className='archived-guard absolute inset-0 z-50 cursor-not-allowed'
             style={{ backgroundColor: 'transparent' }}
           />
         )}
 
         {ticket?.isArchived && (
-          <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
+          <div className='archived-guard mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
             <Archive className='w-5 h-5 text-muted-foreground shrink-0' />
             <div className='flex-1'>
               <p className='text-sm font-medium text-foreground'>
@@ -3364,6 +3748,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             {
                               <button
                                 onClick={() => void handleRemoveTag(tag.id)}
+                                data-ph-capture-attribute-track-id='remove_ticket_tag'
                                 className={`ml-1 p-0.5 rounded transition-colors`}
                                 aria-label='Remove label'
                                 data-track-category='Tickets'
@@ -3414,6 +3799,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         {tagSearchQuery.trim() && !exactMatch && (
                           <button
                             onClick={() => void handleToggleTag(tagSearchQuery)}
+                            data-ph-capture-attribute-track-id='create_ticket_tag'
                             className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
                             data-track-category='Tickets'
                             data-track-name='CreateTag'
@@ -3433,6 +3819,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             <button
                               key={tagName}
                               onClick={() => void handleToggleTag(tagName)}
+                              data-ph-capture-attribute-track-id='toggle_ticket_tag'
                               className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
                               data-track-category='Tickets'
                               data-track-name='ToggleTag'
@@ -3472,7 +3859,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   data-testid='ticket-detail-status-selector'
                   className='flex items-center gap-2'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_STATUS'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -3480,15 +3867,41 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     currentStatus: ticket.stageName,
                   })}
                 >
-                  <Selector
-                    items={selectorStages}
-                    selectedValue={ticket.stageName}
-                    onValueChange={handleStageChange}
-                    placeholder='Set Status'
-                    icon={<TicketStatusIcon size={14} />}
-                    noBorder={true}
-                    isItemDisabled={item => item.name === ticket.stageName}
-                  />
+                  {stageReadOnly ? (
+                    <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
+                      <StageIndicator
+                        stages={stages}
+                        stageName={ticket.stageName}
+                        fallbackStatus={ticket.statusV2}
+                        isNonLinearBoard={isNonLinearBoard}
+                      />
+                      {ticket.stageName || 'Not set'}
+                    </span>
+                  ) : (
+                    <Selector
+                      items={selectorStages}
+                      selectedValue={ticket.stageName}
+                      onValueChange={handleStageChange}
+                      placeholder='Set Status'
+                      icon={
+                        <StageIndicator
+                          stages={stages}
+                          stageName={ticket.stageName}
+                          fallbackStatus={ticket.statusV2}
+                          isNonLinearBoard={isNonLinearBoard}
+                        />
+                      }
+                      getItemIcon={item => (
+                        <StageIndicator
+                          stages={stages}
+                          stageName={item.name}
+                          isNonLinearBoard={isNonLinearBoard}
+                        />
+                      )}
+                      noBorder={true}
+                      isItemDisabled={item => item.name === ticket.stageName}
+                    />
+                  )}
                   {/* Show alert icon if there's a pending request for the next stage */}
                   {((): React.ReactElement | null => {
                     if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
@@ -3531,7 +3944,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 <div
                   data-testid='ticket-detail-priority-selector'
                   data-track-event='SELECTOR_CHANGE'
-                  data-track-category='TICKETS'
+                  data-track-category='Tickets'
                   data-track-name='CHANGE_PRIORITY'
                   data-track-metadata={JSON.stringify({
                     ticketId: ticket.id,
@@ -3660,10 +4073,95 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           Overdue
                         </span>
                       )}
+                    {etaManagementView?.severity === 'PLANNING_RISK' && (
+                      <span
+                        className='inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded'
+                        title='The current stage deadline is later than this due date'
+                      >
+                        <AlertCircle size={11} />
+                        Planning Risk{etaManagementView.isPaused ? ' (paused)' : ''}
+                      </span>
+                    )}
+                    {etaManagementView?.forecastStatus === 'INCOMPLETE' && (
+                      <span
+                        className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground rounded'
+                        title={
+                          etaManagementView.forecastIncompleteReason ?? 'Missing a stage estimate'
+                        }
+                      >
+                        Estimate Incomplete
+                      </span>
+                    )}
                   </div>
                 )
               }
             />
+            {etaManagementView?.severity === 'PLANNING_RISK' &&
+              etaManagementView.planningRiskState === 'ACTIVE' && (
+                <div className='mx-0 mb-2 px-3 py-2.5 rounded-md border border-amber-200 bg-amber-50 text-sm'>
+                  <div className='flex items-start justify-between gap-2'>
+                    <div className='text-amber-800'>
+                      <p className='font-medium'>Planning risk</p>
+                      <p className='text-xs text-amber-700 mt-0.5'>
+                        The current stage deadline
+                        {etaManagementView.stageDeadline
+                          ? ` (${formatETADisplay(etaManagementView.stageDeadline)})`
+                          : ''}{' '}
+                        is later than the ticket due date
+                        {etaManagementView.ticketDue
+                          ? ` (${formatETADisplay(etaManagementView.ticketDue)})`
+                          : ''}
+                        .
+                        {etaManagementView.autoEnabled
+                          ? ' Automatic recalculation is active for this board.'
+                          : ' Automatic recalculation is off for this board.'}
+                      </p>
+                    </div>
+                    {!showAcknowledgeInput && (
+                      <Button
+                        variant='secondary'
+                        onClick={() => setShowAcknowledgeInput(true)}
+                        data-track-category='TicketDetails'
+                        data-track-name='OpenAcknowledgeEtaRisk'
+                      >
+                        Acknowledge
+                      </Button>
+                    )}
+                  </div>
+                  {showAcknowledgeInput && (
+                    <div className='mt-2 flex items-center gap-2'>
+                      <input
+                        type='text'
+                        value={acknowledgeReason}
+                        onChange={e => setAcknowledgeReason(e.target.value)}
+                        placeholder='Reason for keeping the current dates...'
+                        className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
+                        data-testid='acknowledge-eta-risk-reason'
+                        data-track-category='TicketDetails'
+                        data-track-name='AcknowledgeEtaRiskReasonInput'
+                      />
+                      <Button
+                        variant='secondary'
+                        onClick={() => void handleAcknowledgeRisk()}
+                        disabled={submittingAcknowledge || !acknowledgeReason.trim()}
+                        data-track-category='TicketDetails'
+                        data-track-name='SubmitAcknowledgeEtaRisk'
+                      >
+                        {submittingAcknowledge ? 'Saving...' : 'Confirm'}
+                      </Button>
+                      <Button
+                        variant='ghost'
+                        onClick={() => {
+                          setShowAcknowledgeInput(false);
+                          setAcknowledgeReason('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
             {/* Status Deadline - only show if current stage has eta configured */}
             {currentStageInfo?.eta && (
               <TicketKeyValuePair
@@ -3823,8 +4321,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
-        {/* Additional Form Fields */}
-        {allFormFields && allFormFields.length > 0 && (
+        {/* Additional Form Fields — current, editable fields plus (marked with a trailing
+            "*") any values the ticket has for fields no longer part of the board's current
+            configuration (e.g. left behind by a config copy from another board). Those are
+            read-only rather than editable, since the field itself no longer exists in the
+            board's schema. */}
+        {(allFormFields.length > 0 || leftoverFieldValues.length > 0) && (
           <div className='border border-border bg-muted rounded-lg p-4 my-4'>
             <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
             <div className='space-y-4'>
@@ -3844,6 +4346,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     )
                   }
                 />
+              ))}
+              {leftoverFieldValues.map(field => (
+                <div key={field.resolvedFieldId} className='flex items-start gap-2 w-full'>
+                  <span
+                    className='flex items-center gap-1 text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
+                    title={`${field.fieldName} — no longer part of this board's configuration, read-only`}
+                  >
+                    {field.fieldName}
+                    <Lock size={11} className='flex-shrink-0 text-muted-foreground' />
+                  </span>
+                  <span className='flex-1 text-sm text-foreground break-all pt-0.5'>
+                    {formatLeftoverFieldValue(field, leftoverFieldUserById)}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
@@ -3882,7 +4398,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             />
           ))}
 
-        {nextStageDetailsConfig &&
+        {!stageReadOnly &&
+          nextStageDetailsConfig &&
           (nextStageDetailsConfig.formId ? (
             <StageFormInlinePanel
               ticket={ticket}
@@ -4061,6 +4578,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
+                                  data-ph-capture-attribute-track-id='submit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
@@ -4248,6 +4766,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
+                                  data-ph-capture-attribute-track-id='resubmit_stage_request'
                                   className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
@@ -4324,6 +4843,36 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
+        {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
+          <div className='mt-4'>
+            <button
+              type='button'
+              onClick={() =>
+                void navigate(`/listProjects/${ticket.projectId}/releases/${ticket.id}`, {
+                  state: { returnToUrl: location.pathname + location.search },
+                })
+              }
+              data-track-category='Tickets'
+              data-track-name='OpenReleaseViewFromTicket'
+              data-testid='open-release-view-button'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
+            >
+              <span className='inline-flex items-center gap-3'>
+                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
+                  <SquareArrowOutUpRight size={18} />
+                </span>
+                <span className='flex flex-col text-left'>
+                  <span className='text-sm font-semibold text-foreground'>Open release view</span>
+                  <span className='text-xs text-muted-foreground'>
+                    Dev tickets, envs, migrations &amp; timeline for this release
+                  </span>
+                </span>
+              </span>
+              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
+            </button>
+          </div>
+        )}
+
         {/* Generate/View Release Notes Button - shown for completed Release/Hotfix tickets */}
         {ticket &&
           isReleaseTicket(ticket.ticketType as BaseTicketType) &&
@@ -4361,9 +4910,25 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   : undefined;
                 const stageIndex =
                   boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
-                const stageProgress = getStageProgress(parentTicket.stageName, boardStages);
-                const displayProgress = stageProgress === 0 ? 1 : stageProgress;
                 const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+                const navigateToParentTicket = (): void => {
+                  const channelType = channelTypeMap.get(parentTicket.channelId);
+                  if (isDeskChannelType(channelType) && parentTicket.xyneId) {
+                    const pathParts = location.pathname.split('/');
+                    const workspaceId = pathParts[1];
+                    void navigate(
+                      `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+                    );
+                  } else {
+                    const workspaceId = location.pathname.split('/')[1];
+                    const base = buildChannelRoute(
+                      `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
+                      { selectedTab: 'thread' },
+                    );
+                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`);
+                  }
+                };
+
                 const openParentTicket = (): void => {
                   if (onNavigateToTicket) {
                     onNavigateToTicket(parentTicket.id);
@@ -4377,11 +4942,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     key={parentTicket.id}
                     role='button'
                     tabIndex={0}
-                    onClick={openParentTicket}
+                    onClick={navigateToParentTicket}
                     onKeyDown={event => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        openParentTicket();
+                        navigateToParentTicket();
                       }
                     }}
                     className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'
@@ -4419,7 +4984,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       </Tooltip>
                       {boardStages && boardStages.length > 0 && (
                         <div className='flex items-center gap-1.5'>
-                          <TicketStageIcon progressPercentage={displayProgress} size={18} />
+                          <StageIndicator
+                            stages={boardStages}
+                            stageName={parentTicket.stageName}
+                            size={18}
+                          />
                           <span className='whitespace-nowrap text-xs font-medium text-foreground'>
                             {stageIndex + 1}/{boardStages.length}
                           </span>
@@ -4472,6 +5041,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
               )}
               {createSubTicketButton}
+              {addSubTicketPicker}
             </div>
           </div>
         </div>
@@ -4774,11 +5344,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowArchiveConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowArchiveConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_ARCHIVE_TICKET'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={handleArchiveTicket}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_ARCHIVE_TICKET'
                 className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               >
                 Archive Ticket
@@ -4849,11 +5426,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </p>
 
             <div className='flex justify-end gap-3'>
-              <Button variant='secondary' onClick={() => setShowBoardChangeConfirmDialog(false)}>
+              <Button
+                variant='secondary'
+                onClick={() => setShowBoardChangeConfirmDialog(false)}
+                data-track-category='Tickets'
+                data-track-name='CANCEL_BOARD_CHANGE'
+              >
                 Cancel
               </Button>
               <Button
                 onClick={confirmBoardChange}
+                data-track-category='Tickets'
+                data-track-name='CONFIRM_BOARD_CHANGE'
                 className='bg-primary text-primary-foreground hover:opacity-90'
               >
                 Confirm

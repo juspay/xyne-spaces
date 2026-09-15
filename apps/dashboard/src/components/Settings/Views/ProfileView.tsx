@@ -272,6 +272,7 @@ const ProfileView = ({
                       setLivePresenceStatus('ONLINE');
                       setIsPresenceDropdownOpen(false);
                     }}
+                    data-ph-capture-attribute-track-id='set_presence_online'
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceOnline'
@@ -288,6 +289,7 @@ const ProfileView = ({
                       setLivePresenceStatus('AWAY');
                       setIsPresenceDropdownOpen(false);
                     }}
+                    data-ph-capture-attribute-track-id='set_presence_away'
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='SetPresenceAway'
@@ -348,6 +350,9 @@ const ProfileView = ({
                 variant='ghost'
                 size='lg'
                 onClick={handleClearStatus}
+                trackId='clear_user_status'
+                data-track-category='PROFILE'
+                data-track-name='CLEAR_STATUS'
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
               >
@@ -385,6 +390,7 @@ const ProfileView = ({
                 className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 onClick={handleResumeNotifications}
+                trackId='resume_notifications'
                 data-track-category='PROFILE'
                 data-track-name='ResumeNotifications'
               >
@@ -430,6 +436,8 @@ const ProfileView = ({
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
+                    data-ph-capture-attribute-track-id='pause_notifications'
+                    data-ph-capture-attribute-duration={option.minutes}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='PROFILE'
                     data-track-name='PauseNotifications'
@@ -500,6 +508,7 @@ const ProfileView = ({
           type='button'
           className='!text-white w-full !bg-destructive rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
           onClick={handleLogout}
+          trackId='logout'
           data-track-category='PROFILE'
           data-track-name='Logout'
         >

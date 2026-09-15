@@ -83,6 +83,9 @@ export class ClickHouseConnector extends ConnectorBase {
       username: this.config.user,
       password: this.config.password,
       database: this.config.database,
+      ...(this.config.ssl && this.config.ca
+        ? { tls: { ca_cert: Buffer.from(this.config.ca) } }
+        : {}),
       request_timeout: appConfig.dashboard.chRequestTimeoutMs,
       clickhouse_settings: {
         max_execution_time: Math.floor(appConfig.dashboard.pgStatementTimeoutMs / 1000),

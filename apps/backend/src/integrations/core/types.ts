@@ -98,7 +98,6 @@ export interface NormalizedData {
     clientVersionCode?: string;
     updateExisting?: boolean;
     syncTicketOnUpdate?: boolean;
-    skipBlockingCheck?: boolean;
   };
 
   ticketCustomFields?: Array<{

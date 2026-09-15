@@ -10,6 +10,7 @@ import { config } from "@/config/env";
 import { outageAlertService } from "@/services/outageAlertService";
 import { extractMentionsFromContent } from "@/utils/mentionUtils";
 import {
+	deleteConversationMessage,
 	findOrCreateConversation,
 	getChannelHistory,
 	getConversationReplies,
@@ -32,6 +33,7 @@ import {
 	resolveSlackChannel,
 } from "./middleware";
 import {
+	transformDelete,
 	transformPostMessage,
 	transformUpdate,
 } from "./request-transformers/chat";
@@ -39,6 +41,7 @@ import {
 	transformHistory,
 	transformList,
 	transformReplies,
+	transformUsersConversations,
 } from "./request-transformers/conversations";
 import { transformFilesUpload } from "./request-transformers/files";
 import {
@@ -46,6 +49,7 @@ import {
 	transformUsersLookupByEmail,
 } from "./request-transformers/users";
 import {
+	transformDeleteResponse,
 	transformPostMessageResponse,
 	transformUpdateResponse,
 } from "./response-transformers/chat";
@@ -55,6 +59,7 @@ import {
 	transformListResponse,
 	transformOpenResponse,
 	transformRepliesResponse,
+	transformUsersConversationsResponse,
 } from "./response-transformers/conversations";
 import { deriveFiletype, transformFilesUploadResponse } from "./response-transformers/files";
 import { transformUsergroupsListResponse } from "./response-transformers/usergroups";
@@ -162,6 +167,11 @@ const UpdateSchema = z
 		},
 	);
 
+const DeleteSchema = z.object({
+	channel: z.string().min(1, "channel is required"),
+	ts: z.string().min(1, "ts is required"),
+});
+
 const HistorySchema = z.object({
 	channel: z.string().min(1, "channel is required"),
 	limit: z
@@ -207,6 +217,18 @@ const ConversationsOpenSchema = z
 
 const UsersInfoSchema = z.object({
 	user: z.string().min(1, "user is required"),
+});
+
+const UsersConversationsSchema = z.object({
+	user: z.string().optional(),
+	types: z.string().optional(),
+	limit: z
+		.union([z.number(), z.string()])
+		.optional()
+		.transform((val) => (val ? Number(val) : 100)),
+	cursor: z.string().optional(),
+	exclude_archived: SlackBooleanSchema.default(false),
+	team_id: z.string().optional(),
 });
 
 const UsersLookupByEmailSchema = z.object({
@@ -299,22 +321,23 @@ export class SlackController {
 	});
 
 	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
+		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query, headers: req.headers });
 		const parsed = PostMessageSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
 			return;
 		}
 
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
 		const context = getSlackAuthContext(req);
 		const channelId = getResolvedChannelId(req);
 		const args = await transformPostMessage(
 			{ ...parsed.data, channel: channelId },
 			context,
 		);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
 
 		const threadResolution = await resolveSlackThreadConversationId(
 			args.conversationId,
@@ -401,12 +424,12 @@ export class SlackController {
 			return;
 		}
 
-		const context = getSlackAuthContext(req);
-		const args = await transformUpdate(parsed.data, context);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
 			res.status(200).json({ ok: false, error: "msg_too_long" });
 			return;
 		}
+		const context = getSlackAuthContext(req);
+		const args = await transformUpdate(parsed.data, context);
 		const channelId = getResolvedChannelId(req);
 
 		const existingMessage = await repositories.messages.findById(args.messageId);
@@ -440,6 +463,39 @@ export class SlackController {
 			context.userId,
 		);
 		res.status(200).json(slackResponse);
+	});
+
+
+	chatDelete = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = DeleteSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+		const args = transformDelete({ ...parsed.data, channel: channelId });
+		const existingMessage = await repositories.messages.findById(args.messageId);
+		if (!existingMessage) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		if (existingMessage.isDeleted) {
+			res.status(200).json({ ok: true, channel: channelId, ts: args.messageId });
+			return;
+		}
+		if (existingMessage.senderId !== context.userId || existingMessage.msgType !== MessageType.BOT) {
+			res.status(200).json({ ok: false, error: "cant_delete_message" });
+			return;
+		}
+		const existingConversation = await repositories.conversations.findById(existingMessage.conversationId);
+		if (!existingConversation || existingConversation.channelId !== args.channelId) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		const result = await deleteConversationMessage(args.messageId, context.userId);
+		res.status(200).json(transformDeleteResponse(result, channelId));
 	});
 
 	conversationsHistory = wrapSlackHandler(
@@ -664,7 +720,65 @@ export class SlackController {
 		);
 	});
 
+	usersConversations = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = UsersConversationsSchema.safeParse(getSlackParams(req));
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		// Slack defaults to the authed user when `user` is omitted
+		const targetUserId = parsed.data.user ?? context.userId;
+		if (!targetUserId) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		if (parsed.data.user) {
+			const targetUser = await repositories.users.findById(targetUserId);
+			if (!targetUser) {
+				res.status(200).json({ ok: false, error: "user_not_found" });
+				return;
+			}
+		}
+
+		const args = transformUsersConversations({
+			...parsed.data,
+			user: targetUserId,
+		});
+		if (args.unknownTypes.length > 0) {
+			res.status(200).json({ ok: false, error: "invalid_types" });
+			return;
+		}
+
+		const channels = await repositories.channels.findManyPaginated({
+			where: args.where,
+			limit: args.limit + 1,
+			cursor: args.cursor,
+		});
+
+		const hasMore = channels.length > args.limit;
+		const items = hasMore ? channels.slice(0, args.limit) : channels;
+		const slackResponse = transformUsersConversationsResponse({
+			items: items.map((channel) => ({
+				id: channel.id,
+				name: channel.name,
+				description: channel.description || undefined,
+				scopeType: channel.scopeType,
+				visibility: channel.visibility,
+				projectId: channel.projectId,
+				createdBy: channel.createdBy,
+				createdAt: channel.createdAt,
+			})),
+			hasMore,
+			nextCursor: hasMore ? items[items.length - 1]?.id : undefined,
+		});
+		res.status(200).json(slackResponse);
+	});
+
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
+		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query, headers: req.headers });
 		const parsed = FilesUploadSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });

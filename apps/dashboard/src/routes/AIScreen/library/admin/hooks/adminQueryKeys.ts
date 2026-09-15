@@ -1,6 +1,4 @@
-import type { AdminDateRange, AdminOrgScope, GrantableRole } from '@/services/claw/clawAdminTypes';
-
-export const adminRolesKey = (role: GrantableRole): unknown[] => ['claw-admin-roles', role];
+import type { AdminDateRange, AdminOrgScope } from '@/services/claw/clawAdminTypes';
 
 export const pendingRequestsKey = (scope: AdminOrgScope): unknown[] => [
   'claw-admin-requests',

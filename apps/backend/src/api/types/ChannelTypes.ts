@@ -77,7 +77,8 @@ export interface CreateChannelResponse {
 export interface CheckDuplicateChannelResponse {
   isDuplicate: boolean;
   name: string;
-  projectId: string;
+  /** Echoed back when provided by the client. The check itself is workspace-scoped. */
+  projectId?: string;
 }
 
 // GET /channels

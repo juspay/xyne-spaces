@@ -27,7 +27,7 @@ import {
 } from '../../ui/dropdown-menu';
 import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { useActiveUsers } from '../../../hooks/useUsers';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { FlowGroupNode, type FlowGroupNodeData } from '../FlowRun/FlowGroupNode';
 import { Popover } from '../../ui/Popover/Popover';
@@ -91,11 +91,7 @@ export const StepAssigneePicker: React.FC<{
     if (!users) return [];
     const query = search.trim().toLowerCase();
     if (!query) return users;
-    return users.filter(user => {
-      const name = getUserDisplayName(user).toLowerCase();
-      const email = (user.email ?? '').toLowerCase();
-      return name.includes(query) || email.includes(query);
-    });
+    return users.filter(user => matchesUserQuery(user, search));
   }, [users, search]);
   const pick = (userId: string | null): void => {
     onChange(userId);

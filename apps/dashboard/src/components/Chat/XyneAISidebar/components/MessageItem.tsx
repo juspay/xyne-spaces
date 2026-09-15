@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../../utils/logger';
 import {
   ReactElement,
   useState,
@@ -19,12 +20,14 @@ import {
   Loader2,
   Bug,
   AlertTriangle,
+  X,
 } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import rehypeHighlight from 'rehype-highlight';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   StreamingMarkdownBlocks,
@@ -47,7 +50,9 @@ import {
   resolveCitationIconUrl,
 } from '../utils/clawCitationUrl';
 import { CitationLink } from './CitationLink';
+import { ReadonlyContextPills } from '../../../AIScreen/ReadonlyContextPills';
 import { genericInstance } from '../../../../services/clients/genericClient';
+import { showDownloadCompleteToast } from '../../../../utils/downloadToast';
 import type { Components } from 'react-markdown';
 import {
   SingleStat,
@@ -134,6 +139,9 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   }
   if (citation.kind === 'canvas') {
     return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
+  }
+  if (citation.kind === 'recording') {
+    return citation.label ? `Recording — ${citation.label}` : 'Recording';
   }
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
@@ -255,6 +263,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
                       {citation.url ? (
                         <Link
                           to={citation.url}
+                          data-track-category='XyneAI'
+                          data-track-name='inline-citation-link-click'
                           className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                         >
                           <Link2 size={10} />
@@ -272,6 +282,8 @@ const InlineCitations = ({ citations }: { citations: InlineCitation[] }): ReactE
               ) : citation.url ? (
                 <Link
                   to={citation.url}
+                  data-track-category='XyneAI'
+                  data-track-name='inline-citation-link-click'
                   className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
                 >
                   <Link2 size={10} />
@@ -326,7 +338,11 @@ const ImageWithDownload = ({
         setDownloaded(true);
         setTimeout(() => setDownloaded(false), 2000);
       } catch (error) {
-        console.error('Failed to download image:', error);
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('Failed to download image:'),
+          error: error,
+        });
         // Fallback: try direct download
         const link = document.createElement('a');
         link.href = src;
@@ -346,7 +362,7 @@ const ImageWithDownload = ({
         onClick={handleDownload}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
         title='Download image'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='download-image'
       >
         {downloaded ? (
@@ -648,6 +664,20 @@ interface MessageActionsProps {
     | undefined;
 }
 
+/**
+ * What an edited message keeps of what was sent with it.
+ *
+ * An edit re-runs the turn, so the canvas selections and files attached to the
+ * original ride along again unless they are dropped here. Editing was the only
+ * place they could not be removed — the composer's pills are gone by the time
+ * the message exists — which left "ask about this diagram" stuck to every retry
+ * of that turn.
+ */
+export interface EditedMessageContext {
+  selectionContexts: SelectionContext[] | undefined;
+  attachments: MessageAttachment[] | undefined;
+}
+
 interface MessageItemProps {
   message: Message;
   onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
@@ -665,7 +695,7 @@ interface MessageItemProps {
     | ((messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void)
     | undefined;
   onRegenerate?: (() => void) | undefined;
-  onEditSubmit?: ((newContent: string) => void) | undefined;
+  onEditSubmit?: ((newContent: string, context?: EditedMessageContext) => void) | undefined;
   onEditMobile?: (() => void) | undefined;
   isLatestBotMessage?: boolean | undefined;
   branchInfo?: { index: number; total: number } | undefined;
@@ -723,7 +753,11 @@ const AttachmentImagePreview = ({
           setImageUrl(blobUrl);
           setIsLoading(false);
         } catch (err) {
-          console.error('[AttachmentImagePreview] Failed to load image:', err);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[AttachmentImagePreview] Failed to load image:'),
+            error: err,
+          });
           if (isMounted) {
             setError('Failed to load image');
             setIsLoading(false);
@@ -770,7 +804,7 @@ const AttachmentImagePreview = ({
         disabled={isDownloading}
         className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
         title='Download image'
-        data-track-category='xyne-ai'
+        data-track-category='XyneAI'
         data-track-name='download-image'
       >
         {isDownloading ? (
@@ -819,6 +853,7 @@ export const AttachmentPreview = ({
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(blobUrl);
+        showDownloadCompleteToast(displayName);
         return;
       }
 
@@ -850,8 +885,13 @@ export const AttachmentPreview = ({
       document.body.removeChild(link);
 
       URL.revokeObjectURL(blobUrl);
+      showDownloadCompleteToast(displayName);
     } catch (error) {
-      console.error('[AttachmentPreview] Download failed:', error);
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String('[AttachmentPreview] Download failed:'),
+        error: error,
+      });
       const { toast } = await import('sonner');
       toast.error('Download failed', {
         description: error instanceof Error ? error.message : 'Failed to download file',
@@ -933,7 +973,7 @@ export const AttachmentPreview = ({
           onClick={() => void handleDownload()}
           disabled={isDownloading}
           className='flex items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-50'
-          data-track-category='xyne-ai'
+          data-track-category='XyneAI'
           data-track-name='attachment-download'
         >
           <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
@@ -971,14 +1011,21 @@ export const AttachmentPreview = ({
 };
 
 // Selection context preview component
+/**
+ * One card of context on a user message. `onRemove` is only passed while the
+ * message is being edited — a sent message's own record of what it carried is
+ * not editable, so the card is read-only everywhere else.
+ */
 const SelectionContextPreview = ({
   selection,
   onClick,
+  onRemove,
 }: {
   selection: SelectionContext;
   onClick?: () => void;
+  onRemove?: () => void;
 }): ReactElement => {
-  return (
+  const card = (
     <button
       type='button'
       onClick={onClick}
@@ -997,6 +1044,27 @@ const SelectionContextPreview = ({
         <span className="text-sm text-foreground font-['Inter'] truncate">{selection.preview}</span>
       </div>
     </button>
+  );
+
+  if (!onRemove) return card;
+
+  // A sibling rather than a child: the card is itself a button, and a button
+  // inside a button is neither valid markup nor reliably clickable.
+  return (
+    <div className='relative'>
+      {card}
+      <button
+        type='button'
+        onClick={onRemove}
+        className='absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+        title='Remove this context'
+        aria-label='Remove this context'
+        data-track-category='XyneAI'
+        data-track-name='EDIT_REMOVE_SELECTION_CONTEXT'
+      >
+        <X size={12} />
+      </button>
+    </div>
   );
 };
 
@@ -1071,7 +1139,30 @@ export const MessageItem = React.memo(
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editText, setEditText] = useState('');
+    // What the edit will re-send. Seeded from the message when editing starts
+    // and narrowed by the × on each card, so cancelling leaves the sent message
+    // exactly as it was.
+    const [editSelectionContexts, setEditSelectionContexts] = useState<SelectionContext[]>([]);
+    const [editAttachments, setEditAttachments] = useState<MessageAttachment[]>([]);
     const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+    const startEditing = useCallback((): void => {
+      setEditText(message.content);
+      setEditSelectionContexts(message.selectionContexts ?? []);
+      setEditAttachments(message.attachments ?? []);
+      setIsEditing(true);
+      setTimeout(() => editTextareaRef.current?.focus(), 0);
+    }, [message.attachments, message.content, message.selectionContexts]);
+
+    const submitEdit = useCallback((): void => {
+      const trimmed = editText.trim();
+      if (!trimmed) return;
+      onEditSubmit?.(trimmed, {
+        selectionContexts: editSelectionContexts.length > 0 ? editSelectionContexts : undefined,
+        attachments: editAttachments.length > 0 ? editAttachments : undefined,
+      });
+      setIsEditing(false);
+    }, [editAttachments, editSelectionContexts, editText, onEditSubmit]);
     const navigate = useNavigate();
 
     // Resolve `@name` against this message's userTags + the live workspace
@@ -1175,9 +1266,7 @@ export const MessageItem = React.memo(
               if (onEditMobile) {
                 onEditMobile();
               } else {
-                setEditText(message.content);
-                setIsEditing(true);
-                setTimeout(() => editTextareaRef.current?.focus(), 0);
+                startEditing();
               }
             }}
             className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
@@ -1194,7 +1283,7 @@ export const MessageItem = React.memo(
             message.type === 'user'
               ? isEditing
                 ? 'max-w-[90%] w-full overflow-hidden'
-                : 'max-w-[80%] overflow-hidden'
+                : 'flex max-w-[80%] flex-col items-end gap-1'
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
@@ -1208,13 +1297,54 @@ export const MessageItem = React.memo(
               message.type === 'user'
                 ? isEditing
                   ? 'rounded-2xl bg-accent p-3'
-                  : 'flex flex-col items-start gap-3 px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  : 'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
             {message.type === 'user' && isEditing ? (
               /* Inline edit mode */
               <div className='flex flex-col gap-2'>
+                {/* The context this turn was sent with, each card droppable.
+                    Shown here and nowhere else: this is the one moment the turn
+                    is about to run again and its context can still change. */}
+                {editSelectionContexts.length > 0 && (
+                  <div className='space-y-2'>
+                    {editSelectionContexts.map((selection, index) => (
+                      <SelectionContextPreview
+                        key={`${selection.canvasId}-${index}`}
+                        selection={selection}
+                        onClick={() => handleSelectionContextClick(selection.canvasId)}
+                        onRemove={() =>
+                          setEditSelectionContexts(previous =>
+                            previous.filter((_, at) => at !== index),
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {editAttachments.length > 0 && (
+                  <div className='space-y-2'>
+                    {editAttachments.map((attachment, index) => (
+                      <div className='relative' key={`${attachment.filename}-${index}`}>
+                        <AttachmentPreview attachment={attachment} />
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setEditAttachments(previous => previous.filter((_, at) => at !== index))
+                          }
+                          className='absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+                          title='Remove this attachment'
+                          aria-label='Remove this attachment'
+                          data-track-category='XyneAI'
+                          data-track-name='EDIT_REMOVE_ATTACHMENT'
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={editTextareaRef}
                   value={editText}
@@ -1222,10 +1352,7 @@ export const MessageItem = React.memo(
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      if (editText.trim()) {
-                        onEditSubmit?.(editText.trim());
-                        setIsEditing(false);
-                      }
+                      submitEdit();
                     }
                     if (e.key === 'Escape') {
                       setIsEditing(false);
@@ -1252,6 +1379,7 @@ export const MessageItem = React.memo(
                         setIsEditing(false);
                       }
                     }}
+                    data-ph-capture-attribute-track-id='edit_message_submit'
                     disabled={!editText.trim()}
                     className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
                     data-track-category='XyneAI'
@@ -1312,6 +1440,8 @@ export const MessageItem = React.memo(
                               href={href}
                               target='_blank'
                               rel='noopener noreferrer'
+                              data-track-category='XyneAI'
+                              data-track-name='open-external-link'
                               className='text-blue-500 hover:text-blue-600 underline'
                               {...props}
                             >
@@ -1325,7 +1455,7 @@ export const MessageItem = React.memo(
                             <a
                               href={href}
                               className='text-blue-500 hover:text-blue-600 underline'
-                              data-track-category='xyne-ai'
+                              data-track-category='XyneAI'
                               data-track-name='api-download'
                               onClick={e => {
                                 e.preventDefault();
@@ -1341,6 +1471,8 @@ export const MessageItem = React.memo(
                         return (
                           <a
                             href={href}
+                            data-track-category='XyneAI'
+                            data-track-name='open-internal-link'
                             className='text-blue-500 hover:text-blue-600 underline'
                             {...props}
                           >
@@ -1367,6 +1499,19 @@ export const MessageItem = React.memo(
               />
             )}
           </div>
+
+          {/* Read-only context chip the user attached to this turn — sits BELOW
+              the bubble. Collapsed by default; click to reveal the list. Kept
+              OUTSIDE the bubble's overflow-hidden so the popover isn't clipped. */}
+          {message.type === 'user' &&
+            !isEditing &&
+            message.attachedContext &&
+            message.attachedContext.length > 0 && (
+              <ReadonlyContextPills
+                items={message.attachedContext}
+                expandedWidthClass='max-w-[15rem]'
+              />
+            )}
 
           {/* Error display for bot messages */}
           {message.type === 'bot' && message.errorInfo && (
@@ -1577,9 +1722,10 @@ MessageItem.displayName = 'MessageItem';
 // types, discard the real DOM nodes and rebuild them (re-firing the mount fade
 // = the blink). Hoisted to module scope so identity can never change.
 const ANSWER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const STATIC_ANSWER_REHYPE_PLUGINS = [rehypeHighlight];
 // Word-fade spans for live-streamed answers (see rehypeStreamWordFade). Only
 // applied on the everStreamed path so history messages carry no extra spans.
-const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
+const ANSWER_REHYPE_PLUGINS = [rehypeHighlight, rehypeStreamWordFade];
 // Preserve `cite:clf-…` hrefs — react-markdown's default sanitizer strips
 // non-http(s) schemes, which would erase the href before the `a` override can
 // intercept it and substitute a ClawCitationChip. Same fix as v3
@@ -1722,7 +1868,14 @@ const MessageContent = ({
         // Add target="_blank" for external links
         if (isExternal) {
           return (
-            <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+            <a
+              href={href}
+              target='_blank'
+              rel='noopener noreferrer'
+              data-track-category='XyneAI'
+              data-track-name='open-external-link'
+              {...props}
+            >
               {children}
             </a>
           );
@@ -1732,7 +1885,7 @@ const MessageContent = ({
           return (
             <a
               href={href}
-              data-track-category='xyne-ai'
+              data-track-category='XyneAI'
               data-track-name='api-download'
               onClick={e => {
                 e.preventDefault();
@@ -1746,7 +1899,12 @@ const MessageContent = ({
         }
 
         return (
-          <a href={href} {...props}>
+          <a
+            href={href}
+            data-track-category='XyneAI'
+            data-track-name='open-internal-link'
+            {...props}
+          >
             {children}
           </a>
         );
@@ -1766,7 +1924,7 @@ const MessageContent = ({
     (markdown: string): ReactElement => (
       <ReactMarkdown
         remarkPlugins={ANSWER_REMARK_PLUGINS}
-        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : undefined}
+        rehypePlugins={wordFade ? ANSWER_REHYPE_PLUGINS : STATIC_ANSWER_REHYPE_PLUGINS}
         urlTransform={preserveUrlTransform}
         components={answerComponents}
       >
@@ -2036,6 +2194,7 @@ const SummarizerContent = ({
           <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
+              rehypePlugins={STATIC_ANSWER_REHYPE_PLUGINS}
               components={{
                 ...sidebarMarkdownComponents,
                 p: ({ children }) => {
@@ -2071,7 +2230,14 @@ const SummarizerContent = ({
                   // Add target="_blank" for external links
                   if (isExternal) {
                     return (
-                      <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                      <a
+                        href={href}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        data-track-category='XyneAI'
+                        data-track-name='open-external-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2081,7 +2247,7 @@ const SummarizerContent = ({
                     return (
                       <a
                         href={href}
-                        data-track-category='xyne-ai'
+                        data-track-category='XyneAI'
                         data-track-name='api-download'
                         onClick={e => {
                           e.preventDefault();
@@ -2095,7 +2261,12 @@ const SummarizerContent = ({
                   }
 
                   return (
-                    <a href={href} {...props}>
+                    <a
+                      href={href}
+                      data-track-category='XyneAI'
+                      data-track-name='open-internal-link'
+                      {...props}
+                    >
                       {children}
                     </a>
                   );
@@ -2180,7 +2351,14 @@ const SummarizerContent = ({
 
                             if (isExternal) {
                               return (
-                                <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                <a
+                                  href={href}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  data-track-category='XyneAI'
+                                  data-track-name='open-external-link'
+                                  {...props}
+                                >
                                   {children}
                                 </a>
                               );
@@ -2190,7 +2368,7 @@ const SummarizerContent = ({
                               return (
                                 <a
                                   href={href}
-                                  data-track-category='xyne-ai'
+                                  data-track-category='XyneAI'
                                   data-track-name='api-download'
                                   onClick={e => {
                                     e.preventDefault();
@@ -2204,7 +2382,12 @@ const SummarizerContent = ({
                             }
 
                             return (
-                              <a href={href} {...props}>
+                              <a
+                                href={href}
+                                data-track-category='XyneAI'
+                                data-track-name='open-internal-link'
+                                {...props}
+                              >
                                 {children}
                               </a>
                             );
@@ -2299,7 +2482,14 @@ const GeniusKeyPoints = ({
 
                     if (isExternal) {
                       return (
-                        <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                        <a
+                          href={href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          data-track-category='XyneAI'
+                          data-track-name='open-external-link'
+                          {...props}
+                        >
                           {children}
                         </a>
                       );
@@ -2309,7 +2499,7 @@ const GeniusKeyPoints = ({
                       return (
                         <a
                           href={href}
-                          data-track-category='xyne-ai'
+                          data-track-category='XyneAI'
                           data-track-name='api-download'
                           onClick={e => {
                             e.preventDefault();
@@ -2323,7 +2513,12 @@ const GeniusKeyPoints = ({
                     }
 
                     return (
-                      <a href={href} {...props}>
+                      <a
+                        href={href}
+                        data-track-category='XyneAI'
+                        data-track-name='open-internal-link'
+                        {...props}
+                      >
                         {children}
                       </a>
                     );
@@ -2387,7 +2582,11 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 }: {
   participants: Participant[];
 }) => {
-  console.log('[ParticipantsAvatars] Rendering:', { participants, count: participants?.length });
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Rendering:'),
+    context: [{ participants, count: participants?.length }],
+  });
 
   // Deduplicate participants by ID
   const uniqueParticipants = React.useMemo(() => {
@@ -2399,9 +2598,15 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
     });
   }, [participants]);
 
-  console.log('[ParticipantsAvatars] Unique participants:', {
-    uniqueParticipants,
-    count: uniqueParticipants.length,
+  logger.info(LogEvent.INFO, {
+    type: 'migrated_console_log',
+    message: String('[ParticipantsAvatars] Unique participants:'),
+    context: [
+      {
+        uniqueParticipants,
+        count: uniqueParticipants.length,
+      },
+    ],
   });
 
   // Get top 3 unique participants
@@ -2479,6 +2684,7 @@ const MessageActions = ({
       {onRegenerate && (
         <button
           onClick={onRegenerate}
+          data-ph-capture-attribute-track-id='regenerate_message'
           className='p-1.5 rounded transition-colors hover:bg-accent'
           title='Regenerate response'
           data-track-category='XyneAI'
@@ -2503,6 +2709,7 @@ const MessageActions = ({
           {/* Like Button */}
           <button
             onClick={() => onFeedback(message.id, 'LIKE')}
+            data-ph-capture-attribute-track-id='like_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Like'
             data-track-category='XyneAI'
@@ -2545,6 +2752,7 @@ const MessageActions = ({
           {/* Dislike Button */}
           <button
             onClick={() => onFeedback(message.id, 'DISLIKE')}
+            data-ph-capture-attribute-track-id='dislike_message'
             className='p-1.5 rounded transition-colors hover:bg-accent'
             title='Dislike'
             data-track-category='XyneAI'
@@ -2612,6 +2820,8 @@ const MessageActions = ({
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'
+          data-track-category='XyneAI'
+          data-track-name='open-searxng-attribution'
           className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-primary-foreground' />

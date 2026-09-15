@@ -93,6 +93,7 @@ async function ensureBoardTicketForm(input: {
         fieldName: field.name,
         fieldType: field.type as FormFieldType,
         isOptional: !field.required,
+        workspaceId: input.workspaceId,
         updatedAt: new Date(),
       },
     });
@@ -197,6 +198,7 @@ async function seedReleaseSpecsFormAndMappings(): Promise<void> {
           contextId: board.id,
           contextType: FormContextType.BOARD,
           entityType: FormEntityType.TICKET,
+          workspaceId: ws.id,
         },
       });
       // Prisma upsert doesn't tell us whether it created or updated; count
@@ -294,6 +296,7 @@ async function seedReleaseChangeForms(): Promise<void> {
             fieldName: field.name,
             fieldType: field.type as FormFieldType,
             isOptional: !field.required,
+            workspaceId: ws.id,
             updatedAt: new Date(),
           },
         });

@@ -24,6 +24,7 @@ import {
   GitBranchIcon,
   GearSixIcon,
   SparkleIcon,
+  PaintBrushIcon,
   ChartBarIcon,
   BrainIcon,
   FlaskIcon,
@@ -39,6 +40,7 @@ import {
   CaretRightIcon,
   DotsThreeVerticalIcon,
   ArrowUUpLeftIcon,
+  ClockCounterClockwiseIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "./hooks/useTheme";
@@ -91,6 +93,7 @@ interface FlyoutState {
 
 const RAIL_DESTINATIONS: RailDestination[] = [
   { label: "Chat with agents", path: "/v3/chat",     icon: SparkleIcon },
+  { label: "Design",          path: "/v3/design",   icon: PaintBrushIcon },
   { label: "Dashboard",    path: "/v3/dashboard",    icon: ChartBarIcon },
   { label: "Digital Twin", path: "/v3/digital-twin", icon: BrainIcon },
   // Escape hatch to the legacy V1 surface. Lives in the top rail
@@ -120,6 +123,9 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
   {
     label: "Observe",
     items: [
+      // Runs leads the group on purpose: it is the only Observe item every user
+      // can act on (their own sessions), so it reads before the aggregate views.
+      { label: "Runs", path: "/v3/runs", icon: ClockCounterClockwiseIcon },
       { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
       { label: "Search Evals", path: "/v3/search-evals", icon: MagnifyingGlassIcon },
@@ -132,6 +138,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Organization", path: "/v3/organizations", icon: BuildingsIcon },
       { label: "Settings", path: "/v3/settings", icon: GearSixIcon },
+      { label: "Digital Twin Users", path: "/v3/configurations/digital-twin", icon: BrainIcon },
     ],
   },
 ];
@@ -306,7 +313,9 @@ export function ShellV3({ children, isAdmin = false, hasSearchEvalAccess = false
         ...g,
         items: g.items.filter((i) => {
           if (i.path === "/v3/search-evals") return hasSearchEvalAccess;
-          return i.path !== "/v3/evals" && i.path !== "/v3/entity-types";
+          return i.path !== "/v3/evals"
+            && i.path !== "/v3/entity-types"
+            && i.path !== "/v3/configurations/digital-twin";
         }),
       }))
   ).filter((g) => g.items.length > 0);

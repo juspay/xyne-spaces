@@ -12,14 +12,10 @@ const AIAgentEditScreen = (): ReactElement => {
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
 
   return (
-    <AIShell
-      onCreateChat={onCreateChat}
-      onSelectSession={onSelectSession}
-      mainClassName='ai-page-bg'
-    >
+    <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
         data-id='ai-agent-edit-view'
-        className='relative flex h-full flex-1 flex-col overflow-hidden border border-border bg-background'
+        className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
         {isLoading ? (
           <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>

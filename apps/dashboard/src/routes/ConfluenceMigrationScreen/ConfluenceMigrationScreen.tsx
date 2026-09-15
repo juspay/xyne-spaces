@@ -493,6 +493,8 @@ const ConfluenceMigrationScreen = (): ReactElement => {
               <div className='flex flex-wrap items-center gap-2'>
                 <Button
                   onClick={() => void handlePreview()}
+                  data-track-category='confluence_migration'
+                  data-track-name='PREVIEW_MIGRATION'
                   disabled={!canPreview || isPreviewLoading}
                 >
                   {isPreviewLoading
@@ -504,6 +506,8 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                 <Button
                   variant='outline'
                   onClick={() => setIsHistoryModalOpen(true)}
+                  data-track-category='confluence_migration'
+                  data-track-name='OPEN_MIGRATION_HISTORY'
                   disabled={history.length === 0}
                 >
                   View Imported Canvases
@@ -645,6 +649,8 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                       setMigrationPhase('migrate');
                       void handleImport();
                     }}
+                    data-track-category='confluence_migration'
+                    data-track-name='START_MIGRATION'
                     disabled={isImportLoading}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Space'}

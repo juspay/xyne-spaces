@@ -256,6 +256,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='TOGGLE_SLA_PRIORITY'
                     data-track-metadata={JSON.stringify({ priority })}
+                    data-ph-capture-attribute-track-id='toggle_sla_priority'
                   >
                     <span
                       className={cn(
@@ -538,6 +539,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                       data-track-category='BOARD_SLA_SETTINGS'
                       data-track-name='SAVE_SLA_POLICY'
                       data-track-metadata={JSON.stringify({ priority })}
+                      data-ph-capture-attribute-track-id='save_sla_policy'
                     >
                       Save
                     </button>

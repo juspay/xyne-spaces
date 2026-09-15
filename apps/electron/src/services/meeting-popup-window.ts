@@ -1,6 +1,9 @@
 import { BrowserWindow, screen, session, ipcMain } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
+import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
+import { isMicOwnedByXyne } from './recording-controller';
 
 let popupWindow: BrowserWindow | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -17,17 +20,31 @@ async function isUserLoggedIn(): Promise<boolean> {
 }
 
 export async function showMeetingPopup(meetingData: { app: string; startedAt: string }): Promise<void> {
+  if (popupWindow && !popupWindow.isDestroyed()) {
+    popupWindow.webContents.send('meeting-popup:update', meetingData);
+    resetAutoDismiss();
+    return;
+  }
+
+  if (isMicOwnedByXyne()) {
+    log.info('[MeetingPopup] Recording already in progress, skipping popup');
+    Logger.info(
+      ElectronEvent.MEETING_POPUP_SKIPPED_RECORDING,
+      { app: meetingData.app },
+      'MeetingDetector',
+    );
+    return;
+  }
+
   // Only show popup if user is logged in to Xyne Spaces
   const loggedIn = await isUserLoggedIn();
   if (!loggedIn) {
     log.info('[MeetingPopup] User not logged in, skipping popup');
-    return;
-  }
-
-  if (popupWindow && !popupWindow.isDestroyed()) {
-    // Already showing — just update content
-    popupWindow.webContents.send('meeting-popup:update', meetingData);
-    resetAutoDismiss();
+    Logger.info(
+      ElectronEvent.MEETING_POPUP_SKIPPED_LOGGED_OUT,
+      { app: meetingData.app },
+      'MeetingDetector',
+    );
     return;
   }
 
@@ -113,6 +130,11 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
   });
 
   log.info('[MeetingPopup] Showing popup for:', meetingData.app);
+  Logger.info(
+    ElectronEvent.MEETING_POPUP_SHOWN,
+    { app: meetingData.app, startedAt: meetingData.startedAt },
+    'MeetingDetector',
+  );
   resetAutoDismiss();
 }
 
@@ -144,6 +166,7 @@ export function hideMeetingPopup(): void {
   }, 300); // Match CSS transition duration
 
   log.info('[MeetingPopup] Hiding popup');
+  Logger.info(ElectronEvent.MEETING_POPUP_HIDDEN, {}, 'MeetingDetector');
 }
 
 function resetAutoDismiss(): void {

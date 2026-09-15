@@ -1,5 +1,5 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
+import { ANDROID_PACKAGE_NAME_PATTERN, normalizeChannelName } from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
@@ -247,12 +247,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     [userGroups],
   );
 
-  const orgName = 'default';
-
   const { data: duplicateCheck } = useQuery({
-    queryKey: ['checkDuplicateChannel', debouncedChannelName, orgName],
-    queryFn: () => channelService.checkDuplicateChannel(debouncedChannelName, orgName),
-    enabled: Boolean(debouncedChannelName.trim() && orgName.trim()),
+    queryKey: ['checkDuplicateChannel', debouncedChannelName],
+    queryFn: () => channelService.checkDuplicateChannel(debouncedChannelName),
+    enabled: Boolean(debouncedChannelName.trim()),
     staleTime: 0,
     retry: 1,
     refetchOnWindowFocus: false,
@@ -471,12 +469,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   }, [duplicateCheck, form]);
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const value = e.target.value;
-    // Convert spaces to hyphens, then remove special characters, keep only alphanumeric, hyphens, and underscores
-    const cleanValue = value
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-_]/g, '');
+    const cleanValue = normalizeChannelName(e.target.value);
     form.setFieldValue('name', cleanValue);
     setChannelName(cleanValue);
   };
@@ -1252,6 +1245,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 isSubmitDisabled && 'pointer-events-none',
               )}
               data-testid='create-channel-button'
+              trackId={mode === 'promote' ? 'promote_group_dm_to_channel' : 'create_channel'}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='CREATE_CHANNEL_SUBMIT'
               data-track-metadata={JSON.stringify({ mode, channelName })}

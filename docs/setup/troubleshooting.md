@@ -110,7 +110,7 @@ predates secret generation.
 pnpm run secrets
 ```
 
-That fills `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, and the VAPID keypair.
+That fills `JWT_SECRET`, `ZERO_AUTH_SECRET`, and `ENCRYPTION_KEY`.
 It only touches placeholder or empty values, so it is safe to run against an
 `.env.local` that already contains real secrets.
 

@@ -25,12 +25,17 @@ export { UserRepository } from './users';
 export { ResourceRepository } from './resources';
 export { ResourceAccessRepository } from './resourceAccess';
 export { ACLAuditLogRepository } from './aclAuditLogs';
-export { 
+export {
   NotificationRepository, 
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
 export { MessageRepository } from './messageRepository';
+export {
+  syncMessageArtifact,
+  setSlashCommandArtifactLifecycle,
+  type MessageArtifactLifecycleStatus,
+} from './messageArtifactRepository';
 export { BaseRepository } from './base';
 export { CallRepository } from './callRepository';
 export { CallRecordingRepository } from './callRecordingRepository';
@@ -88,8 +93,8 @@ import { UserRepository } from './users';
 import { ResourceRepository } from './resources';
 import { ResourceAccessRepository } from './resourceAccess';
 import { ACLAuditLogRepository } from './aclAuditLogs';
-import { 
-  NotificationRepository, 
+import {
+  NotificationRepository,
   NotificationPreferenceRepository, 
   BrowserNotificationSubscriptionRepository 
 } from './notificationRepository';
@@ -265,4 +270,11 @@ export class RepositoryContainer {
   }
 }
 
-export const repositories = RepositoryContainer.getInstance();
+// Delay construction until a repository is first used. Constructing the
+// entire container during module evaluation makes any repository that imports
+// this barrel vulnerable to circular-import temporal dead zones.
+export const repositories: RepositoryContainer = new Proxy({} as RepositoryContainer, {
+  get(_target, property: keyof RepositoryContainer) {
+    return RepositoryContainer.getInstance()[property];
+  },
+});

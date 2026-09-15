@@ -1,27 +1,26 @@
-import MemberAchievements from '@/components/TeamIntelligence/MemberAchievements';
-import MemberHeader from '@/components/TeamIntelligence/MemberHeader';
-import MemberQuickInsights from '@/components/TeamIntelligence/MemberQuickInsights';
-import { useMemberDetails } from '@/hooks/useTeamIntelligence';
+import { MemberLeadershipDashboard } from '@/components/TeamIntelligence/LeadershipDashboard';
+import { useMemberDetails, useUserLeadershipSnapshots } from '@/hooks/useTeamIntelligence';
 import { ReactElement } from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader2Icon } from 'lucide-react';
-import MemberTickets from '@/components/TeamIntelligence/MemberTickets';
+import { useOutletContext, useParams } from 'react-router-dom';
+import { TeamIntelligenceOutletContext } from './TeamIntelligenceScreen';
 
 const TeamIntelligenceMemberScreen = (): ReactElement => {
   const { memberEmail } = useParams<{ memberEmail: string }>();
+  const { dateRange } = useOutletContext<TeamIntelligenceOutletContext>();
 
-  const { data: memberData, isLoading: isLoadingMemberData } = useMemberDetails(memberEmail!);
+  const {
+    data: memberData,
+    isLoading: isLoadingMemberData,
+    isError: isMemberError,
+  } = useMemberDetails(memberEmail ?? '');
+  const {
+    data: snapshotsData,
+    isLoading: isLoadingSnapshots,
+    isError: isSnapshotError,
+  } = useUserLeadershipSnapshots(memberEmail ?? '', dateRange);
+  const snapshot = snapshotsData?.snapshots[0] ?? null;
 
-  if (isLoadingMemberData) {
-    return (
-      <div className='h-full flex items-center justify-center bg-background'>
-        <Loader2Icon className='animate-spin text-muted-foreground' />
-        <p className='text-muted-foreground'>Loading member details...</p>
-      </div>
-    );
-  }
-
-  if (!memberData) {
+  if (!memberEmail) {
     return (
       <div className='h-full flex items-center justify-center bg-background'>
         <p className='text-muted-foreground'>Member not found.</p>
@@ -30,12 +29,13 @@ const TeamIntelligenceMemberScreen = (): ReactElement => {
   }
 
   return (
-    <div className='flex-1 w-full flex flex-col mx-auto max-w-6xl px-6 py-8 space-y-12'>
-      <MemberHeader member={memberData} />
-      <MemberQuickInsights />
-      <MemberAchievements />
-      <MemberTickets />
-    </div>
+    <MemberLeadershipDashboard
+      snapshot={snapshot}
+      member={memberData}
+      isLoading={isLoadingMemberData || isLoadingSnapshots}
+      isError={isMemberError || isSnapshotError}
+      sectionRequest={{ scope: 'user', userEmail: memberEmail, ...dateRange }}
+    />
   );
 };
 

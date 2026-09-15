@@ -129,9 +129,14 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
                     ? 'waiting-to-join-button'
                     : 'request-to-join-button'
               }
-              trackCategory='CALL'
+              trackCategory='CALLS'
               trackJoinName={userIsActiveInCall ? 'SwitchCallFromLayout' : 'JoinCallFromLayout'}
               trackRequestName='RequestToJoinCallFromLayout'
+              trackMetadata={{
+                source: 'call_layout_header',
+                callId,
+                isSwitch: userIsActiveInCall,
+              }}
               className='mx-2 shrink-0'
             />
           )}

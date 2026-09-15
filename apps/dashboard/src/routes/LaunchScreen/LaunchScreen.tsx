@@ -122,7 +122,7 @@ const LaunchScreen = (): ReactElement => {
                   void navigate(targetPath, { replace: true });
                 }}
                 className='text-blue-600 hover:underline bg-transparent border-none cursor-pointer p-0'
-                data-track-category='Navigation'
+                data-track-category='NAVIGATION'
                 data-track-name='ContinueInBrowser'
               >
                 continue in browser

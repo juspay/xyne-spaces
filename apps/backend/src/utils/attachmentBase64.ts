@@ -152,7 +152,7 @@ function parseGcsUrl(url: string, attachment?: MessageAttachment): { bucketName:
  * const attachment = await db.messageAttachment.findUnique({ where: { id } });
  * const base64 = await convertToBase64(attachment);
  * if (base64) {
- *   console.log(base64.dataUri); // data:image/png;base64,...
+ *   useBase64Data(base64.dataUri);
  * }
  */
 export async function convertToBase64(

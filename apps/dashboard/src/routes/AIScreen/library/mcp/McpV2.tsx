@@ -1,5 +1,6 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { searchByNameThenDescription } from '../shared/librarySearch';
 import { McpServerIcon } from '@/components/ClawAgents/McpServerIcon';
 import { useClawMcp } from '@/hooks/useClawMcp';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
@@ -13,6 +14,7 @@ import {
 } from '../shared/components/LibraryTabShell';
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
+import { Badge } from '@/components/ui/Badge';
 
 const McpV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -21,12 +23,13 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
   const servers = useMemo(() => data?.servers ?? [], [data]);
   const connections = useMemo(() => data?.connections ?? [], [data]);
 
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const searched = useMemo(
     () =>
-      q
-        ? servers.filter(s => `${s.name} ${s.description ?? ''}`.toLowerCase().includes(q))
-        : servers,
+      searchByNameThenDescription(servers, q, server => ({
+        name: server.name,
+        description: server.description,
+      })),
     [servers, q],
   );
 
@@ -102,6 +105,13 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
                 icon={<McpServerIcon server={server} size='sm' />}
                 name={server.name}
                 description={server.description ?? undefined}
+                meta={
+                  server.oauth ? (
+                    <Badge variant='secondary' className='px-1.5 py-0 text-[10px] leading-tight'>
+                      OAuth
+                    </Badge>
+                  ) : undefined
+                }
               />
             );
           }),

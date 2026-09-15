@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node --max-old-space-size=8192 node_modules/.bin/vite build",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",
     "lint": "eslint .",
@@ -16,7 +16,8 @@
   "dependencies": {
     "@livekit/components-react": "^2.9.15",
     "@livekit/components-styles": "^1.1.6",
-    "@rocicorp/zero": "1.6.1",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@rocicorp/zero": "1.9.0",
     "@tanstack/react-query": "^5.90.9",
     "@xstate/react": "^6.0.0",
     "@xstate/store": "^3.16.0",

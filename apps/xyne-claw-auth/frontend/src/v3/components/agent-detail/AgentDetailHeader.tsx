@@ -274,8 +274,8 @@ export function AgentDetailHeader({
             forceExpanded={cloning}
             title={
               cloneNeedsApproval
-                ? "Send a clone request to this agent's owner. A clone copies only the system prompt, tools, and skills."
-                : "Create your own copy — copies the system prompt, tools, and skills into a new personal agent."
+                ? "Send a clone request to this agent's owner. A clone copies its prompt, tools, skills and knowledge-base grants — not their saved credentials."
+                : "Create your own copy — prompt, tools, skills and knowledge base — in a new personal agent."
             }
           />
         )}

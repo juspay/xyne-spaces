@@ -190,6 +190,7 @@ const ConversationHeaderMobile = ({
               </button>
               <button
                 onClick={handleStarToggle}
+                data-ph-capture-attribute-track-id='toggle_star_channel'
                 className={cn(
                   'w-full border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] transition-all duration-100',
                   isStarred ? 'bg-muted border-border' : 'bg-background border-border',
@@ -302,6 +303,7 @@ const ConversationHeaderMobile = ({
               isMember={!!channelUserStatus}
               className={cn('rounded-full', floatingButtonClass)}
               disabled={channel.isArchived}
+              trackSource='chat_header_mobile'
             />
           </div>
         </div>

@@ -23,8 +23,18 @@ const log = createLogger("failure-curator");
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
-const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
-const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
+// Background job: prefer the low-priority automation key so curator bursts
+// can't queue interactive agent turns on the main key's parallel-slot pool.
+const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");
+// Model MUST be resolved from the same source as the key above: LiteLLM keys are
+// team-scoped and the teams' allowed-model lists are DISJOINT, so pairing the
+// automation key with the interactive `LITELLM_MODEL` yields a hard 403
+// ("team not allowed to access model") — prod 2026-08-14, where the automation
+// team allowed `private-large` but not `private-large-spaces`. Mirrors the
+// key fallback: automation first, interactive second, code default last.
+const CURATOR_MODEL = process.env["LITELLM_AUTOMATION_MODEL"]?.trim()
+  || process.env["LITELLM_MODEL"]
+  || "claude-haiku-4-5-20251001";
 const CURATOR_TIMEOUT_MS = Number(process.env["FAILURE_CURATOR_TIMEOUT_MS"] ?? 90_000);
 
 const MAX_NEGATIVE_SESSIONS = 30;

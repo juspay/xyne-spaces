@@ -2,7 +2,15 @@ import { ReactElement, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { ArrowRight } from '@xyne/icons';
-import { ChevronDown, ChevronRight, ChevronUp, Folder, Loader2, UserRound } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Folder,
+  Loader2,
+  UserRound,
+} from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
@@ -14,9 +22,40 @@ import {
   uploadProfilePicture as uploadProfilePictureViaApi,
 } from '../../services/userProfile/userProfileService';
 import { v4 as uuidv4 } from 'uuid';
+import type { LocalHarnessInstallation } from '../../types/electron';
+import {
+  LocalHarnessStepPanel,
+  LocalHarnessStepPreview,
+  machineLabel,
+  platformNoun,
+  type HarnessProvider,
+} from './LocalHarnessStep';
+
+type StepKey = 'name' | 'company' | 'harness' | 'ai';
 
 const TEAM_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
 type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
+
+interface OnboardingDraft {
+  displayName?: string;
+  role?: string;
+  companyName?: string;
+  companySize?: TeamSize | '';
+  photoFileName?: string;
+}
+
+const getDraftStorageKey = (email?: string): string => `onboarding_draft_${email || 'anon'}`;
+
+const getInitialStepIndex = (): number => {
+  try {
+    const match = window.location.hash.match(/^#(\d+)$/);
+    if (!match || !match[1]) return 0;
+    const parsed = Number.parseInt(match[1], 10);
+    return Number.isNaN(parsed) || parsed < 1 ? 0 : parsed - 1;
+  } catch {
+    return 0;
+  }
+};
 
 const QuestionnaireScreen = (): ReactElement | null => {
   const navigate = useNavigate();
@@ -25,19 +64,79 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const generalChannel = useChannelByName('general');
 
-  const [currentStep, setCurrentStep] = useState(0);
+  const [currentStep, setCurrentStep] = useState(getInitialStepIndex);
   const [isCompleting, setIsCompleting] = useState(false);
+  const currentStepRef = useRef(0);
+  currentStepRef.current = currentStep;
 
   const [displayName, setDisplayName] = useState(user?.['displayName'] || user?.name || '');
   const [role, setRole] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [companySize, setCompanySize] = useState<TeamSize | ''>('');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoFileName, setPhotoFileName] = useState('');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftStorageKey = getDraftStorageKey(user?.email);
+  const loadedDraftKeyRef = useRef<string | null>(null);
+
+  const [harnesses, setHarnesses] = useState<LocalHarnessInstallation[]>([]);
+  const [harnessDevice, setHarnessDevice] = useState({ name: 'This machine', platform: '' });
+  const [selectedHarness, setSelectedHarness] = useState<HarnessProvider | null>(null);
+  const [connectedHarness, setConnectedHarness] = useState<HarnessProvider | null>(null);
 
   const { url: existingPictureUrl } = useProfilePictureUrl(user?.id || '', user?.picture);
   const effectivePhotoUrl = photoPreviewUrl || existingPictureUrl || null;
+
+  const steps: StepKey[] = [
+    'name',
+    'company',
+    ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
+    'ai',
+  ];
+  const clampedStep = Math.min(currentStep, steps.length - 1);
+  const step: StepKey = steps[clampedStep] ?? 'name';
+
+  useEffect(() => {
+    if (loadedDraftKeyRef.current === draftStorageKey) return;
+    loadedDraftKeyRef.current = draftStorageKey;
+    try {
+      const raw = localStorage.getItem(draftStorageKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as OnboardingDraft;
+      if (draft.displayName) setDisplayName(draft.displayName);
+      if (draft.role) setRole(draft.role);
+      if (draft.companyName) setCompanyName(draft.companyName);
+      if (draft.companySize && (TEAM_SIZE_OPTIONS as readonly string[]).includes(draft.companySize))
+        setCompanySize(draft.companySize);
+      if (draft.photoFileName) setPhotoFileName(draft.photoFileName);
+    } catch {
+      // Ignore corrupted drafts
+    }
+  }, [draftStorageKey]);
+
+  useEffect(() => {
+    if (loadedDraftKeyRef.current !== draftStorageKey) return;
+    try {
+      const draft: OnboardingDraft = {
+        displayName,
+        role,
+        companyName,
+        companySize,
+        photoFileName,
+      };
+      localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    } catch {
+      // Storage may be unavailable (e.g. private mode); persistence is best-effort
+    }
+  }, [draftStorageKey, displayName, role, companyName, companySize, photoFileName]);
+
+  useEffect(() => {
+    const hash = `#${clampedStep + 1}`;
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, '', hash);
+    }
+  }, [clampedStep]);
 
   useEffect(() => {
     const isNewUserCookie = Cookies.get('is_new_user');
@@ -45,6 +144,22 @@ const QuestionnaireScreen = (): ReactElement | null => {
       void navigate('/');
     }
   }, [navigate]);
+
+  useEffect(() => {
+    const api = window.electronAPI?.localHarness;
+    if (!api) return;
+    let cancelled = false;
+    void Promise.all([api.detect(), api.getStatus()])
+      .then(([found, status]) => {
+        if (cancelled || currentStepRef.current > 1) return;
+        setHarnesses(found.filter(install => install.authenticated));
+        setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
+      })
+      .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!displayName && user) {
@@ -68,8 +183,10 @@ const QuestionnaireScreen = (): ReactElement | null => {
       const previewUrl = URL.createObjectURL(file);
       setPhotoPreviewUrl(previewUrl);
       await uploadProfilePictureViaApi(file);
+      setPhotoFileName(file.name);
     } catch {
       setPhotoPreviewUrl(null);
+      setPhotoFileName('');
     } finally {
       setIsUploadingPhoto(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -115,6 +232,12 @@ const QuestionnaireScreen = (): ReactElement | null => {
       // Non-blocking: profile upsert failure shouldn't trap the user on the questionnaire
     }
 
+    try {
+      localStorage.removeItem(draftStorageKey);
+    } catch {
+      // Best-effort cleanup
+    }
+
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = user?.workspaceId;
@@ -125,44 +248,48 @@ const QuestionnaireScreen = (): ReactElement | null => {
   };
 
   const canAdvance = (): boolean => {
-    if (currentStep === 0) return displayName.trim().length > 0;
-    if (currentStep === 1) return companyName.trim().length > 0 && companySize !== '';
+    if (step === 'name') return displayName.trim().length > 0;
+    if (step === 'company') return companyName.trim().length > 0 && companySize !== '';
     return true;
   };
 
   const handleNext = (): void => {
-    if (currentStep < 2) {
+    if (clampedStep < steps.length - 1) {
       if (!canAdvance()) return;
-      setCurrentStep(currentStep + 1);
+      setCurrentStep(clampedStep + 1);
       return;
     }
     void handleComplete();
   };
 
-  if (currentStep === 2) {
+  if (step === 'ai') {
     return (
       <div className='relative h-[100dvh] w-full overflow-hidden bg-white'>
         <img
           src='/svgs/xyne.svg'
           alt='Xyne'
-          className='absolute left-12 top-[34px] h-[30px] w-auto lg:left-16'
+          className='absolute left-6 top-6 h-7 w-auto md:left-12 md:top-[34px] md:h-[30px] lg:left-16'
         />
 
-        <div className='mx-auto flex h-full w-full max-w-[920px] flex-col items-center pt-[156px]'>
-          <div className='flex h-[118px] w-[118px] items-center justify-center rounded-[30px] bg-gradient-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_16px_40px_rgba(255,79,79,0.24)]'>
-            <img src='/svgs/icons/genius-star-white.svg' alt='' className='h-[66px] w-[66px]' />
+        <div className='mx-auto flex h-full w-full max-w-[920px] flex-col items-center justify-center px-4 pb-16 sm:px-6 md:justify-start md:pb-0 md:pt-[156px]'>
+          <div className='flex h-[84px] w-[84px] shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_16px_40px_rgba(255,79,79,0.24)] md:h-[118px] md:w-[118px] md:rounded-[30px]'>
+            <img
+              src='/svgs/icons/genius-star-white.svg'
+              alt=''
+              className='h-[48px] w-[48px] md:h-[66px] md:w-[66px]'
+            />
           </div>
 
-          <h1 className='mt-[34px] text-center text-[40px] leading-[48px] font-bold text-[#242936]'>
+          <h1 className='mt-[24px] text-center text-[30px] leading-[38px] font-bold text-[#242936] md:mt-[34px] md:text-[40px] md:leading-[48px]'>
             Meet Xyne AI
           </h1>
-          <p className='mt-[14px] max-w-[430px] text-center text-[18px] leading-[28px] font-medium text-[#5F646D]'>
+          <p className='mt-[14px] max-w-[430px] text-center text-[16px] leading-[26px] font-medium text-[#5F646D] md:text-[18px] md:leading-[28px]'>
             It&apos;s wherever you are, and it already knows what you&apos;re looking at
           </p>
 
-          <div className='mt-[72px] grid grid-cols-2 gap-[38px]'>
+          <div className='mt-[72px] hidden grid-cols-2 gap-[38px] md:grid'>
             <div>
-              <div className='relative h-[176px] w-[400px] overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
+              <div className='relative h-[176px] w-[400px] max-w-full overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
                 <div className='absolute inset-x-0 top-[80px] h-px bg-[#D9DEE7]' />
                 <div className='absolute left-0 top-[97px] h-[66px] w-[338px] rounded-r-[14px] bg-white shadow-[0_13px_28px_rgba(30,41,59,0.18)]'>
                   <div className='absolute -left-[12px] top-[16px] h-[36px] w-[36px] overflow-hidden rounded-full bg-gradient-to-br from-[#98C464] to-[#DCA47C]'>
@@ -198,7 +325,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
             </div>
 
             <div>
-              <div className='relative h-[176px] w-[400px] overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
+              <div className='relative h-[176px] w-[400px] max-w-full overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
                 <div className='absolute inset-x-0 top-[66px] h-px bg-[#D9DEE7]' />
                 <div className='absolute left-[62px] top-[58px] h-[92px] w-[342px] rounded-[14px] bg-white shadow-[0_13px_28px_rgba(30,41,59,0.18)]'>
                   <div className='absolute left-[20px] top-[23px] whitespace-nowrap text-[17px] leading-[23px] text-[#242936]'>
@@ -223,7 +350,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
             type='button'
             onClick={() => void handleComplete()}
             disabled={isCompleting}
-            className='mt-[120px] inline-flex h-[56px] items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60'
+            className='mt-[48px] inline-flex h-[56px] shrink-0 items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60 md:mt-[120px]'
             data-track-category='Questionnaire'
             data-track-name='EnterWorkspace'
           >
@@ -245,7 +372,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           className='h-7 w-auto self-start md:absolute md:left-12 lg:left-16 md:top-[34px] md:h-[30px]'
         />
 
-        {currentStep === 0 && (
+        {step === 'name' && (
           <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[329px] md:bottom-[38px] md:w-[calc(100%_-_96px)] md:max-w-[600px] md:justify-start'>
             <h1 className='text-[30px] leading-[36px] md:text-[30px] md:leading-[36px] font-bold text-[#1f2430]'>
               Whats your name?
@@ -284,7 +411,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
               />
             </div>
 
-            <div className='mt-[46px] flex items-center justify-between'>
+            <div className='mt-[46px] flex items-center justify-between gap-3'>
               <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
                 Your profile photo{' '}
                 <span className='text-[#8E939D] font-normal text-[12px]'>(optional)</span>
@@ -293,12 +420,12 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 type='button'
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploadingPhoto}
-                className='inline-flex h-[32px] min-w-[78px] items-center justify-center px-3 border border-[#DDE3EC] rounded-[8px] bg-white text-[14px] leading-none text-[#272B35] hover:bg-[#F8FAFC] transition-colors disabled:opacity-50'
+                className='inline-flex h-[32px] min-w-[78px] shrink-0 items-center justify-center px-3 border border-[#DDE3EC] rounded-[8px] bg-white text-[14px] leading-none text-[#272B35] hover:bg-[#F8FAFC] transition-colors disabled:opacity-50'
                 data-track-category='Questionnaire'
                 data-track-name='UploadPhoto'
               >
                 {isUploadingPhoto ? <Loader2 className='w-4 h-4 animate-spin' /> : null}
-                Upload
+                {photoFileName ? 'Change' : 'Upload'}
               </button>
               <input
                 ref={fileInputRef}
@@ -308,6 +435,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 className='hidden'
               />
             </div>
+
+            {photoFileName ? (
+              <div className='mt-2 flex items-center gap-1.5 md:hidden'>
+                <Check className='h-3.5 w-3.5 shrink-0 text-[#22A06B]' />
+                <span className='truncate text-[12px] leading-[16px] text-[#5F646D]'>
+                  {photoFileName}
+                </span>
+              </div>
+            ) : null}
 
             <button
               type='button'
@@ -323,7 +459,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
-        {currentStep === 1 && (
+        {step === 'company' && (
           <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%_-_96px)] lg:w-[calc(100%_-_200px)] md:max-w-[776px] md:justify-start'>
             <h1 className='text-[28px] leading-[34px] font-bold text-[#242936]'>
               Tell us about your company
@@ -408,11 +544,24 @@ const QuestionnaireScreen = (): ReactElement | null => {
             </div>
           </div>
         )}
+
+        {step === 'harness' && (
+          <LocalHarnessStepPanel
+            installations={harnesses}
+            noun={platformNoun(harnessDevice.platform)}
+            selected={selectedHarness}
+            onSelect={setSelectedHarness}
+            connected={connectedHarness}
+            onConnected={setConnectedHarness}
+            onBack={() => setCurrentStep(currentStep - 1)}
+            onNext={handleNext}
+          />
+        )}
       </div>
 
       {/* Right panel */}
       <div className='hidden md:flex items-center justify-center bg-[#F8F9FB] border-l border-[#ECEFF3]'>
-        {currentStep === 0 && (
+        {step === 'name' && (
           <div className='w-[368px] rounded-[16px] border border-[#E2E5EA] bg-white shadow-[0_18px_38px_rgba(27,36,52,0.13)] overflow-hidden'>
             <div className='h-[48px] flex items-center justify-center'>
               <div className='w-[86px] h-[20px] rounded-full border border-[#E5EAF0] bg-[#F3F5F8] shadow-[inset_0_1px_3px_rgba(20,31,48,0.08)]' />
@@ -439,7 +588,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
-        {currentStep === 1 && (
+        {step === 'company' && (
           <div className='relative h-full w-full overflow-hidden bg-[#F8F9FB]'>
             <div className='absolute left-0 right-0 top-[164px] h-[calc(100%-164px)] bg-[#F5F8FC]' />
             <div className='absolute left-[16.5%] right-0 top-[164px] z-[3] h-[18px] border-t border-[#DDE5F0] bg-white' />
@@ -484,6 +633,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
               </div>
             </div>
           </div>
+        )}
+
+        {step === 'harness' && (
+          <LocalHarnessStepPreview
+            installations={harnesses}
+            selected={selectedHarness}
+            connected={connectedHarness}
+            deviceName={harnessDevice.name}
+          />
         )}
       </div>
     </div>

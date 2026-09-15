@@ -323,6 +323,7 @@ async function createGoogleRecordingEmailAuthUrl(
   userId: string,
   workspaceId: string,
   returnPath: string,
+  platform: ProviderPlatform,
   req: Request,
 ): Promise<string> {
   const user = await db.user.findFirst({
@@ -340,7 +341,7 @@ async function createGoogleRecordingEmailAuthUrl(
     workspaceId,
     expectedEmail: user.email.trim().toLowerCase(),
     returnPath,
-    platform: 'web',
+    platform,
     timestamp: Date.now(),
   });
 
@@ -583,6 +584,7 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
+    const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
     if (!returnPath) {
       res.status(400).json({ error: 'A valid return path is required' });
       return;
@@ -593,6 +595,7 @@ router.post(
         req.user!.id,
         req.user!.workspaceId,
         returnPath,
+        platform,
         req,
       );
       res.json({ authUrl });
@@ -1283,10 +1286,29 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
 
-        const board = await tx.board.findFirst({
+        const boards = await tx.board.findMany({
           where: { projectId: cd.projectId },
           orderBy: { createdAt: 'asc' },
+          select: { id: true },
         });
+        const board = boards[0] ?? null;
+
+        // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+        // so downstream consumers never need to read channel.projectId.
+        if (boards.length > 0) {
+          await tx.channelBoardMapping.createMany({
+            data: boards.map((b, index) => ({
+              channelId: ch.id,
+              boardId: b.id,
+              workspaceId: cd.workspaceId,
+              isDefault: cd.boardId ? b.id === cd.boardId : index === 0,
+              createdBy: cd.userId,
+              createdAt: now,
+              updatedAt: now,
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         await tx.externalSource.create({
           data: {

@@ -4,23 +4,34 @@ import { MaximizeTwoArrow } from '@xyne/icons';
 import useMeasure from '../../../hooks/useMeasure';
 
 interface ExpandableMessageProps {
-  message: string;
+  message?: string;
+  children?: React.ReactNode;
   showEdited?: boolean;
   maxHeight?: number; // in pixels, default 500
   className?: string;
+  fadeColor?: string;
   isSystemMessage?: boolean;
   messageId?: string;
   conversationId?: string;
+  slashCommandArtifactContext?: {
+    channelId?: string;
+    senderId?: string;
+    createdAt?: number;
+    surface?: 'channel' | 'thread';
+  };
 }
 
 export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   message,
+  children,
   showEdited = false,
   maxHeight = 500,
   className = '',
+  fadeColor = 'hsl(var(--background))',
   isSystemMessage = false,
   messageId,
   conversationId,
+  slashCommandArtifactContext,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldShowButton, setShouldShowButton] = useState(false);
@@ -50,15 +61,20 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
           maxHeight: isExpanded ? 'none' : `${maxHeight}px`,
         }}
       >
-        <div className='jp-message-html whitespace-pre-wrap break-all-words'>
-          <RenderMessageWithHTML
-            message={message}
-            showEdited={showEdited}
-            isSystemMessage={isSystemMessage}
-            {...(messageId !== undefined && { messageId })}
-            {...(conversationId !== undefined && { conversationId })}
-          />
-        </div>
+        {children !== undefined ? (
+          children
+        ) : (
+          <div className='jp-message-html whitespace-pre-wrap break-all-words'>
+            <RenderMessageWithHTML
+              message={message ?? ''}
+              showEdited={showEdited}
+              isSystemMessage={isSystemMessage}
+              {...(messageId !== undefined && { messageId })}
+              {...(conversationId !== undefined && { conversationId })}
+              {...(slashCommandArtifactContext !== undefined && { slashCommandArtifactContext })}
+            />
+          </div>
+        )}
       </div>
 
       {shouldShowButton && (
@@ -72,8 +88,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             isExpanded
               ? undefined
               : {
-                  backgroundImage:
-                    'linear-gradient(to bottom, transparent, hsl(var(--background)))',
+                  backgroundImage: `linear-gradient(to bottom, transparent, ${fadeColor})`,
                 }
           }
         >
@@ -83,7 +98,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
             data-track-category='ChatMessage'
             data-track-name='TOGGLE_EXPAND_MESSAGE'
-            data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}
+            data-track-metadata={JSON.stringify({ isExpanded, message: message?.length ?? 0 })}
           >
             <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
             <span>{isExpanded ? 'Show less' : 'Show more'}</span>

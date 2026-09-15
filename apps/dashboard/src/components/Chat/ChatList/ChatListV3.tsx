@@ -1,3 +1,4 @@
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import { withProfiler } from '../../../utils/withProfiler';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
@@ -14,7 +15,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -240,7 +241,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
   const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
@@ -492,7 +493,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
         setConversationsState(merged);
         setIsInitialLoadComplete(true);
       })
-      .catch(err => console.error('[V11] initial load error:', err));
+      .catch(err =>
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[V11] initial load error:'),
+          error: err,
+        }),
+      );
   }, []);
 
   useEffect(() => {
@@ -615,7 +622,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
           setFirstItemIndex(prev => prev - newItems.length);
           setConversationsState(merged);
         })
-        .catch(err => console.error('[V11] fetchOlderMessages error:', err));
+        .catch(err =>
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[V11] fetchOlderMessages error:'),
+            error: err,
+          }),
+        );
     },
     [
       channelId,
@@ -677,7 +690,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
           isFetchingRef.current = false;
         })
         .catch(err => {
-          console.error('[V11] fetchNewerMessages error:', err);
+          logger.error(LogEvent.FRONTEND_ERROR, {
+            type: 'migrated_console_error',
+            message: String('[V11] fetchNewerMessages error:'),
+            error: err,
+          });
           isFetchingRef.current = false;
         });
     },
@@ -1044,13 +1061,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
       });
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToConversation();
       return;
     }
 
     requestEdit(message.messageId, scrollToConversation);
-  }, [conversations, user?.id, firstItemIndex, editingMessageId, requestEdit]);
+  }, [conversations, user?.id, firstItemIndex, isEditingMessage, requestEdit]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: conversations.length > 0,
@@ -1417,4 +1434,4 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 };
 
-export default withProfiler(ChatListV3, 'ChatListV3');
+export default withProfiler(withEditSurface(ChatListV3), 'ChatListV3');

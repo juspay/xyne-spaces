@@ -17,6 +17,7 @@ export interface TicketPreviousValue {
   userGroupId: string | null;
   createdBy: string;
   channelId: string | null;
+  metadata: unknown;
 }
 
 export interface TicketStageEtaPreviousValue {
@@ -154,7 +155,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   calls: ['update'],
   tickets: ['update'],
   ticket_assignments: ['insert', 'update'],
-  ticket_stage_eta: ['update'],
+  ticket_stage_eta: ['insert', 'update', 'delete', 'upsert'],
   rcas: ['insert', 'update'],
   ticket_sub_ticket_mappings: ['insert'],
   ticket_reference_mappings: ['insert', 'delete'],
