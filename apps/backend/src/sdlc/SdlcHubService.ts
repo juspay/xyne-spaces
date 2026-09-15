@@ -610,12 +610,14 @@ export class SdlcHubService implements SdlcHub {
   async getRepositoryRunContext(
     actor: SdlcActor,
     repoId: string,
-    conversationId: string
+    conversationId: string,
+    channelId?: string
   ): Promise<SdlcRepositoryRunContext> {
-    const repo = await this.requireRepositoryRole(actor, repoId, false);
+    const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
     const agentContext = await sdlcAgentContext.build(actor, repo.id, {
       operation: 'interactive',
       conversationId,
+      channelId: repo.channelId,
     });
     return {
       repoId: repo.id,
@@ -799,34 +801,39 @@ export class SdlcHubService implements SdlcHub {
     actor: SdlcActor,
     input: CreateSdlcClawArtifactInput
   ): Promise<SdlcArtifact> {
-    const repo = await this.requireRepositoryRole(
+    const { channelId, projectId, repo } = await this.requireHubScope(
       actor,
-      input.repoId,
-      false,
-      (input.folderId ? await this.hubOf('canvasFolder', input.folderId) : undefined) ??
-        (input.setupExecutionId ? await this.hubOfExecution(input.setupExecutionId) : undefined) ??
-        input.channelId
+      {
+        ...(input.repoId && { repoId: input.repoId }),
+        channelId:
+          (input.folderId ? await this.hubOf('canvasFolder', input.folderId) : undefined) ??
+          (input.setupExecutionId
+            ? await this.hubOfExecution(input.setupExecutionId)
+            : undefined) ??
+          input.channelId,
+      },
+      false
     );
-    if (!repo?.channelId || !repo.projectId) {
-      throw new AppError('SDLC repository not found', 404);
-    }
+    // The schema already refuses a baseline without a repoId; this narrows it.
     if (input.kind === 'BASELINE') {
-      await sdlcVcs.requireCapabilities(actor, input.repoId, [...BASELINE_CAPABILITIES]);
+      if (!repo) throw new AppError('Baseline artifacts require a repository', 400);
+      await sdlcVcs.requireCapabilities(actor, repo.id, [...BASELINE_CAPABILITIES]);
     }
 
     const folder = input.folderId
       ? await this.prisma.canvasFolder.findFirst({
-          where: { id: input.folderId, channelId: repo.channelId },
+          where: { id: input.folderId, channelId: channelId },
           select: { id: true },
         })
       : await this.prisma.canvasFolder.findFirst({
-          where: { channelId: repo.channelId, name: 'Baseline' },
+          where: { channelId: channelId, name: 'Baseline' },
           select: { id: true },
         });
     if (!folder) throw new AppError('Artifact type folder not found', 409);
 
     let baselineGenerationCommit: string | null = null;
     if (input.kind === 'BASELINE') {
+      if (!repo) throw new AppError('Baseline artifacts require a repository', 400);
       const execution = await this.prisma.workflowExecution.findFirst({
         where: {
           id: input.setupExecutionId,
@@ -853,7 +860,7 @@ export class SdlcHubService implements SdlcHub {
           ? executionContext.generationCommit
           : null;
       const existing = await this.findSdlcCanvas(
-        repo.channelId,
+        channelId,
         input.baselineKind!,
         input.setupExecutionId!
       );
@@ -868,7 +875,7 @@ export class SdlcHubService implements SdlcHub {
     }
 
     if (input.trackId) {
-      const inHub = await isTrackInChannel(this.prisma, input.trackId, repo.channelId);
+      const inHub = await isTrackInChannel(this.prisma, input.trackId, channelId);
       if (!inHub) throw new AppError('SDLC track not found for this repository', 404);
     }
 
@@ -878,6 +885,11 @@ export class SdlcHubService implements SdlcHub {
     const citesRepository =
       (input.sourceReferences?.length ?? 0) > 0 || input.markdown.includes('[[source:');
     if (citesRepository) {
+      // Source markers pin lines in a repository, so they cannot be resolved in a
+      // hub that covers none.
+      if (!repo) {
+        throw new AppError('Source references require a repository on this hub', 400);
+      }
       const pinnedCommit =
         input.kind === 'BASELINE'
           ? baselineGenerationCommit
@@ -907,9 +919,9 @@ export class SdlcHubService implements SdlcHub {
               workspaceId: actor.workspaceId,
               title: input.title,
               content: content as unknown as Prisma.InputJsonValue,
-              channelId: repo.channelId,
+              channelId: channelId,
               folderId: folder.id,
-              projectId: repo.projectId,
+              projectId: projectId,
               createdBy: actor.userId,
               lastEditedBy: actor.userId,
               lastEditedAt: new Date(),
@@ -918,7 +930,7 @@ export class SdlcHubService implements SdlcHub {
               isCollaborative: true,
               metadata: {} as Prisma.InputJsonValue,
               participants: {
-                create: sdlcChannelCanvasParticipant(actor.workspaceId, repo.channelId),
+                create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId),
               },
             },
           });
@@ -926,7 +938,7 @@ export class SdlcHubService implements SdlcHub {
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
-                channelId: repo.channelId,
+                channelId: channelId,
                 sourceType: 'TRACK',
                 sourceId: input.trackId,
                 targetType: 'CANVAS',
@@ -938,7 +950,7 @@ export class SdlcHubService implements SdlcHub {
             await tx.sdlcEntityLink.create({
               data: {
                 workspaceId: actor.workspaceId,
-                channelId: repo.channelId,
+                channelId: channelId,
                 sourceType: 'TRACK',
                 sourceId: input.trackId,
                 targetType: 'CANVAS',
@@ -951,7 +963,8 @@ export class SdlcHubService implements SdlcHub {
           await tx.sdlcArtifact.create({
             data: {
               workspaceId: actor.workspaceId,
-              repoId: repo.id,
+              // Null in a hub covering no repository; the row is placed by its canvas.
+              repoId: repo?.id ?? null,
               artifactId: canvas.id,
               artifactType:
                 input.kind === 'BASELINE'
@@ -972,14 +985,14 @@ export class SdlcHubService implements SdlcHub {
           );
           if (relatedIds.length > 0) {
             const validRelated = await tx.canvas.findMany({
-              where: { id: { in: relatedIds }, channelId: repo.channelId },
+              where: { id: { in: relatedIds }, channelId: channelId },
               select: { id: true },
             });
             for (const related of validRelated) {
               await tx.sdlcEntityLink.create({
                 data: {
                   workspaceId: actor.workspaceId,
-                  channelId: repo.channelId,
+                  channelId: channelId,
                   sourceType: 'CANVAS',
                   sourceId: related.id,
                   targetType: 'CANVAS',
@@ -1522,15 +1535,27 @@ export class SdlcHubService implements SdlcHub {
 
   async linkContext(
     actor: SdlcActor,
-    repoId: string,
+    repoId: string | undefined,
     input: CreateSdlcLinkInput,
     channelId?: string
   ): Promise<SdlcLink> {
     if (input.relationType === 'DISCUSSION') {
       throw new AppError('SDLC discussions must be created with their conversation', 400);
     }
-    const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
-    await this.requireLinkSource(repoId, repo.channelId, input.sourceType, input.sourceId);
+    // A repository can sit in several hubs, so `repoId` cannot say which one a link
+    // belongs to and the caller's `channelId` is only a guess. The source entity is
+    // unambiguous: it lives in exactly one hub, and that is the hub the link belongs
+    // to. Fall back to the caller's scope only when the source names no hub, so
+    // requireLinkSource still rejects it exactly as before.
+    const sourceChannelId = await this.linkSourceHub(input.sourceType, input.sourceId);
+    const repo = await this.requireHubScope(
+      actor,
+      sourceChannelId
+        ? { channelId: sourceChannelId }
+        : { ...(repoId && { repoId }), ...(channelId && { channelId }) },
+      false
+    );
+    await this.requireLinkSource(repo.channelId, input.sourceType, input.sourceId);
     await this.requireAccessibleEntity(actor, input.targetType, input.targetId);
     try {
       const link = await this.prisma.sdlcEntityLink.create({
@@ -1578,10 +1603,14 @@ export class SdlcHubService implements SdlcHub {
     }
   }
 
-  async listTracks(actor: SdlcActor, repoId: string, channelId?: string) {
-    const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
+  async listTracks(actor: SdlcActor, repoId: string | undefined, channelId?: string) {
+    const scope = await this.requireHubScope(
+      actor,
+      { ...(repoId && { repoId }), ...(channelId && { channelId }) },
+      false
+    );
     // Tracks carry no scope column; the CHANNEL -> TRACK edges name the hub's tracks.
-    const trackIds = repo.channelId ? await trackIdsForChannel(this.prisma, repo.channelId) : [];
+    const trackIds = await trackIdsForChannel(this.prisma, scope.channelId);
     return this.prisma.sdlcTrack.findMany({
       where: { id: { in: trackIds } },
       orderBy: { createdAt: 'asc' },
@@ -1597,9 +1626,12 @@ export class SdlcHubService implements SdlcHub {
   }
 
   async createTrack(actor: SdlcActor, input: CreateSdlcTrackInput) {
-    const repo = await this.requireRepositoryRole(actor, input.repoId, false, input.channelId);
-    if (!repo.channelId) throw new AppError('SDLC repository not found', 404);
-    const channelId = repo.channelId;
+    const scope = await this.requireHubScope(
+      actor,
+      { ...(input.repoId && { repoId: input.repoId }), ...(input.channelId && { channelId: input.channelId }) },
+      false
+    );
+    const channelId = scope.channelId;
     return this.prisma.$transaction(async (tx) => {
       const track = await tx.sdlcTrack.create({
         data: {
@@ -1628,25 +1660,34 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  async listArtifactTypes(actor: SdlcActor, repoId: string, channelId?: string) {
-    const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
-    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
+  async listArtifactTypes(actor: SdlcActor, repoId: string | undefined, channelId?: string) {
+    const scope = await this.requireHubScope(
+      actor,
+      { ...(repoId && { repoId }), ...(channelId && { channelId }) },
+      false
+    );
     return this.prisma.canvasFolder.findMany({
-      where: { channelId: repo.channelId },
+      where: { channelId: scope.channelId },
       orderBy: { createdAt: 'asc' },
       select: { id: true, name: true, createdAt: true },
     });
   }
 
-  async createArtifactType(actor: SdlcActor, repoId: string, name: string, channelId?: string) {
-    const repo = await this.requireRepositoryRole(actor, repoId, false, channelId);
-    if (!repo?.channelId || !repo.projectId) {
-      throw new AppError('SDLC repository not found', 404);
-    }
+  async createArtifactType(
+    actor: SdlcActor,
+    repoId: string | undefined,
+    name: string,
+    channelId?: string
+  ) {
+    const scope = await this.requireHubScope(
+      actor,
+      { ...(repoId && { repoId }), ...(channelId && { channelId }) },
+      false
+    );
     const trimmed = name.trim();
     if (!trimmed) throw new AppError('Artifact type name is required', 400);
     const existing = await this.prisma.canvasFolder.findFirst({
-      where: { channelId: repo.channelId, name: trimmed },
+      where: { channelId: scope.channelId, name: trimmed },
       select: { id: true },
     });
     if (existing) throw new AppError('An artifact type with this name already exists', 409);
@@ -1654,8 +1695,8 @@ export class SdlcHubService implements SdlcHub {
       data: {
         id: randomUUID(),
         workspaceId: actor.workspaceId,
-        projectId: repo.projectId,
-        channelId: repo.channelId,
+        projectId: scope.projectId,
+        channelId: scope.channelId,
         name: trimmed,
         createdBy: actor.userId,
       },
@@ -1663,18 +1704,24 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  async renameArtifactType(actor: SdlcActor, repoId: string, folderId: string, name: string) {
-    const repo = await this.requireRepositoryRole(
+  async renameArtifactType(
+    actor: SdlcActor,
+    repoId: string | undefined,
+    folderId: string,
+    name: string
+  ) {
+    const scope = await this.requireHubScope(
       actor,
-      repoId,
-      false,
-      await this.hubOf('canvasFolder', folderId)
+      {
+        ...(repoId && { repoId }),
+        channelId: await this.hubOf('canvasFolder', folderId),
+      },
+      false
     );
-    if (!repo?.channelId) throw new AppError('SDLC repository not found', 404);
     const trimmed = name.trim();
     if (!trimmed) throw new AppError('Artifact type name is required', 400);
     const folder = await this.prisma.canvasFolder.findFirst({
-      where: { id: folderId, channelId: repo.channelId },
+      where: { id: folderId, channelId: scope.channelId },
       select: { id: true, name: true },
     });
     if (!folder) throw new AppError('Artifact type not found', 404);
@@ -1682,7 +1729,7 @@ export class SdlcHubService implements SdlcHub {
       throw new AppError('Repo Knowledge cannot be renamed', 400);
     }
     const clash = await this.prisma.canvasFolder.findFirst({
-      where: { channelId: repo.channelId, name: trimmed, id: { not: folderId } },
+      where: { channelId: scope.channelId, name: trimmed, id: { not: folderId } },
       select: { id: true },
     });
     if (clash) throw new AppError('An artifact type with this name already exists', 409);
@@ -1693,12 +1740,18 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  async unlinkContext(actor: SdlcActor, repoId: string, linkId: string): Promise<void> {
-    const repo = await this.requireRepositoryRole(
+  async unlinkContext(
+    actor: SdlcActor,
+    repoId: string | undefined,
+    linkId: string
+  ): Promise<void> {
+    const repo = await this.requireHubScope(
       actor,
-      repoId,
-      false,
-      await this.hubOf('sdlcEntityLink', linkId)
+      {
+        ...(repoId && { repoId }),
+        channelId: await this.hubOf('sdlcEntityLink', linkId),
+      },
+      false
     );
     const link = await this.prisma.sdlcEntityLink.findFirst({
       where: { id: linkId, channelId: repo.channelId, workspaceId: actor.workspaceId },
@@ -1787,6 +1840,66 @@ export class SdlcHubService implements SdlcHub {
   }
 
   /** Gate for hub-scoped work: artifact types, artifacts, links, tracks, membership. */
+  /**
+   * The hub a write lands in, plus the project that scopes its folders.
+   *
+   * Hub-scoped work (documents, artifact types) only ever used `repoId` to reach
+   * these two fields, so a hub covering no repository addresses itself by
+   * `channelId` instead. Authorization is unchanged either way: through a
+   * repository it still resolves the actor's membership of a hub that covers it,
+   * and through a channel it is that hub's own membership check.
+   */
+  private async requireHubScope(
+    actor: SdlcActor,
+    input: { repoId?: string | undefined; channelId?: string | undefined },
+    requireAdmin: boolean
+  ): Promise<{
+    channelId: string;
+    projectId: string;
+    repo: Awaited<ReturnType<SdlcHubService['requireRepositoryRole']>> | null;
+  }> {
+    if (input.repoId) {
+      const repo = await this.requireRepositoryRole(
+        actor,
+        input.repoId,
+        requireAdmin,
+        input.channelId
+      );
+      if (!repo.channelId || !repo.projectId) {
+        throw new AppError('SDLC repository not found', 404);
+      }
+      return { channelId: repo.channelId, projectId: repo.projectId, repo };
+    }
+    if (!input.channelId) {
+      throw new AppError('A repository or hub is required', 400);
+    }
+    const channel = await this.requireChannelRole(actor, input.channelId, requireAdmin);
+    if (!channel.projectId) throw new AppError('SDLC hub not found', 404);
+    // The claw tools address a hub by channel alone, so a hub covering exactly one
+    // repository still resolves it: artifacts keep their repoId and source citations
+    // keep working there, exactly as when the repository was named. Several
+    // repositories are ambiguous, so none is picked.
+    const memberships = await this.prisma.sdlcEntityLink.findMany({
+      where: {
+        channelId: channel.id,
+        targetType: 'REPOSITORY',
+        relationType: SDLC_MEMBERSHIP_RELATION,
+      },
+      select: { targetId: true },
+      take: 2,
+    });
+    if (memberships.length === 1 && memberships[0]?.targetId) {
+      const repo = await this.requireRepositoryRole(
+        actor,
+        memberships[0].targetId,
+        requireAdmin,
+        channel.id
+      );
+      return { channelId: channel.id, projectId: channel.projectId, repo };
+    }
+    return { channelId: channel.id, projectId: channel.projectId, repo: null };
+  }
+
   private async requireChannelRole(actor: SdlcActor, channelId: string, requireAdmin: boolean) {
     const channel = await this.prisma.channel.findFirst({
       where: { id: channelId, workspaceId: actor.workspaceId, type: ChannelType.SDLC },
@@ -1916,12 +2029,34 @@ export class SdlcHubService implements SdlcHub {
     });
   }
 
-  private async requireLinkSource(
-    repoId: string,
-    channelId: string,
-    type: string,
-    id: string
-  ): Promise<void> {
+  /**
+   * The hub a link source lives in, or undefined when the row is missing or carries
+   * no hub. Only used to scope a link — requireLinkSource still verifies the source
+   * really belongs to the hub the actor was granted.
+   */
+  private async linkSourceHub(type: string, id: string): Promise<string | undefined> {
+    if (type === 'CANVAS') return this.hubOf('canvas', id);
+    if (type === 'CHANNEL') return id;
+    if (type === 'TICKET') return this.ticketHub(id);
+    if (type === 'PULL_REQUEST') {
+      const pullRequest = await this.prisma.pullRequests.findUnique({
+        where: { id },
+        select: { ticketId: true },
+      });
+      return pullRequest?.ticketId ? this.ticketHub(pullRequest.ticketId) : undefined;
+    }
+    return undefined;
+  }
+
+  private async ticketHub(ticketId: string): Promise<string | undefined> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { channelId: true },
+    });
+    return ticket?.channelId ?? undefined;
+  }
+
+  private async requireLinkSource(channelId: string, type: string, id: string): Promise<void> {
     let exists: { id: string } | null = null;
     if (type === 'CANVAS') {
       exists = await this.prisma.canvas.findFirst({
@@ -1948,7 +2083,7 @@ export class SdlcHubService implements SdlcHub {
         if (ticket) exists = { id: pullRequest.id };
       }
     }
-    if (!exists) throw new AppError(`Invalid ${type} source for repository ${repoId}`, 400);
+    if (!exists) throw new AppError(`Invalid ${type} source for this SDLC hub`, 400);
   }
 
   private async requireAccessibleEntity(actor: SdlcActor, type: string, id: string): Promise<void> {

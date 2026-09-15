@@ -20,6 +20,7 @@ export type SdlcWikiAgentRole =
 
 export interface SdlcAgentContextInput {
   operation: SdlcAgentOperation;
+  channelId?: string;
   workflowExecutionId?: string;
   sessionId?: string;
   conversationId?: string;
@@ -98,6 +99,7 @@ export class SdlcAgentContextService {
         workspaceId: actor.workspaceId,
         repoId,
         userId: actor.userId,
+        ...(input.channelId ? { channelId: input.channelId } : {}),
       }),
     ]);
     if (!repo?.projectId) throw new AppError('SDLC repository not found', 404);

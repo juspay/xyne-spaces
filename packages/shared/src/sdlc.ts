@@ -203,7 +203,7 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
   .object({
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
     ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
@@ -276,8 +276,7 @@ export type SdlcSetupStatus = z.infer<typeof sdlcSetupStatusSchema>;
 export const createSdlcChannelSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
-  // At least one: a hub with no repositories has no screen to render.
-  repoIds: z.array(z.string().min(1)).min(1).max(100),
+  repoIds: z.array(z.string().min(1)).max(100),
 });
 export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
 
@@ -683,7 +682,7 @@ export type BootstrapSdlcRuntimeCredentialInput = z.infer<
 
 export const createSdlcClawArtifactSchema = z
   .object({
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
     // The hub to write into. A repository sits in several, so it cannot be inferred.
     channelId: z.string().min(1).optional(),
     kind: sdlcArtifactKindSchema.optional(),
@@ -699,6 +698,19 @@ export const createSdlcClawArtifactSchema = z
     sourceReferences: sdlcSourceReferencesSchema,
   })
   .superRefine((value, ctx) => {
+    if (!value.repoId && !value.channelId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Artifact creation requires either a repoId or a channelId",
+      });
+    }
+    // A baseline is generated from a repository, so it cannot be addressed by hub.
+    if (value.kind === "BASELINE" && !value.repoId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Baseline artifacts require a repoId",
+      });
+    }
     if (
       value.kind === "BASELINE" &&
       (!value.baselineKind ||
@@ -781,26 +793,54 @@ export const createSdlcLinkSchema = z.object({
 });
 export type CreateSdlcLinkInput = z.infer<typeof createSdlcLinkSchema>;
 
-export const createSdlcTrackSchema = z.object({
-  repoId: z.string().min(1),
-  channelId: z.string().min(1).optional(),
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(2000).optional(),
-});
+export const createSdlcTrackSchema = z
+  .object({
+    repoId: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(2000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.repoId && !value.channelId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tracks require either a repoId or a channelId",
+      });
+    }
+  });
 export type CreateSdlcTrackInput = z.infer<typeof createSdlcTrackSchema>;
 
-export const createSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
-  channelId: z.string().min(1).optional(),
-  name: z.string().trim().min(1).max(80),
-});
+export const createSdlcArtifactTypeSchema = z
+  .object({
+    repoId: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    name: z.string().trim().min(1).max(80),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.repoId && !value.channelId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Artifact types require either a repoId or a channelId",
+      });
+    }
+  });
 export type CreateSdlcArtifactTypeInput = z.infer<typeof createSdlcArtifactTypeSchema>;
 
-export const renameSdlcArtifactTypeSchema = z.object({
-  repoId: z.string().min(1),
-  folderId: z.string().min(1),
-  name: z.string().trim().min(1).max(80),
-});
+export const renameSdlcArtifactTypeSchema = z
+  .object({
+    repoId: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    folderId: z.string().min(1),
+    name: z.string().trim().min(1).max(80),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.repoId && !value.channelId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Artifact types require either a repoId or a channelId",
+      });
+    }
+  });
 export type RenameSdlcArtifactTypeInput = z.infer<typeof renameSdlcArtifactTypeSchema>;
 
 export function inferRepositoryNameFromUrl(raw: string): string | null {
