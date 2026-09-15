@@ -288,5 +288,32 @@
       "savedTitle": "Saved to your apps. Open it in the Library.",
       "savedLabel": "Saved"
     }
+  },
+  "artifactPaneReference": {
+    "viewingTitle": "This version is open in the pane",
+    "showTitle": "Show this version in the pane",
+    "versionLabel": "Version {{number}}",
+    "appLabel": "App",
+    "currentLabel": "· Current",
+    "showingLabel": "· Showing",
+    "restoreCurrentWithNumber": "Make version {{number}} current — the agent's next update builds on it",
+    "restoreCurrent": "Make this version current",
+    "restoreButton": "Restore"
+  },
+  "artifactErrorOverlay": {
+    "unknownError": "Unknown error",
+    "hitErrorTitle": "This app hit an error",
+    "dismissAriaLabel": "Dismiss",
+    "dismissTitle": "Dismiss and show the app anyway",
+    "fixRequested": "Fix requested",
+    "fixWithAi": "Fix with AI",
+    "copied": "Copied",
+    "copyError": "Copy error",
+    "waitForReply": "Wait for the current reply to finish, then try again."
+  },
+  "messageReactArtifacts": {
+    "couldNotSave": "Could not save this app.",
+    "openInAppPanel": "Open in the app panel",
+    "openFullScreen": "Open full screen"
   }
 }

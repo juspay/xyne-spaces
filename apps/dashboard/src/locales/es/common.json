@@ -288,5 +288,32 @@
       "savedTitle": "Guardada en tus apps. Ábrela en la Biblioteca.",
       "savedLabel": "Guardada"
     }
+  },
+  "artifactPaneReference": {
+    "viewingTitle": "Esta versión está abierta en el panel",
+    "showTitle": "Mostrar esta versión en el panel",
+    "versionLabel": "Versión {{number}}",
+    "appLabel": "App",
+    "currentLabel": "· Actual",
+    "showingLabel": "· Mostrando",
+    "restoreCurrentWithNumber": "Hacer que la versión {{number}} sea la actual: la próxima actualización del agente se construirá sobre ella",
+    "restoreCurrent": "Hacer que esta versión sea la actual",
+    "restoreButton": "Restaurar"
+  },
+  "artifactErrorOverlay": {
+    "unknownError": "Error desconocido",
+    "hitErrorTitle": "Esta app tuvo un error",
+    "dismissAriaLabel": "Descartar",
+    "dismissTitle": "Descartar y mostrar la app de todos modos",
+    "fixRequested": "Corrección solicitada",
+    "fixWithAi": "Corregir con IA",
+    "copied": "Copiado",
+    "copyError": "Copiar error",
+    "waitForReply": "Espera a que termine la respuesta actual y vuelve a intentarlo."
+  },
+  "messageReactArtifacts": {
+    "couldNotSave": "No se pudo guardar esta app.",
+    "openInAppPanel": "Abrir en el panel de apps",
+    "openFullScreen": "Abrir en pantalla completa"
   }
 }

@@ -24,6 +24,7 @@
  */
 
 import type { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RotateLeft } from '@xyne/icons';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import type { ReactArtifactRef } from './ReactArtifact.types';
@@ -34,6 +35,7 @@ export const ArtifactPaneReference = ({
 }: {
   artifact: ReactArtifactRef;
 }): ReactElement => {
+  const { t } = useTranslation('common');
   const { viewingVersionId, headVersionId, icon, viewVersion, restoreVersion, restoring } =
     useAppCreationModeSignal();
   const version = artifact.manifest.versionNumber;
@@ -59,7 +61,9 @@ export const ArtifactPaneReference = ({
         disabled={!artifact.versionId}
         aria-current={isViewing ? 'true' : undefined}
         className='flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:pointer-events-none'
-        title={isViewing ? 'This version is open in the pane' : 'Show this version in the pane'}
+        title={
+          isViewing ? t('artifactPaneReference.viewingTitle') : t('artifactPaneReference.showTitle')
+        }
         data-track-category='AskAI'
         data-track-name='ArtifactPaneReferenceSelect'
       >
@@ -73,12 +77,20 @@ export const ArtifactPaneReference = ({
           {artifact.manifest.title}
         </span>
         <span className='shrink-0 text-[13px] text-muted-foreground'>
-          {version !== undefined ? `Version ${version}` : 'App'}
+          {version !== undefined
+            ? t('artifactPaneReference.versionLabel', { number: version })
+            : t('artifactPaneReference.appLabel')}
         </span>
         {isCurrent && (
-          <span className='shrink-0 text-[13px] text-muted-foreground/70'>· Current</span>
+          <span className='shrink-0 text-[13px] text-muted-foreground/70'>
+            {t('artifactPaneReference.currentLabel')}
+          </span>
         )}
-        {isViewing && <span className='shrink-0 text-[13px] text-primary/80'>· Showing</span>}
+        {isViewing && (
+          <span className='shrink-0 text-[13px] text-primary/80'>
+            {t('artifactPaneReference.showingLabel')}
+          </span>
+        )}
       </button>
 
       {canRestore && (
@@ -92,14 +104,14 @@ export const ArtifactPaneReference = ({
           className='flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
           title={
             version !== undefined
-              ? `Make version ${version} current — the agent's next update builds on it`
-              : 'Make this version current'
+              ? t('artifactPaneReference.restoreCurrentWithNumber', { number: version })
+              : t('artifactPaneReference.restoreCurrent')
           }
           data-track-category='AskAI'
           data-track-name='ArtifactPaneReferenceRestore'
         >
           <RotateLeft size={14} aria-hidden='true' />
-          Restore
+          {t('artifactPaneReference.restoreButton')}
         </button>
       )}
     </div>
