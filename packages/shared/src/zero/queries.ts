@@ -4746,10 +4746,11 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
-  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ ctx, args: { userId } }) => {
     return zql.saved_user_configurations
       .where('userId', userId)
       .related('values')
+      .related('viewAccess', va => va.where('sharedBy', '=', ctx.userID))
       .orderBy('createdAt', 'desc');
   }),
 
