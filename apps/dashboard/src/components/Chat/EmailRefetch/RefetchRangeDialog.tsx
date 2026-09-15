@@ -69,6 +69,7 @@ interface RefetchRangeDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: (range?: { startDate: string; endDate: string }) => void;
   isPending?: boolean;
+  sourceName?: string | undefined;
 }
 
 export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
@@ -76,7 +77,12 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   onOpenChange,
   onConfirm,
   isPending = false,
+  sourceName,
 }) => {
+  const titleText = sourceName ? `Fetch from ${sourceName}` : 'Fetch emails';
+  const descriptionText = sourceName
+    ? 'Choose how much history to pull from this source.'
+    : 'Pull new mail or backfill a specific time range from the connected inbox.';
   const [mode, setMode] = useState<Mode>('last-7d');
   const [customStart, setCustomStart] = useState<Date | null>(null);
   const [customEnd, setCustomEnd] = useState<Date | null>(null);
@@ -142,17 +148,15 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title='Fetch emails'
-      description='Choose how much history to pull from the inbox.'
+      title={titleText}
+      description={descriptionText}
       className='max-w-lg'
     >
       <div className='p-6 space-y-5'>
         {/* Header */}
         <div>
-          <div className='text-lg font-semibold text-foreground'>Fetch emails</div>
-          <p className='text-sm text-muted-foreground mt-0.5'>
-            Pull new mail or backfill a specific time range from the connected inbox.
-          </p>
+          <div className='text-lg font-semibold text-foreground'>{titleText}</div>
+          <p className='text-sm text-muted-foreground mt-0.5'>{descriptionText}</p>
         </div>
 
         {/* Quick presets */}

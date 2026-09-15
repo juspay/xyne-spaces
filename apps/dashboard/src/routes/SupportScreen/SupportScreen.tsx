@@ -84,8 +84,10 @@ import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
+import { FetchSourcePicker } from '../../components/Chat/EmailRefetch/FetchSourcePicker';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
@@ -1262,6 +1264,9 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('workspaceMailboxConnected') === 'true',
   );
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [fetchTarget, setFetchTarget] = useState<
+    { sourceId?: string | undefined; sourceName?: string | undefined } | undefined
+  >(undefined);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -1646,12 +1651,23 @@ const SupportScreen = (): ReactElement => {
     isSocialMediaDesk,
   );
   const canRefetch = !!refetchChannelId;
+  const {
+    data: fetchSources,
+    isLoading: isFetchSourcesLoading,
+    isError: isFetchSourcesError,
+  } = useChannelFetchSources(refetchChannelId, canRefetch);
+  const anyFetchSource = (fetchSources?.length ?? 0) > 0;
+  const hasMultipleFetchSources = (fetchSources?.length ?? 0) > 1;
+  const dlHasApps = (fetchSources ?? []).some(source => source.sourceType === 'app-desk');
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
       handleChannelBoardIdResolved(channelPreference.boardId);
     }
   }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
+  useEffect(() => {
+    setFetchTarget(undefined);
+  }, [refetchChannelId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -2739,6 +2755,11 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        (isDlDesk ||
+                          isSocialMediaDesk ||
+                          isFetchSourcesLoading ||
+                          isFetchSourcesError ||
+                          anyFetchSource) &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -2765,15 +2786,26 @@ const SupportScreen = (): ReactElement => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
                               <DropdownMenuItem
-                                onClick={() => setShowRefetchDialog(true)}
+                                onClick={() => {
+                                  setFetchTarget(undefined);
+                                  setShowRefetchDialog(true);
+                                }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
                               >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
-                                  <span className='truncate'>Fetch latest emails</span>
+                                  <span className='truncate'>
+                                    {dlHasApps
+                                      ? 'Fetch latest emails & app data'
+                                      : 'Fetch latest emails'}
+                                  </span>
                                   <Tooltip
-                                    content='Fetch recent emails from the connected shared mailbox for this desk.'
+                                    content={
+                                      dlHasApps
+                                        ? 'Fetch recent emails from the connected shared mailbox and history from the connected apps for this desk.'
+                                        : 'Fetch recent emails from the connected shared mailbox for this desk.'
+                                    }
                                     side='left'
                                     className='max-w-72'
                                   >
@@ -2815,6 +2847,38 @@ const SupportScreen = (): ReactElement => {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                        ) : hasMultipleFetchSources || (isSocialMediaDesk && anyFetchSource) ? (
+                          <FetchSourcePicker
+                            sources={fetchSources ?? []}
+                            leadingAction={
+                              isSocialMediaDesk
+                                ? {
+                                    label: 'Fetch Google Play reviews',
+                                    onSelect: () => handleRefetch(),
+                                  }
+                                : undefined
+                            }
+                            onSelect={(sourceId, sourceName) => {
+                              setFetchTarget(sourceId ? { sourceId, sourceName } : undefined);
+                              setShowRefetchDialog(true);
+                            }}
+                          >
+                            <button
+                              disabled={isRefetching || isFetchSourcesLoading}
+                              aria-label='Fetch data'
+                              className={cn(
+                                'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                isRefetching && 'opacity-60 cursor-not-allowed',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='RefetchExternalSource'
+                              data-track-metadata={JSON.stringify({
+                                channelId: refetchChannelId,
+                              })}
+                            >
+                              <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                            </button>
+                          </FetchSourcePicker>
                         ) : (
                           <Tooltip
                             content={
@@ -2827,10 +2891,19 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                           >
                             <button
-                              onClick={() =>
-                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
-                              }
-                              disabled={isRefetching}
+                              onClick={() => {
+                                if (isSocialMediaDesk) return handleRefetch();
+                                // Single-source desks skip the picker but still
+                                // get a titled dialog (and exact-source fetch).
+                                const only = fetchSources?.[0];
+                                setFetchTarget(
+                                  fetchSources?.length === 1 && only
+                                    ? { sourceId: only.sourceId, sourceName: only.displayName }
+                                    : undefined,
+                                );
+                                setShowRefetchDialog(true);
+                              }}
+                              disabled={isRefetching || isFetchSourcesLoading}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
                                 isRefetching && 'opacity-60 cursor-not-allowed',
@@ -3971,14 +4044,15 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && !isSocialMediaDesk && (
+      {canRefetch && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
+          sourceName={fetchTarget?.sourceName}
           onConfirm={range => {
             setShowRefetchDialog(false);
-            handleRefetch(range);
+            handleRefetch(range, fetchTarget);
           }}
         />
       )}
