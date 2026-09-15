@@ -17,8 +17,6 @@ import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/c
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type ThreadListProps = {
   channelId: string;
