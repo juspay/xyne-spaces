@@ -110,7 +110,9 @@ export function useCalendarSync(userId?: string): UseCalendarSyncResult {
     let cancelled = false;
     void getCalendarProvider()
       .then(provider => {
-        if (!cancelled) setCalendarProvider(provider);
+        if (!cancelled) {
+          setCalendarProvider(provider);
+        }
       })
       .catch((error: unknown) => {
         logger.error(Logger.Event.API_CALL_FAILED, {
