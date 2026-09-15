@@ -147,7 +147,6 @@ export const TicketFiltersDropdown = ({
   onSearchChange?: (searchTerm: string) => void;
   isExactSearch?: boolean;
   onExactSearchChange?: (exact: boolean) => void;
-  // Sits before the boards chip, so a host can put a control on the first filter row.
   startSlot?: ReactElement | null | undefined;
   leadingControl?: ReactElement;
   trailingControl?: ReactElement | undefined;

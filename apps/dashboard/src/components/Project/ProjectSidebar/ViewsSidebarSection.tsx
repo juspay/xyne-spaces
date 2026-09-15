@@ -47,7 +47,6 @@ type SavedView = {
 // How many views to show before the "Show more" affordance.
 const PAGE_SIZE = 6;
 
-// Shared either way the ACL allows it: workspace-wide via visibility, or per-user via view_access.
 const isViewShared = (view: SavedView): boolean =>
   view.visibility === SavedConfigVisibility.PUBLIC || (view.viewAccess ?? []).length > 0;
 
@@ -99,7 +98,6 @@ function ViewRow({ label, isShared, isActive, ownerId, onOpen, menu }: ViewRowPr
 
       <span className='flex-1 min-w-0 text-left truncate block'>{label}</span>
 
-      {/* Owner avatar — says who shared the view; presence is off, it means nothing here. */}
       {ownerId && (
         <Avatar userId={ownerId} size='sm' showActiveStatus={false} className='shrink-0' />
       )}
@@ -156,7 +154,6 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
     [query],
   );
 
-  // Starred views are lifted out of Views entirely, so a view is listed exactly once.
   const starredViews = useMemo(
     () => matching(allViews.filter(isViewStarred)),
     [allViews, matching],

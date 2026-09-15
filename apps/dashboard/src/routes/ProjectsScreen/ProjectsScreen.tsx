@@ -31,8 +31,6 @@ const ProjectsScreen = (): ReactElement => {
   const sidebarPanelRef = usePanelRef();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // Toggle from the panel's REAL state, so the button can never disagree with
-  // what a drag or a restored layout did.
   const toggleSidebar = useCallback((): void => {
     const panel = sidebarPanelRef.current;
     if (!panel) return;
@@ -40,8 +38,6 @@ const ProjectsScreen = (): ReactElement => {
     else panel.collapse();
   }, [sidebarPanelRef]);
 
-  // The collapsed sidebar has no header of its own, so the way back is handed to the
-  // content route and rendered inline as the first item of its header row.
   const outletContext = useMemo<ProjectsScreenOutletContext>(
     () => ({
       leftHeaderSlot: isSidebarCollapsed ? (

@@ -53,7 +53,6 @@ const ProjectSidebar = ({ onToggleCollapse }: ProjectSidebarProps): ReactElement
           </div>
         </div>
 
-        {/* Search */}
         <div className='px-0.5 pb-3 shrink-0'>
           <div className='flex h-8 items-center gap-2 rounded-lg bg-muted px-2.5'>
             <Search className='size-3.5 shrink-0 text-muted-foreground' />
