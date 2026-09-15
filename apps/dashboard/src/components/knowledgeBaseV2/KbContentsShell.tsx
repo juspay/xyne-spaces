@@ -6,6 +6,7 @@ import { useProjectCollections } from '../../components/knowledgeBase/hooks/useP
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { GlobalCollectionsProvider, useGlobalCollections } from './hooks/useGlobalCollections';
+import { KbContentsSearchProvider } from './hooks/useKbContentsSearch';
 import { KbContentsPanel, type KbContentsFile } from './components/KbContentsPanel';
 import { resolveKbBasePath } from './utils/kbRoutePaths';
 import { cn } from '../../utils/classNames';
@@ -43,6 +44,11 @@ const KbContentsShellInner: React.FC<KbContentsShellProps> = ({ children }) => {
 
   const contentsPanelRef = useRef<PanelImperativeHandle>(null);
   const [isContentsCollapsed, setIsContentsCollapsed] = useState(false);
+  // Lifted out of KbContentsPanel so the main pane (children, below) can
+  // filter by the same query via KbContentsSearchProvider — see
+  // useKbContentsSearch.tsx for why this couldn't stay local to the panel.
+  const [searchQuery, setSearchQuery] = useState('');
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   useEffect(() => {
     const panel = contentsPanelRef.current;
@@ -200,6 +206,8 @@ const KbContentsShellInner: React.FC<KbContentsShellProps> = ({ children }) => {
               onNavigate={onNavigate}
               onOpenFile={onOpenFile}
               onToggleCollapsed={() => setIsContentsCollapsed(c => !c)}
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
             />
           ) : (
             <KbContentsPanel
@@ -217,6 +225,8 @@ const KbContentsShellInner: React.FC<KbContentsShellProps> = ({ children }) => {
               onToggleCollapsed={() => setIsContentsCollapsed(c => !c)}
               rootCollections={rootCollections}
               onNavigateCollection={onNavigateCollection}
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
             />
           )}
         </Panel>
@@ -229,7 +239,9 @@ const KbContentsShellInner: React.FC<KbContentsShellProps> = ({ children }) => {
           <div className='h-full w-px bg-sidebar-border-muted group-hover:bg-primary group-active:bg-primary' />
         </Separator>
         <Panel id='kb-main-panel' minSize='50%'>
-          {children}
+          <KbContentsSearchProvider query={normalizedSearchQuery}>
+            {children}
+          </KbContentsSearchProvider>
         </Panel>
       </ResizableGroup>
     </div>
