@@ -722,5 +722,63 @@
       "compare": "Comparar",
       "clear": "Borrar"
     }
+  },
+  "form": {
+    "formCard": {
+      "entityLabel": "Entidad: {{entityType}}",
+      "contextLabel": "Contexto: {{contextType}}"
+    },
+    "fieldOptionsList": {
+      "addOption": "Agregar opción"
+    },
+    "sortableFieldOption": {
+      "reorderAriaLabel": "Reordenar opción",
+      "removeAriaLabel": "Quitar opción"
+    },
+    "optionPlaceholder": "Opción {{index}}",
+    "createFormModal": {
+      "duplicateFieldNames": "Los nombres de los campos deben ser únicos. Elimina los nombres duplicados.",
+      "projectRequiredToUpdate": "Se requiere un proyecto para actualizar los campos del formulario",
+      "formUpdateFailed": "Error al actualizar el formulario",
+      "operationFailedRetry": "La operación falló. Inténtalo de nuevo.",
+      "formUpdated": "Formulario actualizado",
+      "projectRequiredToCreate": "Se requiere un proyecto para crear los campos del formulario",
+      "atLeastOneField": "Agrega al menos un campo al formulario",
+      "allFieldsNeedName": "Todos los campos deben tener un nombre",
+      "fieldNeedsOption": "El campo \"{{fieldLabel}}\" debe tener al menos una opción",
+      "formCreationFailed": "Error al crear el formulario",
+      "viewForm": "Ver formulario",
+      "editForm": "Editar formulario",
+      "createNewForm": "Crear nuevo formulario",
+      "updateForm": "Actualizar formulario",
+      "creating": "Creando...",
+      "createForm": "Crear formulario",
+      "edit": "Editar",
+      "closeAriaLabel": "Cerrar",
+      "operationFailed": "La operación falló",
+      "projectLabel": "Proyecto",
+      "formFieldsScopedNote": "Los campos del formulario están limitados al proyecto seleccionado.",
+      "formNameLabel": "Nombre del formulario",
+      "formNameRequired": "El nombre del formulario es obligatorio",
+      "descriptionLabel": "Descripción",
+      "contextTypeLabel": "Tipo de contexto",
+      "contextTypeRequired": "El tipo de contexto es obligatorio",
+      "entityTypeLabel": "Tipo de entidad",
+      "entityTypeRequired": "El tipo de entidad es obligatorio",
+      "formFieldsHeading": "Campos del formulario",
+      "addFieldsSubheading": "Agrega campos a tu formulario",
+      "noFieldsAddedYet": "Aún no se han agregado campos.",
+      "fieldNameLabel": "Nombre del campo",
+      "fieldNameExists": "El nombre del campo ya existe",
+      "fieldTypeLabel": "Tipo de campo",
+      "optionalField": "Campo opcional",
+      "keepFieldOptional": "Mantener este campo como opcional",
+      "removeFieldAriaLabel": "Quitar campo",
+      "fieldOptionsLabel": "Opciones del campo",
+      "emptyOptionFallback": "(vacío)",
+      "noOptions": "Sin opciones",
+      "addNewFormField": "Agregar nuevo campo de formulario",
+      "cancel": "Cancelar"
+    }
   }
 }

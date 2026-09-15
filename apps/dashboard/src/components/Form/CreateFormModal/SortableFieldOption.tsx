@@ -1,4 +1,5 @@
 import { useSortable } from '@dnd-kit/sortable';
+import { useTranslation } from 'react-i18next';
 import { CSS } from '@dnd-kit/utilities';
 import { DeleteDustbin02, DragableSixDots } from '@xyne/icons';
 import type { CSSProperties, ReactElement } from 'react';
@@ -29,6 +30,7 @@ const SortableFieldOption = ({
   onRemove,
   trackMetadata,
 }: SortableFieldOptionProps): ReactElement => {
+  const { t } = useTranslation('common');
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   });
@@ -52,7 +54,7 @@ const SortableFieldOption = ({
         {...attributes}
         {...listeners}
         disabled={disabled}
-        aria-label='Reorder option'
+        aria-label={t('form.sortableFieldOption.reorderAriaLabel')}
         className='flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground outline-none active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
       >
         <DragableSixDots className='size-4' />
@@ -72,7 +74,7 @@ const SortableFieldOption = ({
         type='button'
         onClick={onRemove}
         disabled={disabled}
-        aria-label='Remove option'
+        aria-label={t('form.sortableFieldOption.removeAriaLabel')}
         className='flex size-4 shrink-0 items-center justify-center text-destructive outline-none transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Forms'
         data-track-name='RemoveFieldOption'

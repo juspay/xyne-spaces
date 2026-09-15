@@ -85,6 +85,7 @@ export const CreateFormModal = ({
   onSuccess,
 }: CreateFormModalProps): ReactElement => {
   const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   const zero = useZero();
   const [fields, setFields] = useState<FormField[]>([]);
   const [isReadOnly, setIsReadOnly] = useState(false);
@@ -357,7 +358,7 @@ export const CreateFormModal = ({
     try {
       // Validation: check for duplicate field names
       if (hasDuplicateFieldNames()) {
-        throw new Error('Field names must be unique. Please remove duplicate field names.');
+        throw new Error(tc('form.createFormModal.duplicateFieldNames'));
       }
 
       if (isEditMode && form) {
@@ -481,7 +482,7 @@ export const CreateFormModal = ({
         }
 
         if (!effectiveProjectId) {
-          throw new Error('Project is required to update form fields');
+          throw new Error(tc('form.createFormModal.projectRequiredToUpdate'));
         }
 
         const result = zero.mutate(
@@ -489,31 +490,31 @@ export const CreateFormModal = ({
         );
         const response = await result.server;
         if (response.type === 'error') {
-          toast.error('Form Update Failed', {
-            description: response.error.message || 'Operation failed. Please try again.',
+          toast.error(tc('form.createFormModal.formUpdateFailed'), {
+            description: response.error.message || tc('form.createFormModal.operationFailedRetry'),
           });
           return;
         }
 
-        toast.success('Form updated');
+        toast.success(tc('form.createFormModal.formUpdated'));
         onOpenChange(false);
       } else {
         // Create mode - use API
         const { formName, formDescription, contextType, entityType } = formData;
 
         if (!effectiveProjectId) {
-          throw new Error('Project is required to create form fields');
+          throw new Error(tc('form.createFormModal.projectRequiredToCreate'));
         }
 
         // Validation: at least one field required
         if (fields.length === 0) {
-          throw new Error('Please add at least one field to the form');
+          throw new Error(tc('form.createFormModal.atLeastOneField'));
         }
 
         // Validation: all fields must have names
         const invalidFields = fields.filter(field => !field.fieldName.trim());
         if (invalidFields.length > 0) {
-          throw new Error('All fields must have a name');
+          throw new Error(tc('form.createFormModal.allFieldsNeedName'));
         }
 
         // Validation: SELECT fields must have at least one option
@@ -523,7 +524,9 @@ export const CreateFormModal = ({
               field.fieldEnum && field.fieldEnum.some(opt => opt.value.trim() !== '');
             if (!hasOptions) {
               throw new Error(
-                `Field "${field.fieldName || index + 1}" must have at least one option`,
+                tc('form.createFormModal.fieldNeedsOption', {
+                  fieldLabel: field.fieldName || index + 1,
+                }),
               );
             }
           }
@@ -585,31 +588,41 @@ export const CreateFormModal = ({
         message: String('Failed to create/update form:'),
         error: error,
       });
-      toast.error(isEditMode ? 'Form Update Failed' : 'Form Creation Failed', {
-        description: error instanceof Error ? error.message : 'Operation failed. Please try again.',
-      });
+      toast.error(
+        isEditMode
+          ? tc('form.createFormModal.formUpdateFailed')
+          : tc('form.createFormModal.formCreationFailed'),
+        {
+          description:
+            error instanceof Error
+              ? error.message
+              : tc('form.createFormModal.operationFailedRetry'),
+        },
+      );
     }
   };
 
   const getDialogTitle = (): string => {
     if (isEditMode) {
-      return isReadOnly ? 'View Form' : 'Edit Form';
+      return isReadOnly ? tc('form.createFormModal.viewForm') : tc('form.createFormModal.editForm');
     }
-    return 'Create New Form';
+    return tc('form.createFormModal.createNewForm');
   };
 
   // The visible header shows the form's own name; `title` on Dialog stays the
   // mode label since it is the (hidden) accessible name.
   const getHeaderTitle = (): string => {
     if (isEditMode && form) return form.formName;
-    return 'Create New Form';
+    return tc('form.createFormModal.createNewForm');
   };
 
   const getSubmitButtonText = (): string => {
     if (isEditMode) {
-      return 'Update Form';
+      return tc('form.createFormModal.updateForm');
     }
-    return createFormMutation.isPending ? 'Creating...' : 'Create Form';
+    return createFormMutation.isPending
+      ? tc('form.createFormModal.creating')
+      : tc('form.createFormModal.createForm');
   };
 
   return (
@@ -639,13 +652,13 @@ export const CreateFormModal = ({
                 data-track-metadata={JSON.stringify({ formId: form.id })}
               >
                 <PencilEditBox className='size-4' />
-                Edit
+                {tc('form.createFormModal.edit')}
               </button>
             )}
             <button
               type='button'
               onClick={() => onOpenChange(false)}
-              aria-label='Close'
+              aria-label={tc('form.createFormModal.closeAriaLabel')}
               className='flex h-7 w-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='Forms'
               data-track-name='CloseFormModal'
@@ -661,7 +674,7 @@ export const CreateFormModal = ({
             <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded'>
               {createFormMutation.error instanceof Error
                 ? createFormMutation.error.message
-                : 'Operation failed'}
+                : tc('form.createFormModal.operationFailed')}
             </div>
           )}
 
@@ -669,7 +682,8 @@ export const CreateFormModal = ({
             <div>
               {/* Not a <label htmlFor>: Combobox owns its input id internally */}
               <span className='block text-sm font-medium text-foreground mb-1.5'>
-                Project {!isReadOnly && <span className='text-red-500'>*</span>}
+                {tc('form.createFormModal.projectLabel')}{' '}
+                {!isReadOnly && <span className='text-red-500'>*</span>}
               </span>
               {isReadOnly ? (
                 <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
@@ -708,7 +722,7 @@ export const CreateFormModal = ({
                     />
                   </div>
                   <p className='mt-1 text-xs text-muted-foreground'>
-                    Form fields are scoped to the selected project.
+                    {tc('form.createFormModal.formFieldsScopedNote')}
                   </p>
                 </>
               )}
@@ -718,7 +732,8 @@ export const CreateFormModal = ({
           {/* Form Name - Disabled in edit mode */}
           <div>
             <label htmlFor='formName' className='block text-sm font-medium text-foreground mb-1.5'>
-              Form Name {!isReadOnly && <span className='text-red-500'>*</span>}
+              {tc('form.createFormModal.formNameLabel')}{' '}
+              {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
               <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
@@ -728,7 +743,7 @@ export const CreateFormModal = ({
               <Controller
                 name='formName'
                 control={control}
-                rules={{ required: 'Form name is required' }}
+                rules={{ required: tc('form.createFormModal.formNameRequired') }}
                 render={({ field: { onChange, value } }) => (
                   <Input
                     id='formName'
@@ -749,7 +764,7 @@ export const CreateFormModal = ({
               htmlFor='formDescription'
               className='block text-sm font-medium text-foreground mb-1.5'
             >
-              Description
+              {tc('form.createFormModal.descriptionLabel')}
             </label>
             {isReadOnly ? (
               <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg min-h-[80px]'>
@@ -780,7 +795,8 @@ export const CreateFormModal = ({
               htmlFor='contextType'
               className='block text-sm font-medium text-foreground mb-1.5'
             >
-              Context Type {!isReadOnly && <span className='text-red-500'>*</span>}
+              {tc('form.createFormModal.contextTypeLabel')}{' '}
+              {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
               <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
@@ -790,7 +806,7 @@ export const CreateFormModal = ({
               <Controller
                 name='contextType'
                 control={control}
-                rules={{ required: 'Context type is required' }}
+                rules={{ required: tc('form.createFormModal.contextTypeRequired') }}
                 render={({ field: { onChange, value } }) => (
                   <Select
                     value={value}
@@ -824,7 +840,8 @@ export const CreateFormModal = ({
               htmlFor='entityType'
               className='block text-sm font-medium text-foreground mb-1.5'
             >
-              Entity Type {!isReadOnly && <span className='text-red-500'>*</span>}
+              {tc('form.createFormModal.entityTypeLabel')}{' '}
+              {!isReadOnly && <span className='text-red-500'>*</span>}
             </label>
             {isReadOnly ? (
               <div className='px-3 py-2 text-sm bg-muted border border-border rounded-lg'>
@@ -834,7 +851,7 @@ export const CreateFormModal = ({
               <Controller
                 name='entityType'
                 control={control}
-                rules={{ required: 'Entity type is required' }}
+                rules={{ required: tc('form.createFormModal.entityTypeRequired') }}
                 render={({ field: { onChange, value } }) => (
                   <Select
                     value={value}
@@ -866,13 +883,19 @@ export const CreateFormModal = ({
           <div>
             <hr className='border-border my-6' />
             <div className='mb-4'>
-              <h3 className='font-medium text-foreground'>Form Fields</h3>
-              <p className='text-sm text-muted-foreground'>Add fields to your form</p>
+              <h3 className='font-medium text-foreground'>
+                {tc('form.createFormModal.formFieldsHeading')}
+              </h3>
+              <p className='text-sm text-muted-foreground'>
+                {tc('form.createFormModal.addFieldsSubheading')}
+              </p>
             </div>
 
             {fields.length === 0 && isReadOnly ? (
               <div className='text-center py-8 border-2 border-dashed border-border rounded-lg'>
-                <p className='text-muted-foreground text-sm'>No fields added yet.</p>
+                <p className='text-muted-foreground text-sm'>
+                  {tc('form.createFormModal.noFieldsAddedYet')}
+                </p>
               </div>
             ) : (
               <div className='space-y-3'>
@@ -888,7 +911,7 @@ export const CreateFormModal = ({
                           htmlFor={`fieldName-${index}`}
                           className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'
                         >
-                          Field Name
+                          {tc('form.createFormModal.fieldNameLabel')}
                           {!isReadOnly && <span className='text-destructive'>*</span>}
                         </label>
                         {isReadOnly ? (
@@ -906,7 +929,9 @@ export const CreateFormModal = ({
                               className='h-11 rounded-[12px] px-2 py-3'
                             />
                             {fieldErrors.has(index) && (
-                              <p className='text-xs text-destructive'>Field name already exists</p>
+                              <p className='text-xs text-destructive'>
+                                {tc('form.createFormModal.fieldNameExists')}
+                              </p>
                             )}
                           </>
                         )}
@@ -916,7 +941,7 @@ export const CreateFormModal = ({
                           htmlFor={`fieldType-${index}`}
                           className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'
                         >
-                          Field Type
+                          {tc('form.createFormModal.fieldTypeLabel')}
                           {!isReadOnly && <span className='text-destructive'>*</span>}
                         </label>
                         {isReadOnly ? (
@@ -976,12 +1001,14 @@ export const CreateFormModal = ({
                     {(!isReadOnly || field.isOptional) && (
                       <div className='flex w-full items-center justify-between gap-2'>
                         {isReadOnly ? (
-                          <p className='text-sm text-muted-foreground italic'>Optional field</p>
+                          <p className='text-sm text-muted-foreground italic'>
+                            {tc('form.createFormModal.optionalField')}
+                          </p>
                         ) : (
                           <Checkbox
                             checked={field.isOptional ?? false}
                             onChange={checked => updateField(index, { isOptional: checked })}
-                            label='Keep this field optional'
+                            label={tc('form.createFormModal.keepFieldOptional')}
                             size='sm'
                             disabled={createFormMutation.isPending}
                           />
@@ -991,7 +1018,7 @@ export const CreateFormModal = ({
                             type='button'
                             onClick={() => removeField(index)}
                             disabled={createFormMutation.isPending}
-                            aria-label='Remove field'
+                            aria-label={tc('form.createFormModal.removeFieldAriaLabel')}
                             className='flex size-4 shrink-0 items-center justify-center text-destructive outline-none transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
                             data-track-category='Forms'
                             data-track-name='RemoveFormField'
@@ -1007,7 +1034,7 @@ export const CreateFormModal = ({
                     {isSelectField(field.fieldType) && (
                       <div className='flex w-full flex-col gap-2'>
                         <span className='flex items-center gap-1 text-sm font-[550] leading-[1.2] tracking-[-0.1px] text-foreground'>
-                          Field Options
+                          {tc('form.createFormModal.fieldOptionsLabel')}
                           {!isReadOnly && <span className='text-destructive'>*</span>}
                         </span>
                         {isReadOnly ? (
@@ -1018,11 +1045,13 @@ export const CreateFormModal = ({
                                   key={option.id}
                                   className='flex h-11 items-center rounded-[12px] border border-border bg-muted/20 px-2 py-3 text-sm text-foreground'
                                 >
-                                  {option.value || '(empty)'}
+                                  {option.value || tc('form.createFormModal.emptyOptionFallback')}
                                 </div>
                               ))
                             ) : (
-                              <p className='text-sm text-muted-foreground italic'>No options</p>
+                              <p className='text-sm text-muted-foreground italic'>
+                                {tc('form.createFormModal.noOptions')}
+                              </p>
                             )}
                           </div>
                         ) : (
@@ -1053,7 +1082,7 @@ export const CreateFormModal = ({
                     data-track-name='AddFormField'
                   >
                     <PlusDefault className='size-4' />
-                    Add new form field
+                    {tc('form.createFormModal.addNewFormField')}
                   </button>
                 )}
               </div>
@@ -1072,7 +1101,7 @@ export const CreateFormModal = ({
               data-track-category='Forms'
               data-track-name='CancelFormCreation'
             >
-              Cancel
+              {tc('form.createFormModal.cancel')}
             </Button>
             <Button
               variant='default'

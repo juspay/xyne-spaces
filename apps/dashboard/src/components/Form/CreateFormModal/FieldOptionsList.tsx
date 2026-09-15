@@ -7,6 +7,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { useTranslation } from 'react-i18next';
 import { PlusDefault } from '@xyne/icons';
 import type { FieldEnumOption } from '@xyne/shared';
 import type { ReactElement } from 'react';
@@ -35,6 +36,8 @@ const FieldOptionsList = ({
   onAddOption,
   onReorder,
 }: FieldOptionsListProps): ReactElement => {
+  const { t } = useTranslation('placeholders');
+  const { t: tc } = useTranslation('common');
   // 5px activation distance so a click on the grip that never moves still
   // reaches the button rather than starting a drag.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -64,7 +67,7 @@ const FieldOptionsList = ({
                   key={option.id}
                   id={option.id}
                   value={option.value}
-                  placeholder={`Option ${optionIndex + 1}`}
+                  placeholder={t('form.optionPlaceholder', { index: optionIndex + 1 })}
                   disabled={disabled}
                   onChange={value => onChangeOption(optionIndex, value)}
                   onRemove={() => onRemoveOption(optionIndex)}
@@ -85,7 +88,7 @@ const FieldOptionsList = ({
         data-track-metadata={JSON.stringify({ fieldIndex })}
       >
         <PlusDefault className='size-4' />
-        Add Option
+        {tc('form.fieldOptionsList.addOption')}
       </button>
     </div>
   );

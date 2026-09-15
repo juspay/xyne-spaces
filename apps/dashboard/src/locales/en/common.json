@@ -722,5 +722,63 @@
       "compare": "Compare",
       "clear": "Clear"
     }
+  },
+  "form": {
+    "formCard": {
+      "entityLabel": "Entity: {{entityType}}",
+      "contextLabel": "Context: {{contextType}}"
+    },
+    "fieldOptionsList": {
+      "addOption": "Add Option"
+    },
+    "sortableFieldOption": {
+      "reorderAriaLabel": "Reorder option",
+      "removeAriaLabel": "Remove option"
+    },
+    "optionPlaceholder": "Option {{index}}",
+    "createFormModal": {
+      "duplicateFieldNames": "Field names must be unique. Please remove duplicate field names.",
+      "projectRequiredToUpdate": "Project is required to update form fields",
+      "formUpdateFailed": "Form Update Failed",
+      "operationFailedRetry": "Operation failed. Please try again.",
+      "formUpdated": "Form updated",
+      "projectRequiredToCreate": "Project is required to create form fields",
+      "atLeastOneField": "Please add at least one field to the form",
+      "allFieldsNeedName": "All fields must have a name",
+      "fieldNeedsOption": "Field \"{{fieldLabel}}\" must have at least one option",
+      "formCreationFailed": "Form Creation Failed",
+      "viewForm": "View Form",
+      "editForm": "Edit Form",
+      "createNewForm": "Create New Form",
+      "updateForm": "Update Form",
+      "creating": "Creating...",
+      "createForm": "Create Form",
+      "edit": "Edit",
+      "closeAriaLabel": "Close",
+      "operationFailed": "Operation failed",
+      "projectLabel": "Project",
+      "formFieldsScopedNote": "Form fields are scoped to the selected project.",
+      "formNameLabel": "Form Name",
+      "formNameRequired": "Form name is required",
+      "descriptionLabel": "Description",
+      "contextTypeLabel": "Context Type",
+      "contextTypeRequired": "Context type is required",
+      "entityTypeLabel": "Entity Type",
+      "entityTypeRequired": "Entity type is required",
+      "formFieldsHeading": "Form Fields",
+      "addFieldsSubheading": "Add fields to your form",
+      "noFieldsAddedYet": "No fields added yet.",
+      "fieldNameLabel": "Field Name",
+      "fieldNameExists": "Field name already exists",
+      "fieldTypeLabel": "Field Type",
+      "optionalField": "Optional field",
+      "keepFieldOptional": "Keep this field optional",
+      "removeFieldAriaLabel": "Remove field",
+      "fieldOptionsLabel": "Field Options",
+      "emptyOptionFallback": "(empty)",
+      "noOptions": "No options",
+      "addNewFormField": "Add new form field",
+      "cancel": "Cancel"
+    }
   }
 }

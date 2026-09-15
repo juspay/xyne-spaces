@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Form } from '@xyne/shared';
 
 interface FormCardProps {
@@ -7,6 +8,7 @@ interface FormCardProps {
 }
 
 const FormCard = ({ form, onClick }: FormCardProps): ReactElement => {
+  const { t } = useTranslation('common');
   return (
     <div
       role='button'
@@ -28,11 +30,11 @@ const FormCard = ({ form, onClick }: FormCardProps): ReactElement => {
       </div>
       <div className='flex w-full items-center gap-1'>
         <p className='truncate text-sm font-[450] leading-5 text-muted-foreground'>
-          Entity: {form.entityType}
+          {t('form.formCard.entityLabel', { entityType: form.entityType })}
         </p>
         <div className='h-3 w-px shrink-0 rounded-[15px] bg-border' />
         <p className='shrink-0 text-center text-xs font-[450] leading-[22px] text-muted-foreground opacity-70'>
-          Context: {form.contextType}
+          {t('form.formCard.contextLabel', { contextType: form.contextType })}
         </p>
       </div>
     </div>
