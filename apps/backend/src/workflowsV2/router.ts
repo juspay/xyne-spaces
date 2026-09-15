@@ -1,19 +1,7 @@
-/**
- * Express adapter for the `@xyne/workflow-sdk` HTTP surface.
- *
- * `createWorkflowRouter` returns plain `RouteDefinition[]` — `{ method, path, handler }`
- * with no framework coupling. This file is the glue: Express request → `RouteRequest`,
- * `RouteResponse` → Express response, in both directions, including SSE, binary and
- * redirects.
- *
- * Two routers come out, and the split matters:
- *  - `workflowsPublicRouter` — routes the SDK marks `authenticated: false`. Their
- *    authorization is a secret in the path, so they mount BEFORE the auth middleware.
- *  - `workflowsRouter` — everything else, mounted behind it.
- */
 import express, { type Request, type Response, type Router } from 'express';
-import { createWorkflowRouter, type RouteRequest } from '@xyne/workflow-sdk';
+import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
 import { logger } from '@/utils/logger';
+import { webhookLimiter } from '@/middleware/rateLimiters';
 import { uploadConfig } from '@/middleware/upload';
 import { workflowRuntime } from './runtime';
 import type { XyneCtx } from './types';
@@ -74,12 +62,17 @@ const buildRouteRequest = (req: Request): RouteRequest => {
     bytes: new Uint8Array(f.buffer),
   }));
 
+  // express.raw() leaves a Buffer on req.body for routes marked `rawBody`. The SDK
+  // verifies a webhook's signature over these exact bytes.
+  const rawBody = Buffer.isBuffer(body) ? new Uint8Array(body) : undefined;
+
   return {
     params: req.params as Record<string, string>,
     query: req.query as Record<string, string | string[] | undefined>,
     body,
     headers: req.headers as Record<string, string | string[] | undefined>,
     ...(files.length > 0 ? { files } : {}),
+    ...(rawBody ? { rawBody } : {}),
   };
 };
 
@@ -127,6 +120,10 @@ const sendRouteResponse = async (
   res.status(response.status).json(response.body);
 };
 
+const PUBLIC_ALLOWED_ROUTES = new Set([
+  'POST /webhooks/:workflowId'
+]);
+
 const CLAW_ALLOWED_ROUTES = new Set([
   'GET /schema/steps',
   'GET /schema/steps/:type',
@@ -157,29 +154,42 @@ const CLAW_ALLOWED_ROUTES = new Set([
   'GET /analytics/top-errors',
 ]);
 
-const mount = (router: Router, authenticated: boolean, allow?: ReadonlySet<string>): void => {
+const needsSession = (access: RouteAccess): boolean => {
+  switch (access) {
+    case 'session':
+      return true;
+    case 'provider':
+      return false;
+  }
+};
+
+const mount = (
+  router: Router,
+  authenticated: boolean,
+  allow?: ReadonlySet<string>,
+  guards: readonly express.RequestHandler[] = [],
+): void => {
   const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
-    // Only consulted for unauthenticated routes, whose authorization is a path secret —
-    // so reaching it at all means a route was misclassified.
     authenticate: () => {
       throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
     },
   });
 
   for (const route of routes) {
-    const isPublic = route.authenticated === false;
-    if (isPublic !== !authenticated) continue;
+    if (needsSession(route.access) !== authenticated) continue;
 
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
 
     if (allow && !allow.has(key)) continue;
 
-    // The SDK tells us which routes need a multipart parser; run multer only there so
-    // ordinary JSON routes are untouched.
-    const middleware = route.multipart ? [uploadConfig.any()] : [];
+    const middleware: express.RequestHandler[] = route.multipart
+      ? [uploadConfig.any()]
+      : route.rawBody
+        ? [express.raw({ type: () => true, limit: '10mb' })]
+        : [express.json({ limit: '10mb' })];
 
-    router[method](route.path, ...middleware, (req: Request, res: Response) => {
+    router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
           const ctx = authenticated ? ctxFromRequest(req) : null;
@@ -211,6 +221,6 @@ export const workflowsRouter: Router = express.Router();
 mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
-mount(workflowsPublicRouter, false);
+mount(workflowsPublicRouter, false, PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
 export const workflowsClawRouter: Router = express.Router();
 mount(workflowsClawRouter, true, CLAW_ALLOWED_ROUTES);
