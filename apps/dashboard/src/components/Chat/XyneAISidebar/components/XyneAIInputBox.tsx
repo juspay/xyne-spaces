@@ -1,3 +1,4 @@
+import { aiSendButtonTrackingMetadata } from '../../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
 import React, { type ReactElement } from 'react';
 import {
@@ -124,7 +125,8 @@ export interface XyneAIInputBoxProps {
   selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSubmit: () => void;
+  /** `trigger` says which affordance sent it; the button has its own click row. */
+  onSubmit: (trigger?: 'button' | 'enter') => void;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -1079,7 +1081,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               trigger: 'keyboard',
               keyCombo: 'enter',
             });
-            onSubmit();
+            onSubmit('enter');
             return true;
           }
 
@@ -1962,7 +1964,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
                   <button
-                    onClick={isStreaming ? onAbort : onSubmit}
+                    onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={
                       isStreaming ? 'abort_message' : 'submit_message'
                     }
@@ -1975,7 +1977,20 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           : 'bg-muted text-muted-foreground cursor-not-allowed'
                     }`}
                     data-track-category='XyneAI'
-                    data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SEND_BUTTON_CLICK'}
+                    data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
+                    data-track-metadata={JSON.stringify(
+                      isStreaming
+                        ? { surface: 'panel' }
+                        : aiSendButtonTrackingMetadata({
+                            surface: 'panel',
+                            agentSlug: selectedAgentSlug,
+                            model: selectedModel,
+                            thinkingLevel,
+                            webSearchEnabled,
+                            deepResearchEnabled,
+                            createCanvasEnabled,
+                          }),
+                    )}
                   >
                     {isStreaming ? (
                       <StopIcon className='w-2.5 h-2.5' />

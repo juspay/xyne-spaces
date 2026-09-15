@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   ReactElement,
@@ -294,58 +295,6 @@ const XyneAISidebar = ({
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
   const autoSendTriggerRef = useRef<'auto_send' | null>(null);
 
-  // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
-  // panel is open (AppRoot renders it conditionally; embedded callers mount it
-  // for their own lifetime), so mount and unmount are the open and close.
-  // The one exception is AppRoot's `visible={false}` copy, kept mounted in a
-  // hidden div so an in-flight stream survives closing the drawer: nobody is
-  // looking at it, so it must not count as an open (or a close).
-  // `source` is whichever surface dispatched OPEN (machine `openSource`), or
-  // the prop for embedded instances. The otel ask_ai_opened counter rides the
-  // same effect so every entry point counts, not just the two that used to
-  // call it directly. No label: the channel name for a DM is a person's name.
-  const openedAtRef = useRef<number>(Date.now());
-  const messagesSentWhileOpenRef = useRef(0);
-  useEffect(() => {
-    if (!visible) return;
-    const ctx = xyneAIActor.getSnapshot().context;
-    const source = trackSourceProp ?? ctx.openSource ?? 'unknown';
-    openedAtRef.current = Date.now();
-    messagesSentWhileOpenRef.current = 0;
-    trackAskAIOpened(scopeType || undefined);
-    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
-      surface: 'panel',
-      variant,
-      source,
-      contextType: ctx.contextType,
-      startFreshChat: ctx.startFreshChat,
-      hasThreadInfo: !!ctx.threadInfo,
-      hasCanvasInfo: !!ctx.canvasInfo || ctx.canvasContexts.length > 0,
-      hasInitialQuery: !!ctx.initialQuery,
-      hasWorkflowContext: !!ctx.workflowInfo,
-      hasResearchContext: !!ctx.researchContext,
-      kbScope: ctx.kbDocId
-        ? 'file'
-        : ctx.kbFolderId
-          ? 'folder'
-          : ctx.kbCollectionId
-            ? 'collection'
-            : 'none',
-      resumedConversation: !!ctx.focusSessionId || !!initialConversationId,
-      ...(forcedAgentSlug && { agentSlug: forcedAgentSlug }),
-    });
-    return () => {
-      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
-        surface: 'panel',
-        variant,
-        source,
-        msOpen: Date.now() - openedAtRef.current,
-        messagesSentWhileOpen: messagesSentWhileOpenRef.current,
-      });
-    };
-    // Mount/unmount only: the open is a single moment, not a render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   useEffect(() => {
     if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
     if (!initialQuery?.trim()) return;
@@ -644,6 +593,77 @@ const XyneAISidebar = ({
   const channelDescription = (channel?.['description'] as string) || '';
 
   const scopeType = (channel?.['scopeType'] as string) || '';
+
+  // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
+  // panel is open (AppRoot renders it conditionally; embedded callers mount it
+  // for their own lifetime), so mount and unmount are the open and close.
+  // The one exception is AppRoot's `visible={false}` copy, kept mounted in a
+  // hidden div so an in-flight stream survives closing the drawer: nobody is
+  // looking at it, so it must not count as an open (or a close).
+  // `source` is whichever surface dispatched OPEN (machine `openSource`), or
+  // the prop for embedded instances. The otel ask_ai_opened counter rides the
+  // same effect so every entry point counts, not just the two that used to
+  // call it directly. No label: the channel name for a DM is a person's name.
+  // The open is a single moment, so the effect keys on `visible` alone and
+  // reads everything else off a per-render snapshot ref: the props are
+  // attribution, not triggers, and a prop change must not re-open the panel.
+  const openedAtRef = useRef<number>(Date.now());
+  const messagesSentWhileOpenRef = useRef(0);
+  const openTrackSnapshotRef = useRef({
+    trackSourceProp,
+    scopeType,
+    variant,
+    initialConversationId,
+    forcedAgentSlug,
+  });
+  openTrackSnapshotRef.current = {
+    trackSourceProp,
+    scopeType,
+    variant,
+    initialConversationId,
+    forcedAgentSlug,
+  };
+  useEffect(() => {
+    if (!visible) return;
+    const snap = openTrackSnapshotRef.current;
+    const ctx = xyneAIActor.getSnapshot().context;
+    const source = snap.trackSourceProp ?? ctx.openSource ?? 'unknown';
+    const openedAt = Date.now();
+    openedAtRef.current = openedAt;
+    const sentCounter = messagesSentWhileOpenRef;
+    sentCounter.current = 0;
+    trackAskAIOpened(snap.scopeType || undefined);
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'panel',
+      variant: snap.variant,
+      source,
+      contextType: ctx.contextType,
+      startFreshChat: ctx.startFreshChat,
+      hasThreadInfo: !!ctx.threadInfo,
+      hasCanvasInfo: !!ctx.canvasInfo || ctx.canvasContexts.length > 0,
+      hasInitialQuery: !!ctx.initialQuery,
+      hasWorkflowContext: !!ctx.workflowInfo,
+      hasResearchContext: !!ctx.researchContext,
+      kbScope: ctx.kbDocId
+        ? 'file'
+        : ctx.kbFolderId
+          ? 'folder'
+          : ctx.kbCollectionId
+            ? 'collection'
+            : 'none',
+      resumedConversation: !!ctx.focusSessionId || !!snap.initialConversationId,
+      ...(snap.forcedAgentSlug && { agentSlug: snap.forcedAgentSlug }),
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'panel',
+        variant: snap.variant,
+        source,
+        msOpen: Date.now() - openedAt,
+        messagesSentWhileOpen: sentCounter.current,
+      });
+    };
+  }, [visible]);
 
   const allChannels = useAllVisibleChannels();
   const nonDMChannels = useMemo(
@@ -1800,187 +1820,195 @@ const XyneAISidebar = ({
   );
   const deskAutoDraftRef = useRef<{ conversationId: string; channelId: string } | null>(null);
 
-  const handleSubmit = useCallback(async (): Promise<void> => {
-    // Allow submission if there's input, activities, OR selection contexts
-    if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
-      return;
-
-    const deskDraft = deskAutoDraftRef.current;
-    if (deskDraft && deskDraft.conversationId === conversationId) {
-      try {
-        const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
-        deskAutoDraftRef.current = null;
-        setConversationId(forked.conversationId);
-      } catch {
-        toast.error('Could not continue this draft conversation');
+  const handleSubmit = useCallback(
+    async (trigger?: XyneAiSendTrigger): Promise<void> => {
+      // Allow submission if there's input, activities, OR selection contexts
+      if (
+        !inputValue.trim() &&
+        selectedActivities.length === 0 &&
+        activeSelectionInfos.length === 0
+      )
         return;
+
+      const deskDraft = deskAutoDraftRef.current;
+      if (deskDraft && deskDraft.conversationId === conversationId) {
+        try {
+          const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
+          deskAutoDraftRef.current = null;
+          setConversationId(forked.conversationId);
+        } catch {
+          toast.error('Could not continue this draft conversation');
+          return;
+        }
       }
-    }
 
-    // Store the display content (what the user typed, without hidden context)
-    const displayContent = inputValue.trim();
+      // Store the display content (what the user typed, without hidden context)
+      const displayContent = inputValue.trim();
 
-    // Build the full query with all context for the AI
-    // Note: Activities are sent separately via attachedContext in useXyneAIStream, not in query
-    let query = inputValue;
+      // Build the full query with all context for the AI
+      // Note: Activities are sent separately via attachedContext in useXyneAIStream, not in query
+      let query = inputValue;
 
-    // Add browser context if present (hidden from display but sent to AI)
-    if (browserContext) {
-      const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
-      query = query + contextText;
-    }
-
-    // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
-    // The user message will show original query + selectionContexts as visual cards
-
-    const currentAttachments = attachments;
-
-    // Submission-time otel counters fire inside useXyneAIStream.submitQuery now,
-    // so the /ai page and this panel count the same way.
-    messagesSentWhileOpenRef.current += 1;
-    // The auto-send effect below clears autoSendPendingQueryRef before calling
-    // handleSubmit, so read the trigger off a flag it sets for this one call.
-    const sendTrigger = autoSendTriggerRef.current;
-    autoSendTriggerRef.current = null;
-
-    // Convert attachments to MessageAttachment format for display
-    const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
-      filename: att.filename,
-      mimeType: att.mimeType,
-      data: att.data,
-    }));
-
-    // Build selection contexts for UI display and internal formatting
-    const selectionContexts =
-      activeSelectionInfos.length > 0
-        ? activeSelectionInfos.map(selection => ({
-            canvasId: selection.canvasId,
-            selectedText: selection.text,
-            preview: selection.preview,
-            ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
-          }))
-        : undefined;
-
-    // Stuck-draft recovery: a fresh draft slot still holding a completed turn
-    // means the first turn ended without ever establishing a server session
-    // (it errored/aborted before the sessionId arrived). A follow-up would be
-    // inserted as a second parentless root and resolveActivePath would fork the
-    // tree (phantom 1/2 branch arrows). The dead turn was never persisted — a
-    // reload already shows only the surviving turn — so drop it and start the
-    // retry as a clean single-chain conversation. Only clears local message
-    // state (not streamThreadKey/conversationId), so the submitQuery closure
-    // stays valid and live-stream routing is unaffected.
-    if (
-      !editingMessageId &&
-      usesDraftStreamKeyRef.current &&
-      messages.length > 0 &&
-      !messages.some((m: Message) => m.isStreaming)
-    ) {
-      setMessages([]);
-      setBranchSelections({});
-    }
-
-    // Determine parentMessageId for branching
-    let parentMessageId: string | undefined;
-
-    if (editingMessageId) {
-      // Mobile edit: create sibling branch from same parent as the edited message
-      const editedMsg = messages.find((m: Message) => m.id === editingMessageId);
-      if (editedMsg) {
-        parentMessageId = editedMsg.parentId ?? undefined;
+      // Add browser context if present (hidden from display but sent to AI)
+      if (browserContext) {
+        const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
+        query = query + contextText;
       }
-      abortCurrentRequest();
-      setEditingMessageId(null);
-    } else if (!isLegacyConversation) {
-      // Normal submit: chain from the last displayed message for established sessions only.
-      // Draft stream slots (new chat / new parallel session) stay on a fresh server session until
-      // the first turn completes — omit parentMessageId here so turns are not linked as tree
-      // siblings/branches of another session. Regenerate and edit still pass parent explicitly.
-      const lastDisplayed = displayMessages[displayMessages.length - 1];
-      if (lastDisplayed && !usesDraftStreamKeyRef.current) {
-        parentMessageId = lastDisplayed.id;
+
+      // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
+      // The user message will show original query + selectionContexts as visual cards
+
+      const currentAttachments = attachments;
+
+      // Submission-time otel counters fire inside useXyneAIStream.submitQuery now,
+      // so the /ai page and this panel count the same way.
+      messagesSentWhileOpenRef.current += 1;
+      // The auto-send effect below clears autoSendPendingQueryRef before calling
+      // handleSubmit, so read the trigger off a flag it sets for this one call;
+      // otherwise it is whatever the input box said (button / enter).
+      const sendTrigger = autoSendTriggerRef.current ?? trigger ?? null;
+      autoSendTriggerRef.current = null;
+
+      // Convert attachments to MessageAttachment format for display
+      const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
+        filename: att.filename,
+        mimeType: att.mimeType,
+        data: att.data,
+      }));
+
+      // Build selection contexts for UI display and internal formatting
+      const selectionContexts =
+        activeSelectionInfos.length > 0
+          ? activeSelectionInfos.map(selection => ({
+              canvasId: selection.canvasId,
+              selectedText: selection.text,
+              preview: selection.preview,
+              ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
+            }))
+          : undefined;
+
+      // Stuck-draft recovery: a fresh draft slot still holding a completed turn
+      // means the first turn ended without ever establishing a server session
+      // (it errored/aborted before the sessionId arrived). A follow-up would be
+      // inserted as a second parentless root and resolveActivePath would fork the
+      // tree (phantom 1/2 branch arrows). The dead turn was never persisted — a
+      // reload already shows only the surviving turn — so drop it and start the
+      // retry as a clean single-chain conversation. Only clears local message
+      // state (not streamThreadKey/conversationId), so the submitQuery closure
+      // stays valid and live-stream routing is unaffected.
+      if (
+        !editingMessageId &&
+        usesDraftStreamKeyRef.current &&
+        messages.length > 0 &&
+        !messages.some((m: Message) => m.isStreaming)
+      ) {
+        setMessages([]);
+        setBranchSelections({});
       }
-    }
 
-    setInputValue('');
-    setAttachments([]);
-    setSelectedActivities([]);
-    setBrowserContext(null); // Clear browser context after submit
-    // Note: Don't clear selection infos - they persist for follow-up questions
+      // Determine parentMessageId for branching
+      let parentMessageId: string | undefined;
 
-    // Set the channel ID for this conversation if not already set
-    // This ensures the conversation is saved to the correct channel even if user switches channels
-    // For KB context (channelId is null), use kbCollectionId for storage
-    if (!conversationChannelId) {
-      if (channelId) {
-        setConversationChannelId(channelId);
-      } else if (kbCollectionIdProp) {
-        setConversationChannelId(kbCollectionIdProp);
+      if (editingMessageId) {
+        // Mobile edit: create sibling branch from same parent as the edited message
+        const editedMsg = messages.find((m: Message) => m.id === editingMessageId);
+        if (editedMsg) {
+          parentMessageId = editedMsg.parentId ?? undefined;
+        }
+        abortCurrentRequest();
+        setEditingMessageId(null);
+      } else if (!isLegacyConversation) {
+        // Normal submit: chain from the last displayed message for established sessions only.
+        // Draft stream slots (new chat / new parallel session) stay on a fresh server session until
+        // the first turn completes — omit parentMessageId here so turns are not linked as tree
+        // siblings/branches of another session. Regenerate and edit still pass parent explicitly.
+        const lastDisplayed = displayMessages[displayMessages.length - 1];
+        if (lastDisplayed && !usesDraftStreamKeyRef.current) {
+          parentMessageId = lastDisplayed.id;
+        }
       }
-    }
 
-    // Scroll immediately after clearing input, before query is submitted
-    setTimeout(() => {
-      scrollToBottom();
-    }, 50);
+      setInputValue('');
+      setAttachments([]);
+      setSelectedActivities([]);
+      setBrowserContext(null); // Clear browser context after submit
+      // Note: Don't clear selection infos - they persist for follow-up questions
 
-    // Include userTags in the user message for display
-    const userTagsForMessage =
-      Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
+      // Set the channel ID for this conversation if not already set
+      // This ensures the conversation is saved to the correct channel even if user switches channels
+      // For KB context (channelId is null), use kbCollectionId for storage
+      if (!conversationChannelId) {
+        if (channelId) {
+          setConversationChannelId(channelId);
+        } else if (kbCollectionIdProp) {
+          setConversationChannelId(kbCollectionIdProp);
+        }
+      }
 
-    try {
-      await submitQuery(
-        query,
-        messageAttachments,
-        selectionContexts,
-        displayContent,
-        userTagsForMessage,
-        parentMessageId,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        sendTrigger ? { trigger: sendTrigger } : undefined,
-      );
-    } finally {
-      // The attachment belongs to the message it was sent with, not to the
-      // conversation: the sent message carries its own copy of attachedContext
-      // (persisted server-side — it is what the history pills and
-      // edit/regenerate read), so clearing the composer changes nothing already
-      // said. Left in place it silently steered every later answer, and nothing
-      // ever removed it.
-      //
-      // In a finally: a send that throws is exactly when the context must not
-      // be left behind, since the turn it belonged to never happened.
-      setSelectedChannels([]);
-      setSelectedTickets([]);
-      setSelectedCanvases([]);
-      setSelectedTranscripts([]);
-      setSelectedRecordings([]);
-      setActiveSelectionInfos([]);
-      processedSelectionKeysRef.current.clear();
-      // The machine holds the canvas selections that feed the list above;
-      // without this its next update would put them straight back.
-      xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
-    }
-  }, [
-    inputValue,
-    attachments,
-    selectedActivities,
-    activeSelectionInfos,
-    browserContext,
-    currentUserTags,
-    submitQuery,
-    scrollToBottom,
-    conversationChannelId,
-    channelId,
-    editingMessageId,
-    messages,
-    displayMessages,
-    abortCurrentRequest,
-    isLegacyConversation,
-    kbCollectionIdProp,
-  ]);
+      // Scroll immediately after clearing input, before query is submitted
+      setTimeout(() => {
+        scrollToBottom();
+      }, 50);
+
+      // Include userTags in the user message for display
+      const userTagsForMessage =
+        Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
+
+      try {
+        await submitQuery(
+          query,
+          messageAttachments,
+          selectionContexts,
+          displayContent,
+          userTagsForMessage,
+          parentMessageId,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          sendTrigger ? { trigger: sendTrigger } : undefined,
+        );
+      } finally {
+        // The attachment belongs to the message it was sent with, not to the
+        // conversation: the sent message carries its own copy of attachedContext
+        // (persisted server-side — it is what the history pills and
+        // edit/regenerate read), so clearing the composer changes nothing already
+        // said. Left in place it silently steered every later answer, and nothing
+        // ever removed it.
+        //
+        // In a finally: a send that throws is exactly when the context must not
+        // be left behind, since the turn it belonged to never happened.
+        setSelectedChannels([]);
+        setSelectedTickets([]);
+        setSelectedCanvases([]);
+        setSelectedTranscripts([]);
+        setSelectedRecordings([]);
+        setActiveSelectionInfos([]);
+        processedSelectionKeysRef.current.clear();
+        // The machine holds the canvas selections that feed the list above;
+        // without this its next update would put them straight back.
+        xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
+      }
+    },
+    [
+      inputValue,
+      attachments,
+      selectedActivities,
+      activeSelectionInfos,
+      browserContext,
+      currentUserTags,
+      submitQuery,
+      scrollToBottom,
+      conversationChannelId,
+      channelId,
+      editingMessageId,
+      messages,
+      displayMessages,
+      abortCurrentRequest,
+      isLegacyConversation,
+      kbCollectionIdProp,
+    ],
+  );
 
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
   useEffect(() => {
@@ -2034,7 +2062,7 @@ const XyneAISidebar = ({
     selectionInfos: activeSelectionInfos,
     inputValue,
     onInputChange: setInputValue,
-    onSubmit: () => void handleSubmit(),
+    onSubmit: (trigger?: 'button' | 'enter') => void handleSubmit(trigger),
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,

@@ -1,3 +1,4 @@
+import { aiSendButtonTrackingMetadata } from '../../services/Analytics/xyneAiTracking';
 import {
   useEffect,
   useRef,
@@ -83,6 +84,8 @@ interface AIComposerProps {
     text: string,
     attachments?: AIComposerAttachment[],
     context?: ComposerContext,
+    /** Which affordance sent it — the button already has its own click row. */
+    trigger?: 'button' | 'enter' | 'programmatic',
   ) => void;
   placeholder?: string;
   hideDisclaimer?: boolean;
@@ -500,7 +503,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         if (pending) return false;
         const trimmed = text.trim();
         if (!trimmed) return false;
-        onSubmit?.(trimmed, undefined, buildContext());
+        onSubmit?.(trimmed, undefined, buildContext(), 'programmatic');
         return true;
       },
       setContext: (items: AttachedContextItem[]): void => {
@@ -520,20 +523,22 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [handleFilesAdded, pending, onSubmit, buildContext],
   );
 
-  const submit = (): void => {
+  const submit = (trigger: 'button' | 'enter'): void => {
     if (pending) return;
     const trimmed = value.trim();
     if (!trimmed) return;
-    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext());
+    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext(), trigger);
     setValue('');
     setAttachments([]);
     // Toggles/context persist across turns (mirrors the sidebar), so they are
     // intentionally NOT reset here.
   };
 
+  // Form submit only happens through the send button (Enter is intercepted in
+  // handleKeyDown), so this is the 'button' trigger.
   const handleSubmit = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
-    submit();
+    submit('button');
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -544,7 +549,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         trigger: 'keyboard',
         keyCombo: 'enter',
       });
-      submit();
+      submit('enter');
     }
   };
 
@@ -977,7 +982,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   aria-label='Send'
                   title='Send'
                   data-track-category='XyneAI'
-                  data-track-name='SEND_BUTTON_CLICK'
+                  data-track-name='SEND_MESSAGE'
+                  data-track-metadata={JSON.stringify(
+                    aiSendButtonTrackingMetadata({
+                      surface: 'page',
+                      model: selectedModel,
+                      thinkingLevel,
+                      webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
+                      deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
+                      createCanvasEnabled,
+                      attachmentsCount: attachments.length,
+                    }),
+                  )}
                   className={cn(
                     'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}

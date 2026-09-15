@@ -1,8 +1,8 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   isAiOriginatedSource,
-  ticketTrackingMetadata,
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
 } from '../../../services/Analytics/ticketTracking';
 import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
@@ -1266,8 +1266,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const dynamicFieldsFilledCount = Object.values(formData.dynamicFields ?? {}).filter(value =>
       Array.isArray(value) ? value.length > 0 : !!value?.trim(),
     ).length;
-    globalClickTracker.trackManualEvent('Tickets', 'CREATE_TICKET_SUCCEEDED', undefined, {
-      ...ticketTrackingMetadata({
+    trackTicketCreateSucceeded(
+      {
         id: created.id,
         xyneId: created.xyneId ?? null,
         ticketType: formData.ticketType ?? null,
@@ -1276,24 +1276,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         boardId: formData.boardId || null,
         projectId: selectedBoard?.projectId ?? projectId ?? null,
         channelId: effectiveChannelId ?? null,
-      }),
-      source: trackSource,
-      aiOriginated: isAiOriginatedSource(trackSource) || isFromAI,
-      fromSourceMessage: !!sourceMessageId,
-      fromSourceConversation: !!sourceConversation,
-      prefilledFromShareLink: enableUrlSync && hasCreateTicketFlag(searchParamsRef.current),
-      isSubTicket: !!parentTicketId,
-      isRelease: formData.workflowType === 'release' || releaseOnly,
-      hasAssignee: formData.assignee?.type === 'assigneeTo',
-      hasUserGroup: formData.assignee?.type === 'userGroup',
-      hasDueDate: !!formData.eta,
-      attachmentsCount: formData.files?.length ?? 0,
-      subTicketsCount: normalizeSubTicketDrafts(subTickets).length,
-      tagsCount: formData.tags?.length ?? 0,
-      dynamicFieldsFilledCount,
-      standalone,
-      msSinceOpened: Date.now() - openedAtRef.current,
-    });
+      },
+      {
+        source: trackSource,
+        aiOriginated: isAiOriginatedSource(trackSource) || isFromAI,
+        fromSourceMessage: !!sourceMessageId,
+        fromSourceConversation: !!sourceConversation,
+        prefilledFromShareLink: enableUrlSync && hasCreateTicketFlag(searchParamsRef.current),
+        isSubTicket: !!parentTicketId,
+        isRelease: formData.workflowType === 'release' || releaseOnly,
+        hasAssignee: formData.assignee?.type === 'assigneeTo',
+        hasUserGroup: formData.assignee?.type === 'userGroup',
+        hasDueDate: !!formData.eta,
+        attachmentsCount: formData.files?.length ?? 0,
+        subTicketsCount: normalizeSubTicketDrafts(subTickets).length,
+        tagsCount: formData.tags?.length ?? 0,
+        dynamicFieldsFilledCount,
+        standalone,
+        msSinceOpened: Date.now() - openedAtRef.current,
+      },
+    );
   };
 
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
@@ -1629,15 +1631,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         description:
           error instanceof Error ? error.message : 'Failed to create ticket. Please try again.',
       });
-      const httpStatus =
-        typeof error === 'object' && error !== null && 'response' in error
-          ? (error as { response?: { status?: number } }).response?.status
-          : undefined;
-      globalClickTracker.trackManualEvent('Tickets', 'CREATE_TICKET_FAILED', undefined, {
+      trackTicketCreateFailed(error, {
         source: trackSource,
-        errorKind:
-          httpStatus === undefined ? 'network' : httpStatus >= 500 ? 'server' : 'validation',
-        ...(httpStatus !== undefined && { httpStatus }),
         msSinceOpened: Date.now() - openedAtRef.current,
       });
     }
