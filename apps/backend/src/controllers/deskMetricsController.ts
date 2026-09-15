@@ -34,6 +34,7 @@ import {
   DEFAULT_DESK_METRIC_KEYS,
   DESK_METRIC_KEYS,
   DESK_METRICS_MAX_AGGREGATE_DESKS,
+  parseDeskMetricsGuestVisibility,
   TicketPriority,
   WorkspaceRole,
 } from '@xyne/shared';
@@ -254,6 +255,12 @@ export class DeskMetricsController {
     });
   }
 
+  private guestVisibilityFor(req: Request, preference: { metricsGuestVisibility?: string | null }) {
+    return req.user?.role === WorkspaceRole.GUEST
+      ? parseDeskMetricsGuestVisibility(preference.metricsGuestVisibility)
+      : undefined;
+  }
+
   getMetrics = async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
 
@@ -287,7 +294,7 @@ export class DeskMetricsController {
       }
 
       const metrics = await this.metricsForChannel(channelId, preference, query);
-      res.json(metrics);
+      res.json({ ...metrics, guestVisibility: this.guestVisibilityFor(req, preference) });
     } catch (error) {
       logger.error('[DeskMetrics] Failed to compute metrics', { channelId, error });
       res.status(500).json({ error: 'Failed to compute desk metrics' });
@@ -691,6 +698,7 @@ export class DeskMetricsController {
 
       const contributions: DeskMetricsContribution[] = [];
       const skipped: DeskMetricsSkippedDesk[] = [];
+      let guestVisibility: Record<string, boolean> | undefined;
 
       // Guests skip role checks. Other callers get ONE batched
       // lookup for admin + owned desks rather than a per-desk findParticipant
@@ -735,6 +743,7 @@ export class DeskMetricsController {
 
           const channel = await this.channelRepo.findById(channelId);
           const metrics = await this.metricsForChannel(channelId, preference, query);
+          guestVisibility ??= this.guestVisibilityFor(req, preference);
           contributions.push({ channelId, channelName: channel?.name ?? null, metrics });
         } catch (error) {
           logger.error('[DeskMetrics] Aggregate: desk failed, skipping', { channelId, error });
@@ -759,7 +768,7 @@ export class DeskMetricsController {
       }
 
       const aggregate = aggregateDeskMetrics(contributions);
-      res.json({ ...aggregate, skipped } satisfies DeskMetricsAggregateResponse);
+      res.json({ ...aggregate, skipped, guestVisibility } satisfies DeskMetricsAggregateResponse);
     } catch (error) {
       logger.error('[DeskMetrics] Failed to compute aggregate metrics', { channelIds, error });
       res.status(500).json({ error: 'Failed to compute desk metrics' });
