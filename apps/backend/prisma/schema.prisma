@@ -1885,6 +1885,10 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  // Recency-ordered pagination (dmChannelsLatestMessagesPaginated and friends):
+  // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
+  // instead of a full-table temp-sort on every hydration.
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
