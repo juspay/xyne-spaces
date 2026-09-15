@@ -64,6 +64,7 @@ interface ExecutionContext {
 export class SdlcClawExecutionService {
   constructor(private readonly prisma = DatabaseClient.getInstance()) {}
 
+  /** The run's hub. The fallback is only for runs queued before it was stamped. */
   private async runChannelId(context: ExecutionContext, repoId: string): Promise<string> {
     return context.channelId ?? requireSdlcChannelId(this.prisma, repoId);
   }

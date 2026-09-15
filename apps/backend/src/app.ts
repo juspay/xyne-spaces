@@ -626,6 +626,7 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
