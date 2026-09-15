@@ -780,6 +780,7 @@ const ProjectDetailScreen = (): ReactElement => {
           projectId={projectId}
           initialTicketKind='release'
           releaseOnly
+          trackSource='project_detail'
           releaseChannelIds={releaseChannelIds}
           onClose={() => setCreatingRelease(false)}
           onTicketCreated={() => setCreatingRelease(false)}

@@ -28,6 +28,7 @@ import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefineInput } from '../RefineInput/RefineInput';
+import { getDeskDraftTrackingSnapshot } from '../../../hooks/useDeskAIDraft';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -116,6 +117,20 @@ export const DraftCard = ({
     () => stripCitationMarks(stripCitationBlock(draftContent)),
     [draftContent],
   );
+
+  // Joins Insert / Discard / Refine back to DRAFT_GENERATED. `generatedAt` is a
+  // timestamp, not a delta — the attribute is baked at render, and the click
+  // comes later; the delta is `timestamp - generatedAt` in the query.
+  const draftTrackMetadata = (extra?: Record<string, unknown>): string => {
+    const snapshot = getDeskDraftTrackingSnapshot();
+    return JSON.stringify({
+      generatedAt: snapshot.generatedAt,
+      refineCount: snapshot.refineCount,
+      runKind: snapshot.kind,
+      isStreaming,
+      ...extra,
+    });
+  };
 
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -350,6 +365,7 @@ export const DraftCard = ({
                 title='Stop generating'
                 data-track-category='AIDraft'
                 data-track-name='StopDraft'
+                data-track-metadata={draftTrackMetadata()}
               >
                 <Square size={11} className='fill-current' />
                 <span>Stop</span>
@@ -363,6 +379,7 @@ export const DraftCard = ({
                 title='Discard draft'
                 data-track-category='AIDraft'
                 data-track-name='RejectDraft'
+                data-track-metadata={draftTrackMetadata()}
               >
                 <X size={14} />
               </button>
@@ -476,7 +493,7 @@ export const DraftCard = ({
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='AIDraft'
                     data-track-name='QuickRefine'
-                    data-track-metadata={JSON.stringify({ action: preset.id })}
+                    data-track-metadata={draftTrackMetadata({ action: preset.id })}
                   >
                     <span className='text-muted-foreground'>{preset.icon}</span>
                     <span>{preset.label}</span>
@@ -509,6 +526,7 @@ export const DraftCard = ({
               title='Insert draft'
               data-track-category='AIDraft'
               data-track-name='AcceptDraft'
+              data-track-metadata={draftTrackMetadata()}
             >
               Insert
             </button>

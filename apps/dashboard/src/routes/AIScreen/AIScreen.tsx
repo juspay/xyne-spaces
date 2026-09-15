@@ -1,5 +1,5 @@
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload, PanelRightOpen } from 'lucide-react';
 import { AIShell } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
@@ -17,6 +17,8 @@ import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen
 import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
 import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
@@ -27,6 +29,7 @@ const AIScreen = (): ReactElement => {
     sessionId?: string;
   }>();
   const location = useLocation();
+  const navigationType = useNavigationType();
   /** '' for the landing page — `chat/new` is the literal, not a session id. */
   const sessionFromUrl = routeSessionId && routeSessionId !== 'new' ? routeSessionId : '';
 
@@ -120,6 +123,32 @@ const AIScreen = (): ReactElement => {
     return () => {
       xyneAIStreamManager.setOnAIPage(false);
     };
+  }, []);
+
+  // XYNE_AI_OPENED for the full page. Once per mount: switching threads inside
+  // the page is SELECT_CONVERSATION / NEW_CHAT, not a new open. `source` comes
+  // from the navigating surface's `state.trackSource`; back/forward reports
+  // history_pop and a pasted link reports direct (see readTrackSource).
+  const pageOpenedAtRef = useRef(Date.now());
+  useEffect(() => {
+    const source = readTrackSource(location.state, navigationType);
+    pageOpenedAtRef.current = Date.now();
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'page',
+      source,
+      contextType: 'general',
+      resumedConversation: !!sessionFromUrl,
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'page',
+        source,
+        msOpen: Date.now() - pageOpenedAtRef.current,
+      });
+    };
+    // Mount/unmount only — the open is a single moment, not a render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Drag and drop on the main content area — routes dropped files into

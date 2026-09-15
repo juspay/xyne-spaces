@@ -91,6 +91,7 @@ export function BrowserPanelHandler(): null {
       // Open XyneAI sidebar
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'browser_panel',
         contextType: 'general',
       });
 

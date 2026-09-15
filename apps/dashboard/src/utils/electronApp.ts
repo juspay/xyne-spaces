@@ -225,6 +225,8 @@ export interface CreateTicketPopoutDraft {
   parentTicketId?: string | null | undefined;
   isFromSubTicket?: boolean | undefined;
   isFromAI?: boolean | undefined;
+  /** Opening surface, forwarded so the popout's create outcome keeps its source. */
+  trackSource?: string | undefined;
   subTickets?: Array<{ title: string; description?: string }> | undefined;
   excludedChatAttachmentIds?: string[] | undefined;
   // Full in-progress form snapshot so nothing the user entered is dropped.

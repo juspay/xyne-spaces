@@ -981,13 +981,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // folder to add, so just the collection chip shows, as before.
   const handleOpenAI = useCallback((): void => {
     if (!collectionId) {
-      xyneAIActor.send({ type: 'OPEN', startFreshChat: true });
+      xyneAIActor.send({ type: 'OPEN', trackSource: 'knowledge_base', startFreshChat: true });
       return;
     }
     const owning = globalCollections.byId(collectionId);
     const currentFolder = spParentId ? nodes[spParentId] : undefined;
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'knowledge_base',
       startFreshChat: true,
       kbCollectionId: collectionId,
       kbChannelId: owning?.scopeId ?? null,
@@ -1009,6 +1010,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         const owning = collectionId ? globalCollections.byId(collectionId) : null;
         xyneAIActor.send({
           type: 'OPEN',
+          trackSource: 'knowledge_base',
           startFreshChat: true,
           kbCollectionId: collectionId ?? null,
           kbChannelId: owning?.scopeId ?? null,
@@ -1021,6 +1023,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         const owning = globalCollections.byId(entry.id);
         xyneAIActor.send({
           type: 'OPEN',
+          trackSource: 'knowledge_base',
           startFreshChat: true,
           kbCollectionId: entry.id,
           kbChannelId: owning?.scopeId ?? null,
@@ -1030,6 +1033,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       const owning = collectionId ? globalCollections.byId(collectionId) : null;
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'knowledge_base',
         startFreshChat: true,
         kbCollectionId: collectionId ?? null,
         kbChannelId: owning?.scopeId ?? null,

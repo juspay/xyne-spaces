@@ -242,6 +242,7 @@ export default function CallDetailScreen(): ReactElement {
     _userClosedAIForCallId = null;
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'call_detail_auto',
       ...(call.channelId ? { channelId: call.channelId } : {}),
       threadInfo: callConversationId
         ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
