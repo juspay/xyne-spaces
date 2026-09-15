@@ -54,6 +54,7 @@ import { redisService } from '@/services/redisService';
 import { superpositionClient } from '@/services/superpositionClient';
 import { metricsMiddleware } from '@/middleware/metricsMiddleware';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
+import { posthogNodeService } from '@/services/hyperAnalytics/posthogNodeService';
 import { externalSourceSyncRoutes } from '@/integrations';
 import googleAuthRoutes from '@/integrations/routes/google-auth';
 import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
@@ -1207,6 +1208,9 @@ export class App {
 
       // Shutdown bookmark reminder service
       await bookmarkReminderService.shutdown();
+
+      // Flush queued analytics events before the process exits
+      await posthogNodeService.shutdown();
 
       await DatabaseClient.disconnect();
       await CommonDatabaseClient.disconnect();

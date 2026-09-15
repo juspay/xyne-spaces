@@ -146,6 +146,7 @@
     "pdfkit": "^0.18.0",
     "pg": "^8.16.3",
     "postgres": "^3.4.7",
+    "posthog-node": "^5.52.2",
     "pptxgenjs": "^4.0.1",
     "reflect-metadata": "^0.2.2",
     "remark-frontmatter": "^5.0.0",
