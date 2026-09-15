@@ -9,11 +9,11 @@ import {
   UserType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { conversationService } from '@/services/conversationService';
+import { buildWorkspaceCanvasUrl } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
@@ -32,11 +32,6 @@ interface PublishReleaseReportInput {
 }
 
 const ENV_VAR_REGEX = /^\s*([A-Za-z][A-Za-z0-9_]*)\s*[=:]/gm;
-
-function buildReleaseReportCanvasUrl(workspaceId: string, canvasId: string): string {
-  const frontendUrl = config.slackFrontendUrl.replace(/\/$/, '');
-  return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
-}
 
 function extractEnvironmentVariableNames(...values: string[]): Set<string> {
   const names = new Set<string>();
@@ -316,7 +311,7 @@ export class ReleaseReportService {
       version,
       existingMetadata.releaseReportCanvasId
     );
-    const canvasUrl = buildReleaseReportCanvasUrl(report.release.workspaceId, canvas.canvasId);
+    const canvasUrl = buildWorkspaceCanvasUrl(report.release.workspaceId, canvas.canvasId);
 
     // Timeline event — best-effort, never blocks the publish path.
     void this.releaseRepository
