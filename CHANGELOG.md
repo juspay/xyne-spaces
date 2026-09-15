@@ -1,3 +1,10 @@
+## [1.318.0-release-20260915.2](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.1...v1.318.0-release-20260915.2) (2026-09-15)
+
+
+### Features
+
+* github connector for workflows ([#1864](https://github.com/juspay/xyne-spaces/issues/1864)) ([6639438](https://github.com/juspay/xyne-spaces/commit/66394380c40173f3148d3833eeb8fa610a0d2e5d))
+
 ## [1.318.0-release-20260915.1](https://github.com/juspay/xyne-spaces/compare/v1.317.3...v1.318.0-release-20260915.1) (2026-09-15)
 
 
