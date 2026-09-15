@@ -2,6 +2,7 @@ import { metrics } from '@opentelemetry/api';
 import type { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
 import { OTEL_SERVICE_NAME } from '../../config';
 import { logger, Event } from '../../utils/logger';
+import { diagnosticsStore } from '../diagnostics/store';
 
 function getMeter(): Meter {
   return metrics.getMeter(OTEL_SERVICE_NAME);
@@ -15,7 +16,7 @@ function getMeter(): Meter {
 // low-cardinality route template from the current path (the same value the
 // bridge logger records as `pageUrl`) by collapsing id-like segments to `:id`,
 // so cardinality is bounded by the number of route shapes — not by ids.
-function currentRouteTemplate(): string {
+export function currentRouteTemplate(): string {
   try {
     const path = window.location.pathname || '/';
     const template =
@@ -248,6 +249,7 @@ export function createBatchViewUpdatesWithMetrics(): (applyViewUpdates: () => vo
     const duration = performance.now() - start;
     if (duration > 1) {
       pokeRenderDuration.record(duration);
+      diagnosticsStore.recordLatencySample('zeroPokeP95', duration);
     }
   };
 }

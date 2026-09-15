@@ -151,6 +151,12 @@ export const Event = {
   JS_HEAP_SNAPSHOT: "js_heap_snapshot",
   WEB_VITAL_INP_SLOW: "web_vital_inp_slow",
   LONG_TASK_SLOW: "long_task_slow",
+  // `long_task_slow` comes from the `longtask` API, which reports that the main
+  // thread was blocked but names no code. These two come from Long Animation
+  // Frames and the CPU observers, and carry the attribution it cannot.
+  CLIENT_SCRIPT_DRAIN: "client_script_drain",
+  CLIENT_CPU_SNAPSHOT: "client_cpu_snapshot",
+  DIAGNOSTICS_HELP_REQUESTED: "diagnostics_help_requested",
   SLASH_COMMAND_SESSION_START: "slash_command_session_start",
   SLASH_COMMAND_IMPRESSION: "slash_command_impression",
   SLASH_COMMAND_CLICK: "slash_command_click",
