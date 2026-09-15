@@ -112,6 +112,7 @@ const ConversationPanelV2 = ({
   skipMarkAsRead = false,
   suppressInputAutoFocus = false,
   listLoadingFallback,
+  skipSubscription = false,
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
@@ -151,6 +152,8 @@ const ConversationPanelV2 = ({
    * this panel mounted — see `loadingFallback` there.
    */
   listLoadingFallback?: React.ReactNode;
+  // Skips the websocket channel subscription — messages render via Zero regardless.
+  skipSubscription?: boolean;
   // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
@@ -252,7 +255,7 @@ const ConversationPanelV2 = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  useChannelSubscription(channelId, NO_CONVERSATION_IDS);
+  useChannelSubscription(skipSubscription ? undefined : channelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
     handleTabChange('canvas');
