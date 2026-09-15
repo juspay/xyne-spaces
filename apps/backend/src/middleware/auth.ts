@@ -10,6 +10,7 @@ import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
+import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
 export class AuthMiddleware {
   // private googleClient?: OAuth2Client;
@@ -591,24 +592,11 @@ export class AuthMiddleware {
         return { success: false, error: 'Invalid session' };
       }
 
-      // Check if session is still active and not expired
-      const now = new Date();
-      const isSessionExpired = now > session.refreshTokenExpiry;
-      logger.info(`[AUTH] refreshTokenBySession validating session state`, {
-        userId: session.user.id,
-        sessionStatus: session.status,
-        refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-        isSessionExpired,
-      });
-
-      if (session.status !== 'ACTIVE' || isSessionExpired) {
-        logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired`, {
-          userId: session.user.id,
-          sessionStatus: session.status,
-          refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-          now: now.toISOString(),
-        });
-        return { success: false, error: 'Session expired' };
+      // Shared validity + provider-revocation check (status, expiry, leftAt,
+      // Google/Microsoft revocation, and deactivation cleanup). Same decision
+      // used by v2 authV2Middleware so both stay in sync.
+      if (!(await isRefreshAllowed(session))) {
+        return { success: false, error: 'Session invalid or revoked' };
       }
 
       // Generate a new custom JWT token for the user

@@ -478,6 +478,14 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
+  INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // mTLS certificate service (s2s). Empty url disables cert revocation.
+  MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
+  MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Comma-separated Google OAuth error codes that, when returned by the client
+  // that owns a refresh token, mean the token is permanently revoked.
+  GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1148,6 +1156,18 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  mtlsService: {
+    url: envVars.MTLS_SERVICE_URL as string,
+    // Reuses the shared internal-service secret (X-Internal-Service-Secret).
+    s2sSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+    requestTimeoutMs: envVars.MTLS_SERVICE_REQUEST_TIMEOUT_MS as number,
+  },
+  // Google OAuth error codes from the owning client that mean permanent revocation.
+  googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
   },
