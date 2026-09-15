@@ -184,15 +184,12 @@ export interface SdlcVcs {
     head: string;
     base: string;
     commitHash: string;
-  } & (
-    | { executionId: string; sessionId: string }
-    | { interactiveGrant: string; conversationId: string }
-  )):
-    Promise<DraftPullRequestResult>;
+    interactiveGrant: string;
+    conversationId: string;
+  }): Promise<DraftPullRequestResult>;
   inspectPullRequest(repoId: string, number: number): Promise<PullRequestInspection>;
   resolveBaseBranchHead(repoId: string): Promise<string>;
   listBaseBranchFirstParentHistory(repoId: string): Promise<FirstParentHistory>;
-  verifyBaseBranchHead(repoId: string, commitHash: string): Promise<void>;
   verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void>;
   verifySourceRanges(
     repoId: string,
