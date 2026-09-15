@@ -305,13 +305,14 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                 onClick={onBulkCreateTicket}
                 data-testid='kanban-bulk-create-ticket-button'
                 data-track-event='BUTTON_CLICK'
-                data-track-category='Tickets'
+                data-track-category='TICKETS'
                 data-track-name='BULK_CREATE_TICKET_KANBAN'
                 data-track-metadata={bulkCreateTicketMetadata}
-                className='ml-0.5 flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-2.5 text-[12.5px] font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground'
+                title='Bulk create tickets'
+                className='ml-0.5 flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-foreground/70 transition-colors hover:bg-muted hover:text-foreground'
               >
-                <ListPlus className='size-[14px]' strokeWidth={2} />
-                Bulk
+                <ListPlus className='size-[15px]' strokeWidth={2} />
+                <span className='sr-only'>Bulk create tickets</span>
               </button>
             </Tooltip>
           )}

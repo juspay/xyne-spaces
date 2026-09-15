@@ -109,6 +109,7 @@ import type {
   FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import {
+  BulkTicketMode,
   TicketStatusV2,
   ActivityType,
   FormContextType,
@@ -4668,7 +4669,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
         linkBoardsMetadata={JSON.stringify({ channelId, source: 'kanban_header' })}
         onBulkCreateTicket={
-          canCreateTicket && effectiveProjectId && channel && !channel.isArchived
+          isTableLayout && canCreateTicket && effectiveProjectId && channel && !channel.isArchived
             ? (): void => setIsBulkCreateModalOpen(true)
             : null
         }
@@ -5777,6 +5778,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <BulkCreateTicketsModal
           isOpen={isBulkCreateModalOpen}
           onClose={() => setIsBulkCreateModalOpen(false)}
+          mode={BulkTicketMode.ALL_PARENTS}
           channelId={channel.id}
           projectId={effectiveProjectId}
           boardId={currentBoardId ?? ''}
