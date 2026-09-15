@@ -15,7 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive, List } from 'lucide-react';
+import { TextAlignJustify, FileSpreadsheet, Archive } from 'lucide-react';
 import {
   PlusDefault as Plus,
   FilterHorizontal as Settings2,
@@ -109,6 +109,7 @@ import type {
   FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import {
+  BulkTicketMode,
   TicketStatusV2,
   ActivityType,
   FormContextType,
@@ -4308,22 +4309,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   <span className='sm:hidden'>Create</span>
                 </button>
               )}
-          {canCreateTicket && channel && !channel.isArchived && (
+            </div>
+          )}
+          {canCreateTicket && ((channel && !channel.isArchived) || isMyTicketsView) && (
             <button
-              data-testid='kanban-bulk-create-ticket-button'
+              data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
-              data-track-category='TICKETS'
-              data-track-name='BULK_CREATE_TICKET_KANBAN'
+              data-track-category='Tickets'
+              data-track-name='CREATE_TICKET_KANBAN'
               data-track-metadata={JSON.stringify({ boardId, channelId })}
-              onClick={() => setIsBulkCreateModalOpen(true)}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-foreground bg-secondary hover:bg-secondary/80 rounded-lg transition-colors flex-shrink-0'
+              onClick={() => {
+                setCreateTicketSeed(null);
+                setIsCreateModalOpen(true);
+              }}
+              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
             >
-              <List className='w-4 h-4' />
-              <span className='hidden sm:inline font-semibold text-sm'>Bulk Create</span>
-              <span className='sm:hidden'>Bulk</span>
+              <Plus className='w-4 h-4' />
+              <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
+              <span className='sm:hidden'>Create</span>
             </button>
           )}
-          </div>
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
             {/* CSV/JSON export — table view only, exports the filtered rows */}
@@ -4522,6 +4527,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 </Tooltip>
               </div>
             )}
+            {/* Bulk create belongs to the table, where rows are edited in a grid */}
+            {layoutView === 'table' && canCreateTicket && channel && !channel.isArchived && (
+              <Tooltip content='Bulk create tickets'>
+                <button
+                  data-testid='kanban-bulk-create-ticket-button'
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='TICKETS'
+                  data-track-name='BULK_CREATE_TICKET_KANBAN'
+                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  onClick={() => setIsBulkCreateModalOpen(true)}
+                  className='flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted transition-all outline-none focus:ring-2 focus:ring-border shadow-sm'
+                  title='Bulk create tickets'
+                >
+                  <Plus className='w-3.5 h-3.5 text-muted-foreground' />
+                  <span className='sr-only'>Bulk create tickets</span>
+                </button>
+              </Tooltip>
+            )}
+
             {/* Stage Overdue Filter Toggle */}
             <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
               <button
@@ -5914,6 +5938,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <BulkCreateTicketsModal
           isOpen={isBulkCreateModalOpen}
           onClose={() => setIsBulkCreateModalOpen(false)}
+          mode={BulkTicketMode.ALL_PARENTS}
           channelId={channel.id}
           projectId={effectiveProjectId}
           boardId={currentBoardId ?? ''}

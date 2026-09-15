@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type FC, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
+import { ChevronDown, Filter, Plus, Search, Ticket, X } from 'lucide-react';
 import { Input } from '../ui/Input';
 
 const TABLE_FILTER_ID_ATTR = 'data-canvas-table-filter-id';
@@ -28,8 +28,24 @@ interface RegisteredTableFilter {
 
 interface TableFilterWidgetProps {
   blockContent: HTMLElement;
+  canCreateTickets: boolean;
+  onCreateTickets: (draft: CanvasTableTicketDraft) => void;
   table: HTMLTableElement;
   wrapper: HTMLElement;
+}
+
+/** A canvas table read as bulk ticket input: row one is the parent ticket. */
+export interface CanvasTableTicketDraft {
+  /** Row titles in table order, the first of which is the parent's. */
+  titles: string[];
+  /** Descriptions aligned with `titles`; an empty one falls back to the title. */
+  descriptions: string[];
+}
+
+interface UseCanvasTableFiltersOptions {
+  /** Whether the table shows its create-tickets button. */
+  canCreateTickets?: boolean;
+  onCreateTickets?: ((draft: CanvasTableTicketDraft) => void) | undefined;
 }
 
 interface MatchCount {
@@ -227,6 +243,52 @@ const getTableMetadata = (table: HTMLTableElement): TableMetadata => {
     autocompleteOptionsByColumn: getAutocompleteOptions(table, columnOptions),
     columnOptions,
   };
+};
+
+const getHeaderRow = (table: HTMLTableElement): HTMLTableRowElement | null => {
+  const firstRow = table.querySelector<HTMLTableRowElement>('tr');
+  return firstRow?.querySelector('th') ? firstRow : null;
+};
+
+/** A row hidden by an active filter has no box, so it is left out of a draft. */
+const isRowHidden = (row: HTMLTableRowElement): boolean => row.getClientRects().length === 0;
+
+/**
+ * Reads the table as bulk ticket input the way the chat composer reads a typed
+ * list: the first column is each ticket's title and the columns after it become
+ * `Header: value` description lines, so nothing in the row is dropped. Filtered
+ * rows are skipped, which makes the draft match what the table is showing.
+ */
+const collectTableTicketDraft = (table: HTMLTableElement): CanvasTableTicketDraft => {
+  const columnOptions = getColumnOptions(table);
+  const headerRow = getHeaderRow(table);
+  const titles: string[] = [];
+  const descriptions: string[] = [];
+
+  for (const row of getFilterableRows(table)) {
+    if (isRowHidden(row)) continue;
+
+    const titleCell = getCellAtColumn(row, 0);
+    const title = normalizeCellText(titleCell?.textContent ?? '');
+    if (!title) continue;
+
+    const readCells = new Set<HTMLTableCellElement>(titleCell ? [titleCell] : []);
+    const detailLines = columnOptions.slice(1).flatMap(option => {
+      const cell = getCellAtColumn(row, Number.parseInt(option.value, 10));
+      // A merged cell answers for every column it spans, so it is read once.
+      if (!cell || readCells.has(cell)) return [];
+      readCells.add(cell);
+
+      const value = normalizeCellText(cell.textContent ?? '');
+      if (!value) return [];
+      return [headerRow ? `${option.label}: ${value}` : value];
+    });
+
+    titles.push(title);
+    descriptions.push(detailLines.join('\n'));
+  }
+
+  return { titles, descriptions };
 };
 
 const getVisibleAutocompleteOptions = (options: string[], query: string): string[] => {
@@ -442,7 +504,13 @@ const getFilterRowGridClass = (filterCount: number): string => {
   return 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)]';
 };
 
-const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, table, wrapper }) => {
+const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({
+  blockContent,
+  canCreateTickets,
+  onCreateTickets,
+  table,
+  wrapper,
+}) => {
   const initialMetadataRef = useRef<TableMetadata | null>(null);
   const getInitialMetadata = (): TableMetadata => {
     initialMetadataRef.current ??= getTableMetadata(table);
@@ -708,20 +776,36 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
     >
       <style ref={styleRef} />
       {!isOpen ? (
-        <button
-          type='button'
-          className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
-          data-active={hasActiveFilters ? 'true' : 'false'}
-          data-track-category='CANVAS'
-          data-track-name='table_filter_open'
-          aria-label='Filter table rows'
-          aria-pressed={hasActiveFilters}
-          title='Filter table rows'
-          onMouseDown={event => event.preventDefault()}
-          onClick={() => setIsOpen(true)}
-        >
-          <Filter size={14} strokeWidth={2} />
-        </button>
+        <div className='flex items-center gap-1'>
+          {canCreateTickets && (
+            <button
+              type='button'
+              className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground'
+              data-track-category='CANVAS'
+              data-track-name='table_create_tickets'
+              aria-label='Create tickets from table'
+              title='Create tickets from table'
+              onMouseDown={event => event.preventDefault()}
+              onClick={() => onCreateTickets(collectTableTicketDraft(table))}
+            >
+              <Ticket size={14} strokeWidth={2} />
+            </button>
+          )}
+          <button
+            type='button'
+            className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
+            data-active={hasActiveFilters ? 'true' : 'false'}
+            data-track-category='CANVAS'
+            data-track-name='table_filter_open'
+            aria-label='Filter table rows'
+            aria-pressed={hasActiveFilters}
+            title='Filter table rows'
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => setIsOpen(true)}
+          >
+            <Filter size={14} strokeWidth={2} />
+          </button>
+        </div>
       ) : (
         <div
           className={`flex ${panelWidthClass} max-w-[calc(100vw-96px)] flex-col items-stretch gap-[7px] overflow-visible rounded-md border bg-popover p-2 text-popover-foreground shadow-md`}
@@ -981,9 +1065,47 @@ const cleanupRegistration = (registration: RegisteredTableFilter): void => {
   registration.wrapper.classList.remove(TABLE_FILTER_OPEN_PADDING_CLASS);
 };
 
-export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null>): void => {
+export const useCanvasTableFilters = (
+  containerRef: RefObject<HTMLElement | null>,
+  options: UseCanvasTableFiltersOptions = {},
+): void => {
+  const { canCreateTickets = false, onCreateTickets } = options;
   const registrationsRef = useRef<Map<HTMLElement, RegisteredTableFilter>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
+  const ticketActionsRef = useRef<UseCanvasTableFiltersOptions>({
+    canCreateTickets,
+    onCreateTickets,
+  });
+
+  const handleCreateTickets = useCallback((draft: CanvasTableTicketDraft): void => {
+    ticketActionsRef.current.onCreateTickets?.(draft);
+  }, []);
+
+  const renderWidget = useCallback(
+    (registration: RegisteredTableFilter): void => {
+      const { canCreateTickets: canCreate, onCreateTickets: onCreate } = ticketActionsRef.current;
+      registration.reactRoot.render(
+        <CanvasTableFilterWidget
+          blockContent={registration.blockContent}
+          canCreateTickets={canCreate === true && !!onCreate}
+          onCreateTickets={handleCreateTickets}
+          table={registration.table}
+          wrapper={registration.wrapper}
+        />,
+      );
+    },
+    [handleCreateTickets],
+  );
+
+  // Every widget lives in its own root, so a change to what the editor allows
+  // has to be pushed into them. Re-rendering a root keeps the widget's state,
+  // which leaves any filter the reader had open untouched.
+  useEffect(() => {
+    ticketActionsRef.current = { canCreateTickets, onCreateTickets };
+    for (const registration of registrationsRef.current.values()) {
+      renderWidget(registration);
+    }
+  }, [canCreateTickets, onCreateTickets, renderWidget]);
 
   const syncFilters = useCallback(() => {
     const container = containerRef.current;
@@ -1020,18 +1142,16 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
       mount.className = TABLE_FILTER_MOUNT_CLASS;
       blockContent.appendChild(mount);
 
-      const reactRoot = createRoot(mount);
-      reactRoot.render(
-        <CanvasTableFilterWidget blockContent={blockContent} table={table} wrapper={wrapper} />,
-      );
-
-      registrationsRef.current.set(wrapper, {
+      const registration: RegisteredTableFilter = {
         blockContent,
         mount,
-        reactRoot,
+        reactRoot: createRoot(mount),
         table,
         wrapper,
-      });
+      };
+      renderWidget(registration);
+
+      registrationsRef.current.set(wrapper, registration);
     }
 
     for (const [wrapper, registration] of registrationsRef.current.entries()) {
@@ -1040,7 +1160,7 @@ export const useCanvasTableFilters = (containerRef: RefObject<HTMLElement | null
         registrationsRef.current.delete(wrapper);
       }
     }
-  }, [containerRef]);
+  }, [containerRef, renderWidget]);
 
   const scheduleSyncFilters = useCallback(() => {
     if (animationFrameRef.current !== null) {
