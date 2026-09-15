@@ -12,7 +12,6 @@ import {
   Building2,
   CalendarDays,
   LayoutGrid,
-  Loader2,
   Search,
   SignalHigh,
   SlidersHorizontal,
@@ -75,8 +74,6 @@ interface SearchQueryInputProps {
    * only `onSubmit` (Enter) commits the query to the URL/history.
    */
   onLiveChange: (next: string) => void;
-  /** True while a search is in flight — swaps the leading icon for a spinner. */
-  isSearching: boolean;
   /**
    * Take focus when the box appears, so typing goes straight in — Cmd+K landing on full page, or
    * the palette expanding into it. Waits for a dialog over the page (the palette handing off) to
@@ -145,7 +142,6 @@ export function SearchQueryInput({
   onFiltersChange,
   onSubmit,
   onLiveChange,
-  isSearching,
   autoFocus = false,
   focusRequest = 0,
 }: SearchQueryInputProps): ReactElement {
@@ -209,7 +205,9 @@ export function SearchQueryInput({
   valueRef.current = value;
 
   // Re-seed only on a genuine outside change (back/forward, a fresh cmd+K search). The URL
-  // catching up to what was typed would otherwise fight the caret mid-word.
+  // catching up to what was typed would otherwise fight the caret mid-word. The URL gets the
+  // text the search actually ran — filter syntax stripped — so a half-typed `issue from:`
+  // commits `issue`; that is still a catch-up, not a reason to wipe the `from:`.
   useEffect(() => {
     if (queryIsOwnWrite || query === valueRef.current.trim()) return;
     setValue(query);
@@ -311,11 +309,8 @@ export function SearchQueryInput({
         'transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20',
       )}
     >
-      {isSearching ? (
-        <Loader2 size={16} className='shrink-0 animate-spin text-primary' />
-      ) : (
-        <Search size={16} className='shrink-0 text-muted-foreground' />
-      )}
+      {/* No in-flight spinner here: the results list shows the loading skeleton, as in Cmd+K. */}
+      <Search size={16} className='shrink-0 text-muted-foreground' />
       {tokens.map(token => (
         <span
           key={token.key}
