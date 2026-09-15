@@ -1,4 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
@@ -12,10 +13,10 @@ import { ClawApiError } from '@/services/claw/clawRequest';
 import type { ImprovementBucket, ImprovementCandidate } from '@/services/claw/clawMetricsTypes';
 import { MetricsCard } from './MetricsCard';
 
-const BUCKETS: Array<{ key: ImprovementBucket; label: string }> = [
-  { key: 'agent_unable_to_do_work', label: 'Agent unable to do work' },
-  { key: 'failure', label: 'Failures' },
-  { key: 'user_frustrated', label: 'User frustrated' },
+const BUCKET_KEYS: Array<{ key: ImprovementBucket; labelKey: string }> = [
+  { key: 'agent_unable_to_do_work', labelKey: 'improvementsCard.bucketAgentUnable' },
+  { key: 'failure', labelKey: 'improvementsCard.bucketFailures' },
+  { key: 'user_frustrated', labelKey: 'improvementsCard.bucketUserFrustrated' },
 ];
 
 const ImprovementRow = ({
@@ -28,68 +29,76 @@ const ImprovementRow = ({
   busy: boolean;
   onApply: () => void;
   onDismiss: () => void;
-}): ReactElement => (
-  <div className='flex flex-col gap-2 rounded-lg bg-muted/30 p-3'>
-    <div className='flex flex-wrap items-center gap-2 text-xs'>
-      <span className='rounded bg-muted px-2 py-0.5 font-mono text-foreground'>
-        {item.rootCause}
-      </span>
-      <span className='rounded bg-muted px-2 py-0.5 text-muted-foreground'>{item.confidence}</span>
-      <span className='text-muted-foreground'>
-        {item.evidence.length} evidence session{item.evidence.length === 1 ? '' : 's'}
-      </span>
-    </div>
-    <p className='text-sm text-foreground'>{item.finding}</p>
-    <div className='rounded-md bg-muted px-3 py-2 text-xs'>
-      <span className='mr-2 font-mono text-muted-foreground'>{item.proposedFix.type}:</span>
-      <span className='whitespace-pre-wrap text-foreground'>{item.proposedFix.description}</span>
-    </div>
-    <div className='flex flex-wrap gap-1'>
-      {item.evidence.slice(0, 8).map(sessionId => (
-        <span
-          key={sessionId}
-          className='rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'
-        >
-          {sessionId.slice(0, 14)}
+}): ReactElement => {
+  const { t } = useTranslation('common');
+  return (
+    <div className='flex flex-col gap-2 rounded-lg bg-muted/30 p-3'>
+      <div className='flex flex-wrap items-center gap-2 text-xs'>
+        <span className='rounded bg-muted px-2 py-0.5 font-mono text-foreground'>
+          {item.rootCause}
         </span>
-      ))}
-      {item.evidence.length > 8 && (
-        <span className='text-xs text-muted-foreground'>+{item.evidence.length - 8} more</span>
-      )}
-    </div>
-    <div className='flex items-center justify-between gap-3 pt-1'>
-      <p className='text-xs italic text-muted-foreground'>
-        Marking handled records a manual change; it does not edit the agent.
-      </p>
-      <div className='flex shrink-0 gap-2'>
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          disabled={busy}
-          onClick={onDismiss}
-          data-track-category='Claw Agents'
-          data-track-name='DISMISS_IMPROVEMENT'
-        >
-          Dismiss
-        </Button>
-        <Button
-          type='button'
-          size='sm'
-          loading={busy}
-          disabled={busy}
-          onClick={onApply}
-          data-track-category='Claw Agents'
-          data-track-name='APPLY_IMPROVEMENT'
-        >
-          Mark as handled
-        </Button>
+        <span className='rounded bg-muted px-2 py-0.5 text-muted-foreground'>
+          {item.confidence}
+        </span>
+        <span className='text-muted-foreground'>
+          {t('improvementsCard.evidenceSessionCount', { count: item.evidence.length })}
+        </span>
+      </div>
+      <p className='text-sm text-foreground'>{item.finding}</p>
+      <div className='rounded-md bg-muted px-3 py-2 text-xs'>
+        <span className='mr-2 font-mono text-muted-foreground'>{item.proposedFix.type}:</span>
+        <span className='whitespace-pre-wrap text-foreground'>{item.proposedFix.description}</span>
+      </div>
+      <div className='flex flex-wrap gap-1'>
+        {item.evidence.slice(0, 8).map(sessionId => (
+          <span
+            key={sessionId}
+            className='rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'
+          >
+            {sessionId.slice(0, 14)}
+          </span>
+        ))}
+        {item.evidence.length > 8 && (
+          <span className='text-xs text-muted-foreground'>
+            {t('improvementsCard.moreCount', { count: item.evidence.length - 8 })}
+          </span>
+        )}
+      </div>
+      <div className='flex items-center justify-between gap-3 pt-1'>
+        <p className='text-xs italic text-muted-foreground'>
+          {t('improvementsCard.manualChangeNotice')}
+        </p>
+        <div className='flex shrink-0 gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={busy}
+            onClick={onDismiss}
+            data-track-category='Claw Agents'
+            data-track-name='DISMISS_IMPROVEMENT'
+          >
+            {t('improvementsCard.dismissButton')}
+          </Button>
+          <Button
+            type='button'
+            size='sm'
+            loading={busy}
+            disabled={busy}
+            onClick={onApply}
+            data-track-category='Claw Agents'
+            data-track-name='APPLY_IMPROVEMENT'
+          >
+            {t('improvementsCard.markHandledButton')}
+          </Button>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const ImprovementsCard = ({ agentSlug }: { agentSlug: string }): ReactElement | null => {
+  const { t } = useTranslation('common');
   const { data: items, isLoading, error } = useClawAgentImprovements(agentSlug);
   const apply = useApplyImprovement(agentSlug);
   const dismiss = useDismissImprovement(agentSlug);
@@ -102,7 +111,7 @@ export const ImprovementsCard = ({ agentSlug }: { agentSlug: string }): ReactEle
   const grouped = useMemo(
     () =>
       new Map(
-        BUCKETS.map(bucket => [
+        BUCKET_KEYS.map(bucket => [
           bucket.key,
           items?.filter(item => item.bucket === bucket.key) ?? [],
         ]),
@@ -115,34 +124,42 @@ export const ImprovementsCard = ({ agentSlug }: { agentSlug: string }): ReactEle
   const handleApply = async (id: string): Promise<void> => {
     try {
       await apply.mutateAsync(id);
-      toast.success('Improvement marked as handled');
+      toast.success(t('improvementsCard.toastImprovementHandled'));
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : 'Failed to update improvement');
+      toast.error(
+        reason instanceof Error ? reason.message : t('improvementsCard.toastFailedToUpdate'),
+      );
     }
   };
   const handleDismiss = async (id: string): Promise<void> => {
     try {
       await dismiss.mutateAsync({ id });
-      toast.success('Improvement dismissed');
+      toast.success(t('improvementsCard.toastImprovementDismissed'));
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : 'Failed to dismiss improvement');
+      toast.error(
+        reason instanceof Error ? reason.message : t('improvementsCard.toastFailedToDismiss'),
+      );
     }
   };
 
   return (
     <MetricsCard
-      title='Improvement suggestions'
-      description='Generated hourly from negative-signal sessions. Review the proposed fix, make the change manually, then mark it handled.'
+      title={t('improvementsCard.title')}
+      description={t('improvementsCard.description')}
     >
       {isLoading ? (
         <Skeleton className='h-24 w-full' />
       ) : error ? (
-        <p className='text-sm text-destructive'>Failed to load suggestions: {error.message}</p>
+        <p className='text-sm text-destructive'>
+          {t('improvementsCard.failedToLoad', { message: error.message })}
+        </p>
       ) : !items?.length ? (
-        <p className='text-sm text-muted-foreground'>No pending suggestions.</p>
+        <p className='text-sm text-muted-foreground'>
+          {t('improvementsCard.noPendingSuggestions')}
+        </p>
       ) : (
         <div className='flex flex-col gap-2'>
-          {BUCKETS.map(bucket => {
+          {BUCKET_KEYS.map(bucket => {
             const rows = grouped.get(bucket.key) ?? [];
             const open = openBucket === bucket.key;
             return (
@@ -159,16 +176,16 @@ export const ImprovementsCard = ({ agentSlug }: { agentSlug: string }): ReactEle
                   ) : (
                     <ChevronRight className='size-4 text-muted-foreground' />
                   )}
-                  <span className='font-medium text-foreground'>{bucket.label}</span>
+                  <span className='font-medium text-foreground'>{t(bucket.labelKey)}</span>
                   <span className='text-xs text-muted-foreground'>
-                    {rows.length} finding{rows.length === 1 ? '' : 's'}
+                    {t('improvementsCard.findingCount', { count: rows.length })}
                   </span>
                 </button>
                 {open && (
                   <div className='flex flex-col gap-3 border-t border-border p-3'>
                     {rows.length === 0 ? (
                       <p className='text-xs text-muted-foreground'>
-                        Nothing pending in this bucket.
+                        {t('improvementsCard.nothingPendingInBucket')}
                       </p>
                     ) : (
                       rows.map(item => (

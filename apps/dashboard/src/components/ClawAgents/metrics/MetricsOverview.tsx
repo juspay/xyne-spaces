@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/utils/classNames';
 import type { AgentMetrics, GlobalMetrics } from '@/services/claw/clawMetricsTypes';
 import {
@@ -55,17 +56,20 @@ const Tile = ({
 );
 
 export const MetricsOverview = ({ data }: { data: GlobalMetrics | AgentMetrics }): ReactElement => {
+  const { t } = useTranslation('common');
   const p50Delta = formatSignedMs(data.delta.p50TotalMs);
   const p95Delta = formatSignedMs(data.delta.p95TotalMs);
   const errorDelta = formatSignedPct(data.delta.errorRate);
   const concerns: string[] = [];
   if (data.totals.errorRate > 0.1)
-    concerns.push(`error rate is ${formatPct(data.totals.errorRate)}`);
+    concerns.push(t('metricsOverview.concernErrorRate', { pct: formatPct(data.totals.errorRate) }));
   if ((data.totals.p95TotalMs ?? 0) > 5 * 60_000) {
-    concerns.push(`p95 is ${formatMs(data.totals.p95TotalMs)}`);
+    concerns.push(t('metricsOverview.concernP95', { ms: formatMs(data.totals.p95TotalMs) }));
   }
-  if ((data.delta.errorRate ?? 0) > 0.02) concerns.push('errors are trending upward');
-  if ((data.delta.p95TotalMs ?? 0) > 30_000) concerns.push('tail latency is trending upward');
+  if ((data.delta.errorRate ?? 0) > 0.02)
+    concerns.push(t('metricsOverview.concernErrorsTrendingUp'));
+  if ((data.delta.p95TotalMs ?? 0) > 30_000)
+    concerns.push(t('metricsOverview.concernTailLatencyTrendingUp'));
   const severe = data.totals.errorRate > 0.1 || concerns.length >= 3;
 
   return (
@@ -82,46 +86,57 @@ export const MetricsOverview = ({ data }: { data: GlobalMetrics | AgentMetrics }
         )}
       >
         {concerns.length === 0
-          ? `Metrics look healthy across ${data.totals.runs} run${data.totals.runs === 1 ? '' : 's'}.`
-          : `${concerns.length} concern${concerns.length === 1 ? '' : 's'}: ${concerns.join(' · ')}`}
+          ? t('metricsOverview.healthyBanner', { count: data.totals.runs })
+          : t('metricsOverview.concernsBanner', {
+              count: concerns.length,
+              list: concerns.join(' · '),
+            })}
       </div>
 
       <div className='grid gap-3 md:grid-cols-2'>
         <Hero
-          label='Typical run time'
+          label={t('metricsOverview.typicalRunTimeLabel')}
           value={formatMs(data.totals.p50TotalMs)}
           delta={p50Delta}
-          help='Half of runs completed faster than this.'
+          help={t('metricsOverview.typicalRunTimeHelp')}
         />
         <Hero
-          label='Slow-tail run time'
+          label={t('metricsOverview.slowTailRunTimeLabel')}
           value={formatMs(data.totals.p95TotalMs)}
           delta={p95Delta}
-          help='The slowest 5% completed at or above this time.'
+          help={t('metricsOverview.slowTailRunTimeHelp')}
         />
       </div>
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
         <Tile
-          label='Total runs'
+          label={t('metricsOverview.totalRunsLabel')}
           value={String(data.totals.runs)}
-          detail={`${data.delta.runs >= 0 ? '+' : ''}${data.delta.runs} vs previous`}
+          detail={t('metricsOverview.totalRunsDetail', {
+            sign: data.delta.runs >= 0 ? '+' : '',
+            count: data.delta.runs,
+          })}
         />
         <Tile
-          label='Where time goes'
-          value={`${formatMs(data.totals.avgLlmMs)} LLM`}
-          detail={`${formatMs(data.totals.avgToolMs)} in tools`}
+          label={t('metricsOverview.whereTimeGoesLabel')}
+          value={t('metricsOverview.whereTimeGoesValue', { ms: formatMs(data.totals.avgLlmMs) })}
+          detail={t('metricsOverview.whereTimeGoesDetail', {
+            ms: formatMs(data.totals.avgToolMs),
+          })}
         />
         <Tile
-          label='Error rate'
+          label={t('metricsOverview.errorRateLabel')}
           value={formatPct(data.totals.errorRate)}
           detail={errorDelta.label}
           tone={errorDelta.tone}
         />
         <Tile
-          label='Outcomes'
-          value={`${data.totals.completed} complete`}
-          detail={`${data.totals.failed} failed · ${data.totals.cancelled} cancelled`}
+          label={t('metricsOverview.outcomesLabel')}
+          value={t('metricsOverview.outcomesValue', { count: data.totals.completed })}
+          detail={t('metricsOverview.outcomesDetail', {
+            failed: data.totals.failed,
+            cancelled: data.totals.cancelled,
+          })}
         />
       </div>
     </div>

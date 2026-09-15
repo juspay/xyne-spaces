@@ -1,4 +1,5 @@
 import { ReactElement } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/utils/classNames';
 import type { AgentSentiment } from '@/services/claw/clawMetricsTypes';
 
@@ -19,13 +20,14 @@ const MiniTile = ({
 );
 
 export const SentimentPanel = ({ sentiment }: { sentiment: AgentSentiment }): ReactElement => {
+  const { t } = useTranslation('common');
   const concerns: string[] = [];
   if (sentiment.ratingRatio !== null && sentiment.ratingRatio < 0.5)
-    concerns.push('ratings are mostly negative');
-  if (sentiment.apologeticRate > 0.2) concerns.push('apologetic replies are elevated');
-  if (sentiment.failedRate > 0.1) concerns.push('failed runs are elevated');
-  if (sentiment.cancelledRate > 0.1) concerns.push('cancelled runs are elevated');
-  if (sentiment.retriedRate > 0.2) concerns.push('LLM retries are elevated');
+    concerns.push(t('sentimentPanel.concernRatingsNegative'));
+  if (sentiment.apologeticRate > 0.2) concerns.push(t('sentimentPanel.concernApologeticElevated'));
+  if (sentiment.failedRate > 0.1) concerns.push(t('sentimentPanel.concernFailedElevated'));
+  if (sentiment.cancelledRate > 0.1) concerns.push(t('sentimentPanel.concernCancelledElevated'));
+  if (sentiment.retriedRate > 0.2) concerns.push(t('sentimentPanel.concernRetriesElevated'));
   const severe = concerns.length >= 3;
 
   return (
@@ -42,54 +44,67 @@ export const SentimentPanel = ({ sentiment }: { sentiment: AgentSentiment }): Re
         )}
       >
         {concerns.length === 0
-          ? `Sentiment looks healthy across ${sentiment.totalRuns} runs.`
-          : `${concerns.length} concern${concerns.length === 1 ? '' : 's'}: ${concerns.join(' · ')}`}
+          ? t('sentimentPanel.healthyBanner', { count: sentiment.totalRuns })
+          : t('sentimentPanel.concernsBanner', {
+              count: concerns.length,
+              list: concerns.join(' · '),
+            })}
       </div>
 
       <div className='grid grid-cols-2 gap-3 lg:grid-cols-5'>
         <MiniTile
-          label='Ratings 👍'
+          label={t('sentimentPanel.ratingsUpLabel')}
           value={String(sentiment.ratingUp)}
           detail={
             sentiment.ratingTotal
-              ? `${((sentiment.ratingUp / sentiment.ratingTotal) * 100).toFixed(0)}% of rated`
-              : 'No ratings'
+              ? t('sentimentPanel.percentOfRated', {
+                  pct: ((sentiment.ratingUp / sentiment.ratingTotal) * 100).toFixed(0),
+                })
+              : t('sentimentPanel.noRatings')
           }
         />
         <MiniTile
-          label='Ratings 👎'
+          label={t('sentimentPanel.ratingsDownLabel')}
           value={String(sentiment.ratingDown)}
           detail={
             sentiment.ratingTotal
-              ? `${((sentiment.ratingDown / sentiment.ratingTotal) * 100).toFixed(0)}% of rated`
-              : 'No ratings'
+              ? t('sentimentPanel.percentOfRated', {
+                  pct: ((sentiment.ratingDown / sentiment.ratingTotal) * 100).toFixed(0),
+                })
+              : t('sentimentPanel.noRatings')
           }
         />
         <MiniTile
-          label='Apologetic'
+          label={t('sentimentPanel.apologeticLabel')}
           value={`${(sentiment.apologeticRate * 100).toFixed(1)}%`}
-          detail='of completed runs'
+          detail={t('sentimentPanel.ofCompletedRuns')}
         />
         <MiniTile
-          label='Cancelled'
+          label={t('sentimentPanel.cancelledLabel')}
           value={`${(sentiment.cancelledRate * 100).toFixed(1)}%`}
-          detail='of all runs'
+          detail={t('sentimentPanel.ofAllRuns')}
         />
         <MiniTile
-          label='Retried'
+          label={t('sentimentPanel.retriedLabel')}
           value={`${(sentiment.retriedRate * 100).toFixed(1)}%`}
-          detail='LLM retries'
+          detail={t('sentimentPanel.llmRetries')}
         />
       </div>
 
       {sentiment.recentComments.length > 0 && (
         <div className='flex flex-col gap-2'>
           <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
-            Recent comments
+            {t('sentimentPanel.recentCommentsLabel')}
           </p>
           {sentiment.recentComments.map(comment => (
             <div key={comment.sessionId} className='flex gap-3 rounded-lg bg-muted/30 p-3'>
-              <span aria-label={comment.rating === 'up' ? 'Thumbs up' : 'Thumbs down'}>
+              <span
+                aria-label={
+                  comment.rating === 'up'
+                    ? t('sentimentPanel.thumbsUpAriaLabel')
+                    : t('sentimentPanel.thumbsDownAriaLabel')
+                }
+              >
                 {comment.rating === 'up' ? '👍' : '👎'}
               </span>
               <div className='min-w-0 flex-1'>
