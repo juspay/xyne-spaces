@@ -242,3 +242,10 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+
+# Performance-test output and real credential fixtures
+!/performance/reports/
+/performance/reports/*
+!/performance/reports/.gitkeep
+/performance/test-data/users*.json
+!/performance/test-data/users.example.json
