@@ -50,8 +50,12 @@ export const extractTicketRefFromUrl = (rawUrl: string): PastedTicketRef | null 
 export const formatShortDate = (timestamp: number): string =>
   new Date(timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
-export const toDateInputValue = (timestamp: number): string =>
-  new Date(timestamp).toISOString().slice(0, 10);
+const pad = (value: number): string => String(value).padStart(2, '0');
+
+export const toDateInputValue = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
 
 export type HighlightPart = { text: string; match: boolean };
 

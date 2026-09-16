@@ -4,7 +4,7 @@ import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shar
 import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { MultiSelect } from '../../ui/MultiSelect/MultiSelect';
-import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
+import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
 import { TicketLinkField } from '../TicketLinkField/TicketLinkField';
 import {
   toDateInputValue,

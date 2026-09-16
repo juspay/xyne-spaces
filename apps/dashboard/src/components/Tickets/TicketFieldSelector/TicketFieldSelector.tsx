@@ -3,9 +3,9 @@ import { useTicketFieldSearch } from '../../../hooks/useTicketFieldSearch';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuth } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
-import { EntitySelector } from '../EntitySelector/EntitySelector';
-import type { SelectorOption } from '../EntitySelector/EntitySelector.types';
-import { looksLikeXyneId } from '../../Tickets/TicketLinkField/ticketLinkUtils';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import { looksLikeXyneId } from '../TicketLinkField/ticketLinkUtils';
 import { cn } from '../../../utils/classNames';
 
 export interface TicketFieldSelectorProps {

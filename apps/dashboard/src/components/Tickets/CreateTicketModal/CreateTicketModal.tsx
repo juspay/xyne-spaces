@@ -94,7 +94,7 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
-import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
+import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';

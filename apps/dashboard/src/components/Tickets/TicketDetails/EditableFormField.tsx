@@ -10,7 +10,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
 import { MultiSelect } from '../../ui/MultiSelect';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
-import { TicketFieldSelector } from '../../ui/TicketFieldSelector/TicketFieldSelector';
+import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
 import { looksLikeXyneId } from '../TicketLinkField/ticketLinkUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
