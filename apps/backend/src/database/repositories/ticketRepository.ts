@@ -92,7 +92,6 @@ const makeFallbackCountsSnapshot = (ticket: {
 });
 
 export class TicketRepository {
-
   /**
    * Create a ticket (repository method - database access only)
    * NOTE: For creating tickets with conversations, use TicketService.createTicketWithConversation()
@@ -107,7 +106,7 @@ export class TicketRepository {
       updatedBy: string;
       formFieldChanges?: FormFieldChanges;
     },
-    tx?: PrismaTransaction,
+    tx?: PrismaTransaction
   ) {
     const db = tx || prisma; // Use transaction if provided, else default prisma
 
@@ -131,22 +130,24 @@ export class TicketRepository {
     // Fetch all stages of the board
     const stages = await db.stage.findMany({
       where: {
-        boardId: data.boardId
+        boardId: data.boardId,
       },
       orderBy: {
-        sequenceNumber: 'asc'
-      }
+        sequenceNumber: 'asc',
+      },
     });
 
     if (!stages || stages.length === 0) {
-      throw new Error(`No stages found for board ${data.boardId}. Board must have at least one stage.`);
+      throw new Error(
+        `No stages found for board ${data.boardId}. Board must have at least one stage.`
+      );
     }
 
     // Get the stage - use provided stageName if it exists in stages, otherwise use first stage
     let selectedStage = stages[0]; // Default to first stage
 
     if (data.stageName) {
-      const foundStage = stages.find(stage => stage.name === data.stageName);
+      const foundStage = stages.find((stage) => stage.name === data.stageName);
       if (foundStage) {
         selectedStage = foundStage;
       }
@@ -176,7 +177,7 @@ export class TicketRepository {
         update: {}, // No update needed if exists
         create: {
           mid: data.merchantId,
-        }
+        },
       });
       logger.info(`[TicketRepository] Upserted merchant with mid: ${data.merchantId}`);
     }
@@ -188,7 +189,9 @@ export class TicketRepository {
       if (!board) {
         throw new Error(`Board ${data.boardId} not found`);
       }
-      const transitions = await client.stageTransition.findMany({ where: { boardId: data.boardId } });
+      const transitions = await client.stageTransition.findMany({
+        where: { boardId: data.boardId },
+      });
       const boardEtaManagement = parseBoardEtaManagement(board.metadata, board.boardType);
 
       // Create ticket with the conversationId, auto-assigned stageName. `eta` is set here
@@ -225,7 +228,7 @@ export class TicketRepository {
           kanbanPosition,
           ...(data.createdAt && { createdAt: data.createdAt }),
           lastEmailAt: data.createdAt ?? new Date(),
-        }
+        },
       });
 
       const stageEnteredAt = new Date();
@@ -243,7 +246,7 @@ export class TicketRepository {
             stageLeftAt: null,
             stageEta: stageEtaDeadline,
             updatedBy: data.createdBy,
-          }
+          },
         });
         stageVisitId = stageEtaRow.id;
       }
@@ -251,7 +254,7 @@ export class TicketRepository {
       const stepEstimate = resolveStepEstimate(
         { id: selectedStage.id, eta: selectedStage.eta },
         null,
-        { requireExplicitTransition: false },
+        { requireExplicitTransition: false }
       );
       const etaResult = evaluateEta({
         ticketId: ticket.id,
@@ -276,7 +279,10 @@ export class TicketRepository {
         now: stageEnteredAt,
       });
 
-      const mergedMetadata = mergeTicketEtaManagement(ticket.metadata, etaResult.ticketEtaManagementPatch);
+      const mergedMetadata = mergeTicketEtaManagement(
+        ticket.metadata,
+        etaResult.ticketEtaManagementPatch
+      );
       const finalTicket = await client.ticket.update({
         where: { id: ticket.id },
         data: {
@@ -319,30 +325,34 @@ export class TicketRepository {
         ticketUserGroupId: ticket.userGroupId,
         boardId: ticket.boardId,
         actorId: data.createdBy,
-      }).catch(error => {
-        logger.error('[TicketRepository] Failed to dispatch ETA notifications', { ticketId: ticket.id, error });
+      }).catch((error) => {
+        logger.error('[TicketRepository] Failed to dispatch ETA notifications', {
+          ticketId: ticket.id,
+          error,
+        });
       });
     }
 
-    const isHotFix = ticket.ticketType === BaseTicketType.Hotfix
+    const isHotFix = ticket.ticketType === BaseTicketType.Hotfix;
     // If it's a hotfix, add 'hotfix' tag to the ticket
     if (isHotFix) {
       await db.ticketTag.create({
         data: {
           ticketId: ticket.id,
           workspaceId: ticket.workspaceId,
-          name: 'hotfix'
-        }
-      })
+          name: 'hotfix',
+        },
+      });
       await dualWriteTicketTag(ticket.id, 'hotfix');
       logger.info(`Hotfix tag added to ticket ${ticket.id}`);
     }
-    const createdSnapshot = (await buildKanbanCountsSnapshot(ticket.id)) ?? makeFallbackCountsSnapshot(ticket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
+    const createdSnapshot =
+      (await buildKanbanCountsSnapshot(ticket.id)) ??
+      makeFallbackCountsSnapshot(ticket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'insert',
       ticket: createdSnapshot,
     });
-
 
     void (async (): Promise<void> => {
       try {
@@ -355,7 +365,7 @@ export class TicketRepository {
               performedBy: { id: data.createdBy },
             },
           },
-          ticket.workspaceId,
+          ticket.workspaceId
         );
       } catch (err) {
         logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
@@ -392,9 +402,8 @@ export class TicketRepository {
       cascadeFlow?: boolean;
       allowedCurrentStatuses?: readonly TicketStatusV2[];
       requiredActiveFlowRootId?: string;
-    } = {},
+    } = {}
   ) {
-
     // Get current ticket to capture old stage name, boardId, and statusV2
     const currentTicket = await prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -414,7 +423,7 @@ export class TicketRepository {
         eta: true,
         createdAt: true,
         metadata: true,
-      }
+      },
     });
 
     if (!currentTicket) {
@@ -429,12 +438,12 @@ export class TicketRepository {
     const [currentStage, targetStage] = await Promise.all([
       prisma.stage.findFirst({
         where: { boardId: currentTicket.boardId, name: oldStageName },
-        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true }
+        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true },
       }),
       prisma.stage.findFirst({
         where: { boardId: currentTicket.boardId, name: newStageName },
-        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true, eta: true }
-      })
+        select: { id: true, sequenceNumber: true, defaultTicketStatusV2: true, eta: true },
+      }),
     ]);
 
     if (!targetStage) {
@@ -463,8 +472,8 @@ export class TicketRepository {
           });
         guardedUpdatedTicket = options.requiredActiveFlowRootId
           ? await updateWhileFlowRunActive({
-              runTransaction: operation => prisma.$transaction(operation),
-              lockAndReadRootStatus: async tx => {
+              runTransaction: (operation) => prisma.$transaction(operation),
+              lockAndReadRootStatus: async (tx) => {
                 const [root] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
                   SELECT "statusV2"
                   FROM "tickets"
@@ -485,7 +494,8 @@ export class TicketRepository {
       }
     }
 
-    const isForwardMovement = !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
+    const isForwardMovement =
+      !currentStage || targetStage.sequenceNumber > currentStage.sequenceNumber;
     const now = new Date();
     // Resolved outside the transaction: a stable bot-user lookup, not part of the
     // transactional state, and best kept off the held connection.
@@ -504,13 +514,13 @@ export class TicketRepository {
             where: {
               ticketId: ticketId,
               stageId: currentStage.id,
-              stageLeftAt: null // Only update active entry
+              stageLeftAt: null, // Only update active entry
             },
             data: {
               stageLeftAt: now,
               updatedAt: now,
-              updatedBy: updatedBy
-            }
+              updatedBy: updatedBy,
+            },
           });
         }
 
@@ -518,8 +528,8 @@ export class TicketRepository {
         const existingEntry = await tx.ticketStageEta.findFirst({
           where: {
             ticketId: ticketId,
-            stageId: targetStage.id
-          }
+            stageId: targetStage.id,
+          },
         });
 
         if (existingEntry) {
@@ -530,13 +540,12 @@ export class TicketRepository {
               stageEnteredAt: now, // Update entered time to now
               stageLeftAt: null, // Mark as active
               updatedAt: now,
-              updatedBy: updatedBy
-            }
+              updatedBy: updatedBy,
+            },
           });
         } else {
           // First time entering this stage - create new entry only if stage has ETA
           if (targetStage.eta !== null && targetStage.eta > 0) {
-
             const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
 
             await tx.ticketStageEta.create({
@@ -547,8 +556,8 @@ export class TicketRepository {
                 stageEnteredAt: now,
                 stageLeftAt: null,
                 stageEta: stageEtaDeadline,
-                updatedBy: updatedBy
-              }
+                updatedBy: updatedBy,
+              },
             });
           }
         }
@@ -559,30 +568,29 @@ export class TicketRepository {
         const forwardStages = await tx.stage.findMany({
           where: {
             boardId: currentTicket.boardId,
-            sequenceNumber: { gt: targetStage.sequenceNumber }
+            sequenceNumber: { gt: targetStage.sequenceNumber },
           },
-          select: { id: true }
+          select: { id: true },
         });
 
-        const forwardStageIds = forwardStages.map(s => s.id);
+        const forwardStageIds = forwardStages.map((s) => s.id);
 
         // 2. Delete all entries for those forward stages
         if (forwardStageIds.length > 0) {
           await tx.ticketStageEta.deleteMany({
             where: {
               ticketId: ticketId,
-              stageId: { in: forwardStageIds }
-            }
+              stageId: { in: forwardStageIds },
+            },
           });
-
         }
 
         // 3. Reactivate target stage (set stageLeftAt to null)
         const targetEntry = await tx.ticketStageEta.findFirst({
           where: {
             ticketId: ticketId,
-            stageId: targetStage.id
-          }
+            stageId: targetStage.id,
+          },
         });
 
         if (targetEntry) {
@@ -592,8 +600,8 @@ export class TicketRepository {
             data: {
               stageLeftAt: null,
               updatedAt: now,
-              updatedBy: updatedBy
-            }
+              updatedBy: updatedBy,
+            },
           });
         } else {
           // Entry doesn't exist (edge case - create it)
@@ -607,8 +615,8 @@ export class TicketRepository {
                 stageEnteredAt: now,
                 stageLeftAt: null,
                 stageEta: stageEtaDeadline,
-                updatedBy: updatedBy
-              }
+                updatedBy: updatedBy,
+              },
             });
           }
         }
@@ -624,11 +632,9 @@ export class TicketRepository {
       const deadlineTracked = activeVisitRow
         ? activeVisitRow.stageEta.getTime() !== activeVisitRow.stageEnteredAt.getTime()
         : false;
-      const stepEstimate = resolveStepEstimate(
-        { id: targetStage.id, eta: targetStage.eta },
-        null,
-        { requireExplicitTransition: false },
-      );
+      const stepEstimate = resolveStepEstimate({ id: targetStage.id, eta: targetStage.eta }, null, {
+        requireExplicitTransition: false,
+      });
       // metadata AND eta were both read before this transaction opened, so a concurrent write
       // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
       // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
@@ -668,7 +674,7 @@ export class TicketRepository {
       });
       const mergedMetadata = mergeTicketEtaManagement(
         lockedTicket?.metadata,
-        etaResult.ticketEtaManagementPatch,
+        etaResult.ticketEtaManagementPatch
       );
 
       // The optimistic-concurrency guard above already committed stageName/statusV2 but never
@@ -711,15 +717,19 @@ export class TicketRepository {
           sourceBranch: prActivityData.sourceBranchName,
           destinationBranch: prActivityData.destinationBranchName,
           ...(prActivityData.prAuthor ? { authorName: prActivityData.prAuthor } : {}),
-          ...(stageChanged ? {
-            // Stage change info - aligned with base activity structure
-            field: 'stageName',
-            oldValue: oldStageName ?? undefined,
-            newValue: newStageName,
-          } : {}),
-          ...(prActivityData.remainingOpenPRs && prActivityData.remainingOpenPRs > 0 ? {
-            remainingOpenPRs: prActivityData.remainingOpenPRs
-          } : {})
+          ...(stageChanged
+            ? {
+                // Stage change info - aligned with base activity structure
+                field: 'stageName',
+                oldValue: oldStageName ?? undefined,
+                newValue: newStageName,
+              }
+            : {}),
+          ...(prActivityData.remainingOpenPRs && prActivityData.remainingOpenPRs > 0
+            ? {
+                remainingOpenPRs: prActivityData.remainingOpenPRs,
+              }
+            : {}),
         };
 
         await tx.ticketActivity.create({
@@ -729,8 +739,8 @@ export class TicketRepository {
             updatedBy: updatedBy,
             activityType: ActivityType.PR,
             value: activityValue as Prisma.InputJsonValue,
-            channelId: currentTicket.channelId
-          }
+            channelId: currentTicket.channelId,
+          },
         });
 
         logger.info('[TicketRepository] Created PR activity', {
@@ -754,8 +764,8 @@ export class TicketRepository {
               source: source,
               ...(source === ActivitySource.AUTOMATION ? { isAutomation: true } : {}),
             } as Prisma.InputJsonValue,
-            channelId: currentTicket.channelId
-          }
+            channelId: currentTicket.channelId,
+          },
         });
 
         logger.info('[TicketRepository] Created STAGE_NAME activity', {
@@ -784,7 +794,7 @@ export class TicketRepository {
               channelId: currentTicket.channelId,
             },
           },
-          tx,
+          tx
         );
 
         logger.info('[TicketRepository] Created STATUS activity', {
@@ -827,8 +837,11 @@ export class TicketRepository {
         ticketUserGroupId: currentTicket.userGroupId,
         boardId: currentTicket.boardId,
         actorId: updatedBy,
-      }).catch(error => {
-        logger.error('[TicketRepository] Failed to dispatch ETA notifications', { ticketId, error });
+      }).catch((error) => {
+        logger.error('[TicketRepository] Failed to dispatch ETA notifications', {
+          ticketId,
+          error,
+        });
       });
     }
 
@@ -845,21 +858,21 @@ export class TicketRepository {
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
     if (
-      newStatusV2 === TicketStatusV2.COMPLETED
-      && oldStatusV2 !== TicketStatusV2.COMPLETED
-      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
+      newStatusV2 === TicketStatusV2.COMPLETED &&
+      oldStatusV2 !== TicketStatusV2.COMPLETED &&
+      isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
     ) {
       // The ticket update above is already committed; deployed-version
       // bookkeeping must not fail the request or suppress the emits below.
       try {
         await versionReleaseMappingService.updateDeployedVersionOnCompletion(
           ticketId,
-          updatedTicket.updatedAt,
+          updatedTicket.updatedAt
         );
       } catch (error) {
         logger.error(
           `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
-          error,
+          error
         );
       }
     }
@@ -879,7 +892,9 @@ export class TicketRepository {
       });
     }
 
-    const updatedSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
+    const updatedSnapshot =
+      (await buildKanbanCountsSnapshot(updatedTicket.id)) ??
+      makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: updatedSnapshot,
@@ -901,7 +916,7 @@ export class TicketRepository {
         // Get user name for the message
         const user = await prisma.user.findUnique({
           where: { id: updatedBy },
-          select: { name: true }
+          select: { name: true },
         });
 
         const userName = user?.name || 'System';
@@ -973,7 +988,7 @@ export class TicketRepository {
         stageName: true,
         updatedBy: true,
         board: { select: { boardType: true } },
-      }
+      },
     });
   }
   /**
@@ -1028,7 +1043,7 @@ export class TicketRepository {
    */
   async getTicketByXyneId(xyneId: string, workspaceId: string) {
     return await prisma.ticket.findUnique({
-      where: { workspaceId_xyneId: { workspaceId, xyneId } }
+      where: { workspaceId_xyneId: { workspaceId, xyneId } },
     });
   }
 
@@ -1049,7 +1064,7 @@ export class TicketRepository {
    */
   async getTicketById(ticketId: string) {
     return await prisma.ticket.findUnique({
-      where: { id: ticketId }
+      where: { id: ticketId },
     });
   }
 
@@ -1069,14 +1084,10 @@ export class TicketRepository {
           },
         },
       },
-      orderBy: [
-        { timestamp: 'desc' },
-        { id: 'desc' },
-      ],
+      orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
       take: limit,
     });
   }
-
 
   /**
    * Get hotfix sub-tickets for a parent ticket
@@ -1087,23 +1098,27 @@ export class TicketRepository {
         ticketId: parentTicketId,
         subTicket: {
           mappedTicket: {
-            ticketType: BaseTicketType.Hotfix
-          }
-        }
+            ticketType: BaseTicketType.Hotfix,
+          },
+        },
       },
       include: {
         subTicket: {
           include: {
-            mappedTicket: true
-          }
-        }
-      }
+            mappedTicket: true,
+          },
+        },
+      },
     });
 
-    return mappings.map(m => m.subTicket);
+    return mappings.map((m) => m.subTicket);
   }
 
-  async updateTicketAssignee(ticketId: string, newAssigneeId: string | null, updatedBy: string): Promise<void> {
+  async updateTicketAssignee(
+    ticketId: string,
+    newAssigneeId: string | null,
+    updatedBy: string
+  ): Promise<void> {
     const previous = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { assignedTo: true },
@@ -1116,7 +1131,7 @@ export class TicketRepository {
         assignedTo: newAssigneeId,
         updatedBy: updatedBy,
         updatedAt: new Date(),
-      }
+      },
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
@@ -1131,7 +1146,9 @@ export class TicketRepository {
       });
     }
 
-    const assigneeSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
+    const assigneeSnapshot =
+      (await buildKanbanCountsSnapshot(updatedTicket.id)) ??
+      makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
     websocketService.broadcastTicketCountsUpdate({
       operation: 'update',
       ticket: assigneeSnapshot,
@@ -1142,7 +1159,11 @@ export class TicketRepository {
     });
   }
 
-  async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
+  async assignUserGroupToTicket(
+    ticketId: string,
+    groupId: string,
+    updatedBy: string
+  ): Promise<void> {
     const previous = await prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { userGroupId: true },
@@ -1155,7 +1176,7 @@ export class TicketRepository {
         userGroupId: groupId,
         updatedBy: updatedBy,
         updatedAt: new Date(),
-      }
+      },
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
@@ -1169,29 +1190,55 @@ export class TicketRepository {
         performedById: updatedBy,
       });
     }
-  } 
+  }
 
-  // Atomically claims the release-insights in-flight flag: one UPDATE that both checks
-  // (flag unset, or set before `staleBefore`) and sets, so concurrent callers can't both
-  // pass a read-then-write guard. Returns false when another generation holds the flag.
+  // Claims the release-insights in-flight flag. Read + write run in one SERIALIZABLE
+  // transaction (same pattern as the sharing services): a concurrent claimer's commit
+  // fails ours with P2034, and the retry re-reads the flag it just set. No raw SQL — the
+  // tenant extensions must see this write. Returns false when another generation holds
+  // the flag and it isn't older than `staleBefore`.
   async claimReleaseInsightsGeneration(ticketId: string, staleBefore: Date): Promise<boolean> {
-    const startedAt = new Date().toISOString();
-    const updated = await prisma.$executeRaw`
-      UPDATE "tickets"
-      SET "metadata" = COALESCE("metadata", '{}'::jsonb)
-        || jsonb_build_object('isGeneratingReleaseInsights', true, 'insightsGenerationStartedAt', ${startedAt}::text)
-      WHERE "id" = ${ticketId}
-        AND (
-          COALESCE("metadata"->>'isGeneratingReleaseInsights', 'false') <> 'true'
-          OR COALESCE("metadata"->>'insightsGenerationStartedAt', '') < ${staleBefore.toISOString()}
-        )`;
-    return updated > 0;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(
+          async (tx) => {
+            const ticket = await tx.ticket.findUnique({
+              where: { id: ticketId },
+              select: { metadata: true },
+            });
+            if (!ticket) return false;
+            const current = (ticket.metadata as Record<string, unknown> | null) ?? {};
+            if (current.isGeneratingReleaseInsights === true) {
+              const startedAt = current.insightsGenerationStartedAt;
+              const started = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN;
+              if (Number.isFinite(started) && started >= staleBefore.getTime()) return false;
+            }
+            await tx.ticket.update({
+              where: { id: ticketId },
+              data: {
+                metadata: {
+                  ...current,
+                  isGeneratingReleaseInsights: true,
+                  insightsGenerationStartedAt: new Date().toISOString(),
+                } as Prisma.InputJsonObject,
+              },
+            });
+            return true;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      } catch (error) {
+        const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
+        if (!isWriteConflict || attempt === 3) throw error;
+      }
+    }
+    return false;
   }
 
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { metadata: true }
+      select: { metadata: true },
     });
 
     if (!ticket) {
@@ -1205,9 +1252,9 @@ export class TicketRepository {
       data: {
         metadata: {
           ...existingMetadata,
-          ...metadata
-        }
-      }
+          ...metadata,
+        },
+      },
     });
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
@@ -1228,7 +1275,7 @@ export class TicketRepository {
       aiPriority?: string;
     },
     updatedBy: string,
-    options: { cascadeFlow?: boolean } = {},
+    options: { cascadeFlow?: boolean } = {}
   ): Promise<void> {
     const data: Record<string, unknown> = { updatedBy, updatedAt: new Date() };
     if (fields.title !== undefined) data.title = fields.title;
@@ -1251,7 +1298,7 @@ export class TicketRepository {
       fields.title !== undefined ||
       fields.description !== undefined ||
       fields.priority !== undefined ||
-     fields.eta !== undefined ||
+      fields.eta !== undefined ||
       fields.ticketType !== undefined ||
       fields.isArchived !== undefined;
 
@@ -1294,9 +1341,9 @@ export class TicketRepository {
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
 
     if (
-      fields.statusV2 !== undefined
-      && fields.statusV2 !== previousStatus
-      && options.cascadeFlow !== false
+      fields.statusV2 !== undefined &&
+      fields.statusV2 !== previousStatus &&
+      options.cascadeFlow !== false
     ) {
       await dispatchCommittedTicketStatusChange({
         ticketId,
@@ -1308,21 +1355,21 @@ export class TicketRepository {
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
     if (
-      fields.statusV2 === TicketStatusV2.COMPLETED
-      && previousStatus !== TicketStatusV2.COMPLETED
-      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
+      fields.statusV2 === TicketStatusV2.COMPLETED &&
+      previousStatus !== TicketStatusV2.COMPLETED &&
+      isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
     ) {
       // The ticket update above is already committed; deployed-version
       // bookkeeping must not fail the request or suppress the emits below.
       try {
         await versionReleaseMappingService.updateDeployedVersionOnCompletion(
           ticketId,
-          updatedTicket.updatedAt,
+          updatedTicket.updatedAt
         );
       } catch (error) {
         logger.error(
           `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
-          error,
+          error
         );
       }
     }
@@ -1352,10 +1399,7 @@ export class TicketRepository {
         changes.title = { previousValue: prevSnapshot.title, newValue: fields.title };
       }
 
-      if (
-        fields.description !== undefined &&
-        prevSnapshot.description !== fields.description
-      ) {
+      if (fields.description !== undefined && prevSnapshot.description !== fields.description) {
         activities.push({
           activityType: ActivityType.DESCRIPTION,
           value: {
@@ -1422,7 +1466,7 @@ export class TicketRepository {
 
       if (activities.length > 0) {
         await prisma.ticketActivity.createMany({
-          data: activities.map(activity => ({
+          data: activities.map((activity) => ({
             ticketId,
             workspaceId: updatedTicket.workspaceId,
             updatedBy,
@@ -1442,7 +1486,11 @@ export class TicketRepository {
     }
 
     if (prevSnapshot) {
-      const metadataSnapshot = (await buildKanbanCountsSnapshot(updatedTicket.id)) ?? makeFallbackCountsSnapshot(updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]);
+      const metadataSnapshot =
+        (await buildKanbanCountsSnapshot(updatedTicket.id)) ??
+        makeFallbackCountsSnapshot(
+          updatedTicket as Parameters<typeof makeFallbackCountsSnapshot>[0]
+        );
       websocketService.broadcastTicketCountsUpdate({
         operation: 'update',
         ticket: metadataSnapshot,
@@ -1457,17 +1505,17 @@ export class TicketRepository {
 
   async addTagsByName(
     ticketId: string,
-    tags: string[],
+    tags: string[]
   ): Promise<{ added: string[]; alreadyPresent: string[] }> {
-    const requested = Array.from(new Set(tags.map(t => t.trim()).filter(t => t.length > 0)));
+    const requested = Array.from(new Set(tags.map((t) => t.trim()).filter((t) => t.length > 0)));
     if (requested.length === 0) return { added: [], alreadyPresent: [] };
 
     const existing = await prisma.ticketTag.findMany({
       where: { ticketId, name: { in: requested } },
       select: { name: true },
     });
-    const alreadyPresent = existing.map(r => r.name);
-    const toAdd = requested.filter(t => !alreadyPresent.includes(t));
+    const alreadyPresent = existing.map((r) => r.name);
+    const toAdd = requested.filter((t) => !alreadyPresent.includes(t));
     if (toAdd.length === 0) return { added: [], alreadyPresent };
 
     const ticket = await prisma.ticket.findUniqueOrThrow({
@@ -1476,7 +1524,7 @@ export class TicketRepository {
     });
 
     await prisma.ticketTag.createMany({
-      data: toAdd.map(name => ({ ticketId, workspaceId: ticket.workspaceId, name })),
+      data: toAdd.map((name) => ({ ticketId, workspaceId: ticket.workspaceId, name })),
       skipDuplicates: true,
     });
     await dualWriteTicketTags(ticketId, toAdd, prisma);
@@ -1495,7 +1543,7 @@ export class TicketRepository {
   }) {
     const normalizedSender =
       extractEmailAddress(params.senderEmail) ?? params.senderEmail.trim().toLowerCase();
-    const channelIds = [...new Set(params.channelIds.map(id => id.trim()).filter(Boolean))];
+    const channelIds = [...new Set(params.channelIds.map((id) => id.trim()).filter(Boolean))];
 
     const matchingConversations = await prisma.email.findMany({
       where: {
@@ -1506,7 +1554,7 @@ export class TicketRepository {
       select: { conversationId: true },
       distinct: ['conversationId'],
     });
-    const conversationIds = matchingConversations.map(row => row.conversationId);
+    const conversationIds = matchingConversations.map((row) => row.conversationId);
 
     const reporterFilter: Prisma.TicketWhereInput[] = [
       { metadata: { path: ['reporterEmail'], equals: normalizedSender } },
