@@ -63,7 +63,18 @@ export const CanvasEditorHeader = ({
   }, [canEdit, canvas.id, focusTitleOnMount, onTitleAutoFocused]);
 
   return (
-    <div className='group/canvas-editor-title relative min-w-0 bg-transparent'>
+    // .canvas-surface blocks the context menu, which the title input needs.
+    <div
+      className='group/canvas-editor-title relative min-w-0 bg-transparent'
+      onContextMenu={event => event.stopPropagation()}
+    >
+      <CanvasLabelManager
+        canvas={canvas}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        revealTriggerOnParentHover
+      />
+
       <div className='flex min-w-0 items-center gap-2'>
         {onTitleIconChange && (
           <SectionEmojiPicker
@@ -102,13 +113,6 @@ export const CanvasEditorHeader = ({
           />
         </h1>
       </div>
-
-      <CanvasLabelManager
-        canvas={canvas}
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        revealTriggerOnParentHover
-      />
     </div>
   );
 };

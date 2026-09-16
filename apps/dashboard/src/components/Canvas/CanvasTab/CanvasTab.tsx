@@ -26,7 +26,7 @@ import {
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
-import { isBaselineCanvasType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   AudioLines,
   ArrowLeft,
@@ -216,7 +216,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
-      if (isChannelAdmin && isBaselineCanvasType(targetCanvas.sdlcArtifact?.artifactType)) {
+      if (isChannelAdmin && targetCanvas.sdlcArtifact?.artifactType === 'HUB_KNOWLEDGE') {
         return CanvasRole.EDITOR;
       }
       const inheritedRoles = participants
@@ -1054,6 +1054,22 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const shouldFocusCanvasTitleOnMount = Boolean(
     canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
   );
+  const canvasTitleHeader = canvas?.id ? (
+    <div className='canvas-editor-title-column pb-6 pt-0 md:pt-2'>
+      <CanvasEditorHeader
+        canvas={canvas}
+        workspaceId={user?.workspaceId}
+        canEdit={canEdit && !isChannelArchived && !previewVersion}
+        title={currentTitle}
+        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
+        onTitleChange={handleCanvasTitleChange}
+        onTitleSave={handleTitleSave}
+        onTitleAutoFocused={handleTitleAutoFocused}
+        titleIcon={currentTitleIcon}
+        onTitleIconChange={handleTitleIconChange}
+      />
+    </div>
+  ) : null;
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1268,23 +1284,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           className='mx-2 flex flex-1 flex-col overflow-hidden md:mx-4'
           data-testid='canvas-editor'
         >
-          {canvas?.id && (
-            <div className='canvas-editor-title-column shrink-0 pb-6 pt-8 md:pt-10'>
-              <CanvasEditorHeader
-                canvas={canvas}
-                workspaceId={user?.workspaceId}
-                canEdit={canEdit && !isChannelArchived && !previewVersion}
-                title={currentTitle}
-                focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-                onTitleChange={handleCanvasTitleChange}
-                onTitleSave={handleTitleSave}
-                onTitleAutoFocused={handleTitleAutoFocused}
-                titleIcon={currentTitleIcon}
-                onTitleIconChange={handleTitleIconChange}
-              />
-            </div>
-          )}
-
           <div className='min-h-0 flex-1 overflow-hidden'>
             {previewVersion ? (
               <CanvasEditor
@@ -1297,6 +1296,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
                 autoFocus={false}
+                header={canvasTitleHeader}
               />
             ) : canvas?.id && canvas.isCollaborative ? (
               <CollaborativeCanvasEditor
@@ -1311,6 +1311,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
                 autoFocus={!shouldFocusCanvasTitleOnMount}
+                header={canvasTitleHeader}
               />
             ) : (
               <CanvasEditor
@@ -1326,6 +1327,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
                 autoFocus={!shouldFocusCanvasTitleOnMount}
+                header={canvasTitleHeader}
               />
             )}
           </div>

@@ -1133,8 +1133,7 @@ const ProjectDetailScreen = (): ReactElement => {
         >
           <h2 className='text-lg font-semibold'>Add Repository</h2>
           <p className='mt-1 text-sm text-muted-foreground'>
-            Creates the hub, then runs a non-mutating access check. Baseline generation starts only
-            after you click Next.
+            Creates the hub, then runs a non-mutating access check.
           </p>
           <label htmlFor='sdlc-repository-url' className='mt-5 block text-sm font-medium'>
             Repository URL
