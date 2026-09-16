@@ -4496,8 +4496,13 @@ export const queries = defineQueries({
   // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
   // belongs to (one row per release × per-app SubTicket; callers dedupe by
   // releaseId). Keep in sync with the backend copy.
-  // Plain z.string(): useQuery validates args before honouring `enabled`, so a
-  // '' ticketId (non-ticket thread) must not throw — it just matches no rows.
+  // ticketId is a plain z.string(), NOT z.string().min(1). ThreadPannel calls this for
+  // every thread with derivedTicketId = '' when the thread isn't a ticket, and zero-react's
+  // useQuery runs the args validator (addContextToQuery → query.fn) BEFORE it honours
+  // `enabled: false` — so .min(1) threw "Validation failed for query
+  // applicationReleaseTicketsByDevTicketId" and crashed the panel to the error boundary
+  // for any non-ticket thread. Introduced in #1613 (1a8329b1c7), fixed in #1937.
+  // '' simply matches no rows; the caller (useReleaseForDevTicket) still gates on enabled.
   applicationReleaseTicketsByDevTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
