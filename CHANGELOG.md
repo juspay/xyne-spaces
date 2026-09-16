@@ -1,3 +1,11 @@
+## [1.329.1](https://github.com/juspay/xyne-spaces/compare/v1.329.0...v1.329.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* corrected connected apps ui ([#1911](https://github.com/juspay/xyne-spaces/issues/1911)) ([9c64009](https://github.com/juspay/xyne-spaces/commit/9c640094ff4f6a5205771547f4f82778b4ec18bb))
+* stop radar's filter drawing the whole workspace ([#1904](https://github.com/juspay/xyne-spaces/issues/1904)) ([aeacb27](https://github.com/juspay/xyne-spaces/commit/aeacb275319a1567ea370ee0b52dd3ee14cca1d6))
+
 ## [1.329.0](https://github.com/juspay/xyne-spaces/compare/v1.328.0...v1.329.0) (2026-09-16)
 
 
