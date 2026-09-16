@@ -542,10 +542,7 @@ const envSchema = Joi.object({
   // Set to true to restore full-content feeds for migrated attachments. Only consulted on
   // the Slack migration paths — live uploads and KB/collections are unaffected.
   FILE_CONTENT_ENABLED: Joi.boolean().default(false),
-  // Pod-local temp root for the SYNCHRONOUS docling path (pdfProcessor stages
-  // parts and dumps results here while one request runs). The async scheduler
-  // does NOT use this — its staging always goes to the default storage bucket
-  // under a fixed prefix, see services/ingestion/docling/scheduler/storage.ts.
+  // Staging on the LOCAL filesystem (a tmp folder in the container). Single-pod only.
   DOCLING_ASYNC_STORAGE_ROOT: Joi.string().default('/tmp/docling-async'),
   DOCLING_KEEP_TEMP_RESULTS: Joi.boolean().default(false),
   // Submit (OCR wrapper) concurrency permits + leases
@@ -1217,7 +1214,6 @@ export const config = {
     vespaWriteTimeoutMs: envVars.DOCLING_SCHEDULER_VESPA_WRITE_TIMEOUT_MS as number,
     maxVespaPayloadBytes: envVars.DOCLING_SCHEDULER_MAX_VESPA_PAYLOAD_BYTES as number,
     pageChunkSize: envVars.DOCLING_PAGE_CHUNK_SIZE as number,
-    // Sync-path temp root only (pdfProcessor); scheduler staging is in the bucket.
     storageRoot: envVars.DOCLING_ASYNC_STORAGE_ROOT as string,
     keepTempResults: envVars.DOCLING_KEEP_TEMP_RESULTS as boolean,
     submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
