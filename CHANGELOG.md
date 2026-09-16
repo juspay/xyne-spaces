@@ -1,3 +1,10 @@
+## [1.323.0](https://github.com/juspay/xyne-spaces/compare/v1.322.0...v1.323.0) (2026-09-16)
+
+
+### Features
+
+* Hub Knowledge and Wiki as SDLC hub workflows (non-claw) ([#1781](https://github.com/juspay/xyne-spaces/issues/1781)) ([6e45220](https://github.com/juspay/xyne-spaces/commit/6e452207fee20d4fe1db76cd548612d1431e88d9)), closes [#1838](https://github.com/juspay/xyne-spaces/issues/1838) [#1533](https://github.com/juspay/xyne-spaces/issues/1533)
+
 ## [1.322.0](https://github.com/juspay/xyne-spaces/compare/v1.321.0...v1.322.0) (2026-09-15)
 
 
