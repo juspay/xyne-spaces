@@ -26,7 +26,7 @@ import {
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
-import { isHubKnowledgeArtifactType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   AudioLines,
   ArrowLeft,
@@ -73,8 +73,6 @@ import {
 } from '../../../utils/canvasVersioning';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { SectionEmojiPicker } from '../../Chat/SectionEmojiPicker';
-import { cn } from '../../../utils/classNames';
 import {
   buildCanvasTitleWithIcon,
   getCanvasDisplayTitle,
@@ -218,7 +216,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
-      if (isChannelAdmin && isHubKnowledgeArtifactType(targetCanvas.sdlcArtifact?.artifactType)) {
+      if (isChannelAdmin && targetCanvas.sdlcArtifact?.artifactType === 'HUB_KNOWLEDGE') {
         return CanvasRole.EDITOR;
       }
       const inheritedRoles = participants
@@ -1067,51 +1065,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         onTitleChange={handleCanvasTitleChange}
         onTitleSave={handleTitleSave}
         onTitleAutoFocused={handleTitleAutoFocused}
+        titleIcon={currentTitleIcon}
+        onTitleIconChange={handleTitleIconChange}
       />
     </div>
   ) : null;
-
-  const renderCanvasPageTitle = (editable: boolean): ReactElement => (
-    <div className='canvas-page-title-header mx-auto w-full max-w-[900px] px-6 pb-3 pt-8 md:px-14 lg:px-20'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <SectionEmojiPicker
-          value={currentTitleIcon}
-          disabled={!editable}
-          onChange={handleTitleIconChange}
-          trackCategory='CANVAS'
-          trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-          ariaLabel={currentTitleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-          triggerClassName='size-10'
-          iconClassName='text-2xl md:text-[28px]'
-          fallbackIcon={<Plus className='size-4' />}
-          allowCustomEmojis={false}
-        />
-        <h1 className='min-w-0 flex-1'>
-          <Input
-            type='text'
-            aria-label='Canvas page title'
-            value={currentTitle}
-            onChange={event => {
-              const newTitle = event.target.value;
-              setCurrentTitle(newTitle);
-              titleRef.current = newTitle;
-            }}
-            readOnly={!editable}
-            onBlur={handleTitleSave}
-            className={cn(
-              'h-auto min-w-0 border-none bg-transparent px-0 py-0 text-3xl font-bold leading-tight text-foreground shadow-none placeholder:text-muted-foreground/80 focus:ring-0 focus-visible:border-none focus-visible:ring-0 md:text-[40px] md:leading-[48px]',
-              !editable && 'cursor-default',
-            )}
-            placeholder='Add page title'
-            data-testid='canvas-page-title-input'
-            data-track-category='CANVAS'
-            data-track-name='EDIT_CANVAS_PAGE_TITLE'
-            data-track-metadata={JSON.stringify({ canvasId: canvas?.id, channelId })}
-          />
-        </h1>
-      </div>
-    </div>
-  );
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1319,8 +1277,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         {previewVersion && showVersionDiff && hasVersionDiff && (
           <CanvasVersionDiffPanel parts={versionDiffParts} className='mx-2 mb-2 md:mx-4' />
         )}
-
-        {canvas && renderCanvasPageTitle(canEdit && !previewVersion)}
 
         {/* Canvas Editor */}
         <div
