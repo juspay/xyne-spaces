@@ -68,28 +68,27 @@ export const CanvasEditorHeader = ({
       className='group/canvas-editor-title relative min-w-0 bg-transparent'
       onContextMenu={event => event.stopPropagation()}
     >
-      <CanvasLabelManager
-        canvas={canvas}
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        revealTriggerOnParentHover
-      />
-
-      <div className='flex min-w-0 items-center gap-2'>
-        {onTitleIconChange && (
-          <SectionEmojiPicker
-            value={titleIcon ?? null}
-            disabled={!canEdit}
-            onChange={onTitleIconChange}
-            trackCategory='CANVAS'
-            trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-            ariaLabel={titleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-            triggerClassName='size-10'
-            iconClassName='text-2xl md:text-[28px]'
-            fallbackIcon={<Plus className='size-4' />}
-            allowCustomEmojis={false}
-          />
-        )}
+      <div className='canvas-editor-title-row'>
+        <div className='canvas-editor-title-icon-gutter'>
+          {onTitleIconChange && (
+            <SectionEmojiPicker
+              value={titleIcon ?? null}
+              disabled={!canEdit}
+              onChange={onTitleIconChange}
+              trackCategory='CANVAS'
+              trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
+              ariaLabel={titleIcon ? 'Change canvas icon' : 'Add canvas icon'}
+              triggerClassName={cn(
+                'size-10',
+                !titleIcon &&
+                  'rounded-lg border border-dashed border-muted-foreground/30 hover:border-muted-foreground/50',
+              )}
+              iconClassName='text-2xl md:text-[28px]'
+              fallbackIcon={<Plus className='size-4' />}
+              allowCustomEmojis={false}
+            />
+          )}
+        </div>
         <h1 className='m-0 min-w-0 flex-1' data-testid='canvas-page-title-heading'>
           <Input
             ref={titleInputRef}
@@ -112,6 +111,15 @@ export const CanvasEditorHeader = ({
             )}
           />
         </h1>
+      </div>
+
+      <div className='canvas-editor-title-label-row'>
+        <CanvasLabelManager
+          canvas={canvas}
+          workspaceId={workspaceId}
+          canEdit={canEdit}
+          revealTriggerOnParentHover
+        />
       </div>
     </div>
   );
