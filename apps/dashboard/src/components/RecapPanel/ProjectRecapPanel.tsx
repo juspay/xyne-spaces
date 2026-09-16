@@ -47,7 +47,9 @@ const ProjectRecapPanel = (): ReactElement => {
       projectCount: recaps.length,
       channelCount: recaps.reduce((sum, r) => sum + (r.channelCount ?? 0), 0),
       totalMessages: recaps.reduce((sum, r) => sum + (r.messageCount ?? 0), 0),
-      isToday: true,
+      // Project recaps always cover yesterday, so this is the honest value —
+      // kept as the same dimension RecapPanel emits so the two stay comparable.
+      isToday: false,
     });
   }, [isLoading, recaps]);
 

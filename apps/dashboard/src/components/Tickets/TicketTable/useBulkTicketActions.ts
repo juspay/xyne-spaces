@@ -281,7 +281,9 @@ export const useBulkTicketActions = (): BulkTicketActions => {
   const applyTags = useCallback(
     (tickets: readonly BulkActionTicket[], tagNames: readonly string[]): void => {
       const pending: Array<Promise<string | null>> = [];
-      for (const ticket of capSelection(tickets)) {
+      // Capped once: capSelection toasts about the cap as a side effect.
+      const selection = capSelection(tickets);
+      for (const ticket of selection) {
         if (!ticket.projectId) continue;
         for (const tagName of tagNames) {
           // The mutator no-ops when the ticket already carries the label, so
@@ -309,7 +311,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
           trackTicketOutcome('TICKET_FIELD_UPDATED', null, {
             surface: 'bulk',
             field: 'tags',
-            bulkCount: capSelection(tickets).length,
+            bulkCount: selection.length,
             addedCount: tagNames.length,
           });
         }

@@ -11,6 +11,7 @@ import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types'
 import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
 import { trackTicketOutcome } from '../services/Analytics/ticketTracking';
+import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useCurrentUserRoleIds } from './useRoles';
 import { v4 as uuidv4 } from 'uuid';
 import { findMatchingTransition } from '../utils/stageTransitionUtils';
@@ -627,6 +628,15 @@ export const useDragAndDrop = ({
                       isBackward: targetStage.sequenceNumber < currentStage.sequenceNumber,
                     }),
                 });
+              })
+              .catch((err: unknown) => {
+                // Transport failure: the optimistic move still stands locally,
+                // matching the pre-tracking `void` behaviour. Log, don't throw.
+                logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+                  hook: 'useDragAndDrop',
+                  mutator: 'ticket.update',
+                  error: err instanceof Error ? err.message : String(err),
+                });
               });
           }
         }
@@ -697,6 +707,13 @@ export const useDragAndDrop = ({
                 surface: 'kanban_drag',
                 to: newStatus,
                 previous: activeTicket.statusV2 ?? null,
+              });
+            })
+            .catch((err: unknown) => {
+              logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+                hook: 'useDragAndDrop',
+                mutator: 'ticket.update',
+                error: err instanceof Error ? err.message : String(err),
               });
             });
         }

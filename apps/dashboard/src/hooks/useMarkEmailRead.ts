@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { trackDeskOutcome } from '../services/Analytics/deskTracking';
+import { logger, Event as LoggerEvent } from '../utils/logger';
 
 /**
  * Marks a Desk ticket's latest email as read when its detail thread opens.
@@ -33,19 +34,30 @@ export function useMarkEmailRead(
           updatedAt: Date.now(),
         }),
       )
-      .client.then(() => {
-        // Opening the thread is the implicit "mark read"; the manual and bulk
-        // variants report the same outcome with their own trigger.
-        trackDeskOutcome(
-          'READ_STATE_CHANGED',
-          { id: ticketId },
-          {},
-          {
-            to: 'read',
-            trigger: 'open',
-            bulkCount: 1,
-          },
-        );
-      });
+      .client.then(
+        () => {
+          // Opening the thread is the implicit "mark read"; the manual and bulk
+          // variants report the same outcome with their own trigger.
+          trackDeskOutcome(
+            'READ_STATE_CHANGED',
+            { id: ticketId },
+            {},
+            {
+              to: 'read',
+              trigger: 'open',
+              bulkCount: 1,
+            },
+          );
+        },
+        (err: unknown) => {
+          // Same handling as useMarkTicketsAsRead: a client-mutator failure is
+          // logged, not left as an unhandled rejection.
+          logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+            hook: 'useMarkEmailRead',
+            mutator: 'emailRead.markAsRead',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        },
+      );
   }, [shouldMark, ticketId, latestEmailId, zero]);
 }

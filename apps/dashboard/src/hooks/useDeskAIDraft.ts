@@ -24,7 +24,7 @@ export type DeskDraftRunKind = 'manual' | 'refine' | 'quick_rewrite' | 'custom_r
  * module-level record is enough; `generatedAt` is a timestamp rather than a
  * delta because the attribute is baked at render, not at the click.
  */
-interface DeskDraftTracking {
+export interface DeskDraftTrackingSnapshot {
   generatedAt: number | null;
   refineCount: number;
   kind: DeskDraftRunKind;
@@ -37,29 +37,17 @@ interface DeskDraftTracking {
   rejected: boolean;
 }
 
-let deskDraftTracking: DeskDraftTracking = {
-  generatedAt: null,
-  refineCount: 0,
-  kind: 'manual',
-  composerSessionId: null,
-  ticketId: null,
-  acceptedLength: null,
-  rejected: false,
-};
-
-export function getDeskDraftTrackingSnapshot(): Readonly<DeskDraftTracking> {
-  return deskDraftTracking;
-}
-
 /**
- * Called by the composer on mount so every AIDraft event for this session
- * joins back to its COMPOSER_OPENED / SEND_EMAIL_* rows.
+ * One record per hook instance, i.e. per composer. It is NOT module state:
+ * several compose windows and a reply composer can be mounted at once, and
+ * each one's Insert / Discard clicks and send-time `aiDraftState` must join
+ * back to its own COMPOSER_OPENED / SEND_EMAIL_* rows.
  */
-export function setDeskDraftTrackingSession(
+function createDeskDraftTracking(
   composerSessionId: string | null,
   ticketId: string | null,
-): void {
-  deskDraftTracking = {
+): DeskDraftTrackingSnapshot {
+  return {
     generatedAt: null,
     refineCount: 0,
     kind: 'manual',
@@ -71,6 +59,7 @@ export function setDeskDraftTrackingSession(
 }
 
 function trackDeskDraftOutcome(
+  tracking: DeskDraftTrackingSnapshot,
   ok: boolean,
   extra: {
     kind: DeskDraftRunKind;
@@ -91,11 +80,9 @@ function trackDeskDraftOutcome(
       ...rest,
       latencyMs: startedAt === null ? null : Date.now() - startedAt,
       ...(contentLength !== undefined && { draftLengthBucket: lengthBucket(contentLength) }),
-      refineCount: deskDraftTracking.refineCount,
-      ...(deskDraftTracking.composerSessionId && {
-        composerSessionId: deskDraftTracking.composerSessionId,
-      }),
-      ...(deskDraftTracking.ticketId && { ticketId: deskDraftTracking.ticketId }),
+      refineCount: tracking.refineCount,
+      ...(tracking.composerSessionId && { composerSessionId: tracking.composerSessionId }),
+      ...(tracking.ticketId && { ticketId: tracking.ticketId }),
     },
   );
 }
@@ -113,6 +100,8 @@ interface UseDeskAIDraftOptions {
   mode?: 'reply' | 'compose';
   headers?: DeskAIDraftHeaders;
   agentSlug?: string;
+  /** The owning composer's session id (see newComposerSessionId), stamped on every AIDraft event. */
+  composerSessionId?: string | null;
 }
 
 export type AIRefineQuickAction = 'polish' | 'formalise' | 'elaborate' | 'shorten';
@@ -138,6 +127,8 @@ export interface UseDeskAIDraftReturn {
   prepareRefineFromExternal: (sourceContent: string, selectedText: string) => void;
   /** Clear the selected text for refine */
   clearSelectedTextForRefine: () => void;
+  /** This composer's draft bookkeeping, for DraftCard clicks and the send-time aiDraftState. */
+  getTrackingSnapshot: () => Readonly<DeskDraftTrackingSnapshot>;
 }
 
 const latestBotContent = (messages: Message[]): string | null => {
@@ -205,6 +196,7 @@ export function useDeskAIDraft({
   mode = 'reply',
   headers,
   agentSlug = 'ask-ai',
+  composerSessionId,
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
   const [draftSources, setDraftSources] = useState<DraftSource[]>([]);
@@ -225,22 +217,32 @@ export function useDeskAIDraft({
 
   // DRAFT_GENERATED / DRAFT_FAILED bookkeeping. Streamed runs resolve in the
   // subscription below; the inline rewrites resolve in `rewriteTracked`.
+  // Per hook instance, so two mounted composers never share a record; the ids
+  // are re-synced each render because the ticket can arrive after mount.
+  const trackingRef = useRef<DeskDraftTrackingSnapshot>(
+    createDeskDraftTracking(composerSessionId ?? null, ticketId ?? null),
+  );
+  trackingRef.current.composerSessionId = composerSessionId ?? null;
+  trackingRef.current.ticketId = ticketId ?? null;
+  const getTrackingSnapshot = useCallback((): Readonly<DeskDraftTrackingSnapshot> => {
+    return trackingRef.current;
+  }, []);
   const runStartedAtRef = useRef<number | null>(null);
   const runKindRef = useRef<DeskDraftRunKind>('manual');
   const prevStreamStatusRef = useRef<StreamState['status'] | null>(null);
   const beginRun = useCallback((kind: DeskDraftRunKind): void => {
     runKindRef.current = kind;
     runStartedAtRef.current = Date.now();
-    if (kind !== 'manual') deskDraftTracking.refineCount += 1;
+    if (kind !== 'manual') trackingRef.current.refineCount += 1;
     else
-      deskDraftTracking = {
-        ...deskDraftTracking,
+      trackingRef.current = {
+        ...trackingRef.current,
         generatedAt: null,
         refineCount: 0,
         acceptedLength: null,
         rejected: false,
       };
-    deskDraftTracking.kind = kind;
+    trackingRef.current.kind = kind;
   }, []);
   const rewriteTracked = useCallback(
     async (kind: DeskDraftRunKind, query: string): Promise<{ rewrittenText: string }> => {
@@ -248,8 +250,8 @@ export function useDeskAIDraft({
       const startedAt = runStartedAtRef.current;
       try {
         const result = await rewriteEmailText({ query });
-        deskDraftTracking.generatedAt = Date.now();
-        trackDeskDraftOutcome(true, {
+        trackingRef.current.generatedAt = Date.now();
+        trackDeskDraftOutcome(trackingRef.current, true, {
           kind,
           draftMode: mode,
           startedAt,
@@ -258,7 +260,7 @@ export function useDeskAIDraft({
         });
         return result;
       } catch (error) {
-        trackDeskDraftOutcome(false, {
+        trackDeskDraftOutcome(trackingRef.current, false, {
           kind,
           draftMode: mode,
           startedAt,
@@ -420,8 +422,8 @@ export function useDeskAIDraft({
       prevStreamStatusRef.current = state.status;
       if (prevStatus === 'streaming' && state.status !== 'streaming') {
         const ok = state.status === 'completed';
-        if (ok) deskDraftTracking.generatedAt = Date.now();
-        trackDeskDraftOutcome(ok, {
+        if (ok) trackingRef.current.generatedAt = Date.now();
+        trackDeskDraftOutcome(trackingRef.current, ok, {
           kind: runKindRef.current,
           draftMode: mode,
           startedAt: runStartedAtRef.current,
@@ -503,7 +505,7 @@ export function useDeskAIDraft({
           error: error instanceof Error ? error.message : String(error),
         });
         setIsStreaming(false);
-        trackDeskDraftOutcome(false, {
+        trackDeskDraftOutcome(trackingRef.current, false, {
           kind: runKindRef.current,
           draftMode: mode,
           startedAt: runStartedAtRef.current,
@@ -726,8 +728,8 @@ export function useDeskAIDraft({
     clearStorage();
     // Remembered for SEND_EMAIL_SUCCEEDED's aiDraftState: the send compares
     // the body it ships against this length to say whether the draft was edited.
-    deskDraftTracking.acceptedLength = draftContent.length;
-    deskDraftTracking.rejected = false;
+    trackingRef.current.acceptedLength = draftContent.length;
+    trackingRef.current.rejected = false;
     return draftContent;
   }, [draftContent, clearStorage, threadId]);
 
@@ -736,8 +738,8 @@ export function useDeskAIDraft({
       xyneAIStreamManager.abortStreamByThread(threadId);
     }
     ourStreamIdRef.current = null;
-    deskDraftTracking.rejected = true;
-    deskDraftTracking.acceptedLength = null;
+    trackingRef.current.rejected = true;
+    trackingRef.current.acceptedLength = null;
     setIsDraftActive(false);
     setDraftContent('');
     setDraftSources([]);
@@ -782,5 +784,6 @@ export function useDeskAIDraft({
     rejectDraft,
     prepareRefineFromExternal,
     clearSelectedTextForRefine,
+    getTrackingSnapshot,
   };
 }

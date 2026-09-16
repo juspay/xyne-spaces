@@ -607,7 +607,6 @@ const XyneAISidebar = ({
   // The open is a single moment, so the effect keys on `visible` alone and
   // reads everything else off a per-render snapshot ref: the props are
   // attribution, not triggers, and a prop change must not re-open the panel.
-  const openedAtRef = useRef<number>(Date.now());
   const messagesSentWhileOpenRef = useRef(0);
   const openTrackSnapshotRef = useRef({
     trackSourceProp,
@@ -629,7 +628,6 @@ const XyneAISidebar = ({
     const ctx = xyneAIActor.getSnapshot().context;
     const source = snap.trackSourceProp ?? ctx.openSource ?? 'unknown';
     const openedAt = Date.now();
-    openedAtRef.current = openedAt;
     const sentCounter = messagesSentWhileOpenRef;
     sentCounter.current = 0;
     trackAskAIOpened(snap.scopeType || undefined);

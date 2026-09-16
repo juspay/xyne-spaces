@@ -28,7 +28,7 @@ import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefineInput } from '../RefineInput/RefineInput';
-import { getDeskDraftTrackingSnapshot } from '../../../hooks/useDeskAIDraft';
+import type { DeskDraftTrackingSnapshot } from '../../../hooks/useDeskAIDraft';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -81,6 +81,12 @@ interface DraftCardProps {
    * live. When provided, a "See sources" button is shown beside Insert/Replace.
    */
   onSeeSources?: () => void;
+  /**
+   * The owning composer's draft bookkeeping (from useDeskAIDraft), so Insert /
+   * Discard / Refine clicks join back to that composer's DRAFT_GENERATED —
+   * not to whichever composer mounted last.
+   */
+  getTrackingSnapshot?: () => Readonly<DeskDraftTrackingSnapshot>;
 }
 
 interface SelectionPopoverState {
@@ -109,6 +115,7 @@ export const DraftCard = ({
   onClearSelectedText,
   onCollapse,
   onSeeSources,
+  getTrackingSnapshot,
 }: DraftCardProps): ReactElement => {
   // Inline citations (the [clf-…] tokens / [1.1] chips) are intentionally
   // stripped from the draft body — sources now live only in the sources panel
@@ -122,14 +129,16 @@ export const DraftCard = ({
   // timestamp, not a delta — the attribute is baked at render, and the click
   // comes later; the delta is `timestamp - generatedAt` in the query.
   const draftTrackMetadata = (extra?: Record<string, unknown>): string => {
-    const snapshot = getDeskDraftTrackingSnapshot();
+    const snapshot = getTrackingSnapshot?.();
     return JSON.stringify({
-      generatedAt: snapshot.generatedAt,
-      refineCount: snapshot.refineCount,
-      runKind: snapshot.kind,
       isStreaming,
-      ...(snapshot.composerSessionId && { composerSessionId: snapshot.composerSessionId }),
-      ...(snapshot.ticketId && { ticketId: snapshot.ticketId }),
+      ...(snapshot && {
+        generatedAt: snapshot.generatedAt,
+        refineCount: snapshot.refineCount,
+        runKind: snapshot.kind,
+        ...(snapshot.composerSessionId && { composerSessionId: snapshot.composerSessionId }),
+        ...(snapshot.ticketId && { ticketId: snapshot.ticketId }),
+      }),
       ...extra,
     });
   };

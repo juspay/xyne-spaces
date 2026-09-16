@@ -115,6 +115,9 @@ interface AIChatThreadProps {
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
+  /** Which affordance sent `initialQuery` on the landing composer. Absent means
+   *  a true auto-send (an entry point set the query without a composer). */
+  initialTrigger?: XyneAiSendTrigger | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   /** Desktop sidebar toggle for the header; state drives which icon shows. */
   onToggleSidebar?: (() => void) | undefined;
@@ -1412,6 +1415,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery,
     initialAttachments,
     initialExtras,
+    initialTrigger,
     onSetMobileSidebarOpen,
     onToggleSidebar,
     sidebarCollapsed,
@@ -1915,13 +1919,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        { ...(initialExtras ? toStreamOverrides(initialExtras) : {}), trigger: 'auto_send' },
+        {
+          ...(initialExtras ? toStreamOverrides(initialExtras) : {}),
+          // The landing composer's button / Enter is the real trigger; a button
+          // send already has its own click row and must not also emit here.
+          trigger: initialTrigger ?? 'auto_send',
+        },
       );
       // After the call, so "consumed" means "actually submitted" and the
       // attachments above are read before the parent drops them.
       onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
+  }, [
+    initialQuery,
+    initialAttachments,
+    initialExtras,
+    initialTrigger,
+    submitQuery,
+    onInitialQueryConsumed,
+  ]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {

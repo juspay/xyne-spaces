@@ -115,6 +115,7 @@ import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -667,7 +668,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (viewedTicketIdRef.current === ticketId) return;
     viewedTicketIdRef.current = ticketId;
 
-    const source = trackSource ?? readTrackSource(location.state, navigationType);
+    const source = trackSource ?? readTrackSource(location.state, navigationType, location.key);
     const path = location.pathname;
     const surface = path.includes('/projects')
       ? 'projects'
@@ -691,6 +692,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     ticketId,
     trackSource,
     location.state,
+    location.key,
     location.pathname,
     navigationType,
     expandedView,
@@ -1905,15 +1907,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // auto-save effects below can reuse it.
   // Every field edit on this screen funnels through applyTicketUpdate, so the
   // "it actually saved" outcome is reported once here rather than per handler.
-  // The pre-change row is read at call time so `previous` is the value the
-  // user saw, not whatever Zero has replicated by the time the promise settles.
+  // Callers must snapshot the row BEFORE awaiting the mutation: Zero applies
+  // the update optimistically, so by the time `.server` settles `ticketRef`
+  // already holds the new values and `previous` would equal `to`.
   const ticketRef = useRef(ticket);
   ticketRef.current = ticket;
   const outcomeStagesRef = useRef(stages);
   outcomeStagesRef.current = stages;
+  type TicketUpdate = Parameters<typeof mutators.ticket.update>[0];
+  type TicketRow = NonNullable<typeof ticket>;
   const trackDetailsOutcome = useCallback(
-    (update: Parameters<typeof mutators.ticket.update>[0]): void => {
-      const before = ticketRef.current;
+    (
+      update: TicketUpdate,
+      before: TicketRow | null | undefined,
+      stagesBefore = outcomeStagesRef.current,
+    ): void => {
       if (!before) return;
       const u = update as Record<string, unknown>;
       const surface = 'details' as const;
@@ -1921,8 +1929,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         trackTicketOutcome('TICKET_ARCHIVED', before, { surface });
         return;
       }
+      // One update can carry several fields (a stage move also sets statusV2;
+      // a form save can change type and group). Report each so a multi-field
+      // update never hides the second change behind the first.
       if (typeof u['stageName'] === 'string') {
-        const list = outcomeStagesRef.current ?? [];
+        const list = stagesBefore ?? [];
         const fromSeq = list.find(s => s.name === before.stageName)?.sequenceNumber;
         const toSeq = list.find(s => s.name === u['stageName'])?.sequenceNumber;
         trackTicketOutcome('TICKET_STAGE_CHANGED', before, {
@@ -1933,15 +1944,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           ...(typeof fromSeq === 'number' &&
             typeof toSeq === 'number' && { isBackward: toSeq < fromSeq }),
         });
-        return;
-      }
-      if (typeof u['statusV2'] === 'string') {
+      } else if (typeof u['statusV2'] === 'string') {
+        // Status riding a stage move is reported as `toStatus` above, not twice.
         trackTicketOutcome('TICKET_STATUS_CHANGED', before, {
           surface,
           to: u['statusV2'],
           previous: before.statusV2 ?? null,
         });
-        return;
       }
       if ('assignedTo' in u) {
         const next = u['assignedTo'];
@@ -1951,32 +1960,29 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           selfAssigned: !!next && next === currentUser?.id,
           hadAssignee: !!before.assignedTo,
         });
-        return;
       }
-      if (typeof u['priority'] === 'string') {
-        trackTicketOutcome('TICKET_PRIORITY_CHANGED', before, {
-          surface,
-          to: u['priority'],
-          previous: before.priority ?? null,
-        });
-        return;
+      const enumOutcomes = [
+        ['priority', 'TICKET_PRIORITY_CHANGED'],
+        ['boardId', 'TICKET_BOARD_CHANGED'],
+      ] as const;
+      for (const [key, event] of enumOutcomes) {
+        if (typeof u[key] === 'string') {
+          trackTicketOutcome(event, before, {
+            surface,
+            to: u[key],
+            previous: before[key] ?? null,
+          });
+        }
       }
-      if (typeof u['boardId'] === 'string') {
-        trackTicketOutcome('TICKET_BOARD_CHANGED', before, {
-          surface,
-          to: u['boardId'],
-          previous: before.boardId ?? null,
-        });
-        return;
-      }
-      const field = ['title', 'description', 'ticketType', 'userGroupId', 'eta'].find(
-        key => key in u,
-      );
-      if (field) {
-        trackTicketOutcome('TICKET_FIELD_UPDATED', before, {
-          surface,
-          field: field === 'userGroupId' ? 'userGroup' : field,
-        });
+      const fieldNames: Record<string, string> = {
+        title: 'title',
+        description: 'description',
+        ticketType: 'ticketType',
+        userGroupId: 'userGroup',
+        eta: 'eta',
+      };
+      for (const [key, field] of Object.entries(fieldNames)) {
+        if (key in u) trackTicketOutcome('TICKET_FIELD_UPDATED', before, { surface, field });
       }
     },
     [currentUser?.id],
@@ -1987,13 +1993,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       update: Parameters<typeof mutators.ticket.update>[0],
       errorFallback = 'Failed to update ticket',
     ): Promise<boolean> => {
+      // Snapshot before the await — see trackDetailsOutcome.
+      const before = ticketRef.current;
+      const stagesBefore = outcomeStagesRef.current;
       try {
         const result = await zero.mutate(mutators.ticket.update(update)).server;
         if (result.type === 'error') {
           toast.error(result.error.message || errorFallback);
           return false;
         }
-        trackDetailsOutcome(update);
+        trackDetailsOutcome(update, before, stagesBefore);
         return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -2867,6 +2876,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             field: 'stageEta',
           });
         }
+      })
+      .catch((err: unknown) => {
+        logger.error(LogEvent.ZERO_MUTATION_ERROR, {
+          component: 'TicketDetails',
+          mutator: 'ticketStageEta.update',
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
 
     setEditingStageETA(false);
@@ -2938,45 +2954,54 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const handleToggleTag = (tagName: string): void => {
     const existingTag = tags?.find(t => t.tagName === tagName);
 
-    if (existingTag) {
-      zero.mutate(
-        mutators.ticketTagV2.delete({
-          tagId: existingTag.id,
-          mappingId: existingTag.id,
-        }),
-      );
-    } else {
-      zero.mutate(
-        mutators.ticketTagV2.create({
-          ticketId: ticket.id,
-          tagId: uuidv4(),
-          projectTagId: uuidv4(),
-          mappingId: uuidv4(),
-          projectId: ticket.projectId,
-          tagName: tagName.trim(),
-        }),
-      );
-    }
-    trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
-      surface: 'details',
-      field: 'tags',
-      action: existingTag ? 'remove' : 'add',
+    const tagMutation = existingTag
+      ? zero.mutate(
+          mutators.ticketTagV2.delete({
+            tagId: existingTag.id,
+            mappingId: existingTag.id,
+          }),
+        )
+      : zero.mutate(
+          mutators.ticketTagV2.create({
+            ticketId: ticket.id,
+            tagId: uuidv4(),
+            projectTagId: uuidv4(),
+            mappingId: uuidv4(),
+            projectId: ticket.projectId,
+            tagName: tagName.trim(),
+          }),
+        );
+    // Outcome only once the server confirmed, not on the optimistic apply.
+    void surfaceMutationError(tagMutation, 'Failed to update labels').then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'tags',
+          action: existingTag ? 'remove' : 'add',
+        });
+      }
     });
 
     setTagSearchQuery('');
   };
 
   const handleRemoveTag = (tagId: string): void => {
-    zero.mutate(
-      mutators.ticketTagV2.delete({
-        tagId,
-        mappingId: tagId,
-      }),
-    );
-    trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
-      surface: 'details',
-      field: 'tags',
-      action: 'remove',
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticketTagV2.delete({
+          tagId,
+          mappingId: tagId,
+        }),
+      ),
+      'Failed to remove label',
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'tags',
+          action: 'remove',
+        });
+      }
     });
   };
 
@@ -3071,6 +3096,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const formFieldId = isPlaceholder
       ? formEntityValueId.replace(/^(placeholder|prefill)-/, '')
       : '';
+    let fieldMutation: Parameters<typeof surfaceMutationError>[0];
 
     if (isPlaceholder) {
       const resolvedFormId = formId ?? boardCustomFieldsFormId;
@@ -3082,7 +3108,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       // Create a new form entity value record
-      void zero.mutate(
+      fieldMutation = zero.mutate(
         mutators.formEntityValue.createV2({
           id: uuidv4(),
           entityId: ticketId,
@@ -3096,7 +3122,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       );
     } else {
       // Update existing record
-      void zero.mutate(
+      fieldMutation = zero.mutate(
         mutators.formEntityValue.update({
           formEntityValueId,
           newValue,
@@ -3104,12 +3130,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }),
       );
     }
-    // Field id only — the value is user content.
-    trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
-      surface: 'details',
-      field: 'dynamicField',
-      isPlaceholder,
-      valueCount: newValue.length,
+    // Field id only — the value is user content. Reported once the server
+    // confirmed, not on the optimistic apply.
+    void surfaceMutationError(fieldMutation, 'Failed to save field').then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'dynamicField',
+          isPlaceholder,
+          valueCount: newValue.length,
+        });
+      }
     });
   };
 
@@ -5493,9 +5524,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       }),
                       updatedAt: Date.now(),
                     };
-                    void zero.mutate(mutators.ticket.update(backwardUpdate)).server.then(result => {
-                      if (result.type !== 'error') trackDetailsOutcome(backwardUpdate);
-                    });
+                    const beforeBackward = ticketRef.current;
+                    const stagesBeforeBackward = outcomeStagesRef.current;
+                    void zero
+                      .mutate(mutators.ticket.update(backwardUpdate))
+                      .server.then(result => {
+                        if (result.type !== 'error')
+                          trackDetailsOutcome(backwardUpdate, beforeBackward, stagesBeforeBackward);
+                      })
+                      .catch((err: unknown) => {
+                        logger.error(LogEvent.ZERO_MUTATION_ERROR, {
+                          component: 'TicketDetails',
+                          mutator: 'ticket.update',
+                          error: err instanceof Error ? err.message : String(err),
+                        });
+                      });
 
                     setShowBackwardConfirmDialog(false);
                   }

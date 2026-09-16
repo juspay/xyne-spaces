@@ -3745,7 +3745,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       hasSearchTerm,
       savedViewApplied: !!selectedViewId,
       ...(typeof knownCount === 'number' && { ticketCountBucket: ticketCountBucket(knownCount) }),
-      source: readTrackSource(listLocation.state, listNavigationType),
+      source: readTrackSource(listLocation.state, listNavigationType, listLocation.key),
     });
   }, [
     isTicketsSyncing,
@@ -3761,6 +3761,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredTickets,
     allProjectTickets,
     listLocation.state,
+    listLocation.key,
     listNavigationType,
   ]);
 

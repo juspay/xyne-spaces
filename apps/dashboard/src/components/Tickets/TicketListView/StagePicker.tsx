@@ -349,19 +349,25 @@ export function StagePicker({
       if (onStageChange) {
         onStageChange(ticketId, next, stageName);
       } else {
-        void zero.mutate(
-          mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
-        );
-        trackTicketOutcome(
-          'TICKET_STAGE_CHANGED',
-          { id: ticketId, boardId },
-          {
-            surface: 'list_inline',
-            to: next,
-            previous: stageName ?? null,
-          },
-        );
-        onAfterStageChange?.(next);
+        // Outcome only once the server confirmed, like the two branches below.
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
+          ),
+          'Failed to update stage',
+        ).then(ok => {
+          if (!ok) return;
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+            },
+          );
+          onAfterStageChange?.(next);
+        });
       }
       setOpen(false);
       return;

@@ -260,14 +260,20 @@ export const Summary = (props: SummaryProps): ReactElement => {
   const currentIdRef = useRef(id);
   const abortControllerRef = useRef<AbortController | null>(null);
   // When the summarize request left, for SUMMARY_GENERATED / SUMMARY_FAILED
-  // latency. Cache hits never set it — they generate nothing.
+  // latency. Set when a request goes out and cleared on every terminal
+  // outcome and on cache hits, so it never outlives the request it measures.
   const fetchStartedAtRef = useRef<number | null>(null);
+  const takeFetchLatencyMs = (): number | null => {
+    const startedAt = fetchStartedAtRef.current;
+    fetchStartedAtRef.current = null;
+    return startedAt === null ? null : Date.now() - startedAt;
+  };
   const summaryKind = isThread ? 'thread' : 'channel';
   const trackSummaryFailed = (errorKind: string): void => {
     globalClickTracker.trackManualEvent('CHAT_SUMMARY', 'SUMMARY_FAILED', undefined, {
       kind: summaryKind,
       errorKind,
-      latencyMs: fetchStartedAtRef.current === null ? null : Date.now() - fetchStartedAtRef.current,
+      latencyMs: takeFetchLatencyMs(),
       messageCount: metadataRef.current.messageCount,
     });
   };
@@ -322,6 +328,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
           ? getThreadSummary(fetchId)
           : getChannelSummary(fetchId, dateFrom ?? '', dateTo ?? '');
         if (cached) {
+          // Served from cache: nothing was generated, so no request to time.
+          fetchStartedAtRef.current = null;
           if (currentIdRef.current === fetchId) {
             setSummary(cached.summary as SummaryOutput);
             if (cached.conversationIdMapping)
@@ -521,10 +529,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
                           citationsCount: Object.keys(finalParsed.citations).length,
                           hasTopicSections: !!data.output.topicSections,
                           hasDateRange: !!(dateFrom || dateTo),
-                          latencyMs:
-                            fetchStartedAtRef.current === null
-                              ? null
-                              : Date.now() - fetchStartedAtRef.current,
+                          latencyMs: takeFetchLatencyMs(),
                         },
                       );
 
@@ -609,6 +614,8 @@ export const Summary = (props: SummaryProps): ReactElement => {
       ? getThreadSummary(id)
       : getChannelSummary(id, dateFrom ?? '', dateTo ?? '');
     if (cached) {
+      // Served from cache: nothing was generated, so no request to time.
+      fetchStartedAtRef.current = null;
       setSummary(cached.summary as SummaryOutput);
       if (cached.conversationIdMapping) setConversationIdMapping(cached.conversationIdMapping);
       if (cached.messageIdMapping) setMessageIdMapping(cached.messageIdMapping);

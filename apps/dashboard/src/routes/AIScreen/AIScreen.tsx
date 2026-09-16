@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload, PanelRightOpen } from 'lucide-react';
@@ -49,6 +50,8 @@ const AIScreen = (): ReactElement => {
     undefined,
   );
   const [initialExtras, setInitialExtras] = useState<ComposerContext | undefined>(undefined);
+  /** Which affordance on the landing composer sent `initialQuery` (analytics only). */
+  const [initialTrigger, setInitialTrigger] = useState<XyneAiSendTrigger | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
@@ -134,19 +137,21 @@ const AIScreen = (): ReactElement => {
   // depending on it, which would re-report an open on every thread switch.
   const pageOpenSnapshotRef = useRef({
     locationState: location.state as unknown,
+    locationKey: location.key,
     navigationType,
     sessionFromUrl,
     effectiveAgentSlug,
   });
   pageOpenSnapshotRef.current = {
     locationState: location.state as unknown,
+    locationKey: location.key,
     navigationType,
     sessionFromUrl,
     effectiveAgentSlug,
   };
   useEffect(() => {
     const snap = pageOpenSnapshotRef.current;
-    const source = readTrackSource(snap.locationState, snap.navigationType);
+    const source = readTrackSource(snap.locationState, snap.navigationType, snap.locationKey);
     const openedAt = Date.now();
     globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
       surface: 'page',
@@ -266,12 +271,23 @@ const AIScreen = (): ReactElement => {
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
   }, []);
 
+  // `trigger` rides along with the query: the thread's first turn is submitted
+  // by the thread, but it is the landing composer's button or Enter that sent
+  // it. Without this the thread reports `auto_send` and a button send counts
+  // twice (the button's own click row plus the manual SEND_MESSAGE).
   const handleComposerSubmit = useCallback(
-    (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
+    (
+      text: string,
+      attachments?: AIComposerAttachment[],
+      context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
+    ): void => {
       setInitialQuery(text);
       setInitialAttachments(attachments);
+      setInitialTrigger(trigger);
       setInitialExtras(context);
       setActiveSessionId('');
       setChatKey(prev => prev + 1);
@@ -288,6 +304,7 @@ const AIScreen = (): ReactElement => {
   const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
     setInitialExtras(context);
     setActiveSessionId('');
     setChatKey(prev => prev + 1);
@@ -472,6 +489,7 @@ const AIScreen = (): ReactElement => {
                 initialQuery={initialQuery}
                 initialAttachments={initialAttachments}
                 initialExtras={initialExtras}
+                initialTrigger={initialTrigger}
                 onSetMobileSidebarOpen={setMobileSidebarOpen}
                 onConversationChange={handleConversationChange}
                 onAppChange={handleAppChange}

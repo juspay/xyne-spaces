@@ -61,10 +61,7 @@ import {
 } from '../../../services/Analytics/deskTracking';
 import { lengthBucket } from '../../../services/Analytics/trackSource';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
-import {
-  getDeskDraftTrackingSnapshot,
-  setDeskDraftTrackingSession,
-} from '../../../hooks/useDeskAIDraft';
+import type { DeskDraftTrackingSnapshot } from '../../../hooks/useDeskAIDraft';
 
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { markdownToHtml } from '../../../utils/clipboardUtils';
@@ -282,9 +279,13 @@ export const EmailComposer = ({
   // AUTO_DRAFT_SHOWN, the AIDraft run events, SEND_EMAIL_*, COMPOSER_ABANDONED)
   // carries it, so a ticket replied to three times, or a compose modal open
   // beside a reply, still joins exactly.
-  const composerSessionIdRef = useRef<string>(newComposerSessionId());
+  // Lazy-initialised: a `useRef(newComposerSessionId())` would mint (and
+  // discard) a fresh id on every render. The ref keeps the many `.current`
+  // readers below unchanged.
+  const [composerSessionId] = useState(() => newComposerSessionId());
+  const composerSessionIdRef = useRef<string>(composerSessionId);
   // One-shot AI helper for the wand button next to the Subject field.
-  const subjectAI = useComposeSubjectAI(channelId ?? null, composerSessionIdRef.current);
+  const subjectAI = useComposeSubjectAI(channelId ?? null, composerSessionId);
   const emails = propEmails;
   const channelAliasEmail = channelPreference?.sendAsEmail ?? null;
   const clawAgents = useChannelClawAgents(channelId || null);
@@ -528,54 +529,68 @@ export const EmailComposer = ({
   trackCtxRef.current = trackCtx;
   const trackTicketRef = useRef(trackTicket);
   trackTicketRef.current = trackTicket;
+  // Mirrored so the mount / unmount effects and the send path read the
+  // CURRENT values, not the first render's: `ticketDraft` comes from a Zero
+  // query that starts empty, and pressing r / a on arrival mounts this
+  // composer before that row has synced.
+  const hasAutoDraftRef = useRef(hasAutoDraft);
+  hasAutoDraftRef.current = hasAutoDraft;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const openSnapshotRef = useRef({
+    trackMode,
+    resolvedTrackSource,
+    replyToEmailId,
+    isFirstResponse,
+    ticketId,
+  });
+  openSnapshotRef.current = {
+    trackMode,
+    resolvedTrackSource,
+    replyToEmailId,
+    isFirstResponse,
+    ticketId,
+  };
+  // Set once the AI-draft hook below is created; the unmount cleanup reads it.
+  const draftTrackingSnapshotRef = useRef<(() => Readonly<DeskDraftTrackingSnapshot>) | null>(null);
 
-  // COMPOSER_OPENED / AUTO_DRAFT_SHOWN on mount, COMPOSER_ABANDONED on unmount.
-  // The composer is mounted only while it is open (the host toggles it), so
-  // mount and unmount are the open and the close. The send path sets sentRef
-  // so a successful send never also counts as an abandon.
+  // COMPOSER_OPENED on mount, COMPOSER_ABANDONED on unmount. The composer is
+  // mounted only while it is open (the host toggles it), so mount and unmount
+  // are the open and the close. Every dimension is read off a ref at fire
+  // time, so the effect has no reactive inputs. The send path sets sentRef so
+  // a successful send never also counts as an abandon.
   useEffect(() => {
-    const composerSessionId = composerSessionIdRef.current;
-    setDeskDraftTrackingSession(composerSessionId, ticketId ?? null);
-    const hadServerDraft = !!draft?.draftContent && stripHtml(draft.draftContent).trim().length > 0;
+    const sessionId = composerSessionIdRef.current;
+    const open = openSnapshotRef.current;
+    const initialDraft = draftRef.current;
+    const hadServerDraft =
+      !!initialDraft?.draftContent && stripHtml(initialDraft.draftContent).trim().length > 0;
     trackDeskOutcome('COMPOSER_OPENED', trackTicketRef.current, trackCtxRef.current, {
-      composerSessionId,
-      mode: trackMode,
-      source: resolvedTrackSource,
-      hadAutoDraft: hasAutoDraft,
+      composerSessionId: sessionId,
+      mode: open.trackMode,
+      source: open.resolvedTrackSource,
+      hadAutoDraft: hasAutoDraftRef.current,
       hadServerDraft,
-      replyToSpecificEmail: !!replyToEmailId,
-      ...(isFirstResponse !== undefined && { isFirstResponse }),
+      replyToSpecificEmail: !!open.replyToEmailId,
+      ...(open.isFirstResponse !== undefined && { isFirstResponse: open.isFirstResponse }),
     });
-    if (hasAutoDraft && conversationId && !autoDraftShownFor.has(conversationId)) {
-      autoDraftShownFor.add(conversationId);
-      globalClickTracker.trackManualEvent('AIDraft', 'AUTO_DRAFT_SHOWN', undefined, {
-        ...(ticketId && { ticketId }),
-        conversationId,
-        composerSessionId,
-        ...(draft?.draftContent && {
-          draftLengthBucket: lengthBucket(stripHtml(draft.draftContent).trim().length),
-        }),
-        ...(draft?.updatedAt && {
-          hoursSinceGenerated: Math.max(0, Math.round((Date.now() - draft.updatedAt) / 3_600_000)),
-        }),
-        ...(channelPreference?.autoDraftAgentSlug && {
-          agentSlug: channelPreference.autoDraftAgentSlug,
-        }),
-      });
-    }
     return () => {
       if (sentRef.current || bodyLengthRef.current === 0) return;
-      const snapshot = getDeskDraftTrackingSnapshot();
+      const snapshot = draftTrackingSnapshotRef.current?.();
+      const hadAutoDraft = hasAutoDraftRef.current;
       trackDeskOutcome('COMPOSER_ABANDONED', trackTicketRef.current, trackCtxRef.current, {
-        composerSessionId,
-        mode: trackMode,
+        composerSessionId: sessionId,
+        mode: openSnapshotRef.current.trackMode,
         reason: discardRef.current ? 'discard' : 'close',
         bodyLengthBucket: lengthBucket(bodyLengthRef.current),
-        hadAiDraft: hasAutoDraft || snapshot.acceptedLength !== null || snapshot.rejected,
+        hadAiDraft:
+          hadAutoDraft ||
+          (snapshot?.acceptedLength !== null && snapshot?.acceptedLength !== undefined) ||
+          !!snapshot?.rejected,
         aiDraftState: resolveAiDraftState({
-          acceptedLength: snapshot.acceptedLength,
-          rejected: snapshot.rejected,
-          hadAutoDraft: hasAutoDraft,
+          acceptedLength: snapshot?.acceptedLength ?? null,
+          rejected: !!snapshot?.rejected,
+          hadAutoDraft,
           autoDraftLength: autoDraftLengthRef.current,
           sentLength: bodyLengthRef.current,
         }),
@@ -583,9 +598,33 @@ export const EmailComposer = ({
         savedAsDraft: savedAsDraftRef.current,
       });
     };
-    // Mount/unmount only — the open is a single moment, not a render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // AUTO_DRAFT_SHOWN: once per conversation per page load, whenever the READY
+  // draft row is on hand — at mount if it already synced, or later when it
+  // arrives. Keyed on the flag, not the mount, for exactly that reason.
+  useEffect(() => {
+    if (!hasAutoDraft || !conversationId || autoDraftShownFor.has(conversationId)) return;
+    autoDraftShownFor.add(conversationId);
+    const shownDraft = draftRef.current;
+    globalClickTracker.trackManualEvent('AIDraft', 'AUTO_DRAFT_SHOWN', undefined, {
+      ...(ticketId && { ticketId }),
+      conversationId,
+      composerSessionId: composerSessionIdRef.current,
+      ...(shownDraft?.draftContent && {
+        draftLengthBucket: lengthBucket(stripHtml(shownDraft.draftContent).trim().length),
+      }),
+      ...(shownDraft?.updatedAt && {
+        hoursSinceGenerated: Math.max(
+          0,
+          Math.round((Date.now() - shownDraft.updatedAt) / 3_600_000),
+        ),
+      }),
+      ...(channelPreference?.autoDraftAgentSlug && {
+        agentSlug: channelPreference.autoDraftAgentSlug,
+      }),
+    });
+  }, [hasAutoDraft, conversationId, ticketId, channelPreference?.autoDraftAgentSlug]);
 
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const ccInputRef = React.useRef<HTMLInputElement>(null);
@@ -755,6 +794,7 @@ export const EmailComposer = ({
     channelId: channelId || '',
     conversationId: conversationId || '',
     ticketId: ticketId ?? null,
+    composerSessionId,
     mode,
     headers: {
       from: channelAliasEmail || channelConnectedEmail || currentUserEmail || null,
@@ -764,6 +804,7 @@ export const EmailComposer = ({
     },
     agentSlug: channelPreference?.autoDraftAgentSlug ?? 'draft-agent',
   });
+  draftTrackingSnapshotRef.current = aiDraft.getTrackingSnapshot;
 
   const contentWithDraftCitations = useCallback(
     (content: string): string =>
@@ -1554,7 +1595,7 @@ export const EmailComposer = ({
     // contributed, how long the agent spent, how the subject was written.
     // Counts, flags and buckets only — never the body, subject or addresses.
     const sendTrackMetadata = (emailType: 'COMPOSE' | 'REPLY_ALL'): Record<string, unknown> => {
-      const snapshot = getDeskDraftTrackingSnapshot();
+      const snapshot = aiDraft.getTrackingSnapshot();
       const sentLength = stripHtml(emailContent).trim().length;
       const inlineImagesCount = (emailContent.match(/<img\b[^>]*data-att-id=/gi) ?? []).length;
       return {
@@ -1572,7 +1613,7 @@ export const EmailComposer = ({
         aiDraftState: resolveAiDraftState({
           acceptedLength: snapshot.acceptedLength,
           rejected: snapshot.rejected,
-          hadAutoDraft: hasAutoDraft,
+          hadAutoDraft: hasAutoDraftRef.current,
           autoDraftLength: autoDraftLengthRef.current,
           sentLength,
         }),
@@ -2914,6 +2955,7 @@ export const EmailComposer = ({
                 draftContent={aiDraft.draftContent}
                 toolInvocations={aiDraft.draftToolInvocations}
                 isStreaming={aiDraft.isStreaming}
+                getTrackingSnapshot={aiDraft.getTrackingSnapshot}
                 onAccept={() => {
                   const content = aiDraft.acceptDraft();
                   void (async (): Promise<void> => {

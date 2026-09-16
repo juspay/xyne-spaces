@@ -6,6 +6,7 @@ import type { SelectorOption } from '../components/ui/EntitySelector/EntitySelec
 import { mutators } from '../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { trackTicketOutcome } from '../services/Analytics/ticketTracking';
+import { surfaceMutationError } from '../utils/zeroMutationToast';
 
 type ReferenceOut = Pick<TicketReferenceMapping, 'id' | 'targetTicketId' | 'relationType'>;
 
@@ -147,23 +148,30 @@ export const useTicketReferences = ({
       }
 
       if (!existingReference) {
-        void zero.mutate(
-          mutators.ticketReference.create({
-            sourceTicketId: ticketId,
-            targetTicketId,
-            relationType: TicketReferenceRelation.LINKED,
-            timestamp: Date.now(),
-            referenceId: uuidv4(),
-          }),
-        );
-        trackTicketOutcome(
-          'TICKET_LINKED',
-          { id: ticketId },
-          {
-            surface: 'details',
-            relation: TicketReferenceRelation.LINKED,
-          },
-        );
+        // Outcome only once the server confirmed, not on the optimistic apply.
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticketReference.create({
+              sourceTicketId: ticketId,
+              targetTicketId,
+              relationType: TicketReferenceRelation.LINKED,
+              timestamp: Date.now(),
+              referenceId: uuidv4(),
+            }),
+          ),
+          'Failed to link ticket',
+        ).then(ok => {
+          if (ok) {
+            trackTicketOutcome(
+              'TICKET_LINKED',
+              { id: ticketId },
+              {
+                surface: 'details',
+                relation: TicketReferenceRelation.LINKED,
+              },
+            );
+          }
+        });
       }
     } catch (error) {
       setReferenceError(
@@ -176,45 +184,53 @@ export const useTicketReferences = ({
 
   const handleRemoveReference = (referenceId: string): void => {
     const removed = referencesOut?.find(reference => reference.id === referenceId);
-    void zero.mutate(
-      mutators.ticketReference.delete({
-        id: referenceId,
-      }),
-    );
-    if (ticketId) {
-      trackTicketOutcome(
-        'TICKET_UNLINKED',
-        { id: ticketId },
-        {
-          surface: 'details',
-          relation: removed?.relationType ?? 'reference',
-        },
-      );
-    }
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticketReference.delete({
+          id: referenceId,
+        }),
+      ),
+      'Failed to unlink ticket',
+    ).then(ok => {
+      if (ok && ticketId) {
+        trackTicketOutcome(
+          'TICKET_UNLINKED',
+          { id: ticketId },
+          {
+            surface: 'details',
+            relation: removed?.relationType ?? 'reference',
+          },
+        );
+      }
+    });
   };
 
   const handleReferenceRelationChange = (
     referenceId: string,
     relationType: TicketReferenceRelation,
   ): void => {
-    void zero.mutate(
-      mutators.ticketReference.updateRelationType({
-        id: referenceId,
-        relationType,
-        timestamp: Date.now(),
-      }),
-    );
-    if (ticketId) {
-      trackTicketOutcome(
-        'TICKET_LINKED',
-        { id: ticketId },
-        {
-          surface: 'details',
-          relation: relationType,
-          relationChanged: true,
-        },
-      );
-    }
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticketReference.updateRelationType({
+          id: referenceId,
+          relationType,
+          timestamp: Date.now(),
+        }),
+      ),
+      'Failed to change relation',
+    ).then(ok => {
+      if (ok && ticketId) {
+        trackTicketOutcome(
+          'TICKET_LINKED',
+          { id: ticketId },
+          {
+            surface: 'details',
+            relation: relationType,
+            relationChanged: true,
+          },
+        );
+      }
+    });
   };
 
   return {

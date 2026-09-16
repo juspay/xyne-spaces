@@ -1840,7 +1840,7 @@ const SupportScreen = (): ReactElement => {
       activeFilterCount,
       ticketCountBucket: ticketCountBucket(kanbanTickets.length),
       hasAiDraftFilter: filters.hasAiDraft === true,
-      source: readTrackSource(listLocation.state, listNavigationType),
+      source: readTrackSource(listLocation.state, listNavigationType, listLocation.key),
     });
     // kanbanTickets/ticketFilter are read at fire time only; the latch key is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5266,10 +5266,9 @@ export const SupportTicketDetail = ({
     if (viewedTicketIdRef.current === ticket.id) return;
     viewedTicketIdRef.current = ticket.id;
     markDeskTicketViewed(ticket.id);
-    const stateSource = readTrackSource(location.state, navigationType);
     const source =
       trackSourceProp ??
-      (stateSource === 'direct' ? (searchParams.get('src') ?? 'direct') : stateSource);
+      readTrackSource(location.state, navigationType, location.key, searchParams.get('src'));
     globalClickTracker.trackManualEvent('Support', 'SUPPORT_TICKET_VIEWED', undefined, {
       ...deskTicketTrackingMetadata(ticket, {
         deskType: channelPreference?.deskType ?? null,
