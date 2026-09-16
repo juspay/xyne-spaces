@@ -4877,6 +4877,9 @@ export const mutators = defineMutators({
         // authoritative and will reject an invalid path, rolling this write back).
         autoRecomputeEnabled: z.boolean().optional(),
         standardPathStageIds: z.array(z.string()).optional(),
+        // Release-board dev-ticket column picks. Merged into the freshly read metadata so a
+        // stale client snapshot can't overwrite sibling keys (same reason as the ETA args).
+        devTicketColumns: z.array(z.string()).optional(),
         stages: z
           .array(
             z.object({
@@ -4915,6 +4918,7 @@ export const mutators = defineMutators({
           metadata,
           autoRecomputeEnabled,
           standardPathStageIds,
+          devTicketColumns,
           stages,
           timestamp,
           stageIds = {},
@@ -4965,17 +4969,24 @@ export const mutators = defineMutators({
         // ETA settings merge into the etaManagement subtree instead of replacing the whole
         // column. Base is the caller's `metadata` when it sent one (so both survive),
         // otherwise the board's current metadata.
+        // devTicketColumns merges into the current metadata (fresh read, not the caller's blob).
+        const baseMetadata = metadata !== undefined ? metadata : board.metadata;
+        const withColumns =
+          devTicketColumns !== undefined
+            ? { ...(baseMetadata as Record<string, unknown> | null), devTicketColumns }
+            : metadata;
+
         const nextMetadata =
           autoRecomputeEnabled !== undefined || standardPathStageIds !== undefined
             ? mergeBoardEtaManagement(
-                metadata !== undefined ? metadata : board.metadata,
+                withColumns !== undefined ? withColumns : board.metadata,
                 boardType ?? board.boardType,
                 {
                   ...(autoRecomputeEnabled !== undefined && { autoRecomputeEnabled }),
                   ...(standardPathStageIds !== undefined && { standardPathStageIds }),
                 },
               )
-            : metadata;
+            : withColumns;
 
         // Update board
         await tx.mutate.boards.update({
