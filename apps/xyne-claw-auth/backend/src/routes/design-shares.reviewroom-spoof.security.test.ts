@@ -35,7 +35,7 @@ const state = vi.hoisted(() => ({
 vi.mock("../config.js", () => ({
   CONFIG: {
     encryptionKey: Buffer.alloc(32, 9),
-    spacesAppUrl: "https://app.spaces.xyne.juspay.net/claw",
+    spacesAppUrl: "https://app.spaces.example.internal/claw",
     spacesInternalUrl: "http://spaces.internal.test",
     xyneClawS2sKey: "test-s2s-key",
     cliTokensEnabled: false,
