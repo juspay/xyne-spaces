@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { MetricTile } from './MetricTile';
 import { RunView } from './RunView';
+import { useRun } from './useRun';
 import { runController } from '../../services/diagnostics/run';
 import { buildRunJson, buildRunMarkdown } from '../../services/diagnostics/run/report';
 import { useDiagnostics } from './useDiagnostics';
@@ -238,7 +239,13 @@ function TabButton({ current, value, label, onSelect }: TabButtonProps): ReactEl
  */
 function LiveMetricsView(): ReactElement {
   const snapshot = useDiagnostics();
+  const { progress } = useRun();
   const [range, setRange] = useState<'session' | 'history'>('session');
+
+  const runInProgress =
+    progress.phase === 'probing' ||
+    progress.phase === 'observing' ||
+    progress.phase === 'analysing';
 
   const summary = useMemo(() => summarize(snapshot), [snapshot]);
   const findings = useMemo(() => analyze(snapshot), [snapshot]);
@@ -246,6 +253,12 @@ function LiveMetricsView(): ReactElement {
 
   return (
     <div className='px-5 py-4'>
+      {runInProgress ? (
+        <p className='mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'>
+          A diagnostic run is measuring right now. This view refreshes four times a second, which
+          adds load to the window being measured — switch back to Diagnose for a cleaner result.
+        </p>
+      ) : null}
       <div className={`rounded-lg border p-4 ${overall.border} ${overall.bg}`}>
         <div className='flex items-center justify-between gap-3'>
           <div className='flex items-center gap-2'>

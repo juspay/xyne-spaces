@@ -20,8 +20,9 @@ export function buildCheckContext(options: {
   probes: ProbeResults;
   cpu: CpuContext;
   device: DeviceInfo;
+  zeroObserved: boolean;
 }): CheckContext {
-  const { window, probes, cpu, device } = options;
+  const { window, probes, cpu, device, zeroObserved } = options;
 
   const machineIsSlow = (probes.cpu?.speedIndex ?? 1) < SLOW_MACHINE_SPEED_INDEX;
 
@@ -44,6 +45,7 @@ export function buildCheckContext(options: {
     machineIsSlow,
     loadIsExternal: busyElsewhere || throttled,
     interactive: window.interactions > 0,
+    zeroObserved,
   };
 }
 
@@ -55,13 +57,13 @@ export function buildCheckContext(options: {
 export function runChecks(context: CheckContext): CheckResult[] {
   const results: CheckResult[] = [];
 
-  for (const check of ALL_CHECKS) {
+  for (const [index, check] of ALL_CHECKS.entries()) {
     try {
       const result = check(context);
       if (result) results.push(result);
     } catch (error) {
       results.push({
-        id: 'check-error',
+        id: `check-error-${index}`,
         title: 'A check could not complete',
         category: 'machine',
         status: 'inconclusive',

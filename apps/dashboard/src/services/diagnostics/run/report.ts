@@ -246,8 +246,11 @@ export function buildRunAskAiPrompt(report: RunReport): string {
     'I ran the built-in performance diagnostics. Can you explain this and what I should do?',
   );
   lines.push('');
+  // The run's own timestamp goes in deliberately: the panel keeps the last few
+  // runs, so the report on screen may be from a previous session, and a reply
+  // reasoning about "right now" from yesterday's numbers would be wrong.
   lines.push(
-    `Result: ${CHECK_STATUS_STYLES[report.overall].label}. ${report.headline} Measured over ${seconds(report.window.durationMs)} on ${report.route}, while the app was ${report.interactedDuringRun ? 'in use' : 'idle'}.`,
+    `Result: ${CHECK_STATUS_STYLES[report.overall].label}. ${report.headline} Measured over ${seconds(report.window.durationMs)} on ${report.route} at ${new Date(report.startedAt).toISOString()}, while the app was ${report.interactedDuringRun ? 'in use' : 'idle'}.`,
   );
 
   const notable = [...byStatus(report.checks, 'fail'), ...byStatus(report.checks, 'warn')];

@@ -1,6 +1,5 @@
 import { maxOf, mean, percentile } from '../stats';
 import {
-  gradeHigher,
   gradeLower,
   machineCaveat,
   measurement,
@@ -36,6 +35,9 @@ const STALL_SHARE_BAD = 25;
 
 const FPS_WARN = 45;
 const FPS_BAD = 30;
+/** Share of seconds that must be affected before stutter is a finding rather than a blip. */
+const POOR_SECOND_SHARE = 20;
+const BAD_SECOND_SHARE = 10;
 
 /** A script owning at least this share of measured script time is worth naming. */
 const DOMINANT_SCRIPT_SHARE = 0.35;
@@ -178,11 +180,18 @@ export const frameRate: Check = context => {
     return skipped('frame-rate', 'Frame rate', 'responsiveness', 'No frames were sampled.');
   }
 
-  // The 5th percentile, not the mean: a user feels the worst seconds, and an
-  // average comfortably hides a second-long stall inside thirty good seconds.
+  // Graded on how *much* of the run was bad, not on its worst instant. A single
+  // dropped second is normal — one legitimate burst of work would otherwise
+  // fail the check on every run and teach the reader to ignore it. What a person
+  // actually notices is stutter that persists.
+  const badSeconds = samples.filter(value => value < FPS_BAD).length;
+  const poorSeconds = samples.filter(value => value < FPS_WARN).length;
+  const badShare = (badSeconds / samples.length) * 100;
+  const poorShare = (poorSeconds / samples.length) * 100;
   const low = percentile(samples, 5) ?? 0;
   const average = mean(samples) ?? 0;
-  const status = gradeHigher(low, FPS_WARN, FPS_BAD);
+  const status =
+    badShare >= BAD_SECOND_SHARE ? 'fail' : poorShare >= POOR_SECOND_SHARE ? 'warn' : 'pass';
   const { confidence, reason } = seriesConfidence(context, samples.length, 10, 25);
 
   return {
@@ -195,18 +204,23 @@ export const frameRate: Check = context => {
     summary:
       status === 'pass'
         ? 'Scrolling and animation kept up throughout the run.'
-        : `Frame rate dropped to ${low.toFixed(0)} fps at its worst, which reads as stuttering.`,
+        : `${poorSeconds} of ${samples.length} seconds dropped below ${FPS_WARN} fps, which reads as stuttering.`,
     measurements: [
       measurement(
-        'Worst second (p5)',
-        `${low.toFixed(0)} fps`,
-        `warn ≤ ${FPS_WARN}, fail ≤ ${FPS_BAD}`,
+        'Seconds below 30 fps',
+        `${badSeconds} of ${samples.length}`,
+        `fail ≥ ${BAD_SECOND_SHARE}% of the run`,
       ),
+      measurement(
+        'Seconds below 45 fps',
+        `${poorSeconds} of ${samples.length}`,
+        `warn ≥ ${POOR_SECOND_SHARE}% of the run`,
+      ),
+      measurement('Worst second', `${low.toFixed(0)} fps`),
       measurement('Average', `${average.toFixed(0)} fps`),
-      measurement('Samples', String(samples.length)),
     ],
     evidence: [
-      `Graded on the worst 5% of seconds rather than the average, since that is what a person notices`,
+      'Graded on how much of the run stuttered rather than on its worst instant, since one dropped second is normal',
       ...(context.interactive
         ? []
         : ['Nobody interacted during this run, so the app was not being scrolled or typed into']),

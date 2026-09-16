@@ -27,6 +27,13 @@ export interface CheckContext {
   loadIsExternal: boolean;
   /** True when the user did something during the window. */
   interactive: boolean;
+  /**
+   * True when diagnostics was actually observing a Zero client during the run.
+   * Without it, "no disconnects were seen" and "we were never watching" are
+   * indistinguishable, and reporting the second as a healthy connection is a
+   * false pass of exactly the kind that makes a report untrustworthy.
+   */
+  zeroObserved: boolean;
 }
 
 export type Check = (context: CheckContext) => CheckResult | null;

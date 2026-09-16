@@ -1,5 +1,5 @@
 import { SLOW_MACHINE_SPEED_INDEX } from '../probes/cpuBenchmark';
-import { maxOf, mean, slopePerMinute } from '../stats';
+import { maxOf, mean, minOf, slopePerMinute } from '../stats';
 import {
   gradeLower,
   measurement,
@@ -93,7 +93,13 @@ export const machineCapability: Check = context => {
 };
 
 export const machineLoad: Check = context => {
-  const { systemCpuPercent, appSharePercent, appCpuPercent, thermalState } = context.cpu;
+  const { systemCpuPercent, thermalState } = context.cpu;
+  // Averaged across the run, not read off the final sample. CPU is spiky, and
+  // whichever instant the run happened to end on is not the run.
+  const appSharePercent =
+    mean(values(samplesOf(context, 'cpuSharePercent'))) ?? context.cpu.appSharePercent;
+  const appCpuPercent = mean(values(samplesOf(context, 'cpuPercent'))) ?? context.cpu.appCpuPercent;
+
   if (systemCpuPercent === null || appSharePercent === null) {
     return skipped(
       'machine-load',
@@ -217,7 +223,19 @@ export const memoryGrowth: Check = context => {
     );
   }
 
-  const status = gradeLower(slope, HEAP_GROWTH_WARN_MB_PER_MIN, HEAP_GROWTH_BAD_MB_PER_MIN);
+  // A rising slope alone is not a leak. A heap sawtooths between collections, so
+  // a window that happens to end just before a collection fits a steep line
+  // through entirely normal behaviour. What distinguishes a leak is the floor
+  // moving: the troughs after each collection sitting higher than they did.
+  const third = Math.max(1, Math.floor(points.length / 3));
+  const firstTrough = minOf(values(points.slice(0, third)));
+  const lastTrough = minOf(values(points.slice(points.length - third)));
+  const troughRise = firstTrough === null || lastTrough === null ? null : lastTrough - firstTrough;
+  const floorRising = troughRise !== null && troughRise > 0;
+
+  const status = floorRising
+    ? gradeLower(slope, HEAP_GROWTH_WARN_MB_PER_MIN, HEAP_GROWTH_BAD_MB_PER_MIN)
+    : 'pass';
   const { confidence, reason } = seriesConfidence(context, points.length, 10, 20);
 
   return {
@@ -232,18 +250,30 @@ export const memoryGrowth: Check = context => {
         : `${reason} A short window can mistake normal allocation for a leak — re-run for longer to confirm.`,
     summary:
       status === 'pass'
-        ? 'Memory use was stable across the run.'
-        : `Memory grew by about ${slope.toFixed(0)} MB per minute during the run.`,
+        ? floorRising
+          ? 'Memory grew during the run, but within the range of ordinary allocation.'
+          : 'Memory use was stable across the run.'
+        : `Memory grew by about ${slope.toFixed(0)} MB per minute and did not come back down.`,
     measurements: [
       measurement(
         'Growth rate',
         `${slope.toFixed(1)} MB/min`,
         `warn ≥ ${HEAP_GROWTH_WARN_MB_PER_MIN}, fail ≥ ${HEAP_GROWTH_BAD_MB_PER_MIN}`,
       ),
+      measurement(
+        'Floor moved by',
+        troughRise === null ? '—' : `${troughRise >= 0 ? '+' : ''}${troughRise.toFixed(1)} MB`,
+        'must rise before growth counts',
+      ),
       measurement('Samples', String(points.length)),
     ],
     evidence: [
-      'Least-squares slope across the run, which tolerates the sawtooth of ordinary garbage collection',
+      'Least-squares slope across the run, cross-checked against the lowest point reached in its first and last thirds',
+      ...(floorRising
+        ? []
+        : [
+            'Memory returned to where it started, so the rise was ordinary allocation between collections',
+          ]),
       ...(context.interactive
         ? ['The user was active during this run, so some growth is expected']
         : ['Nobody interacted during this run, so growth here is not explained by use']),

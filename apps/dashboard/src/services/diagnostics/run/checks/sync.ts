@@ -43,6 +43,15 @@ function worstNamed(rows: ZeroOpStat[]): ZeroOpStat | undefined {
 export const zeroConnection: Check = context => {
   const { connectionEvents, disconnects, hiddenDisconnects, durationMs } = context.window;
 
+  if (!context.zeroObserved) {
+    return skipped(
+      'zero-connection',
+      'Live connection',
+      'sync',
+      'No live-sync client was being observed during the run, so its state is unknown rather than healthy.',
+    );
+  }
+
   if (connectionEvents.length === 0 && disconnects === 0) {
     return {
       id: 'zero-connection',

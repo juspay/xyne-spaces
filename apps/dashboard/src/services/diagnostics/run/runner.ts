@@ -236,6 +236,7 @@ class RunController {
       probes,
       cpu: snapshot.cpu,
       device: snapshot.device,
+      zeroObserved: snapshot.zeroConnection.observingSince !== null,
     });
 
     const checks = runChecks(context);
