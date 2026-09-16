@@ -3734,7 +3734,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Use last known tickets as fallback when localTickets is empty/null.
     // This prevents the view from disappearing when filters are applied in group-by mode.
     // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
-    if (lastKnownKanbanTickets !== null && lastKnownKanbanTickets.tickets.length > 0) {
+    if (
+      workspaceViewReady &&
+      lastKnownKanbanTickets !== null &&
+      lastKnownKanbanTickets.tickets.length > 0
+    ) {
       // Apply current filters to the fallback tickets
       const filteredFallback = applyTicketFilters(
         lastKnownKanbanTickets.tickets,
@@ -3748,6 +3752,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return localTickets ?? [];
   }, [
+    workspaceViewReady,
     localTickets,
     deferredFilters,
     tagsByTicketId,
