@@ -13,6 +13,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   Bug,
   Check,
+  ChevronDown,
   ChevronRight,
   Hash,
   Hourglass,
@@ -41,7 +42,7 @@ import {
   RadarThreadCard,
   RadarFeedItem,
 } from '../../api/radarApi';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, type User } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { usePersistedRadarFilters } from '../../hooks/usePersistedRadarFilters';
@@ -51,9 +52,10 @@ import {
   type RadarTeam,
 } from '../../hooks/usePersistedRadarTeams';
 import { useActiveUsers, useUsersById } from '../../hooks/useUsers';
+import { useRankedActivePeople } from '../../hooks/useRankedPeopleSearch';
 import { useAllChannels } from '../../hooks/useChannels';
 import { cn } from '../../utils/classNames';
-import { getUserDisplayName, matchesUserQuery } from '../../utils/userDisplayName';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Dialog } from '../ui/Dialog/Dialog';
 import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
@@ -62,6 +64,17 @@ type RadarTab = 'all' | 'pending' | 'waiting';
 
 /** Avatars rendered before the stack collapses into a +N chip. */
 const AVATARS_SHOWN = 3;
+
+/** Team-picker matches drawn per query; past this the search narrows instead. */
+const TEAM_PICKER_RESULTS = 25;
+
+/** Ranked candidates asked of the shared people search. Wide enough that
+ *  narrowing the result to one picker's own people still fills a page. */
+const RANKED_PEOPLE_LIMIT = 200;
+
+/** Feed cards drawn per page. The next page is fetched into view before the
+ *  reader reaches the end, so the feed still reads as one continuous list. */
+const FEED_PAGE = 20;
 
 /**
  * Radar — the execution feed. Card-based views over the open-item ledger:
@@ -99,6 +112,11 @@ const RadarPanel = (): ReactElement => {
   } | null>(null);
   const [debugLookup, setDebugLookup] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // How much of the filtered feed is currently drawn. A card is not a cheap
+  // row — avatars, a meta line and one body per item — so drawing every match
+  // at once is what the reader feels as lag on a busy radar.
+  const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+  const feedEndRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<'pending' | 'channels' | 'time'>('pending');
   // "Pending on" replaces the old tabs: me maps to the pending feed, others to
   // the waiting feed, both to all. The selection is kept per user across
@@ -143,6 +161,10 @@ const RadarPanel = (): ReactElement => {
   // shut: the header carries the current choice, and only someone who wants
   // the other one has to open it.
   const [requestedByOpen, setRequestedByOpen] = useState(false);
+  // Same reasoning as the picker above: excluding a requester is the rare
+  // choice, and "from anyone" is already the answer for almost everyone — so
+  // it opens shut and states that answer rather than listing the workspace.
+  const [requesterPickerOpen, setRequesterPickerOpen] = useState(false);
   const [requesterSearch, setRequesterSearch] = useState('');
   const [holderSearch, setHolderSearch] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
@@ -263,6 +285,29 @@ const RadarPanel = (): ReactElement => {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [load, radarEnabled]);
+
+  // The people-picker ranking every other surface uses — cmd+K, the slash
+  // pickers, Compose, Forward — rather than a matcher of radar's own: full-name
+  // token matching, then MFU affinity, then DM recency. One call per search box
+  // because a hook cannot live inside the picker, which renders conditionally.
+  // A generous limit: each picker narrows the result to the ids it offers, so
+  // the cap has to survive that intersection rather than bound what is drawn.
+  const rankedRequesters = useRankedActivePeople(requesterSearch, RANKED_PEOPLE_LIMIT);
+  const rankedHolders = useRankedActivePeople(holderSearch, RANKED_PEOPLE_LIMIT);
+  const rankedTeamPeople = useRankedActivePeople(memberSearch, RANKED_PEOPLE_LIMIT);
+
+  // Who a ticked team puts into the Others filter, and which team said so.
+  // The feed has always counted these people (effectivePendingUsers); the
+  // picker used to leave their row blank, so the list disagreed with what the
+  // feed was actually doing.
+  const lockedByTeam = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const team of teams) {
+      if (!teamIds.has(team.id)) continue;
+      for (const id of team.memberIds) if (!byId.has(id)) byId.set(id, team.name);
+    }
+    return byId;
+  }, [teams, teamIds]);
 
   const channelById = useMemo(() => new Map(channels.map(c => [c.id, c])), [channels]);
 
@@ -666,7 +711,13 @@ const RadarPanel = (): ReactElement => {
     ]),
   ];
   const otherHolders = [
-    ...new Set([...waiting.flatMap(c => c.items.flatMap(i => i.pendingOn)), ...pendingUsers]),
+    ...new Set([
+      ...waiting.flatMap(c => c.items.flatMap(i => i.pendingOn)),
+      ...pendingUsers,
+      // A ticked team's members, so the row they are ticked on exists even
+      // when they hold nothing in the current feed.
+      ...lockedByTeam.keys(),
+    ]),
   ].filter(id => id !== selfId && usersById.has(id));
 
   // Requesters are excluded, never included: "everyone but Bob" has to keep
@@ -746,6 +797,41 @@ const RadarPanel = (): ReactElement => {
   if (filterChannels.size) {
     cards = cards.filter(({ card }) => filterChannels.has(card.channelId));
   }
+
+  // A new filter or tab is a different list, so it starts from the first page.
+  // A refresh of the same list deliberately does not: the reader may be deep
+  // in it, and collapsing back to one page under them would lose their place.
+  useEffect(() => {
+    setFeedLimit(FEED_PAGE);
+  }, [
+    tab,
+    pendingUsers,
+    teamIds,
+    excludedRequesters,
+    othersMode,
+    filterChannels,
+    timeRange,
+    customFrom,
+    customTo,
+  ]);
+
+  // The sentinel sits after the last drawn card and is only rendered while
+  // there is more to draw, so this observes nothing once the feed is whole.
+  // The margin reaches a screenful past the end, so the next page is in place
+  // before it is scrolled to and the list never visibly stops.
+  const moreToDraw = feedLimit < cards.length;
+  useEffect(() => {
+    const sentinel = feedEndRef.current;
+    if (!sentinel || !moreToDraw) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) setFeedLimit(n => n + FEED_PAGE);
+      },
+      { rootMargin: '600px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [moreToDraw, feedLimit]);
 
   const runBadge = (run: RadarRunLog) =>
     run.error ? (
@@ -1119,92 +1205,185 @@ const RadarPanel = (): ReactElement => {
     // everyone else is drawn ticked and an empty set is everyone — no roster
     // is ever stored, so whoever asks next is in by default.
     mode: 'include' | 'exclude',
+    /** This box's query, already ranked by useRankedActivePeople. */
+    ranked: User[],
+    /** id → the ticked team that put them here; those rows are on and fixed. */
+    lockedOn?: Map<string, string>,
+    /** Pass to make the heading a disclosure; omit and the body always shows. */
+    collapse?: { open: boolean; onToggle: () => void; summary: string },
   ): ReactElement => {
-    const visible = ids.filter(id =>
-      nameOf(id).toLowerCase().includes(search.trim().toLowerCase()),
-    );
+    const query = search.trim();
+    // At rest the list answers "who is this narrowed to", so it draws only the
+    // people the filter already acts on — nothing at all when nothing is
+    // picked. The roster used to sit here answering a question nobody asked,
+    // and on a real workspace it was the slow path as well.
+    //
+    // With a query it answers "who do I mean" instead, over everyone on offer.
+    // Whoever is already ticked is searched with the rest rather than pinned
+    // above it: this box is three rows tall, so a ticked team's members would
+    // otherwise push every match below the fold. Ids the user store has no row
+    // for — an exclusion for a deleted account, drawn as "Someone" — cannot be
+    // matched by name, so they appear only in the unsearched list.
+    const offered = new Set(ids);
     const isOn = (id: string): boolean =>
-      mode === 'exclude' ? !selected.has(id) : selected.has(id);
+      lockedOn?.has(id) ? true : mode === 'exclude' ? !selected.has(id) : selected.has(id);
+    const candidates = query
+      ? // The hook searches every active user; this picker only offers the
+        // people its own half of the feed knows about.
+        ranked.filter(u => offered.has(u.id)).map(u => u.id)
+      : mode === 'exclude'
+        ? // Exclusion starts from everyone, so here the list IS the
+          // information: it is how you find out who has been asking you in the
+          // first place, and there is no name to type until you have seen it.
+          // It is short by construction — only the requesters in your own feed.
+          ids
+        : ids.filter(id => selected.has(id) || lockedOn?.has(id));
+    // Whoever is ticked leads, in either mode and searched or not: the tick is
+    // what the reader is looking for, and this box shows three rows at a time.
+    // Order within each group is left alone — relevance from the ranker, or the
+    // feed's own order at rest.
+    const visible = [...candidates.filter(isOn), ...candidates.filter(id => !isOn(id))];
     // Select all follows the search: with a query typed, it means the names on
     // screen, not the ones hidden behind it. In exclude mode it only ever puts
     // people back.
     const allVisibleOn = visible.length > 0 && visible.every(isOn);
     return (
       <div className='mt-3 ml-8 rounded-xl border border-border overflow-hidden'>
-        <div className='px-3 py-2 bg-muted/40 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-          {heading}
-        </div>
-        <div className='relative px-3 pt-2'>
-          <Search className='absolute left-5 top-1/2 mt-1 -translate-y-1/2 size-3.5 text-muted-foreground' />
-          <input
-            className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
-            placeholder='Search people'
-            data-track-category='RADAR'
-            data-track-name='SEARCH_PICKER_PEOPLE'
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        {/* With everyone already in, there is nothing to select. */}
-        {(mode === 'include' || selected.size > 0) && (
+        {collapse ? (
           <button
-            className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
+            className='w-full flex items-center gap-2 px-3 py-2 bg-muted/40 text-left hover:bg-muted/60'
+            aria-expanded={collapse.open}
             data-track-category='RADAR'
-            data-track-name='FILTER_PENDING_SELECT_ALL'
-            onClick={() => {
-              // Exclude mode: the row means "everyone in", so it clears the
-              // whole exclusion set. Acting only on the names the search left
-              // on screen looks like a dead control when the excluded one is
-              // hidden behind the query.
-              if (mode === 'exclude') {
-                setSelected(new Set());
-                return;
-              }
-              const next = new Set(selected);
-              for (const id of visible) {
-                if (allVisibleOn) next.delete(id);
-                else next.add(id);
-              }
-              setSelected(next);
-            }}
+            data-track-name='TOGGLE_PICKER_PEOPLE'
+            onClick={collapse.onToggle}
           >
-            <span className='flex-1 text-left'>Select all</span>
-            {/* Exclusions exist, so not everyone is in — the row must not draw
-                as though it already is, whatever the search happens to show. */}
-            {checkbox(mode === 'exclude' ? selected.size === 0 : allVisibleOn)}
+            <span className='flex-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+              {heading}
+            </span>
+            <span className='text-xs text-muted-foreground'>{collapse.summary}</span>
+            {/* Down closed, up open — the direction the panel will move. */}
+            <ChevronDown
+              className={cn(
+                'size-3.5 text-muted-foreground transition-transform',
+                collapse.open && 'rotate-180',
+              )}
+            />
           </button>
+        ) : (
+          <div className='px-3 py-2 bg-muted/40 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+            {heading}
+          </div>
         )}
-        {/* Three rows, then scroll: the list is for finding a name, not reading
+        {collapse && !collapse.open ? null : (
+          <>
+            <div className='relative px-3 pt-2'>
+              <Search className='absolute left-5 top-1/2 mt-1 -translate-y-1/2 size-3.5 text-muted-foreground' />
+              <input
+                className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
+                placeholder='Search people'
+                data-track-category='RADAR'
+                data-track-name='SEARCH_PICKER_PEOPLE'
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            {/* With everyone already in, there is nothing to select — and over a
+            single row it says nothing the row itself does not. */}
+            {visible.length > 1 && (mode === 'include' || selected.size > 0) && (
+              <button
+                className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='FILTER_PENDING_SELECT_ALL'
+                onClick={() => {
+                  // Exclude mode: the row means "everyone in", so it clears the
+                  // whole exclusion set. Acting only on the names the search left
+                  // on screen looks like a dead control when the excluded one is
+                  // hidden behind the query.
+                  if (mode === 'exclude') {
+                    setSelected(new Set());
+                    return;
+                  }
+                  const next = new Set(selected);
+                  for (const id of visible) {
+                    // A team's members are not this control's to turn off.
+                    if (lockedOn?.has(id)) continue;
+                    if (allVisibleOn) next.delete(id);
+                    else next.add(id);
+                  }
+                  setSelected(next);
+                }}
+              >
+                <span className='flex-1 text-left'>Select all</span>
+                {/* Exclusions exist, so not everyone is in — the row must not draw
+                as though it already is, whatever the search happens to show. */}
+                {checkbox(mode === 'exclude' ? selected.size === 0 : allVisibleOn)}
+              </button>
+            )}
+            {/* Three rows, then scroll: the list is for finding a name, not reading
             the roster. */}
-        {/* A visible scrollbar takes its width out of the rows, which pushes
+            {/* A visible scrollbar takes its width out of the rows, which pushes
             the tick column left of the unscrolled rows above it. Hiding it
             keeps one control column; the clipped fourth row is the affordance
             that there is more. */}
-        <div className='max-h-32 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
-          {visible.length === 0 && (
-            <div className='px-3 py-2 text-xs text-muted-foreground'>
-              {ids.length === 0 ? 'Nobody here yet.' : 'No one matches.'}
+            <div className='max-h-32 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
+              {visible.length === 0 && (
+                <div className='px-3 py-2 text-xs text-muted-foreground'>
+                  {query
+                    ? 'No one matches.'
+                    : mode === 'exclude'
+                      ? 'Nobody has asked you yet.'
+                      : 'Search to pick people.'}
+                </div>
+              )}
+              {visible.map(id => {
+                const lockedTeam = lockedOn?.get(id);
+                return (
+                  <button
+                    key={id}
+                    // Left enabled on purpose. A disabled button takes no pointer
+                    // events, so the one thing this row has to say — that a team
+                    // is holding it on, and which — never surfaced on hover.
+                    aria-disabled={!!lockedTeam}
+                    title={
+                      lockedTeam ? `On ${lockedTeam} — untick the team to remove them` : undefined
+                    }
+                    className={cn(
+                      'group/member w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+                      lockedTeam && 'cursor-not-allowed',
+                    )}
+                    data-track-category='RADAR'
+                    data-track-name='FILTER_PENDING_USER'
+                    onClick={() => {
+                      // The team put them here; the team is where to take them off.
+                      if (lockedTeam) return;
+                      const next = new Set(selected);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      setSelected(next);
+                    }}
+                  >
+                    <Avatar
+                      userId={id}
+                      size='rg'
+                      showActiveStatus
+                      className='shrink-0 rounded-lg'
+                    />
+                    <span className='flex-1 text-left truncate'>{nameOf(id)}</span>
+                    {/* Named on hover over the whole row, not just the tick: the
+                    row is where the pointer goes, and the reason this one will
+                    not turn off is the team, which is not otherwise on screen. */}
+                    {lockedTeam && (
+                      <span className='hidden group-hover/member:block shrink-0 max-w-[45%] truncate text-[11px] text-muted-foreground'>
+                        On {lockedTeam}
+                      </span>
+                    )}
+                    {checkbox(isOn(id))}
+                  </button>
+                );
+              })}
             </div>
-          )}
-          {visible.map(id => (
-            <button
-              key={id}
-              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
-              data-track-category='RADAR'
-              data-track-name='FILTER_PENDING_USER'
-              onClick={() => {
-                const next = new Set(selected);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                setSelected(next);
-              }}
-            >
-              <Avatar userId={id} size='rg' showActiveStatus className='shrink-0 rounded-lg' />
-              <span className='flex-1 text-left truncate'>{nameOf(id)}</span>
-              {checkbox(isOn(id))}
-            </button>
-          ))}
-        </div>
+          </>
+        )}
       </div>
     );
   };
@@ -1212,46 +1391,75 @@ const RadarPanel = (): ReactElement => {
   // Every active member bar the viewer. A team narrows Others, which is
   // "pending on someone else", so the viewer's own name would be a member that
   // can never match — and so would someone who has left.
-  // Sorted once per roster change rather than on every keystroke anywhere in
-  // the panel, and searched with the predicate the rest of the app uses, so an
-  // email or an out-of-order two-token query finds the same person here as in
-  // cmd+K. The label is the same field that predicate reads, so a row can
-  // never match on a name it does not show.
-  const sortedTeamCandidates = useMemo(
+  const teamPoolIds = useMemo(
     () =>
-      activeUsers
-        .filter(u => u.id !== selfId)
-        .map(u => ({ id: u.id, label: getUserDisplayName(u), user: u }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    [activeUsers, selfId],
+      // Nothing outside the teams dialog reads this, so the feed does not pay
+      // for it on every roster change.
+      manageTeams ? activeUsers.filter(u => u.id !== selfId).map(u => u.id) : [],
+    [activeUsers, selfId, manageTeams],
   );
-  const teamCandidates = sortedTeamCandidates.filter(c => matchesUserQuery(c.user, memberSearch));
 
-  const selectedTeamNames = teams.filter(t => teamIds.has(t.id)).map(t => t.name);
+  // Two groups, and neither grows with the org: who is already picked — never
+  // more than MAX_TEAM_MEMBERS, and drawn whatever is typed, because the answer
+  // to "who is on this team" must not depend on the search box — then a capped
+  // page of everyone else, ordered by the same recipe cmd+K uses.
+  const { pickedCandidates, teamCandidates, teamCandidatesTruncated } = useMemo(() => {
+    const picked = teamDraft?.memberIds;
+    const pool = new Set(teamPoolIds);
+    const label = (id: string): string => getUserDisplayName(usersById.get(id));
+    const pickedCandidates = picked
+      ? [...picked]
+          .filter(id => pool.has(id))
+          .map(id => ({ id, label: label(id) }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+      : [];
+    const query = memberSearch.trim();
+    if (!query) return { pickedCandidates, teamCandidates: [], teamCandidatesTruncated: false };
+    // Whoever is picked is already drawn above; a second row for them would be
+    // one tick control too many.
+    const ranked = rankedTeamPeople
+      .filter(u => u.id !== selfId && !picked?.has(u.id))
+      .map(u => u.id);
+    return {
+      pickedCandidates,
+      teamCandidates: ranked.slice(0, TEAM_PICKER_RESULTS).map(id => ({ id, label: label(id) })),
+      teamCandidatesTruncated: ranked.length > TEAM_PICKER_RESULTS,
+    };
+  }, [teamPoolIds, usersById, memberSearch, teamDraft?.memberIds, rankedTeamPeople, selfId]);
 
-  // Reads back the sentence the two halves make: who asked, then whose queue.
-  // Teams are named because the name is the point of having made one; loose
-  // people are counted, since a list of them is the thing a team replaces.
-  // The Me half reads the same way: who is excluded, if anyone.
-  const meSummary = ((): string => {
-    const excluded = [...excludedRequesters];
-    if (excluded.length === 0) return 'from anyone';
-    // Same shape as the Others half: name the first, count the rest.
-    const rest = excluded.length - 1;
-    return `all but ${nameOf(excluded[0] ?? '')}${rest ? ` +${rest}` : ''}`;
-  })();
-
-  const othersSummary = ((): string => {
-    const requester = othersMode === 'me' ? 'requested by me' : 'requested by anyone';
-    const peopleCount = pendingUsers.size;
-    if (selectedTeamNames.length === 0 && peopleCount === 0) return `${requester} · everyone`;
-    if (selectedTeamNames.length === 0) {
-      return `${requester} · ${peopleCount} ${peopleCount === 1 ? 'person' : 'people'}`;
-    }
-    const shown = selectedTeamNames.slice(0, 2);
-    const extra = selectedTeamNames.length - shown.length + peopleCount;
-    return `${requester} · ${shown.join(', ')}${extra ? ` +${extra}` : ''}`;
-  })();
+  // One row shape for both groups — the tick is the same control whether the
+  // person is being added or taken off, and the cap only ever bites on adding.
+  const memberRow = (
+    candidate: { id: string; label: string },
+    picked: boolean,
+  ): ReactElement | null => {
+    const draft = teamDraft;
+    if (!draft) return null;
+    const full = !picked && draft.memberIds.size >= MAX_TEAM_MEMBERS;
+    return (
+      <button
+        key={candidate.id}
+        disabled={full}
+        title={full ? `At most ${MAX_TEAM_MEMBERS} members` : undefined}
+        className={cn(
+          'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+          full && 'opacity-50 cursor-not-allowed',
+        )}
+        data-track-category='RADAR'
+        data-track-name='TEAM_MEMBER'
+        onClick={() => {
+          const next = new Set(draft.memberIds);
+          if (next.has(candidate.id)) next.delete(candidate.id);
+          else next.add(candidate.id);
+          setTeamDraft({ ...draft, memberIds: next });
+        }}
+      >
+        <Avatar userId={candidate.id} size='rg' showActiveStatus className='shrink-0 rounded-lg' />
+        <span className='flex-1 text-left truncate'>{candidate.label}</span>
+        {checkbox(picked)}
+      </button>
+    );
+  };
 
   const othersModePicker = (
     <div className='mt-3 ml-8 rounded-xl border border-border overflow-hidden'>
@@ -1268,17 +1476,17 @@ const RadarPanel = (): ReactElement => {
         <span className='text-xs text-muted-foreground'>
           {othersMode === 'me' ? 'Me' : 'Anyone'}
         </span>
-        <ChevronRight
+        <ChevronDown
           className={cn(
             'size-3.5 text-muted-foreground transition-transform',
-            requestedByOpen && 'rotate-90',
+            requestedByOpen && 'rotate-180',
           )}
         />
       </button>
       {requestedByOpen &&
         [
-          { id: 'me' as const, label: 'Me', hint: 'What you are chasing' },
-          { id: 'all' as const, label: 'Anyone', hint: 'Everything on them, whoever asked' },
+          { id: 'me' as const, label: 'Me' },
+          { id: 'all' as const, label: 'Anyone' },
         ].map(mode => (
           <button
             key={mode.id}
@@ -1287,10 +1495,7 @@ const RadarPanel = (): ReactElement => {
             data-track-name='FILTER_OTHERS_MODE'
             onClick={() => setOthersMode(mode.id)}
           >
-            <span className='flex-1 text-left'>
-              <span className='block font-bold'>{mode.label}</span>
-              <span className='block text-xs text-muted-foreground'>{mode.hint}</span>
-            </span>
+            <span className='flex-1 text-left font-bold'>{mode.label}</span>
             {radio(othersMode === mode.id)}
           </button>
         ))}
@@ -1368,6 +1573,7 @@ const RadarPanel = (): ReactElement => {
     // Straight back to the filters: the team was made in order to use it, and
     // the list behind this form is not a step anyone asked for.
     setTeamDraft(null);
+    setMemberSearch('');
     setManageTeams(false);
   };
 
@@ -1380,6 +1586,13 @@ const RadarPanel = (): ReactElement => {
       next.delete(team.id);
       return next;
     });
+  };
+
+  // The search belongs to the form, not to the dialog: a query left over from
+  // the last member picked would otherwise decide what the next draft opens on.
+  const openTeamDraft = (draft: typeof teamDraft): void => {
+    setTeamDraft(draft);
+    setMemberSearch('');
   };
 
   const closeManageTeams = (): void => {
@@ -1449,7 +1662,7 @@ const RadarPanel = (): ReactElement => {
                     data-track-category='RADAR'
                     data-track-name='EDIT_TEAM'
                     onClick={() =>
-                      setTeamDraft({
+                      openTeamDraft({
                         id: team.id,
                         name: team.name,
                         memberIds: new Set(team.memberIds),
@@ -1472,7 +1685,7 @@ const RadarPanel = (): ReactElement => {
                 className='rounded-xl border border-dashed border-border px-3.5 py-3 text-sm font-bold text-[#e8604c] hover:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='NEW_TEAM'
-                onClick={() => setTeamDraft({ id: null, name: '', memberIds: new Set() })}
+                onClick={() => openTeamDraft({ id: null, name: '', memberIds: new Set() })}
               >
                 + New team
               </button>
@@ -1515,45 +1728,36 @@ const RadarPanel = (): ReactElement => {
                     onChange={e => setMemberSearch(e.target.value)}
                   />
                 </div>
-                {teamCandidates.length === 0 && (
-                  <div className='px-3 py-2 text-xs text-muted-foreground'>
-                    {memberSearch.trim() ? 'No one matches.' : 'Nobody here yet.'}
+                {pickedCandidates.length > 0 && (
+                  <div className='px-3 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+                    On this team
                   </div>
                 )}
-                {teamCandidates.map(candidate => {
-                  const picked = teamDraft.memberIds.has(candidate.id);
-                  // The cap is what the picker enforces: past it, only
-                  // unticking stays available.
-                  const full = !picked && teamDraft.memberIds.size >= MAX_TEAM_MEMBERS;
-                  return (
-                    <button
-                      key={candidate.id}
-                      disabled={full}
-                      title={full ? `At most ${MAX_TEAM_MEMBERS} members` : undefined}
-                      className={cn(
-                        'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
-                        full && 'opacity-50 cursor-not-allowed',
-                      )}
-                      data-track-category='RADAR'
-                      data-track-name='TEAM_MEMBER'
-                      onClick={() => {
-                        const next = new Set(teamDraft.memberIds);
-                        if (next.has(candidate.id)) next.delete(candidate.id);
-                        else next.add(candidate.id);
-                        setTeamDraft({ ...teamDraft, memberIds: next });
-                      }}
-                    >
-                      <Avatar
-                        userId={candidate.id}
-                        size='rg'
-                        showActiveStatus
-                        className='shrink-0 rounded-lg'
-                      />
-                      <span className='flex-1 text-left truncate'>{candidate.label}</span>
-                      {checkbox(picked)}
-                    </button>
-                  );
-                })}
+                {pickedCandidates.map(candidate => memberRow(candidate, true))}
+                {/* Only ever a divider between two populated groups. */}
+                {pickedCandidates.length > 0 && teamCandidates.length > 0 && (
+                  <div className='mx-3 my-1 border-t border-border' />
+                )}
+                {teamCandidates.map(candidate => memberRow(candidate, false))}
+                {pickedCandidates.length + teamCandidates.length === 0 && (
+                  <div className='px-3 py-2 text-xs text-muted-foreground'>
+                    {memberSearch.trim() ? 'No one matches.' : 'Search to add people.'}
+                  </div>
+                )}
+                {/* "else" because whoever is already on the team is listed
+                    right above, however little the query matched. */}
+                {memberSearch.trim() &&
+                  teamCandidates.length === 0 &&
+                  pickedCandidates.length > 0 && (
+                    <div className='px-3 py-2 text-xs text-muted-foreground'>
+                      No one else matches.
+                    </div>
+                  )}
+                {teamCandidatesTruncated && (
+                  <div className='px-3 py-2 text-xs text-muted-foreground'>
+                    More people match — keep typing to narrow.
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1568,7 +1772,7 @@ const RadarPanel = (): ReactElement => {
             data-track-category='RADAR'
             data-track-name='MANAGE_TEAMS_BACK'
             onClick={() => {
-              if (teamDraft) setTeamDraft(null);
+              if (teamDraft) openTeamDraft(null);
               else setManageTeams(false);
             }}
           >
@@ -1617,12 +1821,7 @@ const RadarPanel = (): ReactElement => {
                 data-track-name='FILTER_PENDING_ME'
                 onClick={() => setPendingMe(v => !v)}
               >
-                <span className='flex-1 min-w-0 flex items-baseline gap-2 text-left'>
-                  <span className='font-bold'>Me</span>
-                  {pendingMe && (
-                    <span className='truncate text-xs text-muted-foreground'>{meSummary}</span>
-                  )}
-                </span>
+                <span className='flex-1 min-w-0 text-left font-bold'>Me</span>
                 {checkbox(pendingMe)}
               </button>
               {pendingMe &&
@@ -1634,6 +1833,22 @@ const RadarPanel = (): ReactElement => {
                   requesterSearch,
                   setRequesterSearch,
                   'exclude',
+                  rankedRequesters,
+                  undefined,
+                  {
+                    open: requesterPickerOpen,
+                    onToggle: () => setRequesterPickerOpen(open => !open),
+                    // Who is still in, not who is out: "All but 1" made the
+                    // reader do the subtraction, and the count that matters is
+                    // the one the feed is actually narrowed to.
+                    summary: (() => {
+                      if (excludedRequesters.size === 0) return 'Anyone';
+                      const included = requesterOptions.filter(
+                        id => !excludedRequesters.has(id),
+                      ).length;
+                      return `${included} ${included === 1 ? 'person' : 'people'}`;
+                    })(),
+                  },
                 )}
               <button
                 className={cn(
@@ -1651,12 +1866,7 @@ const RadarPanel = (): ReactElement => {
                   }
                 }}
               >
-                <span className='flex-1 min-w-0 flex items-baseline gap-2 text-left'>
-                  <span className='font-bold'>Others</span>
-                  {pendingOthers && (
-                    <span className='truncate text-xs text-muted-foreground'>{othersSummary}</span>
-                  )}
-                </span>
+                <span className='flex-1 min-w-0 text-left font-bold'>Others</span>
                 {checkbox(pendingOthers)}
               </button>
               {pendingOthers && teamsPicker}
@@ -1669,6 +1879,8 @@ const RadarPanel = (): ReactElement => {
                   holderSearch,
                   setHolderSearch,
                   'include',
+                  rankedHolders,
+                  lockedByTeam,
                 )}
               {pendingOthers && othersModePicker}
             </>
@@ -1877,7 +2089,8 @@ const RadarPanel = (): ReactElement => {
             </div>
           ) : (
             <div className='space-y-4 max-w-3xl'>
-              {cards.map(({ card, kind }) => renderCard(card, kind))}
+              {cards.slice(0, feedLimit).map(({ card, kind }) => renderCard(card, kind))}
+              {moreToDraw && <div ref={feedEndRef} aria-hidden className='h-px' />}
             </div>
           )}
         </div>
