@@ -1,10 +1,7 @@
 import { UserSessionService } from '@/services/userSessionService';
 import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
-import { logger as baseLogger } from '@/utils/logger';
-
-const logger = baseLogger.child({ module: 'AccountDeactivationService' });
-
+import { logger } from '@/utils/logger';
 interface DeactivatedUser {
   userId: string;
   email: string;
