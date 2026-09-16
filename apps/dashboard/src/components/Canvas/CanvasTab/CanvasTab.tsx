@@ -58,7 +58,6 @@ import {
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -73,13 +72,10 @@ import {
 } from '../../../utils/canvasVersioning';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { SectionEmojiPicker } from '../../Chat/SectionEmojiPicker';
-import { cn } from '../../../utils/classNames';
 import {
   buildCanvasTitleWithIcon,
   getCanvasDisplayTitle,
   getCanvasTitleIcon,
-  setOptimisticCanvasTitleIcon,
 } from '../canvasTitleIcon';
 
 interface CanvasTabProps {
@@ -266,13 +262,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   const handleFileUpload = useCallback(
@@ -760,23 +749,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     );
   }, [canEdit, canvas, currentTitleIcon, z]);
 
-  const handleTitleIconChange = useCallback(
-    (icon: string): void => {
-      if (!canvas?.id || !canEdit) return;
-
-      setCurrentTitleIcon(icon);
-      setOptimisticCanvasTitleIcon(canvas.id, icon);
-      z.mutate(
-        mutators.canvas.update({
-          id: canvas.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, icon),
-          timestamp: Date.now(),
-        }),
-      );
-    },
-    [canEdit, canvas?.id, z],
-  );
-
   const handlePreviewVersion = (version: CanvasVersionRecord): void => {
     if (!previewVersionRef.current) {
       const currentBlocks = editorRef.current?.getBlocks();
@@ -1053,65 +1025,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
-  );
-  const canvasTitleHeader = canvas?.id ? (
-    <div className='canvas-editor-title-column pb-6 pt-0 md:pt-2'>
-      <CanvasEditorHeader
-        canvas={canvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !isChannelArchived && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-      />
-    </div>
-  ) : null;
-
-  const renderCanvasPageTitle = (editable: boolean): ReactElement => (
-    <div className='canvas-page-title-header mx-auto w-full max-w-[900px] px-6 pb-3 pt-8 md:px-14 lg:px-20'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <SectionEmojiPicker
-          value={currentTitleIcon}
-          disabled={!editable}
-          onChange={handleTitleIconChange}
-          trackCategory='CANVAS'
-          trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-          ariaLabel={currentTitleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-          triggerClassName='size-10'
-          iconClassName='text-2xl md:text-[28px]'
-          fallbackIcon={<Plus className='size-4' />}
-          allowCustomEmojis={false}
-        />
-        <h1 className='min-w-0 flex-1'>
-          <Input
-            type='text'
-            aria-label='Canvas page title'
-            value={currentTitle}
-            onChange={event => {
-              const newTitle = event.target.value;
-              setCurrentTitle(newTitle);
-              titleRef.current = newTitle;
-            }}
-            readOnly={!editable}
-            onBlur={handleTitleSave}
-            className={cn(
-              'h-auto min-w-0 border-none bg-transparent px-0 py-0 text-3xl font-bold leading-tight text-foreground shadow-none placeholder:text-muted-foreground/80 focus:ring-0 focus-visible:border-none focus-visible:ring-0 md:text-[40px] md:leading-[48px]',
-              !editable && 'cursor-default',
-            )}
-            placeholder='Add page title'
-            data-testid='canvas-page-title-input'
-            data-track-category='CANVAS'
-            data-track-name='EDIT_CANVAS_PAGE_TITLE'
-            data-track-metadata={JSON.stringify({ canvasId: canvas?.id, channelId })}
-          />
-        </h1>
-      </div>
-    </div>
-  );
+  // No title above the document — see the note in CanvasScreen.
+  const canvasTitleHeader = null;
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1320,8 +1235,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           <CanvasVersionDiffPanel parts={versionDiffParts} className='mx-2 mb-2 md:mx-4' />
         )}
 
-        {canvas && renderCanvasPageTitle(canEdit && !previewVersion)}
-
         {/* Canvas Editor */}
         <div
           ref={canvasContentRef}
@@ -1354,7 +1267,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onFileUpload={handleFileUpload}
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             ) : (
@@ -1370,7 +1283,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             )}
