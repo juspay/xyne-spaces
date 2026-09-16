@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.2](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.1...v1.323.0-release-20260916.2) (2026-09-16)
+
+
+### Features
+
+* ephemeral msg support for slack/xyne ([#1856](https://github.com/juspay/xyne-spaces/issues/1856)) ([#1900](https://github.com/juspay/xyne-spaces/issues/1900)) ([62b3a91](https://github.com/juspay/xyne-spaces/commit/62b3a917c2235b757c4d29fbb5a8420f30ccbf59))
+
 ## [1.323.0-release-20260916.1](https://github.com/juspay/xyne-spaces/compare/v1.322.0...v1.323.0-release-20260916.1) (2026-09-16)
 
 
