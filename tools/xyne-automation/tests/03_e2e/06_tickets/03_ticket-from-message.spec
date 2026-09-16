@@ -6,6 +6,8 @@
 * Creating ticket "ticket-msg-hover-1" from message hover for user "admin-1" with message "Fix login page timeout issue" and priority "Medium"
 
 ## Create ticket from message via thread panel
+tags: quarantine
+Quarantined (XYNE-63195): `[data-testid='thread-more-options-button']` never becomes visible after the reply-in-thread hover action in the CI/Docker runner (30s timeout, fails on all retries).
 * Setting up ticket test with user "user-2" in channel "channel-1" for admin "admin-1"
 * Creating ticket "ticket-msg-thread-1" from thread panel for user "admin-1" with message "API response time slow - need optimization" and priority "High"
 
@@ -14,5 +16,7 @@
 * Creating ticket "ticket-msg-hover-attach-1" from message hover with attachment for user "admin-1" with message "App crash when uploading large files" and priority "Critical"
 
 ## Create ticket from message via thread panel with attachment
+tags: quarantine
+Quarantined (XYNE-63195): `[data-testid='thread-more-options-button']` never becomes visible after the reply-in-thread hover action in the CI/Docker runner (30s timeout, fails on all retries).
 * Setting up ticket test in channel "channel-1" for admin "admin-1"
 * Creating ticket "ticket-msg-thread-attach-1" from thread panel with attachment for user "admin-1" with message "Server performance degradation - logs attached" and priority "High"
