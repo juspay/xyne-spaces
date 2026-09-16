@@ -889,13 +889,7 @@ export function buildSdlcPath(target: SdlcNavTarget): string {
 
 const nullableNonEmpty = z.string().min(1).nullable();
 
-export const SDLC_AGENT_OPERATIONS = [
-  "interactive",
-  "baseline",
-  "artifact",
-  "work",
-  "wiki",
-] as const;
+export const SDLC_AGENT_OPERATIONS = ["interactive"] as const;
 export const sdlcAgentOperationSchema = z.enum(SDLC_AGENT_OPERATIONS);
 export type SdlcAgentOperation = z.infer<typeof sdlcAgentOperationSchema>;
 
@@ -912,75 +906,23 @@ export const sdlcWikiAgentRoleSchema = z.enum(SDLC_WIKI_AGENT_ROLES);
 export type SdlcWikiAgentRole = z.infer<typeof sdlcWikiAgentRoleSchema>;
 
 
-export const sdlcAgentContextSchema = z
-  .object({
-    version: z.literal(1),
-    operation: sdlcAgentOperationSchema,
-    workspaceId: z.string().min(1),
-    projectId: z.string().min(1),
-    channelId: z.string().min(1),
-    actorUserId: z.string().min(1),
-    repository: z.object({
+export const sdlcAgentContextSchema = z.object({
+  version: z.literal(1),
+  operation: sdlcAgentOperationSchema,
+  workspaceId: z.string().min(1),
+  projectId: z.string().min(1),
+  channelId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  repository: z
+    .object({
       id: z.string().min(1),
       name: z.string().min(1),
       url: z.string().min(1),
       baseBranch: z.string().min(1),
-    }),
-    permissions: z.object({ repositoryRole: z.enum(["ADMIN", "MEMBER"]) }),
-    gates: z.object({
-      capabilities: z.array(z.unknown()),
-      allBaselinesApproved: z.boolean(),
-    }),
-    execution: z.object({
-      workflowExecutionId: nullableNonEmpty,
-      sessionId: nullableNonEmpty,
-      conversationId: nullableNonEmpty,
-    }),
-    interactiveGrant: nullableNonEmpty.optional(),
-    artifact: z.object({
-      kind: nullableNonEmpty,
-      id: nullableNonEmpty,
-      sourceType: nullableNonEmpty,
-      sourceId: nullableNonEmpty,
-    }),
-    ticketId: nullableNonEmpty.optional(),
-    setupExecutionId: nullableNonEmpty.optional(),
-    baselineKind: sdlcBaselineKindSchema.nullable().optional(),
-    generationCommit: nullableNonEmpty.optional(),
-    wiki: z
-      .object({
-        role: sdlcWikiAgentRoleSchema.nullable(),
-        assignedCommitShas: z.array(z.string()),
-        bootstrapRef: z.string().nullable(),
-        targetHeadSha: z.string().nullable(),
-      })
-      .optional(),
-  })
-  .superRefine((context, ctx) => {
-    const fail = (message: string) =>
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
-    const hasExecution =
-      Boolean(context.execution.workflowExecutionId) && Boolean(context.execution.sessionId);
-
-    switch (context.operation) {
-      case "baseline":
-        if (!context.setupExecutionId) fail("setupExecutionId is required for baseline runs");
-        if (!context.baselineKind) fail("baselineKind is required for baseline runs");
-        if (!hasExecution) fail("baseline runs require a bound execution");
-        break;
-      case "artifact":
-        if (!hasExecution) fail("artifact runs require a bound execution");
-        break;
-      case "work":
-        if (!context.ticketId) fail("ticketId is required for work runs");
-        if (!hasExecution) fail("work runs require a bound execution");
-        break;
-      case "interactive":
-        if (!context.execution.conversationId) fail("interactive runs require a conversationId");
-        if (!context.interactiveGrant) fail("interactive runs require an interactiveGrant");
-        break;
-      case "wiki":
-        break;
-    }
-  });
+    })
+    .optional(),
+  execution: z.object({ conversationId: z.string().min(1) }),
+  interactiveGrant: z.string().min(1),
+  generationCommit: nullableNonEmpty.optional(),
+});
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;
