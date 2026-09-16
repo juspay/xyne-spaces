@@ -6,6 +6,8 @@ import { mutators } from '../../zero/mutators';
 import { PERF_REPORT_CHANNEL_ID } from '../../config';
 import { diagnosticsStore } from './store';
 import { buildChannelReportHtml } from './report';
+import { runController } from './run';
+import { buildRunChannelHtml } from './run/report';
 import { logger, Event } from '../../utils/logger';
 
 /**
@@ -19,11 +21,12 @@ export function useRequestPerformanceHelp(): (() => Promise<void>) | null {
   const zero = useZero();
 
   const request = useCallback(async (): Promise<void> => {
+    const report = runController.getSnapshot().report;
     const snapshot = diagnosticsStore.getSnapshot();
     const result = zero.mutate(
       mutators.conversations.send({
         channelId: PERF_REPORT_CHANNEL_ID,
-        content: buildChannelReportHtml(snapshot),
+        content: report ? buildRunChannelHtml(report) : buildChannelReportHtml(snapshot),
         conversationId: uuidv4(),
         messageId: uuidv4(),
         timestamp: Date.now(),
@@ -34,7 +37,8 @@ export function useRequestPerformanceHelp(): (() => Promise<void>) | null {
     // only fires once the message actually lands, so "Sent" must mean that.
     await result.server;
     logger.info(Event.DIAGNOSTICS_HELP_REQUESTED, {
-      overall: snapshot.overall,
+      source: report ? 'run' : 'session',
+      overall: report ? report.overall : snapshot.overall,
       channelId: PERF_REPORT_CHANNEL_ID,
     });
   }, [zero]);

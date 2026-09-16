@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { MetricTile } from './MetricTile';
 import { RunView } from './RunView';
 import { runController } from '../../services/diagnostics/run';
+import { buildRunJson, buildRunMarkdown } from '../../services/diagnostics/run/report';
 import { useDiagnostics } from './useDiagnostics';
 import { METRIC_SPECS, VERDICT_STYLES } from '../../services/diagnostics/thresholds';
 import { buildReportJson, buildReportMarkdown, summarize } from '../../services/diagnostics/report';
@@ -59,8 +60,17 @@ export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelPro
   // re-render on every store notification: while a run is measuring, a panel
   // repainting four times a second is load inside the window it is measuring.
   const copy = useCallback(async (kind: 'markdown' | 'json') => {
+    // A finished run is the better document: it is scoped to a window the user
+    // can describe, where the session report spans everything since launch.
+    const report = runController.getSnapshot().report;
     const snapshot = diagnosticsStore.getSnapshot();
-    const text = kind === 'markdown' ? buildReportMarkdown(snapshot) : buildReportJson(snapshot);
+    const text = report
+      ? kind === 'markdown'
+        ? buildRunMarkdown(report)
+        : buildRunJson(report)
+      : kind === 'markdown'
+        ? buildReportMarkdown(snapshot)
+        : buildReportJson(snapshot);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
