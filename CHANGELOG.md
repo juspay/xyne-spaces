@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.4](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.3...v1.323.0-release-20260916.4) (2026-09-16)
+
+
+### Bug Fixes
+
+* emit MESSAGE_RECEIVED on message update [backport to release-20260916] ([#1909](https://github.com/juspay/xyne-spaces/issues/1909)) ([a333dbe](https://github.com/juspay/xyne-spaces/commit/a333dbe928fbf09b70199881373fb5a2230f1d49))
+
 ## [1.323.0-release-20260916.3](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.2...v1.323.0-release-20260916.3) (2026-09-16)
 
 
