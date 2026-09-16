@@ -9,6 +9,7 @@ import {
 import { suggestReleaseServices } from '@/agents/release-service-suggest/index.js';
 import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
@@ -186,18 +187,14 @@ router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER'
     res.status(400).json({ error: 'repoUrl is required' });
     return;
   }
-  if (projectId) {
-    const project = await db.project.findUnique({
-      where: { id: projectId },
-      select: { workspaceId: true },
-    });
-    if (!project || project.workspaceId !== workspaceId) {
-      res.status(404).json({ error: 'Project not found' });
-      return;
-    }
-  }
   const provider = detectVcsProvider(repoUrl);
-  if (provider !== VCSProviderType.GITHUB && provider !== VCSProviderType.BITBUCKET_SERVER) {
+  // detectVcsProvider treats any non-GitHub URL as Bitbucket, so also require the
+  // configured Bitbucket host — otherwise a GitLab URL surfaces as a Bitbucket auth error.
+  const bitbucketHost = config.bitbucket.baseUrl.replace(/^https?:\/\//, '').split('/')[0] || null;
+  const isSupported =
+    provider === VCSProviderType.GITHUB ||
+    (provider === VCSProviderType.BITBUCKET_SERVER && !!bitbucketHost && repoUrl.includes(bitbucketHost));
+  if (!isSupported) {
     res.json({
       services: [],
       message: 'AI suggestions support GitHub and Bitbucket Server repositories.',
@@ -205,6 +202,16 @@ router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER'
     return;
   }
   try {
+    if (projectId) {
+      const project = await db.project.findUnique({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      if (!project || project.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Project not found' });
+        return;
+      }
+    }
     const paths =
       provider === VCSProviderType.GITHUB
         ? await listGitHubRepoFilePaths(repoUrl)

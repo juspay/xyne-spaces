@@ -934,6 +934,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                 ) : (
                   <>
                     <ReleaseDevTicketsTable
+                      key={releaseTicketId}
                       devTicketRows={devTicketRows}
                       repoGroups={devTicketRepoGroups}
                       isMultiRepo={isMultiRepo}
@@ -1088,6 +1089,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                       else void handleAnalyzeRelease();
                     }}
                     disabled={isAnalyzing || isGeneratingInsights}
+                    hidden={!canManageRelease}
                     data-testid='analyze-release-button'
                     className='inline-flex shrink-0 items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                   >

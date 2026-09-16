@@ -185,9 +185,7 @@ export function useReleaseConfigForm({
         service: (typeof services)[number],
         existing?: ApplicationConfig,
       ): ApplicationConfig => ({
-        ...EMPTY_APP,
-        id: existing?.id ?? uuidv4(),
-        boardId: existing?.boardId ?? uuidv4(),
+        ...(existing ?? { ...EMPTY_APP, id: uuidv4(), boardId: uuidv4() }),
         name: service.name,
         regex: service.regex,
         envPaths: service.envPaths.join(', '),

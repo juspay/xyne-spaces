@@ -71,7 +71,11 @@ function compactPaths(paths: string[]): string[] {
       dirs.add(`${parts.slice(0, depth).join('/')}/`);
     }
   }
-  return [...new Set([...interesting, ...dirs])].slice(0, MAX_PROMPT_PATHS);
+  // Directories are what identify services; keep them even when a repo has hundreds of
+  // migration files (this repo alone has 550+ "interesting" paths).
+  const dirList = [...dirs].slice(0, MAX_PROMPT_PATHS / 2);
+  const interestingList = [...new Set(interesting)].slice(0, MAX_PROMPT_PATHS - dirList.length);
+  return [...new Set([...interestingList, ...dirList])];
 }
 
 function buildPrompt(paths: string[]): string {

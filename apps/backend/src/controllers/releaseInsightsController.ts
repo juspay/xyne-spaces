@@ -7,8 +7,9 @@ import { ApplicationRepository } from '@/database/repositories/applicationReposi
 import { generateReleaseInsights } from '@/agents/release-insights/index.js';
 import { logger } from '@/utils/logger';
 
+// 'Unassigned' / 'Unknown' are the report service's placeholders, not people.
 const isAssigned = (value: string | null | undefined): boolean =>
-  !!value && value.trim().length > 0 && value.trim().toLowerCase() !== 'unassigned';
+  !!value && value.trim().length > 0 && !['unassigned', 'unknown'].includes(value.trim().toLowerCase());
 
 // A stuck in-flight flag older than this is treated as abandoned so retries proceed.
 const INSIGHTS_STALE_MS = 5 * 60 * 1000;
@@ -42,34 +43,18 @@ export class ReleaseInsightsController {
         res.status(400).json({ success: false, error: 'Not a release ticket' });
         return;
       }
-      // In-flight guard; a flag older than the stale window is treated as abandoned.
-      const meta = ticket.metadata as {
-        isGeneratingReleaseInsights?: boolean;
-        insightsGenerationStartedAt?: string;
-      } | null;
-      if (meta?.isGeneratingReleaseInsights === true) {
-        const startedAt = meta.insightsGenerationStartedAt
-          ? Date.parse(meta.insightsGenerationStartedAt)
-          : NaN;
-        const isStale =
-          !Number.isFinite(startedAt) || Date.now() - startedAt > INSIGHTS_STALE_MS;
-        if (!isStale) {
-          res.status(409).json({
-            success: false,
-            error: 'Insights are already being generated for this release',
-          });
-          return;
-        }
-        logger.warn('[ReleaseInsights] stale in-flight flag, allowing retry', {
-          ticketId,
-          startedAt: meta.insightsGenerationStartedAt ?? null,
+      // In-flight guard, claimed atomically; a flag older than the stale window is abandoned.
+      const claimed = await this.ticketRepository.claimReleaseInsightsGeneration(
+        ticketId,
+        new Date(Date.now() - INSIGHTS_STALE_MS),
+      );
+      if (!claimed) {
+        res.status(409).json({
+          success: false,
+          error: 'Insights are already being generated for this release',
         });
+        return;
       }
-
-      await this.ticketRepository.updateTicketMetadata(ticketId, {
-        isGeneratingReleaseInsights: true,
-        insightsGenerationStartedAt: new Date().toISOString(),
-      });
 
       let completed = false;
       try {

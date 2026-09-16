@@ -87,7 +87,10 @@ export function createGridSelectionRenderers<T>(
   const IndexCellRenderer = (params: ICellRendererParams<T>): ReactElement | null => {
     const [isHovered, setIsHovered] = useState(false);
     const [isSelected, setIsSelected] = useState(params.node.isSelected());
-    const rowIndex = (params.node.rowIndex ?? 0) + 1;
+    // Grids with full-width group rows stamp their own numbering so headers don't leave gaps.
+    const rowIndex =
+      (params.data as { displayIndex?: number } | undefined)?.displayIndex ??
+      (params.node.rowIndex ?? 0) + 1;
 
     useEffect(() => {
       const onSelectionChanged = (): void => setIsSelected(params.node.isSelected());

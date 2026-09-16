@@ -31,11 +31,40 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 export function readReleaseInsights(metadata: unknown): ReleaseInsights | null {
   if (!isPlainObject(metadata)) return null;
   const value = metadata['releaseInsights'];
-  return isPlainObject(value) ? (value as ReleaseInsights) : null;
+  if (!isPlainObject(value)) return null;
+  // Older/partial blobs: keep only the sub-objects whose arrays exist rather than crash the screen.
+  const stats = value['stats'];
+  const risk = value['risk'];
+  const out: ReleaseInsights = {};
+  if (typeof value['generatedAt'] === 'string') out.generatedAt = value['generatedAt'];
+  if (typeof value['summary'] === 'string') out.summary = value['summary'];
+  if (
+    isPlainObject(stats) &&
+    Array.isArray(stats['serviceNames']) &&
+    Array.isArray(stats['contributors'])
+  ) {
+    out.stats = stats as NonNullable<ReleaseInsights['stats']>;
+  }
+  if (isPlainObject(risk) && Array.isArray(risk['reasons'])) {
+    out.risk = risk as NonNullable<ReleaseInsights['risk']>;
+  }
+  if (Array.isArray(value['composition'])) {
+    out.composition = value['composition'] as NonNullable<ReleaseInsights['composition']>;
+  }
+  if (Array.isArray(value['qualityGaps'])) out.qualityGaps = value['qualityGaps'] as string[];
+  if (Array.isArray(value['watchItems'])) out.watchItems = value['watchItems'] as string[];
+  return out;
 }
 
+// Mirrors the backend's INSIGHTS_STALE_MS: a flag older than this is abandoned (crash
+// mid-generation) and the backend lets a retry through, so the button must too.
+const INSIGHTS_STALE_MS = 5 * 60 * 1000;
+
 export function readIsGeneratingInsights(metadata: unknown): boolean {
-  return isPlainObject(metadata) && metadata['isGeneratingReleaseInsights'] === true;
+  if (!isPlainObject(metadata) || metadata['isGeneratingReleaseInsights'] !== true) return false;
+  const startedAt = metadata['insightsGenerationStartedAt'];
+  const started = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN;
+  return Number.isFinite(started) && Date.now() - started <= INSIGHTS_STALE_MS;
 }
 
 const RISK_BADGE: Record<string, string> = {

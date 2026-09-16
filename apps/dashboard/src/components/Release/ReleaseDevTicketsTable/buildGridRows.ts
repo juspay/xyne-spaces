@@ -21,15 +21,17 @@ export function buildGridRows({
   repoGroups,
 }: BuildGridRowsArgs): GridRow[] {
   if (!isMultiRepo) {
-    return filteredRows.map(row => ({
+    return filteredRows.map((row, i) => ({
       kind: 'ticket' as const,
       id: `ticket:${row.internalTicketId}`,
       row,
+      displayIndex: i + 1,
     }));
   }
 
   const survivors = new Set(filteredRows.map(row => row.internalTicketId));
   const out: GridRow[] = [];
+  let displayIndex = 0;
   const pushGroup = (
     key: string,
     dotKey: string,
@@ -54,8 +56,14 @@ export function buildGridRows({
         total: kept.length,
       },
     });
+    // A cross-repo ticket sits in several groups; the row id must be unique per group.
     for (const row of kept) {
-      out.push({ kind: 'ticket', id: `ticket:${row.internalTicketId}`, row });
+      out.push({
+        kind: 'ticket',
+        id: `ticket:${key}:${row.internalTicketId}`,
+        row,
+        displayIndex: ++displayIndex,
+      });
     }
   };
 

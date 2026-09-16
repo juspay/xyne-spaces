@@ -56,14 +56,15 @@ interface ReleaseDevTicketsTableProps {
 }
 
 // Stable identities: ag-grid re-processes option objects/callbacks whose identity changes.
+const isRowSelectable = (node: IRowNode<GridRow>): boolean => node.data?.kind === 'ticket';
 const ROW_SELECTION = {
   mode: 'multiRow',
   checkboxes: false,
   enableClickSelection: false,
   headerCheckbox: false,
+  isRowSelectable,
 } as const;
 const getRowId = (params: GetRowIdParams<GridRow>): string => params.data.id;
-const isRowSelectable = (node: IRowNode<GridRow>): boolean => node.data?.kind === 'ticket';
 const isFullWidthRow = (params: IsFullWidthRowParams<GridRow>): boolean =>
   params.rowNode.data?.kind === 'group';
 
@@ -161,7 +162,6 @@ export const ReleaseDevTicketsTable = ({
           rowHeight={44}
           headerHeight={44}
           rowSelection={ROW_SELECTION}
-          isRowSelectable={isRowSelectable}
           isFullWidthRow={isFullWidthRow}
           fullWidthCellRenderer={RepoGroupHeaderCell}
           onSelectionChanged={onSelectionChanged}

@@ -1171,6 +1171,23 @@ export class TicketRepository {
     }
   } 
 
+  // Atomically claims the release-insights in-flight flag: one UPDATE that both checks
+  // (flag unset, or set before `staleBefore`) and sets, so concurrent callers can't both
+  // pass a read-then-write guard. Returns false when another generation holds the flag.
+  async claimReleaseInsightsGeneration(ticketId: string, staleBefore: Date): Promise<boolean> {
+    const startedAt = new Date().toISOString();
+    const updated = await prisma.$executeRaw`
+      UPDATE "tickets"
+      SET "metadata" = COALESCE("metadata", '{}'::jsonb)
+        || jsonb_build_object('isGeneratingReleaseInsights', true, 'insightsGenerationStartedAt', ${startedAt}::text)
+      WHERE "id" = ${ticketId}
+        AND (
+          COALESCE("metadata"->>'isGeneratingReleaseInsights', 'false') <> 'true'
+          OR COALESCE("metadata"->>'insightsGenerationStartedAt', '') < ${staleBefore.toISOString()}
+        )`;
+    return updated > 0;
+  }
+
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
