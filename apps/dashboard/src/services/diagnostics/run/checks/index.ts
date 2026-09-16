@@ -82,15 +82,32 @@ export function runChecks(context: CheckContext): CheckResult[] {
 }
 
 /**
- * Worst first, and within a status the things the reader can act on before the
- * things they cannot. A finding about someone else's machine load is context,
- * not a task.
+ * Roughly the order in which a cause explains a complaint. Responsiveness is
+ * what a person actually feels, so it leads; machine-level context trails,
+ * because it frames the others rather than being the thing to fix.
+ */
+const CATEGORY_ORDER: Record<CheckResult['category'], number> = {
+  responsiveness: 0,
+  sync: 1,
+  memory: 2,
+  storage: 3,
+  network: 4,
+  machine: 5,
+};
+
+/**
+ * Worst first; within a status, the things the reader can act on before the
+ * things they cannot, then by category. The headline names whatever lands
+ * first, so this ordering decides what the report is *about* — sorting by title
+ * would have let the alphabet pick that.
  */
 export function sortChecks(checks: CheckResult[]): CheckResult[] {
   return [...checks].sort((a, b) => {
     const byStatus = statusRank(b.status) - statusRank(a.status);
     if (byStatus !== 0) return byStatus;
     if (a.actionable !== b.actionable) return a.actionable ? -1 : 1;
+    const byCategory = CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category];
+    if (byCategory !== 0) return byCategory;
     return a.title.localeCompare(b.title);
   });
 }

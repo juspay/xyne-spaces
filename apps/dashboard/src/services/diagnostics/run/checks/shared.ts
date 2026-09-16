@@ -147,9 +147,11 @@ export function skipped(
     status: 'skipped',
     confidence: 'low',
     confidenceReason: reason,
-    summary: 'Not measured on this device.',
+    // The reason is the summary. A list of rows that all read "not measured"
+    // tells the reader nothing about which gap matters.
+    summary: reason,
     measurements: [],
-    evidence: [reason],
+    evidence: [],
     remediation: '',
     actionable: false,
   };
