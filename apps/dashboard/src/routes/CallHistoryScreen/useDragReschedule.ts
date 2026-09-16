@@ -151,12 +151,14 @@ export function useDragReschedule(
       if (!call?.startsAt) return;
 
       const day = referenceDay ?? new Date(call.startsAt);
-      const { startMins, endMins } = getVisibleMinutesForDay(call, day);
+      const { startMins } = getVisibleMinutesForDay(call, day);
+      const startsAt = new Date(call.startsAt).getTime();
+      const endsAt = call.endsAt ? new Date(call.endsAt).getTime() : startsAt + 60 * 60 * 1000;
 
       const state: DragState = {
         call,
         originalStartMins: startMins,
-        originalDurationMins: Math.max(15, endMins - startMins),
+        originalDurationMins: Math.max(15, (endsAt - startsAt) / 60_000),
         originalDateKey: dayKey(day),
       };
       dragStateRef.current = state;
