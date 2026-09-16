@@ -17,6 +17,7 @@ import {
   MediaDeviceFailure,
   Track,
   LocalVideoTrack,
+  VideoPresets,
 } from 'livekit-client';
 import { BackgroundBlur } from '@livekit/track-processors';
 import type { Zero } from '@rocicorp/zero';
@@ -1180,6 +1181,9 @@ export const roomMachine = setup({
             noiseSuppression: true,
           },
           publishDefaults: {
+            videoCodec: 'vp9',
+            backupCodec: true,
+            videoSimulcastLayers: [VideoPresets.h540, VideoPresets.h216],
             screenShareEncoding: {
               maxBitrate: screenShareQuality.maxBitrate,
               maxFramerate: screenShareQuality.frameRate,
