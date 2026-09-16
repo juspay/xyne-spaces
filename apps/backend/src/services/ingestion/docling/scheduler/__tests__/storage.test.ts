@@ -50,14 +50,38 @@ import {
   isMissingObjectError,
 } from '../storage'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const storageFactory = jest.requireMock('@/services/storage/storageServiceFactory') as any
+interface MockStorageService {
+  uploadFileV2: jest.Mock
+  getFileBuffer: jest.Mock
+  listFiles: jest.Mock
+  deleteFile: jest.Mock
+}
+
+interface MockStorageFactory {
+  getStorageService: () => MockStorageService
+  __store: Map<string, Buffer>
+  __service: MockStorageService
+}
+
+const storageFactory = jest.requireMock(
+  '@/services/storage/storageServiceFactory',
+) as MockStorageFactory
 
 const fileBufferOf = (key: string): Buffer => storageFactory.__store.get(key) as Buffer
 
-const legacyRoot = path.join(os.tmpdir(), `docling-legacy-stage-${process.pid}-${Date.now()}`)
+/**
+ * Stand-in for a pre-GCS pod-local stage. Created with mkdtemp rather than a
+ * name built from pid/timestamp: the OS temp dir is world-writable, so a
+ * predictable path can be pre-created or symlinked by another user before the
+ * test writes to it (CodeQL js/insecure-temporary-file).
+ */
+let legacyRoot: string
 
 describe('docling scheduler staging storage', () => {
+  beforeAll(async () => {
+    legacyRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'docling-legacy-stage-'))
+  })
+
   beforeEach(() => {
     storageFactory.__store.clear()
     storageFactory.__service.uploadFileV2.mockClear()
