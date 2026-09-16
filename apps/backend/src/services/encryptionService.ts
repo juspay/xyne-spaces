@@ -1,10 +1,13 @@
 /**
  * Backward-compatible AES-256-CBC encryption service.
  *
- * Without a valid optional ENCRYPTION_KEYS array (see
- * encryptionKeyRingConfig.ts), the original encryption and
- * decryption implementation is used and new writes stay in the
- * legacy `iv:ciphertext` format.
+ * Mode selection lives in encryptionKeyRingConfig.ts:
+ *   legacy        original behavior, writes `iv:ciphertext`
+ *   keyring-read  still writes `iv:ciphertext`, additionally
+ *                 reads `v2:keyId:iv:ciphertext`
+ *   keyring-write writes `v2:keyId:iv:ciphertext` with the
+ *                 configured ENCRYPTION_ACTIVE_KEY_ID, reads both
+ *                 formats
  */
 
 import crypto from 'crypto';
@@ -222,14 +225,16 @@ function decryptVersioned(
 }
 
 /**
- * Encrypt using the original format unless a valid key ring
- * is configured. In key-ring mode the last ENCRYPTION_KEYS
- * entry is the writer.
+ * Encrypt using the original legacy format unless key-ring
+ * write mode is active (valid ENCRYPTION_KEYS plus a matching
+ * ENCRYPTION_ACTIVE_KEY_ID). In key-ring read mode writes stay
+ * legacy so every reader can be deployed before any V2 data
+ * exists.
  */
 export function encrypt(plaintext: string): string {
   const config = loadEncryptionRuntimeConfig();
 
-  if (config.mode !== 'keyring') {
+  if (config.mode !== 'keyring-write') {
     return encryptLegacy(plaintext);
   }
 

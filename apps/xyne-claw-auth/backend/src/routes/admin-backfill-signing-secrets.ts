@@ -33,6 +33,12 @@ import { decrypt, decryptSpacesCbc } from "../crypto.js";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
 import { backfillSigningSecretFromSpacesDbDetailed } from "../lib/spaces-app-secret.js";
 import { getInstalledAppSigningSecret } from "../lib/spaces-db.js";
+import {
+  buildBackfillBatchResponse,
+  parseBackfillLimit,
+  planBackfillPage,
+  type BackfillRowResult,
+} from "../lib/backfill-pagination.js";
 import { loadSpacesEncryptionRuntimeConfig } from "../spaces-encryption-key-ring-config.js";
 
 import { createLogger } from "../logger.js";
@@ -196,20 +202,14 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
  *
  * `?limit=100&after=<agentId>`: process a bounded,
  * resumable page. Pass `nextAfter` into the next request.
+ * When `limit` is omitted it defaults to 100; the route never
+ * processes an unbounded batch. Pagination over-fetches by one
+ * row (limit + 1) so `nextAfter` is returned only when another
+ * row actually exists — a final page of exactly `limit` rows
+ * does not yield a phantom cursor. Top-level `success` is false
+ * whenever any row failed (`data.partialFailure` is true then);
+ * successful rows are still returned alongside the failures.
  */
-type BackfillRouteResult =
-  | {
-      slug: string;
-      agentId: string;
-      ok: true;
-      action: "validated" | "updated";
-    }
-  | {
-      slug: string;
-      agentId: string;
-      ok: false;
-      reason: string;
-    };
 
 router.post(
   "/backfill-signing-secrets",
@@ -298,38 +298,23 @@ router.post(
         ? rawAfter.trim()
         : undefined;
 
-    const rawLimit = req.query["limit"];
-    let limit: number | undefined;
+    const limitResult = parseBackfillLimit(
+      req.query["limit"],
+    );
 
-    if (rawLimit !== undefined) {
-      if (
-        typeof rawLimit !== "string" ||
-        !/^[1-9][0-9]*$/.test(rawLimit)
-      ) {
-        res.status(400).json({
-          success: false,
-          error:
-            "limit must be a positive integer",
-        });
-        return;
-      }
-
-      limit = Number(rawLimit);
-
-      if (
-        !Number.isSafeInteger(limit) ||
-        limit > 500
-      ) {
-        res.status(400).json({
-          success: false,
-          error:
-            "limit must be between 1 and 500",
-        });
-        return;
-      }
+    if (!limitResult.ok) {
+      res.status(400).json({
+        success: false,
+        error: limitResult.error,
+      });
+      return;
     }
 
-    const agents = await prisma.agent.findMany({
+    const limit = limitResult.limit;
+
+    // Fetch limit + 1: the extra row only signals that another
+    // page exists; it is never processed.
+    const fetchedAgents = await prisma.agent.findMany({
       where: {
         spacesAppId: {
           not: null,
@@ -361,18 +346,19 @@ router.post(
             skip: 1,
           }
         : {}),
-      ...(limit !== undefined
-        ? {
-            take: limit,
-          }
-        : {}),
+      take: limit + 1,
     });
 
+    const {
+      page: agents,
+      nextAfter,
+    } = planBackfillPage(fetchedAgents, limit);
+
     log.info(
-      `[admin-backfill] requesterId=${requesterId} dryRun=${dryRun} overwrite=${overwrite} slug=${slug ?? "(all)"} after=${after ?? "(start)"} limit=${limit ?? "(all)"} agents-to-sync=${agents.length}`,
+      `[admin-backfill] requesterId=${requesterId} dryRun=${dryRun} overwrite=${overwrite} slug=${slug ?? "(all)"} after=${after ?? "(start)"} limit=${limit} agents-to-sync=${agents.length}`,
     );
 
-    const results: BackfillRouteResult[] = [];
+    const results: BackfillRowResult[] = [];
     let okCount = 0;
     let failCount = 0;
 
@@ -405,34 +391,21 @@ router.post(
       }
     }
 
-    const finalAgent = agents.at(-1);
-
-    const nextAfter =
-      limit !== undefined &&
-      agents.length === limit &&
-      finalAgent
-        ? finalAgent.id
-        : null;
-
     log.info(
       `[admin-backfill] requesterId=${requesterId} dryRun=${dryRun} overwrite=${overwrite} ok=${okCount} failed=${failCount} nextAfter=${nextAfter ?? "(complete)"}`,
     );
 
-    res.json({
-      success: true,
-      data: {
+    res.json(
+      buildBackfillBatchResponse({
         dryRun,
         overwrite,
         slug: slug ?? null,
         after: after ?? null,
-        limit: limit ?? null,
+        limit,
         nextAfter,
-        total: agents.length,
-        ok: okCount,
-        failed: failCount,
         results,
-      },
-    });
+      }),
+    );
   },
 );
 

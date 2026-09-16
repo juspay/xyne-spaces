@@ -3,8 +3,10 @@
  *
  * This module performs no file or environment access. Services
  * read the key-ring JSON from their own environment file and
- * decide how fallback works. The last array entry is the active
- * (writing) key; every entry is a valid decryption key.
+ * decide how fallback works. Every entry in the returned ring is
+ * a valid decryption key; which key (if any) writes is the
+ * caller's policy — the backend selects it with
+ * ENCRYPTION_ACTIVE_KEY_ID.
  */
 
 export type EncryptionKeyRingErrorReason =
@@ -25,11 +27,6 @@ export class EncryptionKeyRingConfigError
 
 export interface ParsedEncryptionKeyRing {
   keys: ReadonlyMap<string, Buffer>;
-  /**
-   * ID of the last array entry. Services that write use it as
-   * the active key; read-only services may ignore it.
-   */
-  activeKeyId: string;
 }
 
 function invalidJson(message: string): never {
@@ -39,7 +36,7 @@ function invalidJson(message: string): never {
   );
 }
 
-function invalidEntry(message: string): never {
+function invalidRing(message: string): never {
   throw new EncryptionKeyRingConfigError(
     'keyring_validation_failed',
     message
@@ -60,13 +57,12 @@ export function parseEncryptionKeyRing(
   }
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    return invalidJson(
+    return invalidRing(
       'Encryption keys must be a non-empty array'
     );
   }
 
   const keys = new Map<string, Buffer>();
-  let activeKeyId = '';
 
   parsed.forEach((value, index) => {
     if (
@@ -74,7 +70,7 @@ export function parseEncryptionKeyRing(
       typeof value !== 'object' ||
       Array.isArray(value)
     ) {
-      invalidEntry(
+      invalidRing(
         `Invalid key-ring entry at index ${index}`
       );
     }
@@ -88,7 +84,7 @@ export function parseEncryptionKeyRing(
       typeof entry.id !== 'string' ||
       entry.id !== entry.id.trim()
     ) {
-      invalidEntry(
+      invalidRing(
         `Invalid key ID at index ${index}`
       );
     }
@@ -102,19 +98,19 @@ export function parseEncryptionKeyRing(
       id === 'legacy' ||
       id === 'v2'
     ) {
-      invalidEntry(
+      invalidRing(
         `Invalid key ID at index ${index}`
       );
     }
 
     if (keys.has(id)) {
-      invalidEntry(
+      invalidRing(
         `Duplicate key ID at index ${index}`
       );
     }
 
     if (typeof entry.key !== 'string') {
-      invalidEntry(
+      invalidRing(
         `Invalid key value at index ${index}`
       );
     }
@@ -124,7 +120,7 @@ export function parseEncryptionKeyRing(
     if (
       !/^[0-9a-fA-F]{64}$/.test(normalizedKey)
     ) {
-      invalidEntry(
+      invalidRing(
         `Invalid key value at index ${index}`
       );
     }
@@ -133,12 +129,9 @@ export function parseEncryptionKeyRing(
       id,
       Buffer.from(normalizedKey, 'hex')
     );
-
-    activeKeyId = id;
   });
 
   return {
     keys,
-    activeKeyId,
   };
 }
