@@ -28,7 +28,7 @@ import {
 } from '@/services/externalAttachmentService';
 import { EmailRepository } from '@/database/repositories';
 import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetector';
-import { collectDlCandidates } from '@/services/dlResolver';
+import { collectDlCandidates, dlAddressesFor } from '@/services/dlResolver';
 import { db } from '@/database/client';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -461,10 +461,18 @@ export class ExternalSourceCore {
       return [];
     }
 
-    const matches = await db.emailChannelPreference.findMany({
-      where: { workspaceId, dlEmail: { in: addrs, mode: 'insensitive' } },
-      select: { channelId: true, dlEmail: true },
+    const candidates = await db.emailChannelPreference.findMany({
+      where: {
+        workspaceId,
+        OR: [{ dlEmail: { in: addrs, mode: 'insensitive' } }, { NOT: { dlAliases: null } }],
+      },
+      select: { channelId: true, dlEmail: true, dlAliases: true },
     });
+    // addrs is already lowercased by collectDlCandidates, as is dlAddressesFor.
+    const addrSet = new Set(addrs);
+    const matches = candidates.filter(pref =>
+      dlAddressesFor(pref).some(address => addrSet.has(address)),
+    );
     if (matches.length === 0) {
       logger.info(`[DL_ROUTE] Dropping inbound: no desk for from/to/cc`, {
         sourceName: source.name,

@@ -29,6 +29,7 @@ export function useUpdateEmailChannelPreference() {
       ownerUserId,
       assigneeUserGroupId,
       sendAsEmail,
+      dlAliases,
       defaultCc,
       emailMergeMode,
       twoStepSendEnabled,
@@ -46,6 +47,7 @@ export function useUpdateEmailChannelPreference() {
       ownerUserId?: string;
       assigneeUserGroupId?: string | null;
       sendAsEmail?: string | null;
+      dlAliases?: string | null;
       defaultCc?: string | null;
       emailMergeMode?: EmailMergeMode;
       twoStepSendEnabled?: boolean;
@@ -65,6 +67,7 @@ export function useUpdateEmailChannelPreference() {
           ...(ownerUserId !== undefined ? { ownerUserId } : {}),
           ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
           ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+          ...(dlAliases !== undefined ? { dlAliases } : {}),
           ...(defaultCc !== undefined ? { defaultCc } : {}),
           ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
           ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),

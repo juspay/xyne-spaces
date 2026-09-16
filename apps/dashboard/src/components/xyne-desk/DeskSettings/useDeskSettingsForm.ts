@@ -5,6 +5,7 @@ import {
   AutoDraftMode,
   ChannelType,
   ChannelRole,
+  DeskType,
   isDeskChannelType,
   parseDeskMetricsGuestVisibility,
 } from '@xyne/shared';
@@ -38,6 +39,16 @@ export const parseDefaultCc = (val: string | undefined | null): string[] =>
         .map(s => s.trim())
         .filter(Boolean)
     : [];
+
+export const parseDlAliases = (val: string | undefined | null): string[] => {
+  if (!val) return [];
+  try {
+    const parsed: unknown = JSON.parse(val);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+};
 
 const parseFrtStageNames = (val: string | undefined | null): string[] => {
   if (!val) return [];
@@ -112,6 +123,8 @@ export function useDeskSettingsForm(
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
   const isDeskChannel = isDeskChannelType(channelType);
+  const isDl = emailChannelPreference?.deskType === DeskType.DL;
+  const dlEmail = emailChannelPreference?.dlEmail ?? null;
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
     queries.channelParticipants({ channelId: channelId ?? '' }),
@@ -208,6 +221,7 @@ export function useDeskSettingsForm(
   const pref = useDraft({
     ownerUserId: emailChannelPreference?.ownerUserId ?? '',
     sendAsEmail: emailChannelPreference?.sendAsEmail ?? '',
+    dlAliases: emailChannelPreference?.dlAliases ?? '[]',
     defaultCc: parseDefaultCc(emailChannelPreference?.defaultCc).join(','),
     assigneeUserGroupId: emailChannelPreference?.assigneeUserGroupId ?? '',
     autoMergeEmails: emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED,
@@ -240,6 +254,7 @@ export function useDeskSettingsForm(
 
   const ownerId = pref.draft.ownerUserId;
   const sendAsAlias = pref.draft.sendAsEmail;
+  const dlAliases = parseDlAliases(pref.draft.dlAliases);
   const ccEmails = parseDefaultCc(pref.draft.defaultCc);
   const defaultAssigneeGroupId = pref.draft.assigneeUserGroupId;
   const autoMergeEmails = pref.draft.autoMergeEmails;
@@ -270,6 +285,14 @@ export function useDeskSettingsForm(
     pref.setField('ownerUserId', next);
   };
   const setSendAsAlias = (next: string) => pref.setField('sendAsEmail', next);
+  const setDlAliases = (updater: string[] | ((prev: string[]) => string[])) => {
+    if (!canManage) return;
+    pref.setField('dlAliases', prevStr => {
+      const prevArr = parseDlAliases(prevStr);
+      const nextArr = typeof updater === 'function' ? updater(prevArr) : updater;
+      return JSON.stringify(nextArr.map(a => a.trim().toLowerCase()).filter(Boolean));
+    });
+  };
   const setCcEmails = (updater: string[] | ((prev: string[]) => string[])) => {
     pref.setField('defaultCc', prevStr => {
       const prevArr = parseDefaultCc(prevStr);
@@ -398,6 +421,10 @@ export function useDeskSettingsForm(
       if (d.ownerUserId !== s.ownerUserId && d.ownerUserId) patch.ownerUserId = d.ownerUserId;
       if (d.sendAsEmail !== s.sendAsEmail) patch.sendAsEmail = d.sendAsEmail.trim() || null;
       if (d.defaultCc !== s.defaultCc) patch.defaultCc = d.defaultCc || null;
+      if (d.dlAliases !== s.dlAliases) {
+        const aliases = parseDlAliases(d.dlAliases);
+        patch.dlAliases = aliases.length > 0 ? JSON.stringify(aliases) : null;
+      }
       if (d.assigneeUserGroupId !== s.assigneeUserGroupId) {
         patch.assigneeUserGroupId = d.assigneeUserGroupId || null;
       }
@@ -543,6 +570,10 @@ export function useDeskSettingsForm(
     sendAsAlias,
     setSendAsAlias,
     sendAsAliasError,
+    isDl,
+    dlEmail,
+    dlAliases,
+    setDlAliases,
     classificationConfigError,
     ccEmails,
     setCcEmails,

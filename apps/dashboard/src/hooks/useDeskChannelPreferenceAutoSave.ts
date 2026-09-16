@@ -8,6 +8,7 @@ export type ChannelPreferencePatch = {
   ownerUserId?: string;
   assigneeUserGroupId?: string | null;
   sendAsEmail?: string | null;
+  dlAliases?: string | null;
   defaultCc?: string | null;
   emailMergeMode?: EmailMergeMode;
   twoStepSendEnabled?: boolean;
