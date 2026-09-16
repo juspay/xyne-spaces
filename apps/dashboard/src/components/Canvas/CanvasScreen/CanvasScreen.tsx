@@ -37,7 +37,6 @@ import {
   GitCompare,
   Loader2,
   MessageSquare,
-  Plus,
   RotateCcw,
 } from 'lucide-react';
 import {
@@ -110,15 +109,12 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import { CanvasLabelManager } from '../CanvasLabelManager';
 import { useScope } from '../../../shortcuts';
-import { SectionEmojiPicker } from '../../Chat/SectionEmojiPicker';
 import {
   buildCanvasTitleWithIcon,
   getCanvasDisplayTitle,
   getCanvasTitleIcon,
-  setOptimisticCanvasTitleIcon,
 } from '../canvasTitleIcon';
 
 interface LocationState {
@@ -137,7 +133,6 @@ interface CanvasScreenProps {
   onToggleFullscreen?: () => void;
   showAskAiAction?: boolean;
   /** Off where the document opens with its own title, as SDLC pages do. */
-  showPageTitle?: boolean;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -176,7 +171,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   isFullscreen = false,
   onToggleFullscreen,
   showAskAiAction = true,
-  showPageTitle = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -307,13 +301,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -925,23 +912,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     );
   }, [canEdit, currentTitleIcon, selectedCanvas, z]);
 
-  const handleTitleIconChange = useCallback(
-    (icon: string): void => {
-      if (!selectedCanvas?.id || !canEdit) return;
-
-      setCurrentTitleIcon(icon);
-      setOptimisticCanvasTitleIcon(selectedCanvas.id, icon);
-      z.mutate(
-        mutators.canvas.update({
-          id: selectedCanvas.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, icon),
-          timestamp: Date.now(),
-        }),
-      );
-    },
-    [canEdit, selectedCanvas?.id, z],
-  );
-
   const persistCanvasExitContent = useCallback(
     (content: PartialBlock[], canvasToSave: Canvas): void => {
       void performSave(content, canvasToSave, latestHtmlRef.current);
@@ -1192,11 +1162,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    selectedCanvas?.id &&
-    titleAutoFocusCanvasIdRef.current === selectedCanvas.id &&
-    !previewVersion,
-  );
 
   // Handle Ask AI - Open XyneAI with canvas context using canvas id
   const handleAskAI = (): void => {
@@ -1321,20 +1286,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return rows;
   }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
 
-  const canvasTitleHeader = !selectedCanvas?.id ? null : showPageTitle ? (
-    <div className='canvas-editor-title-column pb-8 pt-2 md:pt-4'>
-      <CanvasEditorHeader
-        canvas={selectedCanvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-      />
-    </div>
-  ) : (
+  // A canvas carries no title above its content: the name lives in the chrome
+  // around it. Two editable titles ended up stacked over every document when the
+  // page header and this one arrived a day apart.
+  const canvasTitleHeader = !selectedCanvas?.id ? null : (
     <div className='canvas-block-row group/canvas-editor-title'>
       <CanvasLabelManager
         canvas={selectedCanvas}
@@ -1348,51 +1303,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
     'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
-
-  const renderCanvasPageTitle = (editable: boolean): ReactElement => (
-    <div className='canvas-page-title-header mx-auto w-full max-w-[900px] px-6 pb-3 pt-8 md:px-14 lg:px-20'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <SectionEmojiPicker
-          value={currentTitleIcon}
-          disabled={!editable}
-          onChange={handleTitleIconChange}
-          trackCategory='CANVAS'
-          trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-          ariaLabel={currentTitleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-          triggerClassName='size-10'
-          iconClassName='text-2xl md:text-[28px]'
-          fallbackIcon={<Plus className='size-4' />}
-          allowCustomEmojis={false}
-        />
-        <h1 className='min-w-0 flex-1'>
-          <Input
-            type='text'
-            aria-label='Canvas page title'
-            value={currentTitle}
-            onChange={event => {
-              const newTitle = event.target.value;
-              setCurrentTitle(newTitle);
-              titleRef.current = newTitle;
-            }}
-            readOnly={!editable}
-            onBlur={handleTitleSave}
-            className={cn(
-              'h-auto min-w-0 border-none bg-transparent px-0 py-0 text-3xl font-bold leading-tight text-foreground shadow-none placeholder:text-muted-foreground/80 focus:ring-0 focus-visible:border-none focus-visible:ring-0 md:text-[40px] md:leading-[48px]',
-              !editable && 'cursor-default',
-            )}
-            placeholder='Add page title'
-            data-testid='canvas-page-title-input'
-            data-track-category='CANVAS'
-            data-track-name='EDIT_CANVAS_PAGE_TITLE'
-            data-track-metadata={JSON.stringify({
-              canvasId: selectedCanvas?.id,
-              channelId: selectedCanvas?.channelId || state?.channelId,
-            })}
-          />
-        </h1>
-      </div>
-    </div>
-  );
 
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
@@ -1844,8 +1754,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               <CanvasVersionDiffPanel parts={versionDiffParts} />
             )}
 
-            {selectedCanvas && !isCreating && renderCanvasPageTitle(canEdit && !previewVersion)}
-
             {/* Canvas Editor */}
             <div
               ref={canvasContentRef}
@@ -1898,7 +1806,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
@@ -1921,7 +1829,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}

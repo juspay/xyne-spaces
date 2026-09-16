@@ -3722,23 +3722,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
     const localEntries = Object.entries(groupedRows);
-    const serverGroups = isKanbanLayout || isTableLayout
-      ? hasSearchTerm
-        ? groupBy === 'status'
-          ? getStatusColumns().map(column => ({
-              groupKey: column.id,
-              displayName: column.name,
-              totalCount: 0,
-              stages: {},
-              statuses: {},
-            }))
+    const serverGroups =
+      isKanbanLayout || isTableLayout
+        ? hasSearchTerm
+          ? groupBy === 'status'
+            ? getStatusColumns().map(column => ({
+                groupKey: column.id,
+                displayName: column.name,
+                totalCount: 0,
+                stages: {},
+                statuses: {},
+              }))
+            : hasMatchingLastKnownKanbanGroups
+              ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
+              : kanbanCounts.groups
           : hasMatchingLastKnownKanbanGroups
             ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
             : kanbanCounts.groups
-        : hasMatchingLastKnownKanbanGroups
-          ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
-          : kanbanCounts.groups
-      : [];
+        : [];
     const serverGroupKeys = new Set(serverGroups.map(group => group.groupKey));
 
     const baseEntries =
