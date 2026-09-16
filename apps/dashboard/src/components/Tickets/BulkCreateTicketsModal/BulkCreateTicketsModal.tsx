@@ -4,6 +4,7 @@ import { Star, Trash2, ArrowDownToLine, Loader2 } from 'lucide-react';
 import {
   BaseTicketType,
   BulkTicketMode,
+  type CreateBulkTicketResponse,
   ChannelScopeType,
   LookupType,
   TicketPriority,
@@ -39,11 +40,16 @@ export interface BulkCreateTicketsModalProps {
   parentTitle?: string | undefined;
   subTitleTitles?: string[] | undefined;
   subDescriptions?: string[] | undefined;
-  clientRowIds?: string[] | undefined;
+  clientRowIds?: ReadonlyArray<string | undefined> | undefined;
   existingParentTicket?: ExistingParentTicket | undefined;
   sourceMessageId?: string | undefined;
   sourceConversationId?: string | undefined;
-  onTicketCreated?: (ticket: { id: string; conversationId?: string; xyneId?: string }) => void;
+  /**
+   * Called once the batch is accepted. The ticket is passed only when one
+   * exists already — a batch that creates its own parent is still queued at
+   * this point, so there is no id to hand over.
+   */
+  onTicketCreated?: (ticket?: { id: string; conversationId?: string; xyneId?: string }) => void;
 }
 
 interface BulkRow {
@@ -183,13 +189,14 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     if (initDoneRef.current) return;
     initDoneRef.current = true;
     const initChannelId = propChannelId ?? '';
+    const clientRowIdAt = (index: number): string | undefined => clientRowIds?.[index] || undefined;
 
     if (isAllParentsMode) {
       if (subTitleTitles && subTitleTitles.length > 0) {
         const prefilledRows = subTitleTitles.map((t, i) => {
           const row = newSubRow(t, initChannelId, defaultBoardId);
           row.description = subDescriptions?.[i] || t;
-          row.clientRowId = clientRowIds?.[i];
+          row.clientRowId = clientRowIdAt(i);
           return row;
         });
         setRows([...prefilledRows, newSubRow('', initChannelId, defaultBoardId)]);
@@ -206,7 +213,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       const subRows = (subTitleTitles ?? []).map((t, i) => {
         const row = newSubRow(t, initChannelId, defaultBoardId);
         row.description = subDescriptions?.[i + 1] || t;
-        row.clientRowId = clientRowIds?.[i];
+        row.clientRowId = clientRowIdAt(i);
         return row;
       });
       setRows([...subRows, newSubRow('', initChannelId, defaultBoardId)]);
@@ -215,7 +222,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
 
     const parentRow: BulkRow = {
       id: newRowId(),
-      clientRowId: clientRowIds?.[0],
+      clientRowId: clientRowIdAt(0),
       title: parentTitle ?? '',
       description: subDescriptions?.[0] || parentTitle || '',
       priority: TicketPriority.HIGH,
@@ -230,7 +237,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     const subRows = (subTitleTitles ?? []).map((t, i) => {
       const row = newSubRow(t, initChannelId, defaultBoardId);
       row.description = subDescriptions?.[i + 1] || t;
-      row.clientRowId = clientRowIds?.[i + 1];
+      row.clientRowId = clientRowIdAt(i + 1);
       return row;
     });
     setRows([parentRow, ...subRows, newSubRow('', initChannelId, defaultBoardId)]);
@@ -367,20 +374,10 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
-        const data = res.data as {
-          enqueuedSubTickets: number;
-          failedSubTickets?: number;
-          failedTitles?: string[];
-        };
-        if (data.failedSubTickets && data.failedSubTickets > 0) {
-          toast.warning('Partial success', {
-            description: `${data.enqueuedSubTickets} queued, ${data.failedSubTickets} failed: ${data.failedTitles?.join(', ')}`,
-          });
-        } else {
-          toast.success('Tickets will be created shortly', {
-            description: `${data.enqueuedSubTickets} ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-          });
-        }
+        const data = res.data as CreateBulkTicketResponse;
+        toast.success('Tickets will be created shortly', {
+          description: `${data.enqueuedSubTickets} ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
+        });
         onClose();
         return;
       }
@@ -409,27 +406,16 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
-        const data = res.data as {
-          parentTicketId: string;
-          parentXyneId: string;
-          conversationId: string;
-          enqueuedSubTickets: number;
-          failedSubTickets?: number;
-          failedTitles?: string[];
-        };
-        if (data.failedSubTickets && data.failedSubTickets > 0) {
-          toast.warning('Partial success', {
-            description: `${data.enqueuedSubTickets} queued, ${data.failedSubTickets} failed: ${data.failedTitles?.join(', ')}`,
-          });
-        } else {
-          toast.success('Sub-tickets will be created shortly', {
-            description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-          });
-        }
+        const data = res.data as CreateBulkTicketResponse;
+        toast.success('Sub-tickets will be created shortly', {
+          description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
+        });
+        // The parent is the one the caller handed us, so these are real values
+        // rather than anything the 202 could have carried.
         onTicketCreated?.({
-          id: data.parentTicketId,
-          conversationId: data.conversationId,
-          xyneId: data.parentXyneId,
+          id: existingParentTicket.id,
+          conversationId: existingParentTicket.conversationId,
+          ...(existingParentTicket.xyneId ? { xyneId: existingParentTicket.xyneId } : {}),
         });
         onClose();
         return;
@@ -484,28 +470,13 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         body.sourceConversationId = sourceConversationId;
       }
       const res = await apiInstance.post('/tickets/bulk-from-message', body);
-      const data = res.data as {
-        parentTicketId: string;
-        parentXyneId: string;
-        conversationId: string;
-        enqueuedSubTickets: number;
-        failedSubTickets?: number;
-        failedTitles?: string[];
-      };
-      if (data.failedSubTickets && data.failedSubTickets > 0) {
-        toast.warning('Partial success', {
-          description: `${data.enqueuedSubTickets} queued, ${data.failedSubTickets} failed: ${data.failedTitles?.join(', ')}`,
-        });
-      } else {
-        toast.success('Tickets will be created shortly', {
-          description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-        });
-      }
-      onTicketCreated?.({
-        id: data.parentTicketId,
-        conversationId: data.conversationId,
-        xyneId: data.parentXyneId,
+      const data = res.data as CreateBulkTicketResponse;
+      toast.success('Tickets will be created shortly', {
+        description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
       });
+      // Parent and sub-tickets are both still queued, so there is no ticket to
+      // report — the callback fires to say the batch was accepted.
+      onTicketCreated?.();
       onClose();
     } catch {
       toast.error('Failed to create tickets', {

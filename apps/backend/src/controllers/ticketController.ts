@@ -249,6 +249,7 @@ export class TicketController {
     messageContent?: string;
     messageSubtype?: string;
     entityLinkContext?: EntityLinkOwner;
+    creationMessageId?: string;
   }): Promise<Ticket> {
     const {
       title,
@@ -270,6 +271,7 @@ export class TicketController {
       messageContent,
       messageSubtype = 'ai_ticket',
       entityLinkContext,
+      creationMessageId: requestedCreationMessageId,
     } = params;
 
     const ticket = await prisma.$transaction(async (tx) => {
@@ -286,7 +288,7 @@ export class TicketController {
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
-      const creationMessageId = randomUUID();
+      const creationMessageId = requestedCreationMessageId ?? randomUUID();
 
       // Create ticket
       const ticket = await this.ticketRepository.createTicket({
@@ -434,9 +436,12 @@ export class TicketController {
   }
 
   /**
-   * Create one ticket for a bulk batch: opens a fresh conversation, seeds its
-   * head system message, then reuses createTicketWithConversation so bulk items
-   * follow the exact same transactional creation path as single tickets.
+   * Create one ticket for a bulk batch: opens a fresh conversation, then reuses
+   * createTicketWithConversation so bulk items follow the exact same
+   * transactional creation path as single tickets. The conversation's
+   * `initialMessageId` is handed down as the creation message's id, so the
+   * thread has one system message — the ticket card — exactly like a single
+   * ticket does.
    *
    * The conversation is written before the ticket's transaction, so a failure
    * afterwards would leave a "Ticket created in …" thread with no ticket behind
@@ -477,20 +482,8 @@ export class TicketController {
     const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
     const creationText = `Ticket created in ${board?.name || 'Unknown Board'}: ${item.title}`;
 
-    await this.messageRepository.createWithExecutionId(
-      {
-        conversationId: conversation.conversationId,
-        senderId: createdBy,
-        content: creationText,
-        msgType: MessageType.SYSTEM,
-        metadata: {},
-      },
-      initialMessageId,
-    );
-    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
-
     try {
-      return await this.createTicketWithConversation({
+      const ticket = await this.createTicketWithConversation({
         title: item.title,
         description: item.description ?? '',
         createdBy,
@@ -507,7 +500,10 @@ export class TicketController {
         statusV2: item.statusV2,
         messageContent: creationText,
         messageSubtype: 'bulk_ticket',
+        creationMessageId: initialMessageId,
       });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+      return ticket;
     } catch (error) {
       await this.discardBulkConversation(conversation.conversationId);
       throw error;
@@ -666,7 +662,8 @@ export class TicketController {
         }
       }
 
-      let parentTicketId: string | null = body.existingParentTicketId ?? null;
+      const parentTicketId: string | null = body.existingParentTicketId ?? null;
+      let parentToCreate: BulkTicketCreationInput | undefined;
 
       if (mode === BulkTicketMode.PARENT_SUB) {
         if (parentTicketId) {
@@ -688,12 +685,14 @@ export class TicketController {
             res.status(400).json({ error: 'parent requires a boardId' });
             return;
           }
-          const parentTicket = await this.createBulkTicketItem(
-            { ...body.parent, projectId: projectByBoardId.get(body.parent.boardId)! },
-            userId,
-            { fromTicketsTab: body.fromTicketsTab === true },
-          );
-          parentTicketId = parentTicket.id;
+
+          parentToCreate = {
+            ...body.parent,
+            description: body.parent.description ?? '',
+            projectId: projectByBoardId.get(body.parent.boardId)!,
+            createdBy: userId,
+            updatedBy: userId,
+          };
         } else {
           res.status(400).json({ error: 'parent or existingParentTicketId is required for parent-sub mode' });
           return;
@@ -709,8 +708,10 @@ export class TicketController {
         userId,
         parentWorkspaceId: workspaceId,
         parentTicketId,
+        ...(parentToCreate ? { parent: parentToCreate } : {}),
         subTickets: children,
         sourceMessageId: body.sourceMessageId,
+        sourceConversationId: body.sourceConversationId,
         sourceType: 'MESSAGE',
         fromTicketsTab: body.fromTicketsTab === true,
         channelId: topChannelId ?? children[0]?.channelId,

@@ -63,12 +63,17 @@ export interface CreateBulkTicketRequest {
   fromTicketsTab?: boolean;
 }
 
-/** Backend → dashboard response for a successfully enqueued batch. */
+/**
+ * Backend → dashboard response for a successfully enqueued batch.
+ *
+ * The endpoint answers 202 before any ticket exists, so it can only report what
+ * was accepted. Per-ticket outcomes are not knowable here and are reported by
+ * the worker instead.
+ */
 export interface CreateBulkTicketResponse {
+  /** Echoed back only when the caller supplied `existingParentTicketId`. */
   parentTicketId?: string;
   enqueuedSubTickets: number;
-  failedSubTickets?: number;
-  failedTitles?: string[];
 }
 
 /** Existing parent ticket reference (for retry flows). */
