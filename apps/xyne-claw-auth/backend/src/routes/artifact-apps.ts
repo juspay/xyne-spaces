@@ -27,6 +27,7 @@ import { getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { chatAttachmentRepository } from "../repositories/index.js";
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
+import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("artifact-apps");
@@ -58,6 +59,18 @@ const saveBody = z.object({
 const addVersionBody = z.object({ attachmentId: z.string().min(1) });
 const publishBody = z.object({ versionId: z.string().min(1) });
 const restoreBody = z.object({ versionId: z.string().min(1) });
+
+/** The dashboard can only draw icons the set contains; reject anything else at
+ *  the boundary rather than storing a name that renders as the fallback. */
+const ICON_NAMES = new Set(ICON_META.map((m) => m.name));
+const patchBody = z.object({
+  icon: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .refine((n) => ICON_NAMES.has(n), { message: "Not a Xyne icon id" })
+    .nullable(),
+});
 
 function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
   res.status(400).json({
@@ -647,6 +660,23 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
     for (const v of all) if (!latestByApp.has(v.appId)) latestByApp.set(v.appId, v);
   }
 
+  // Owner display names for the library cards — an id is not an answer to "who
+  // made this". Resolved from claw-auth's OWN users table (kept current by JIT
+  // upsert) rather than across the Spaces connection: `ownerUserId` is set from
+  // the authenticated requester, so a local row always exists, and this is the
+  // same one-query id→name join every other route here uses. Falls back to the
+  // email local-part when a row has no name.
+  const ownerIds = [...new Set(apps.map((a) => a.ownerUserId))];
+  const owners = ownerIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const ownerNames = new Map(
+    owners.map((u) => [u.id, u.name?.trim() || u.email?.split("@")[0] || null] as const),
+  );
+
   res.json({
     success: true,
     apps: apps.map((a) => {
@@ -662,12 +692,48 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
         description: a.description,
         visibility: a.visibility,
         ownerUserId: a.ownerUserId,
+        ownerName: ownerNames.get(a.ownerUserId) ?? null,
+        icon: a.icon,
         publishedAt: a.publishedAt,
         updatedAt: a.updatedAt,
         manifest: v?.manifest ?? null,
       };
     }),
   });
+});
+
+/**
+ * PATCH /:id — the owner's own edits to app identity. Today: `icon`.
+ *
+ * Sending `icon: null` clears it back to the fallback mark. The user's choice
+ * is durable — the session path never overwrites a non-null icon — so this is
+ * the one write that can change it after the first build.
+ */
+artifactAppsRouter.patch("/:id", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const parsed = patchBody.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  if (!app || app.isArchived) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { icon: parsed.data.icon, updatedAt: new Date() },
+  });
+  res.json({ success: true, app: { ...updated, isOwner: true } });
 });
 
 /** GET /:id — metadata. Owners see every version; everyone else sees the pin. */
@@ -721,7 +787,16 @@ artifactAppsRouter.get("/:id", async (req: Request<{ id: string }>, res: Respons
       })
     : [];
 
-  res.json({ success: true, app: { ...app, isOwner }, versions, restores });
+  // Who built it. An id is not an answer to "whose app is this", and the
+  // Settings tab shows this to a non-owner looking at a published app. Same
+  // local-users join the listing route uses, with the same email fallback.
+  const owner = await prisma.user.findUnique({
+    where: { id: app.ownerUserId },
+    select: { name: true, email: true },
+  });
+  const ownerName = owner?.name?.trim() || owner?.email?.split("@")[0] || null;
+
+  res.json({ success: true, app: { ...app, isOwner, ownerName }, versions, restores });
 });
 
 /**
