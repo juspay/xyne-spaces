@@ -157,6 +157,7 @@ export const Event = {
   CLIENT_SCRIPT_DRAIN: "client_script_drain",
   CLIENT_CPU_SNAPSHOT: "client_cpu_snapshot",
   DIAGNOSTICS_HELP_REQUESTED: "diagnostics_help_requested",
+  DIAGNOSTICS_RUN_COMPLETED: "diagnostics_run_completed",
   SLASH_COMMAND_SESSION_START: "slash_command_session_start",
   SLASH_COMMAND_IMPRESSION: "slash_command_impression",
   SLASH_COMMAND_CLICK: "slash_command_click",
