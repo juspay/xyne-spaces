@@ -16,6 +16,7 @@ import type { McpToolInfo } from "../types.js";
 import { AGENT_INTROSPECT_TOOL_DEFS } from "xyne-claw-shared";
 
 import { createLogger } from "../../logger.js";
+import { findAgents, INDEX_KINDS, type IndexKind } from "../../services/agent-index/index.js";
 const log = createLogger("agent-introspect");
 
 // Slugs MUST match the `tools` rows seeded by the add_agent_introspect_tools
@@ -296,6 +297,55 @@ export async function handleGetAgentRuns(
   });
 }
 
+/**
+ * Semantic lookup over the agent index. Returns a shortlist with the matching
+ * text so the caller can judge fit — a ranked list of bare slugs is the
+ * affordance this tool exists to replace.
+ */
+export async function handleFindAgents(params: Record<string, unknown>, contextOrgId?: string): Promise<string> {
+  const taskDescription = String(params["taskDescription"] ?? "").trim();
+  if (!taskDescription) return JSON.stringify({ error: "`taskDescription` is required" });
+  if (!contextOrgId) {
+    log.warn("[agent-introspect] refusing find_agents without contextOrgId");
+    return JSON.stringify({ count: 0, agents: [] });
+  }
+
+  const limit = Math.min(Math.max(Number(params["maxResults"]) || 5, 1), 20);
+  const kinds = stringList(params["searchDocumentKinds"]).filter((k): k is IndexKind =>
+    (INDEX_KINDS as readonly string[]).includes(k),
+  );
+  const requiredToolSlugs = stringList(params["requiredToolSlugs"]);
+
+  try {
+    const matches = await findAgents(contextOrgId, taskDescription, {
+      limit,
+      ...(kinds.length ? { kinds } : {}),
+      ...(requiredToolSlugs.length ? { requiresCapability: requiredToolSlugs } : {}),
+    });
+    return JSON.stringify({
+      count: matches.length,
+      ...(requiredToolSlugs.length ? { requiredToolSlugs } : {}),
+      agents: matches.map((m) => ({
+        slug: m.slug,
+        score: Number(m.score.toFixed(3)),
+        matchedOn: m.matchedKinds,
+        purpose: m.identity ?? null,
+        usage: m.usage ?? null,
+        capabilities: m.capabilities ?? [],
+        excerpt: m.evidence,
+      })),
+    });
+  } catch (err) {
+    log.warn(`[agent-introspect] find_agents failed: ${err instanceof Error ? err.message : String(err)}`);
+    return JSON.stringify({ error: "agent index unavailable", count: 0, agents: [] });
+  }
+}
+
+function stringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim());
+}
+
 export async function handleAgentIntrospect(
   tool: string,
   params: Record<string, unknown>,
@@ -311,6 +361,8 @@ export async function handleAgentIntrospect(
       return handleListAvailableTools(contextOrgId);
     case "get_agent_runs":
       return handleGetAgentRuns(params, contextOrgId, requestingUserId);
+    case "find_agents":
+      return handleFindAgents(params, contextOrgId);
     default:
       log.warn(`[agent-introspect] unknown tool ${tool}`);
       throw new Error(`Unknown agent-introspect tool: ${tool}`);
