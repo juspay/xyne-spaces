@@ -128,6 +128,19 @@ export default defineConfig(({ command, mode }) => {
       manifest: true,
       reportCompressedSize: false,
     },
+    // Minification renames every top-level binding, so `AppSidebar` ships as
+    // `t`. Both the Long Animation Frames API and the JS self-profiler report
+    // whatever `Function.prototype.name` says, which means without this the
+    // diagnostics panel can only ever name single letters — and a performance
+    // report that blames `t` is one nobody can act on. `keepNames` emits a
+    // `__name()` wrapper that restores the real name at runtime while leaving
+    // the identifier itself minified.
+    //
+    // Verified to reach the minify step: Vite spreads `config.esbuild` into the
+    // options it hands esbuild in `resolveEsbuildTranspileOptions`.
+    esbuild: {
+      keepNames: true,
+    },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
     },

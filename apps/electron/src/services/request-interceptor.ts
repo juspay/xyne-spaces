@@ -326,8 +326,18 @@ export function setupRequestInterceptor(): void {
     }
   );
 
+  // NOTE: Electron keeps only ONE listener per webRequest event for a session —
+  // a second `onHeadersReceived` call silently replaces the first. Everything
+  // that needs to see a response header therefore has to live in this single
+  // registration, branching on the URL.
+  const frontendOrigins = [config.FRONTEND_URL, config.MTLS_FRONTEND_URL].filter(
+    (url): url is string => typeof url === 'string' && url.length > 0,
+  );
+
   session.defaultSession.webRequest.onHeadersReceived(
-    { urls: [`${config.BACKEND_URL}/*`] },
+    {
+      urls: [`${config.BACKEND_URL}/*`, ...frontendOrigins.map((url) => `${url}/*`)],
+    },
     (details, callback) => {
       if (details.statusCode === 401) {
         const contentType = details.responseHeaders?.['content-type']?.[0];
@@ -339,6 +349,29 @@ export function setupRequestInterceptor(): void {
 
       if (details.url.includes('/logout') && details.statusCode === 200) {
         void clearAllCookies();
+      }
+
+      // Opt the app document into the JS Self-Profiling API, which the in-app
+      // performance diagnostics use to attribute main-thread time to real
+      // function and component names. The API refuses to construct without
+      // this header, and nothing else can see inside a long frame: Long
+      // Animation Frames names only the callback that entered the script,
+      // which for React rendering is always the scheduler.
+      //
+      // Set here as well as in nginx so the desktop app has it regardless of
+      // which frontend deployment it happens to be pointed at. It grants no
+      // cross-origin access — a document may only profile its own execution.
+      const isFrontendDocument = frontendOrigins.some((origin) =>
+        details.url.startsWith(origin),
+      );
+      if (isFrontendDocument) {
+        const headers: Record<string, string[]> = { ...(details.responseHeaders ?? {}) };
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === 'document-policy') delete headers[key];
+        }
+        headers['Document-Policy'] = ['js-profiling'];
+        callback({ responseHeaders: headers });
+        return;
       }
 
       callback({ responseHeaders: details.responseHeaders });

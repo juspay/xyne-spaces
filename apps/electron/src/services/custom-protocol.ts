@@ -113,6 +113,10 @@ export function setupCustomProtocol(): void {
         headers: {
           'Content-Type': mimeType,
           'Access-Control-Allow-Origin': '*',
+          // The bundled-UI lane never passes through webRequest, so the
+          // JS self-profiling opt-in the diagnostics need has to be set on the
+          // response we construct here. See request-interceptor.ts for why.
+          'Document-Policy': 'js-profiling',
         },
       });
     } catch (error) {
