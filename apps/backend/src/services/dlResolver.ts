@@ -23,6 +23,13 @@ export interface DlTarget {
 }
 
 /**
+ * Entries that are not plain addresses are dropped rather than trusted: the
+ * Gmail refetch path interpolates these into a search query, where a space or
+ * a paren would rewrite its boolean structure.
+ */
+const PLAIN_ADDRESS = /^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/;
+
+/**
  * Parse the JSON-serialised alias list. Anything unparseable is treated as
  * "no aliases" — a malformed column must not take a desk offline.
  */
@@ -34,7 +41,7 @@ export function parseDlAliases(raw?: string | null): string[] {
     return parsed
       .filter((a): a is string => typeof a === 'string')
       .map(a => a.trim().toLowerCase())
-      .filter(Boolean);
+      .filter(a => PLAIN_ADDRESS.test(a));
   } catch {
     return [];
   }

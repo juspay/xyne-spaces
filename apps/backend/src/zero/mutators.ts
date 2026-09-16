@@ -160,6 +160,7 @@ import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
+import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { userAssignmentStateService } from '@/services/userAssignmentStateService';
@@ -16361,6 +16362,25 @@ export function createMutators(
             deskReportRangeDays,
           },
         }) => {
+          // Mirrors the dlEmail claim check in channelController: one address
+          // routes to exactly one desk, or a desk owner could siphon another
+          // desk's mail by listing its address here.
+          if (dlAliases) {
+            const claimed = parseDlAliases(dlAliases);
+            if (claimed.length > 0) {
+              const others = await tx.run(
+                zql.email_channel_preferences.where('workspaceId', authData.workspaceId),
+              );
+              const taken = others
+                .filter(other => other.channelId !== channelId)
+                .flatMap(other => dlAddressesFor(other))
+                .find(address => claimed.includes(address));
+              if (taken) {
+                throw new Error(`${taken} is already used by another desk in this workspace`);
+              }
+            }
+          }
+
           const existing = await tx.run(
             zql.email_channel_preferences.where('channelId', channelId).one(),
           );

@@ -72,6 +72,16 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
 
   const [ccInputValue, setCcInputValue] = useState('');
   const [dlAliasInput, setDlAliasInput] = useState('');
+  const commitDlAlias = (): boolean => {
+    const candidate = dlAliasInput.trim().toLowerCase();
+    if (!candidate) return true;
+    if (!/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(candidate)) return false;
+    if (candidate !== dlEmail?.trim().toLowerCase() && !dlAliases.includes(candidate)) {
+      setDlAliases(prev => [...prev, candidate]);
+    }
+    setDlAliasInput('');
+    return true;
+  };
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
@@ -221,21 +231,11 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               onChange={e => setDlAliasInput(e.target.value)}
               onKeyDown={e => {
                 if (e.key !== 'Enter' && e.key !== ',' && e.key !== 'Tab') return;
-                const candidate = dlAliasInput.trim().toLowerCase();
-                if (!candidate) return;
+                if (!dlAliasInput.trim()) return;
                 e.preventDefault();
-                if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(candidate)) {
-                  toast.error('Enter a valid email address');
-                  return;
-                }
-                if (candidate === dlEmail?.trim().toLowerCase() || dlAliases.includes(candidate)) {
-                  setDlAliasInput('');
-                  return;
-                }
-                setDlAliases(prev => [...prev, candidate]);
-                setDlAliasInput('');
+                if (!commitDlAlias()) toast.error('Enter a valid email address');
               }}
-              onBlur={() => setDlAliasInput('')}
+              onBlur={() => commitDlAlias()}
               placeholder={dlAliases.length === 0 ? 'support.global@yourcompany.io' : ''}
               readOnly={!canManage}
               disabled={!canManage}
