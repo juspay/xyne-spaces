@@ -79,8 +79,37 @@ function unsupported(reason: string): MainThreadAttribution {
   };
 }
 
+let cachedSupport: boolean | null = null;
+
+/**
+ * Whether a profiler can actually be constructed here.
+ *
+ * Deliberately not a `typeof window.Profiler` check: Chrome exposes the
+ * constructor regardless, and only throws NotAllowedError on construction when
+ * the document was served without the policy header. Verified in Chrome — the
+ * cheap check reports support on a page where profiling is disabled, which
+ * would promise the user function names and deliver none.
+ *
+ * The probe constructs the smallest possible profiler and stops it immediately;
+ * the result is cached, since a document's policy cannot change after load.
+ */
 export function isSelfProfilingSupported(): boolean {
-  return typeof (globalThis as { Profiler?: ProfilerCtor }).Profiler === 'function';
+  if (cachedSupport !== null) return cachedSupport;
+
+  const ctor = (globalThis as { Profiler?: ProfilerCtor }).Profiler;
+  if (typeof ctor !== 'function') {
+    cachedSupport = false;
+    return false;
+  }
+
+  try {
+    const probe = new ctor({ sampleInterval: 1000, maxBufferSize: 1 });
+    void probe.stop().catch(() => undefined);
+    cachedSupport = true;
+  } catch {
+    cachedSupport = false;
+  }
+  return cachedSupport;
 }
 
 /**
