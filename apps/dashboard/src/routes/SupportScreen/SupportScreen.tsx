@@ -894,11 +894,24 @@ const SupportScreen = (): ReactElement => {
   );
   const {
     savedViews: deskSavedViews,
+    savedViewsLoaded,
     saveView: saveDeskView,
     updateView: updateDeskView,
     deleteView: deleteDeskView,
     applySavedView: applyDeskSavedView,
   } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+
+  // Self-heal: clear a stale activeViewId that no longer exists in the list.
+  // Guard on savedViewsLoaded so we don't clear before the query returns data.
+  useEffect(() => {
+    if (
+      savedViewsLoaded &&
+      activeTicketViewId &&
+      !deskSavedViews.find(v => v.id === activeTicketViewId)
+    ) {
+      setActiveTicketViewId(null);
+    }
+  }, [savedViewsLoaded, activeTicketViewId, deskSavedViews, setActiveTicketViewId]);
   const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}), {
     enabled: !!ticketViewsChannelId,
   });
