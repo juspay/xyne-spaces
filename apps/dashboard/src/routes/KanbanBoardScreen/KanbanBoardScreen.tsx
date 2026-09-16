@@ -1103,7 +1103,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (boardsMatch) {
       setHasSeededWorkspaceView(true);
     }
-  }, [isWorkspaceView, hasSeededWorkspaceView, filters.boards, initialFilters?.boards]);
+  }, [isWorkspaceView, hasSeededWorkspaceView, filters, initialFilters?.boards]);
 
   const [isSavingWorkspaceView, setIsSavingWorkspaceView] = useState(false);
   const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
