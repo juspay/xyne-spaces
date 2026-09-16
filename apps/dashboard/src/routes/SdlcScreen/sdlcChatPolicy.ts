@@ -1,15 +1,4 @@
 export type SdlcChatTab = 'conversations' | 'ai';
-export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
-
-export const sdlcRightPanelMode = (input: {
-  chatOpen: boolean;
-  debuggerOpen: boolean;
-}): SdlcRightPanelMode => {
-  if (input.debuggerOpen) return 'debugger';
-  if (input.chatOpen) return 'chat';
-  return 'closed';
-};
-
 export const shouldUseInlineAssistantDebugger = (embeddedInSdlc: boolean): boolean =>
   !embeddedInSdlc;
 
@@ -19,8 +8,8 @@ export const SDLC_CHAT_PANEL_ID = 'sdlc-chat';
 const SDLC_CLOSED_PANEL_IDS = [SDLC_MAIN_PANEL_ID];
 const SDLC_OPEN_PANEL_IDS = [SDLC_MAIN_PANEL_ID, SDLC_CHAT_PANEL_ID];
 
-export const sdlcRightPanelIds = (mode: SdlcRightPanelMode): string[] =>
-  mode === 'closed' ? SDLC_CLOSED_PANEL_IDS : SDLC_OPEN_PANEL_IDS;
+export const sdlcRightPanelIds = (open: boolean): string[] =>
+  open ? SDLC_OPEN_PANEL_IDS : SDLC_CLOSED_PANEL_IDS;
 
 export const sdlcChatLayout = (input: {
   chatParam: string | null;

@@ -2955,6 +2955,31 @@ html .bn-code-block-source-popup-ok-button:hover {
   padding-right: 0;
 }
 
+/* Starts on the first block's left edge and follows the width handles. */
+.canvas-surface .canvas-block-row {
+  box-sizing: border-box;
+  max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
+  margin-inline: auto;
+  padding-left: calc(var(--canvas-gutter) + var(--canvas-block-content-offset));
+  padding-right: var(--canvas-gutter);
+}
+
+/* The label reveal margin is sized for the page-title header, not this row. */
+.canvas-surface .canvas-block-row > * {
+  margin-bottom: 0;
+}
+
+.canvas-surface
+  .canvas-block-row
+  ~ *
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child
+  > .bn-block
+  > .bn-block-content[data-content-type="heading"] {
+  padding-top: 0;
+}
+
 /* Centered reading column. .bn-editor keeps its inline padding as the
    hover-handle gutter, so the drag-handle / "+" stay in the margin. */
 .canvas-surface .bn-editor {
