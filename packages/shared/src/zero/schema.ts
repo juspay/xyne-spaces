@@ -3444,6 +3444,14 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable
+  }),
+  // entityId is polymorphic, so this resolves only for the rows whose owning
+  // feature puts a channel there — SDLC hub files, which have no conversation to
+  // be authorised through. Same shape as sdlcEntityLinks.repo.
+  hubChannel: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable
   })
 }))
 

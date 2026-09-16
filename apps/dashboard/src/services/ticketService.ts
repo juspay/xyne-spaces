@@ -1,3 +1,4 @@
+import type { EntityLinkSourceType } from '@/contexts/EntityLinkContext';
 import { apiInstance } from './clients/apiClient';
 import {
   BaseTicketType,
@@ -15,7 +16,7 @@ export interface CreateTicketRequest {
   boardId?: string;
   sourceConversationId?: string;
   sourceMessageId?: string;
-  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string };
+  entityLinkContext?: { sourceType: EntityLinkSourceType; sourceId: string };
 }
 
 export interface CreateTicketResponse {
