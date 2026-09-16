@@ -77,7 +77,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   // Webhook delivery is a per-channel preference that now applies to any desk
   // carrying app bindings, not just ChannelType.APP. Keep it visible on APP desks
   // even before the first connect so the pre-existing control never disappears.
-  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel);
+  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel && canManage);
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   useEffect(() => {
