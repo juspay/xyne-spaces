@@ -21,16 +21,7 @@ import { useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from '../CallHistoryScreen/useCallHistory';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  CallVisibility,
-  ChannelScopeType,
-  InvitationResponse,
-  MeetingStatus,
-  TagMethod,
-} from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -42,12 +33,17 @@ import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useZero } from '../../hooks/useZero';
 import { cn } from '../../utils/classNames';
+import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
-import { CallCard } from './CallCard';
+import { CallCard } from './components/CallCard';
 import {
   Call,
+  hasExternalChatAccess,
+  isDmScope,
   isMissedCallForUser,
   isExternalCalendarEvent,
+  isVisibleInCallList,
+  mapVespaCallResultToCall,
   type RecentCallFilterV2,
 } from '../CallHistoryScreen/callHistoryItem.utils';
 import { CallLabelFilter } from '../CallHistoryScreen/CallLabelFilter';
@@ -60,16 +56,15 @@ import { ParticipantsModal } from '../CallHistoryScreen/ParticipantsModal';
 import { usePlatform } from '../../hooks/usePlatform';
 import { UpcomingCallsListV2 } from './components/UpcomingCallsListV2';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { MentionType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { CallHistorySearchPanel } from '../CallHistoryScreen/CallHistorySearchPanel';
 import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
 import { Popover } from '../../components/ui/Popover/Popover';
 import { buildDateGroupedRowsFromItems, findNearestVisibleItem } from '../../utils/dateGroupedList';
-import { CallsEmptyStateIllustration } from './CallsEmptyStateIllustration';
+import { CallsEmptyStateIllustration } from './components/CallsEmptyStateIllustration';
 
 interface EmptyStateProps {
   title: string;
@@ -82,137 +77,6 @@ const CALL_FILTER_TABS: ReadonlyArray<{ value: RecentCallFilterV2; label: string
   { value: 'recurring', label: 'Recurring' },
 ];
 
-function hasExternalChatAccess(call: Call): boolean {
-  return (
-    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
-  );
-}
-
-function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
-  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
-}
-
-function isVisibleInCallList(
-  call: Call,
-  currentUserId: string | undefined,
-  showChannelCalls: boolean,
-): boolean {
-  if (isExternalCalendarEvent(call)) return true;
-  if (showChannelCalls) return true;
-  return call.participants?.some(p => p.userId === currentUserId) ?? false;
-}
-
-function stripSearchHighlight(value: string | undefined): string {
-  return (value || '').replace(/<\/?hi>/g, '');
-}
-
-function timestampOrUndefined(value: number | undefined): number | undefined {
-  return value && value > 0 ? value : undefined;
-}
-
-function isJoinedInvitationResponse(response: string): boolean {
-  return (
-    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
-  );
-}
-
-function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
-  const context = result.searchContext;
-  const callId = context?.callId || result.id;
-  const startedAt =
-    timestampOrUndefined(context?.startedAt) ||
-    timestampOrUndefined(context?.startsAt) ||
-    Date.now();
-  const now = Date.now();
-  const participantResponses = context?.participantResponses || [];
-  const participantUserIds = context?.userIds || [];
-  const participantNames = context?.participantNames || [];
-  const participantEmails = context?.participantEmails || [];
-  const participantCount = Math.max(
-    participantUserIds.length,
-    participantResponses.length,
-    participantNames.length,
-    participantEmails.length,
-  );
-
-  return {
-    workspaceId,
-    id: callId,
-    externalId: context?.externalId || callId,
-    title: stripSearchHighlight(context?.title || result.title) || null,
-    createdByUserId: context?.createdByUserId || '',
-    organizerId: null,
-    channelId: context?.channelId || null,
-    orgName: null,
-    description: null,
-    callType: CallType.VIDEO,
-    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
-    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
-    roomLink: context?.roomLink || null,
-    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
-    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    isRecurring: Boolean(context?.recurringSeriesId),
-    recurringSeriesId: context?.recurringSeriesId || null,
-    recurrenceRule: null,
-    instanceDate: null,
-    recordingEnabled: false,
-    recordingUrl: null,
-    recordingParticipants: '[]',
-    transcript: context?.hasTranscript ? 'available' : undefined,
-    aiSummary: null,
-    startedAt,
-    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
-    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
-    createdAt: startedAt,
-    updatedAt: now,
-    metadata: null,
-    callUpdatesChannel: null,
-    participantCount,
-    participantPreviewUserIds: JSON.stringify(
-      participantUserIds
-        .map((userId, index) =>
-          userId
-            ? {
-                userId,
-                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
-              }
-            : null,
-        )
-        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
-    ),
-    summaryTemplateId: null,
-    labels: [],
-    markedItems: [],
-    xyneManaged: false,
-    visibility: CallVisibility.PRIVATE,
-    participants: Array.from({ length: participantCount }, (_, index) => {
-      const userId = participantUserIds[index] || '';
-      const displayName = stripSearchHighlight(participantNames[index]);
-      const email = stripSearchHighlight(participantEmails[index]);
-      const isExternal = !userId;
-
-      return {
-        workspaceId,
-        id: `${callId}:${userId || `external-${index}`}`,
-        callId,
-        userId,
-        invitedBy: context?.createdByUserId || '',
-        invitedAt: startedAt,
-        response: (participantResponses[index] as InvitationResponse | undefined) || null,
-        meetingStatus: MeetingStatus.PENDING,
-        respondedAt: null,
-        joinedAt: null,
-        leftAt: null,
-        metadata: null,
-        displayName: displayName || null,
-        email: email || null,
-        isExternal,
-      };
-    }),
-  } as Call;
-}
-
 const CallHistoryV2Screen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const { user } = useAuth();
@@ -220,10 +84,6 @@ const CallHistoryV2Screen = (): ReactElement => {
   const outlet = useOutlet();
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const [scheduleInitialTime, setScheduleInitialTime] = useState<{
-    startsAt: Date;
-    endsAt: Date;
-  } | null>(null);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
@@ -267,7 +127,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const allUsers = useUsers();
   const allChannels = useAllChannels();
-  const [callMentionSearchType, setCallMentionSearchType] = useState<MentionType | null>(null);
+  const [callMentionSearchType, setCallMentionSearchType] = useState<ChipType | null>(null);
   const [callMentionSearchQuery, setCallMentionSearchQuery] = useState('');
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [hasNavigatedMentions, setHasNavigatedMentions] = useState(false);
@@ -290,25 +150,25 @@ const CallHistoryV2Screen = (): ReactElement => {
   });
   const titleSearchQuery = searchQuery.trim();
   const userMentionResults = useActiveUserSearch(
-    callMentionSearchType === MentionType.USER ? callMentionSearchQuery : '',
+    callMentionSearchType === ChipType.USER ? callMentionSearchQuery : '',
     8,
   );
   const selectedCallSearchUserIds = useMemo(
     () =>
       callSearchSelectedMentions
-        .filter(mention => mention.type === MentionType.USER)
+        .filter(mention => mention.type === ChipType.USER)
         .map(mention => mention.id),
     [callSearchSelectedMentions],
   );
   const selectedCallSearchChannelIds = useMemo(
     () =>
       callSearchSelectedMentions
-        .filter(mention => mention.type === MentionType.CHANNEL)
+        .filter(mention => mention.type === ChipType.CHANNEL)
         .map(mention => mention.id),
     [callSearchSelectedMentions],
   );
   const channelMentionResults = useMemo(() => {
-    if (callMentionSearchType !== MentionType.CHANNEL) return [];
+    if (callMentionSearchType !== ChipType.CHANNEL) return [];
     const query = callMentionSearchQuery.trim().toLowerCase();
     const selected = new Set(selectedCallSearchChannelIds);
 
@@ -340,12 +200,12 @@ const CallHistoryV2Screen = (): ReactElement => {
     selectedCallSearchUserIds.length > 0 || selectedCallSearchChannelIds.length > 0;
   const callSearchInitialQuery = useMemo<InitialQueryData | null>(() => {
     const mentions = callSearchSelectedMentions
-      .filter(mention => mention.type === MentionType.USER || mention.type === MentionType.CHANNEL)
+      .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
       .map(mention => ({
         id: mention.id,
         name: mention.name || mention.id,
         type: mention.type,
-        prefix: mention.type === MentionType.USER ? ('with:' as const) : ('in:' as const),
+        prefix: mention.type === ChipType.USER ? ('with:' as const) : ('in:' as const),
       }));
 
     return searchQuery || mentions.length > 0 ? { text: searchQuery, mentions } : null;
@@ -371,7 +231,7 @@ const CallHistoryV2Screen = (): ReactElement => {
         closeCallMentionSearch();
         return;
       }
-      setCallMentionSearchType(MentionType.USER);
+      setCallMentionSearchType(ChipType.USER);
       setCallMentionSearchQuery(query);
       setSelectedMentionIndex(0);
       setHasNavigatedMentions(false);
@@ -385,7 +245,7 @@ const CallHistoryV2Screen = (): ReactElement => {
         closeCallMentionSearch();
         return;
       }
-      setCallMentionSearchType(MentionType.CHANNEL);
+      setCallMentionSearchType(ChipType.CHANNEL);
       setCallMentionSearchQuery(query);
       setSelectedMentionIndex(0);
       setHasNavigatedMentions(false);
@@ -394,7 +254,7 @@ const CallHistoryV2Screen = (): ReactElement => {
   );
 
   const handleCallSearchChange = useCallback(
-    (text: string, mentions: Array<{ id: string; type: MentionType; prefix?: string }>) => {
+    (text: string, mentions: Array<{ id: string; type: ChipType; prefix?: string }>) => {
       if (isRestoringCallSearchRef.current) {
         if (!text && mentions.length === 0) return;
         isRestoringCallSearchRef.current = false;
@@ -403,19 +263,17 @@ const CallHistoryV2Screen = (): ReactElement => {
       setSearchQuery(text);
       setCallSearchSelectedMentions(
         mentions
-          .filter(
-            mention => mention.type === MentionType.USER || mention.type === MentionType.CHANNEL,
-          )
+          .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
           .map(mention => {
             const existingMention = callSearchSelectedMentions.find(
               selected => selected.id === mention.id && selected.type === mention.type,
             );
             const user =
-              mention.type === MentionType.USER
+              mention.type === ChipType.USER
                 ? allUsers.find(candidate => candidate.id === mention.id)
                 : undefined;
             const channel =
-              mention.type === MentionType.CHANNEL
+              mention.type === ChipType.CHANNEL
                 ? allChannels.find(candidate => candidate.id === mention.id)
                 : undefined;
 
@@ -426,7 +284,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                 (user ? getUserDisplayName(user) : channel?.name) ||
                 mention.id,
               type: mention.type,
-              prefix: mention.type === MentionType.USER ? 'with:' : 'in:',
+              prefix: mention.type === ChipType.USER ? 'with:' : 'in:',
             };
           }),
       );
@@ -460,20 +318,7 @@ const CallHistoryV2Screen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  // Show a loader for at least 10 seconds (or until calls load) so the screen
-  // doesn't flash the empty state while the Zero query is still warming up.
-  const [showMinLoader, setShowMinLoader] = useState(true);
-  useEffect(() => {
-    if (!isLoading) {
-      setShowMinLoader(false);
-      return;
-    }
-    setShowMinLoader(true);
-    const timer = setTimeout(() => setShowMinLoader(false), 10000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
-
-  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
+  const showRecentCallsLoader = isLoading;
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -531,6 +376,7 @@ const CallHistoryV2Screen = (): ReactElement => {
   }, [queryDetails.type]);
 
   const hasCallSearch = !!titleSearchQuery || hasCallSearchFilters;
+  const hasCallFilters = hasCallSearch || recentCallFilter !== 'all' || selectedLabels.length > 0;
   const lastCallSearchScrollTopRef = useRef(0);
   const handleCallHistoryScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
@@ -625,6 +471,20 @@ const CallHistoryV2Screen = (): ReactElement => {
           new Date(call.startsAt).getTime() <= now),
     );
   }, [filteredRecentCallsNoGcal]);
+
+  const upcomingCalls = useMemo(
+    () => [...activeCallsForUpcoming, ...(limitedScheduledCalls || [])],
+    [activeCallsForUpcoming, limitedScheduledCalls],
+  );
+  const hasUpcomingCallsToday = useMemo(() => {
+    const today = new Date();
+    return upcomingCalls.some(
+      call =>
+        call.status === CallStatus.ACTIVE ||
+        call.status === CallStatus.IN_PROGRESS ||
+        (call.startsAt && isSameDay(new Date(call.startsAt), today)),
+    );
+  }, [upcomingCalls]);
 
   const displayRecentCalls = useMemo(() => {
     const base = (filteredRecentCallsNoGcal || []).filter(call => call.status === CallStatus.ENDED);
@@ -721,7 +581,6 @@ const CallHistoryV2Screen = (): ReactElement => {
       <div className='w-full flex flex-col items-center'>
         {/* Sticky header */}
         <div className='max-w-[820px] w-full sticky top-0 bg-background z-50 flex flex-col px-6 pt-8 sm:px-8'>
-          {/* Row 1: Title + calendar sync */}
           <CallHistorySearchPanel
             variant='v2'
             callMentionSearchType={callMentionSearchType}
@@ -749,34 +608,37 @@ const CallHistoryV2Screen = (): ReactElement => {
           <StartCallPill
             onInstantCall={() => setIsInstantCallModalOpen(true)}
             onScheduleCall={() => setIsScheduleModalOpen(true)}
+            isMobile={isMobile}
           />
 
           {/* UPCOMING section */}
-          <div className='flex flex-col gap-3'>
-            <div className='flex items-center justify-between shrink-0'>
-              <span className='text-xs font-medium tracking-wide text-muted-foreground/70 uppercase'>
-                Upcoming
-              </span>
-              <span className='text-xs text-muted-foreground/70'>
-                {format(new Date(), 'EEE, MMMM d')}
-              </span>
-            </div>
-
-            {(!hasCallSearch && isScheduledCallsLoading) ||
-            (hasCallSearch && isVespaCallSearching) ? (
-              <div className='py-10 flex items-center justify-center'>
-                <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+          {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
+            <div className='flex flex-col gap-3'>
+              <div className='flex items-center justify-between shrink-0'>
+                <span className='text-xs font-medium tracking-wide text-muted-foreground/70 uppercase'>
+                  Upcoming
+                </span>
+                <span className='text-xs text-muted-foreground/70'>
+                  {format(new Date(), 'EEE, MMMM d')}
+                </span>
               </div>
-            ) : (
-              <UpcomingCallsListV2
-                calls={[...activeCallsForUpcoming, ...(limitedScheduledCalls || [])]}
-                onJoinCall={call => handleCallRowClick(call)}
-                onEditCall={call => handleEditClick(call)}
-                onCancelCall={call => handleDeleteClick(call)}
-                currentUserId={user?.id}
-              />
-            )}
-          </div>
+
+              {(!hasCallSearch && (isLoading || isScheduledCallsLoading)) ||
+              (hasCallSearch && isVespaCallSearching) ? (
+                <div className='py-10 flex items-center justify-center'>
+                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                </div>
+              ) : (
+                <UpcomingCallsListV2
+                  calls={upcomingCalls}
+                  onJoinCall={call => handleCallRowClick(call)}
+                  onEditCall={call => handleEditClick(call)}
+                  onCancelCall={call => handleDeleteClick(call)}
+                  currentUserId={user?.id}
+                />
+              )}
+            </div>
+          )}
 
           {/* RECENTS section */}
           <div className='flex flex-col gap-3 pb-20 md:pb-4'>
@@ -837,8 +699,8 @@ const CallHistoryV2Screen = (): ReactElement => {
                 <div className='py-10 flex items-center justify-center'>
                   <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
                 </div>
-              ) : hasCallSearch ? (
-                <NoFiltredCalls
+              ) : hasCallFilters ? (
+                <NoFilteredCalls
                   isShortTitleSearch={titleSearchQuery.length > 0 && titleSearchQuery.length < 4}
                   searchQuery={titleSearchQuery}
                 />
@@ -873,7 +735,6 @@ const CallHistoryV2Screen = (): ReactElement => {
                         <CallCard
                           call={row.item}
                           currentUserId={user?.id}
-                          isLastItem={row.item.id === displayRecentCalls.at(-1)?.id}
                           onCallClick={() => handleCallRowClick(row.item)}
                           onParticipantsClick={() => handleParticipantsClick(row.item)}
                           handleGotoTranscript={getGotoTranscriptHandler(row.item)}
@@ -925,12 +786,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
       <ScheduleCallModal
         isOpen={isScheduleModalOpen}
-        onClose={() => {
-          setIsScheduleModalOpen(false);
-          setScheduleInitialTime(null);
-        }}
-        initialStartsAt={scheduleInitialTime?.startsAt ?? null}
-        initialEndsAt={scheduleInitialTime?.endsAt ?? null}
+        onClose={() => setIsScheduleModalOpen(false)}
         initialParticipants={null}
       />
 
@@ -957,7 +813,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       {showAskAIContextModal && (
         <CallAskAIModal
           open={showAskAIContextModal}
-          calls={displayRecentCalls}
+          calls={(calls ?? []).filter(call => !isExternalCalendarEvent(call))}
           users={allUsers}
           currentUserId={user?.id}
           resolveLabel={resolveCallLabel}
@@ -995,7 +851,7 @@ const EmptyState = ({ title, description }: EmptyStateProps): ReactElement => {
   );
 };
 
-const NoFiltredCalls = ({
+const NoFilteredCalls = ({
   isShortTitleSearch,
   searchQuery,
 }: {
@@ -1027,13 +883,23 @@ const NoFiltredCalls = ({
 interface StartCallPillProps {
   onInstantCall: () => void;
   onScheduleCall: () => void;
+  isMobile: boolean;
 }
 
-const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): ReactElement => {
+const StartCallPill = ({
+  onInstantCall,
+  onScheduleCall,
+  isMobile,
+}: StartCallPillProps): ReactElement => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className='fixed bottom-7 left-[calc(50%+30px)] z-10 -translate-x-1/2'>
+    <div
+      className={cn(
+        'fixed bottom-7 z-10 -translate-x-1/2',
+        isMobile ? 'left-1/2' : 'left-[calc(50%+30px)]',
+      )}
+    >
       <Popover
         open={isOpen}
         onOpenChange={setIsOpen}

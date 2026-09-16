@@ -11,8 +11,14 @@ import { UpcomingCallRowV2 } from './UpcomingCallRowV2';
 const COLLAPSED_COUNT = 3;
 const COLLAPSE_TRANSITION = { duration: 0.26, ease: [0.4, 0, 0.2, 1] as const };
 
-function isActiveCall(call: Call): boolean {
-  return call.status === CallStatus.ACTIVE || call.status === CallStatus.IN_PROGRESS;
+function isActiveCall(call: Call, now = Date.now()): boolean {
+  return (
+    call.status === CallStatus.ACTIVE ||
+    call.status === CallStatus.IN_PROGRESS ||
+    (call.status === CallStatus.SCHEDULED &&
+      Boolean(call.startsAt) &&
+      new Date(call.startsAt!).getTime() <= now)
+  );
 }
 
 /** Empty-state greeting varies with how much of the day is still ahead. */
@@ -35,7 +41,7 @@ export interface UpcomingCallsListV2Props {
   day?: Date | undefined;
 }
 
-/** V2's flat, single-day Upcoming widget — always references the shared `UpcomingCallsList` for data/behavior parity, but renders its own row layout (time-inline, no day column). */
+/** V2's standalone single-day Upcoming widget with active-call prioritization and collapsed overflow. */
 export function UpcomingCallsListV2({
   calls,
   onJoinCall,
@@ -46,14 +52,17 @@ export function UpcomingCallsListV2({
 }: UpcomingCallsListV2Props): React.JSX.Element {
   const allUsers = useUsers();
 
-  const targetDay = day ?? new Date();
+  const targetDay = useMemo(() => day ?? new Date(), [day]);
   const todaysCalls = useMemo(() => {
+    const now = Date.now();
     const relevant = calls.filter(
       call =>
-        isActiveCall(call) || (call.startsAt && isSameDay(new Date(call.startsAt), targetDay)),
+        isActiveCall(call, now) || (call.startsAt && isSameDay(new Date(call.startsAt), targetDay)),
     );
     // Active calls pinned to the top; everything else keeps its startsAt-ascending order.
-    return [...relevant].sort((a, b) => Number(isActiveCall(b)) - Number(isActiveCall(a)));
+    return [...relevant].sort(
+      (a, b) => Number(isActiveCall(b, now)) - Number(isActiveCall(a, now)),
+    );
   }, [calls, targetDay]);
 
   const [isExpanded, setIsExpanded] = useState(false);

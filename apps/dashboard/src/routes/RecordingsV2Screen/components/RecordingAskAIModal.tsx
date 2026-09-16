@@ -10,7 +10,10 @@ import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
-import { getPreviewParticipantUsers } from '../../CallHistoryScreen/callHistoryItem.utils';
+import {
+  formatParticipantNames,
+  getPreviewParticipantUsers,
+} from '../../CallHistoryScreen/callHistoryItem.utils';
 import { cn } from '../../../utils/classNames';
 import { formatRecordingDuration, normalizeRecordingTags } from '../../../utils/recordingUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -36,16 +39,6 @@ interface SearchableRecording {
 const MAX_SELECTED_RECORDINGS = 25;
 
 const LIMIT_NOTICE_MS = 3200;
-
-/** Mirrors the list rows: two names, then a count for whoever is left. */
-function formatParticipants(participants: User[]): string {
-  const names = participants.map(participant => getUserDisplayName(participant));
-  if (names.length === 0) return 'Just you';
-  if (names.length <= 2) return names.join(' & ');
-
-  const remaining = names.length - 2;
-  return `${names[0]}, ${names[1]} & ${remaining} other${remaining === 1 ? '' : 's'}`;
-}
 
 const RecordingAskAIModal = ({
   open,
@@ -379,12 +372,13 @@ const RecordingOption = ({
   return (
     <li
       role='option'
+      tabIndex={0}
       aria-selected={checked}
       aria-disabled={blocked}
       data-theme-tokens
       onClick={() => onToggle(recording.id)}
       onKeyDown={event => {
-        if (event.key !== 'Enter') return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         onToggle(recording.id);
       }}
@@ -419,7 +413,8 @@ const RecordingOption = ({
           </span>
         )}
         <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
-          {formatParticipants(participants)} · {formatRecordingTimestamp(recording.startedAt)}
+          {formatParticipantNames(participants.map(participant => getUserDisplayName(participant)))}{' '}
+          · {formatRecordingTimestamp(recording.startedAt)}
         </span>
       </span>
 

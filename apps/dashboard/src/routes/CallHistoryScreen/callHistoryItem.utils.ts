@@ -4,11 +4,15 @@ import { formatDuration } from '../../utils/dateUtils';
 import {
   CallOrigin,
   CallStatus,
+  CallType,
+  CallVisibility,
   ChannelScopeType,
   InvitationResponse,
+  MeetingStatus,
   type User,
 } from '@xyne/shared';
 import { hasJoinedExternalParticipant as hasJoinedExternalCallParticipant } from '../../components/Call/callParticipant.utils';
+import type { DisplaySearchResult } from '../../types/search';
 
 export type RecentCallFilter = 'all' | 'incoming' | 'outgoing' | 'active' | 'missed';
 
@@ -31,6 +35,137 @@ export type Call = Omit<
 > & {
   participants?: CallParticipants;
 };
+
+export function hasExternalChatAccess(call: Call): boolean {
+  return (
+    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
+  );
+}
+
+export function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
+  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
+}
+
+export function isVisibleInCallList(
+  call: Call,
+  currentUserId: string | undefined,
+  showChannelCalls: boolean,
+): boolean {
+  if (isExternalCalendarEvent(call)) return true;
+  if (showChannelCalls) return true;
+  return call.participants?.some(p => p.userId === currentUserId) ?? false;
+}
+
+export function stripSearchHighlight(value: string | undefined): string {
+  return (value || '').replace(/<\/?hi>/g, '');
+}
+
+export function timestampOrUndefined(value: number | undefined): number | undefined {
+  return value && value > 0 ? value : undefined;
+}
+
+export function isJoinedInvitationResponse(response: string): boolean {
+  return (
+    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
+  );
+}
+
+export function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
+  const context = result.searchContext;
+  const callId = context?.callId || result.id;
+  const startedAt =
+    timestampOrUndefined(context?.startedAt) ||
+    timestampOrUndefined(context?.startsAt) ||
+    Date.now();
+  const now = Date.now();
+  const participantResponses = context?.participantResponses || [];
+  const participantUserIds = context?.userIds || [];
+  const participantNames = context?.participantNames || [];
+  const participantEmails = context?.participantEmails || [];
+  const participantCount = Math.max(
+    participantUserIds.length,
+    participantResponses.length,
+    participantNames.length,
+    participantEmails.length,
+  );
+
+  return {
+    workspaceId,
+    id: callId,
+    externalId: context?.externalId || callId,
+    title: stripSearchHighlight(context?.title || result.title) || null,
+    createdByUserId: context?.createdByUserId || '',
+    organizerId: null,
+    channelId: context?.channelId || null,
+    orgName: null,
+    description: null,
+    callType: CallType.VIDEO,
+    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
+    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
+    roomLink: context?.roomLink || null,
+    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
+    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    isRecurring: Boolean(context?.recurringSeriesId),
+    recurringSeriesId: context?.recurringSeriesId || null,
+    recurrenceRule: null,
+    instanceDate: null,
+    recordingEnabled: false,
+    recordingUrl: null,
+    recordingParticipants: '[]',
+    transcript: context?.hasTranscript ? 'available' : undefined,
+    aiSummary: null,
+    startedAt,
+    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
+    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
+    createdAt: startedAt,
+    updatedAt: now,
+    callUpdatesChannel: null,
+    participantCount,
+    metadata: null,
+    participantPreviewUserIds: JSON.stringify(
+      participantUserIds
+        .map((userId, index) =>
+          userId
+            ? {
+                userId,
+                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
+              }
+            : null,
+        )
+        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
+    ),
+    summaryTemplateId: null,
+    labels: [],
+    markedItems: [],
+    xyneManaged: false,
+    visibility: CallVisibility.PRIVATE,
+    participants: Array.from({ length: participantCount }, (_, index) => {
+      const userId = participantUserIds[index] || '';
+      const displayName = stripSearchHighlight(participantNames[index]);
+      const email = stripSearchHighlight(participantEmails[index]);
+      const isExternal = !userId;
+
+      return {
+        workspaceId,
+        id: `${callId}:${userId || `external-${index}`}`,
+        callId,
+        userId,
+        invitedBy: context?.createdByUserId || '',
+        invitedAt: startedAt,
+        response: (participantResponses[index] as InvitationResponse | undefined) || null,
+        meetingStatus: MeetingStatus.PENDING,
+        respondedAt: null,
+        joinedAt: null,
+        leftAt: null,
+        metadata: null,
+        displayName: displayName || null,
+        email: email || null,
+        isExternal,
+      };
+    }),
+  } as Call;
+}
 export type CallParticipantPreviewEntry = {
   readonly userId: string;
   readonly hasJoined: boolean;
@@ -186,6 +321,12 @@ export function buildParticipantSummary(
   return `${firstParticipantName}, ${secondParticipantName} & ${otherParticipantCount - 2} other${
     otherParticipantCount - 2 > 1 ? 's' : ''
   }`;
+}
+
+export function formatParticipantNames(displayNames: string[]): string {
+  return displayNames.length === 0
+    ? 'Just you'
+    : buildParticipantSummary(displayNames, displayNames.length);
 }
 
 export function getCallParticipantCount(call: {
