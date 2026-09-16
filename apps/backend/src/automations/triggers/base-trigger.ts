@@ -19,10 +19,15 @@ export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
 
   hydratePayload?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 
+  /**
+   * Shape the payload for one candidate automation before it is persisted.
+   * Return null to drop the event for that automation before any execution row
+   * is created — the trigger owns that decision, the router stays generic.
+   */
   projectPayload?(
     config: Record<string, unknown>,
     payload: Record<string, unknown>,
-  ): Record<string, unknown>;
+  ): Record<string, unknown> | null;
 
   matchFilters(filter: Record<string, unknown>, payload: Record<string, unknown>): boolean {
     void filter;

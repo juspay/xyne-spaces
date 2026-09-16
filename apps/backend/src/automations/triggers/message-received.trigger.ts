@@ -121,10 +121,20 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
   override projectPayload(
     config: Record<string, unknown>,
     payload: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const { previousContent, ...rest } = payload as { previousContent?: string };
+  ): Record<string, unknown> | null {
+    const { _transient, ...rest } = payload as {
+      isEdit?: boolean;
+      _transient?: { previousContent?: string };
+    };
+    // Edits only matter to automations that opted in. Dropping here — rather than
+    // in matchFilters — keeps an in-place rewrite from spawning one SKIPPED
+    // execution, state row and queue job per automation in the workspace.
+    const cfg = this.configSchema.parse(config);
+    if (rest.isEdit && !cfg.fireOnEdit) return null;
+
+    const previousContent = _transient?.previousContent;
     if (previousContent === undefined) return rest;
-    const needle = (config as MessageReceivedConfig).contentContains;
+    const needle = cfg.contentContains;
     // Mirror matchFilters: test decoded + raw so an encoded-card needle can't read as a non-match.
     const prevTexts = [previousContent, toReadableMessageContent(previousContent)];
     return {
@@ -261,7 +271,7 @@ export async function emitMessageReceived(message: ReceivedMessage): Promise<voi
           msgType: message.msgType ?? MessageType.USER,
           ...(message.isEdit ? { isEdit: true } : {}),
           ...(message.previousContent !== undefined
-            ? { previousContent: message.previousContent }
+            ? { _transient: { previousContent: message.previousContent } }
             : {}),
         },
       },

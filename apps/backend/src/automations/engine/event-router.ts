@@ -44,13 +44,16 @@ class EventRouter {
           string,
           unknown
         >;
-        // Edits only matter to automations that opted in — skip before enqueue.
-        if ((payload as { isEdit?: boolean }).isEdit && !triggerConfig.fireOnEdit) {
-          continue;
-        }
-        const data =
-          triggerImpl?.projectPayload?.(triggerConfig, payload as unknown as Record<string, unknown>) ??
-          payload;
+        const projected = triggerImpl?.projectPayload?.(
+          triggerConfig,
+          payload as unknown as Record<string, unknown>,
+        );
+        // null means the trigger doesn't want this event for this automation —
+        // skip before an execution row or queue job exists.
+        if (projected === null) continue;
+        // `_transient` never persists, projection or not: a registry miss must
+        // degrade to "no projection", never to writing transient data here.
+        const { _transient: _drop, ...data } = (projected ?? payload) as Record<string, unknown>;
         const initialContext = {
           automation: {
             id: workflow.id,
