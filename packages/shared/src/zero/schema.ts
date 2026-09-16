@@ -4612,6 +4612,12 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['viewId'],
       destSchema: viewAccessTable,
     }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
   }),
 );
 

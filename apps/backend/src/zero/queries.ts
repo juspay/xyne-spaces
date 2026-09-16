@@ -5604,6 +5604,12 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where(({ cmp, or }) =>
           or(cmp('userId', '=', ctx.userID), cmp('visibility', '=', SavedConfigVisibility.PUBLIC)),
         )
+        // Only expose results to users who are members of the channel.
+        // This prevents non-members from reading public views (and their filter data)
+        // by guessing or obtaining a channelId they don't have access to.
+        .whereExists('contextChannel', ch =>
+          ch.whereExists('participants', p => p.where('userId', ctx.userID)),
+        )
         .related('values')
         .orderBy('createdAt', 'desc');
     },
