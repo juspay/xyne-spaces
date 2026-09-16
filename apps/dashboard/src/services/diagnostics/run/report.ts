@@ -124,6 +124,36 @@ export function buildRunMarkdown(report: RunReport): string {
 
   const { window } = report;
 
+  const attribution = report.probes.mainThread;
+  if (attribution?.supported && attribution.frames.length) {
+    lines.push('## Where the main thread went');
+    lines.push('');
+    lines.push(
+      `Sampled ${attribution.busySamples} times every ${attribution.sampleIntervalMs}ms. "Own time" is the thread inside that function's own code; "with calls" includes everything it invoked.`,
+    );
+    lines.push('');
+    lines.push('| Function | Kind | Own time | Share | With calls | Source |');
+    lines.push('| --- | --- | --- | --- | --- | --- |');
+    for (const frame of attribution.frames.slice(0, 15)) {
+      const source = frame.resource
+        ? `${frame.resource}${frame.line === null ? '' : `:${frame.line}`}`
+        : '—';
+      lines.push(
+        `| ${frame.name} | ${frame.kind} | ${frame.selfMs.toFixed(0)}ms | ${frame.selfSharePercent.toFixed(0)}% | ${frame.totalMs.toFixed(0)}ms | ${source} |`,
+      );
+    }
+    lines.push('');
+    if (attribution.hotPath.length > 1) {
+      lines.push(`Heaviest call path: ${attribution.hotPath.map(step => step.name).join(' → ')}`);
+      lines.push('');
+    }
+  } else if (attribution && !attribution.supported) {
+    lines.push('## Where the main thread went');
+    lines.push('');
+    lines.push(`Not attributed: ${attribution.unsupportedReason}`);
+    lines.push('');
+  }
+
   if (window.scripts.length) {
     lines.push('## Scripts during the run');
     lines.push('');
@@ -283,10 +313,24 @@ export function buildRunAskAiPrompt(report: RunReport): string {
     );
   }
 
+  const attribution = report.probes.mainThread;
+  if (attribution?.supported && attribution.frames.length) {
+    lines.push('');
+    lines.push('Where the main thread actually went (sampled call stacks, not inference):');
+    for (const frame of attribution.frames.slice(0, 5)) {
+      lines.push(
+        `- ${frame.name} (${frame.kind}): ${frame.selfMs.toFixed(0)}ms own time, ${frame.selfSharePercent.toFixed(0)}% of thread time, ${frame.totalMs.toFixed(0)}ms including calls${frame.resource ? ` — ${frame.resource}${frame.line === null ? '' : `:${frame.line}`}` : ''}`,
+      );
+    }
+    if (attribution.hotPath.length > 1) {
+      lines.push(`Heaviest call path: ${attribution.hotPath.map(step => step.name).join(' → ')}`);
+    }
+  }
+
   const worstScript = report.window.scripts[0];
   if (worstScript) {
     lines.push(
-      `Heaviest script during the run: ${worstScript.fn} in ${worstScript.source}, ${worstScript.totalMs.toFixed(0)}ms over ${worstScript.count} call(s).`,
+      `Callback that entered the longest frames: ${worstScript.fn} in ${worstScript.source}, ${worstScript.totalMs.toFixed(0)}ms over ${worstScript.count} call(s).`,
     );
   }
 

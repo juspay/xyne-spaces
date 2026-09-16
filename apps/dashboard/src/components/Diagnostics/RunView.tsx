@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { CheckCard } from './CheckCard';
+import { HotFrameTable } from './HotFrameTable';
 import { useRun } from './useRun';
 import { CHECK_STATUS_STYLES } from '../../services/diagnostics/thresholds';
 import { runController, DEFAULT_OBSERVE_MS } from '../../services/diagnostics/run';
@@ -259,6 +260,8 @@ function ReportView({ report }: { report: RunReport }): ReactElement {
           .
         </p>
       </div>
+
+      <HotFrameTable attribution={report.probes.mainThread} />
 
       {SECTIONS.map(section => {
         const checks = grouped[section.status];

@@ -6,6 +6,7 @@ import { buildCheckContext, headlineFor, overallStatus, runChecks } from './chec
 import { clearReports, loadReports, saveReport } from './history';
 import { runCpuBenchmark } from './probes/cpuBenchmark';
 import { startEventLoopLagProbe } from './probes/eventLoopLag';
+import { startMainThreadSampler } from './probes/sampler';
 import { runStorageProbe } from './probes/storage';
 import { RunWindow } from './window';
 import { ENGINE_VERSION, type ProbeResults, type RunProgress, type RunReport } from './types';
@@ -132,9 +133,14 @@ class RunController {
 
       diagnosticsStore.beginRunWindow(measured);
       const lagProbe = startEventLoopLagProbe();
+      // Sampling runs only inside the observation window. It costs a little
+      // main-thread time itself, which is the price of being able to name what
+      // is using the rest of it.
+      const sampler = startMainThreadSampler(duration);
 
       const completed = await this.observe(measured, windowStartedAt, duration);
       probes.eventLoop = lagProbe.stop();
+      probes.mainThread = await sampler.stop();
       diagnosticsStore.endRunWindow();
       document.removeEventListener('visibilitychange', onVisibilityChange);
 
@@ -196,7 +202,7 @@ class RunController {
       runCpuBenchmark().catch(() => null),
       runStorageProbe().catch(() => null),
     ]);
-    return { cpu, storage, eventLoop: null };
+    return { cpu, storage, eventLoop: null, mainThread: null };
   }
 
   /** Resolves true when the window ran to completion, false when the user cancelled. */

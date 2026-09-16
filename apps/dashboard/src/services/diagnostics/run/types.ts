@@ -142,10 +142,55 @@ export interface StorageProbeResult {
   quotaMb: number | null;
 }
 
+/**
+ * One function as the sampling profiler saw it.
+ *
+ * `selfMs` is the thread inside this function's own code; `totalMs` is that
+ * plus everything it called. A component with a large total and a tiny self is
+ * not itself slow — something beneath it is.
+ */
+export interface HotFrame {
+  name: string;
+  /**
+   * Derived from React's naming convention — capitalised is a component, `use`
+   * is a hook. React's internals ship pre-minified so nothing around the frame
+   * can corroborate it, which makes this a labelling hint and never something a
+   * verdict rests on.
+   */
+  kind: 'component' | 'hook' | 'function' | 'anonymous';
+  resource: string;
+  line: number | null;
+  column: number | null;
+  selfMs: number;
+  totalMs: number;
+  selfSharePercent: number;
+  totalSharePercent: number;
+}
+
+/** Where the main thread actually went during the run. */
+export interface MainThreadAttribution {
+  supported: boolean;
+  unsupportedReason: string;
+  sampleIntervalMs: number;
+  samples: number;
+  /** Samples where the thread was running something rather than idle. */
+  busySamples: number;
+  busyMs: number;
+  durationMs: number;
+  /** Ranked by self time — the functions the thread was actually inside. */
+  frames: HotFrame[];
+  /** Ranked by total time, components only. */
+  components: HotFrame[];
+  /** The heaviest root-to-leaf call path, which shows how the app got there. */
+  hotPath: { name: string; totalMs: number }[];
+}
+
 export interface ProbeResults {
   cpu: CpuBenchmarkResult | null;
   eventLoop: EventLoopLagResult | null;
   storage: StorageProbeResult | null;
+  /** Null only before the run has stopped sampling. */
+  mainThread: MainThreadAttribution | null;
 }
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'inconclusive' | 'skipped';

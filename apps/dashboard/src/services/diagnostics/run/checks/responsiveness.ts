@@ -41,6 +41,8 @@ const BAD_SECOND_SHARE = 10;
 
 /** A script owning at least this share of measured script time is worth naming. */
 const DOMINANT_SCRIPT_SHARE = 0.35;
+/** A single function holding this share of sampled thread time is the story. */
+const DOMINANT_SELF_SHARE = 25;
 /** Forced style/layout above this share of a script's own time is the real fault. */
 const LAYOUT_THRASH_SHARE = 0.3;
 /** Below this there is not enough script time measured to apportion blame from. */
@@ -388,8 +390,144 @@ export const navigationBlocking: Check = context => {
   };
 };
 
+/**
+ * Names what the main thread was actually inside.
+ *
+ * This is the check the rest of the responsiveness section exists to set up.
+ * `mainThreadBlocking` says the thread was unavailable and `scriptAttribution`
+ * says which callback entered the script — but for anything React renders that
+ * callback is always the scheduler, so neither can name the code responsible.
+ * Only the sampling profiler can, because it captures the whole stack rather
+ * than its entry point.
+ */
+export const mainThreadAttribution: Check = context => {
+  const attribution = context.probes.mainThread;
+
+  if (!attribution || !attribution.supported) {
+    return skipped(
+      'main-thread-attribution',
+      'Where the time went',
+      'responsiveness',
+      attribution?.unsupportedReason || 'Main-thread attribution was not collected for this run.',
+    );
+  }
+
+  const top = attribution.frames[0];
+  if (!top || attribution.busyMs <= 0) {
+    return {
+      id: 'main-thread-attribution',
+      title: 'Where the time went',
+      category: 'responsiveness',
+      status: 'pass',
+      confidence: attribution.samples > 100 ? 'high' : 'low',
+      confidenceReason: `${attribution.samples} samples at ${attribution.sampleIntervalMs}ms.`,
+      summary: 'The main thread was idle for essentially the whole run.',
+      measurements: [
+        measurement('Thread busy', percent(0)),
+        measurement('Samples', String(attribution.samples)),
+      ],
+      evidence: ['Nothing was running long enough to be sampled'],
+      remediation: '',
+      actionable: false,
+    };
+  }
+
+  const busySharePercent = attribution.durationMs
+    ? (attribution.busyMs / attribution.durationMs) * 100
+    : 0;
+  const blockedShare = context.window.durationMs
+    ? (context.window.blockedMs / context.window.durationMs) * 100
+    : 0;
+  const dominant = top.selfSharePercent >= DOMINANT_SELF_SHARE;
+
+  // Naming the busiest function is always useful; calling it a *fault* requires
+  // the thread to have actually been under pressure. The heaviest function in a
+  // responsive run is just the app doing its job.
+  const status = !dominant
+    ? 'pass'
+    : blockedShare >= BLOCKED_SHARE_BAD
+      ? 'fail'
+      : blockedShare >= BLOCKED_SHARE_WARN
+        ? 'warn'
+        : 'pass';
+
+  const { confidence, reason } = seriesConfidence(context, attribution.busySamples, 50, 200);
+  const component = attribution.components[0];
+  const where = top.resource
+    ? `${top.resource}${top.line === null ? '' : `:${top.line}`}`
+    : 'an unknown source';
+
+  return {
+    id: 'main-thread-attribution',
+    title: 'Where the time went',
+    category: 'responsiveness',
+    status,
+    confidence,
+    confidenceReason: `${reason} Sampled every ${attribution.sampleIntervalMs}ms.`,
+    summary: dominant
+      ? `${top.name} used ${ms(top.selfMs)} of main-thread time — ${percent(top.selfSharePercent)} of everything the thread did.`
+      : `No single function dominated; ${top.name} was the largest at ${percent(top.selfSharePercent)}.`,
+    measurements: [
+      measurement('Busiest function', top.name, describeKind(top.kind)),
+      measurement(
+        'Its own time',
+        ms(top.selfMs),
+        `${percent(top.selfSharePercent)} of thread time`,
+      ),
+      measurement('Including what it called', ms(top.totalMs)),
+      measurement('Defined in', where),
+      ...(component
+        ? [
+            measurement(
+              'Heaviest component',
+              component.name,
+              `${ms(component.totalMs)} including children`,
+            ),
+          ]
+        : []),
+      measurement('Thread busy', percent(busySharePercent)),
+    ],
+    evidence: [
+      ...attribution.frames
+        .slice(0, 4)
+        .map(
+          frame =>
+            `${frame.name} — ${ms(frame.selfMs)} own time, ${ms(frame.totalMs)} including calls${frame.resource ? ` (${frame.resource}${frame.line === null ? '' : `:${frame.line}`})` : ''}`,
+        ),
+      ...(attribution.hotPath.length > 1
+        ? [`Heaviest call path: ${attribution.hotPath.map(step => step.name).join(' → ')}`]
+        : []),
+      ...(top.selfMs * 4 < top.totalMs
+        ? [
+            `${top.name} spends most of its time in what it calls rather than its own code, so the cost is below it`,
+          ]
+        : []),
+      ...machineCaveat(context),
+    ],
+    remediation:
+      status === 'pass'
+        ? ''
+        : `Report ${top.name}${component ? ` and ${component.name}` : ''} with this report. This is a measured call stack, not an inference.`,
+    actionable: status !== 'pass',
+  };
+};
+
+function describeKind(kind: 'component' | 'hook' | 'function' | 'anonymous'): string {
+  switch (kind) {
+    case 'component':
+      return 'looks like a React component';
+    case 'hook':
+      return 'looks like a hook';
+    case 'anonymous':
+      return 'unnamed function';
+    default:
+      return 'function';
+  }
+}
+
 export const RESPONSIVENESS_CHECKS: Check[] = [
   mainThreadBlocking,
+  mainThreadAttribution,
   inputResponsiveness,
   frameRate,
   navigationBlocking,
