@@ -108,7 +108,7 @@ function normalizeFakeGcsHost(): string {
 //   ${baseUrl}/claw-preview/<sandboxId>/  →  redirects to vnc.html?autoconnect=…
 // Empty string disables the announce.
 export const SANDBOX_PREVIEW = {
-  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.xyne.juspay.net",
+  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "",
 } as const;
 
 // Hindsight long-term memory.

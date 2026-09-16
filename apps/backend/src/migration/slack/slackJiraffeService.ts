@@ -137,7 +137,12 @@ async function fetchTicketsFromBitbot(
   slackChannelId: string,
   syncDate?: string
 ): Promise<BitbotTicket[]> {
-  const baseUrl = 'https://bitbot.internal.svc.k8s.office.mum.juspay.net';
+  const baseUrl = process.env.BITBOT_MIGRATION_BASE_URL;
+  if (!baseUrl) {
+    throw new Error(
+      'BITBOT_MIGRATION_BASE_URL is not configured — cannot fetch Jiraffe/Bitbot migration tickets',
+    );
+  }
   const url = new URL(`${baseUrl}/api/internal/migration/tickets`);
   url.searchParams.set('slackChannelId', slackChannelId);
   if (syncDate) {
@@ -333,9 +338,13 @@ async function ingestTicket(
   // Find assigned user if assigned_username exists
   let assignedToUserId: string | undefined;
   if (ticket.assigned_username) {
-    const assignedUserEmail = `${ticket.assigned_username}@juspay.in`;
+    // Corporate email domain (deployment-specific). Unset means the assignee
+    // cannot be resolved and the ticket is migrated unassigned.
+    const assignedUserEmail = process.env.CORPORATE_EMAIL_DOMAIN
+      ? `${ticket.assigned_username}@${process.env.CORPORATE_EMAIL_DOMAIN}`
+      : undefined;
     const resolvedWsId = workspaceId || config.defaultWorkspaceId;
-    if (resolvedWsId) {
+    if (assignedUserEmail && resolvedWsId) {
       const assignedUser = await userRepo.findByEmail(assignedUserEmail, resolvedWsId);
       if (assignedUser) {
         assignedToUserId = assignedUser.id;
@@ -565,7 +574,8 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
-      xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+      xyneSpaceChannelLink = `<${frontendUrl}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
       jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
   }

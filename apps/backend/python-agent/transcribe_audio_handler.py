@@ -422,7 +422,7 @@ async def _stream_with_google(
     recognizer = f'projects/{project_id}/locations/{location}/recognizers/_'
 
     # Build a speech-adaptation phrase set from the static hot words + dynamic hints
-    # (bot users, then active @juspay.in users — see UserRegistry/getUserNames, which
+    # (bot users, then active corporate-domain users — see UserRegistry/getUserNames, which
     # already returns them pre-ordered and deduplicated), deduplicated again here,
     # boosted, and capped at Google's documented max phrases/PhraseSet.
     all_hints = list(_HOT_WORDS) + (extra_hints or [])

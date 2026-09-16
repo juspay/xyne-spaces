@@ -679,7 +679,8 @@ export class SlackMigrationEngine {
     if (job.type !== MigrationType.CHANNEL || !job.channelInput?.announceInSlack) return;
     const wsConfig = getBotConfigByWorkspaceId(job.workspaceId);
     if (!wsConfig.notificationsEnabled) return;
-    const link = `<https://spaces.xyne.juspay.net/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const link = `<${frontendUrl}/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
     let text = `<!channel> This Channel has been migrated to ${link}. Please move your conversations there only this channel will be soon archived.`;
     if (wsConfig.migrationFinalMessage) text += `\n${wsConfig.migrationFinalMessage}`;
     await postMessage({

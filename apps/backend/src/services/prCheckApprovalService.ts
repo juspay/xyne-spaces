@@ -42,7 +42,7 @@ interface ParsedPrLink {
 export function extractPrLink(content: string): ParsedPrLink | null {
   const bitbucketHost = (config.bitbucket.baseUrl
     ? new URL(config.bitbucket.baseUrl).hostname
-    : 'bitbucket.juspay.net'
+    : 'bitbucket.example.com'
   ).toLowerCase();
 
   const urlPattern = /https?:\/\/[^\s"'<>]+\/pull-requests\/\d+/g;

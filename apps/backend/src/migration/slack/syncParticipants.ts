@@ -87,7 +87,8 @@ export async function runSyncParticipants({
   const token = wsConfig.slackBotToken;
   const client = new WebClient(token);
   const logChannelId = wsConfig.slackMigrationLogChannelId || slackChannelId;
-  const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
+  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const xyneSpaceChannelLink = `<${frontendUrl}/${workspaceId}/chat/dir/${xyneSpaceChannelId}|${xyneChannel.name}>`;
   const startedTs = await postMessage({
     channelId: logChannelId,
     text: `🔄 <@${userId}> :: Started Participant sync for xyne-space channel ${xyneSpaceChannelLink}...`,

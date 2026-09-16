@@ -57,7 +57,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       context: { kind: 'direct', icon: 'user', place: null, text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Ankit Sharma' },
       name: 'Ankit Sharma',
-      subtitle: 'ankit.sharma@juspay.in',
+      subtitle: 'ankit.sharma@example.com',
     },
   },
   {
@@ -163,7 +163,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       context: { kind: 'direct', icon: 'user', place: null, text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Ankit Sharma' },
       name: 'Ankit Sharma',
-      subtitle: 'ankit.sharma@juspay.in',
+      subtitle: 'ankit.sharma@example.com',
     },
   },
   {
@@ -273,7 +273,7 @@ export const INCOMING_CALL_FIXTURES: IncomingCallFixture[] = [
       context: { kind: 'direct', icon: 'user', place: null, text: 'Incoming call' },
       identity: { mode: 'solo', userId: null, displayName: 'Meera Pillai' },
       name: 'Meera Pillai',
-      subtitle: 'meera.pillai@juspay.in',
+      subtitle: 'meera.pillai@example.com',
     },
   },
 ];

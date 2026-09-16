@@ -4,6 +4,11 @@ import type { ConfluenceUser } from './confluenceClient';
 
 const db = DatabaseClient.getInstance();
 
+// Corporate email domain used to infer user emails from Confluence/Bitbucket
+// names. Deployment-specific: set CORPORATE_EMAIL_DOMAIN (e.g. "example.com").
+// When unset, no email candidates are inferred.
+const CORPORATE_EMAIL_DOMAIN = process.env.CORPORATE_EMAIL_DOMAIN ?? '';
+
 export interface UnresolvedConfluenceUser {
   displayName: string | null;
   publicName: string | null;
@@ -41,8 +46,16 @@ const normalizeEmailLocalPart = (value?: string | null): string =>
 
 const inferEmailCandidatesFromName = (name?: string): string[] => {
   if (!name) return [];
+  if (!CORPORATE_EMAIL_DOMAIN) return [];
 
-  const cleaned = name.replace(/_juspay$/i, '').replace(/[_-]+/g, ' ');
+  // Bitbucket usernames carry a corporate-domain suffix (e.g. "jane.doe_example"
+  // when CORPORATE_EMAIL_DOMAIN is "example.com"); strip it before inference.
+  const corporateSuffix = `_${CORPORATE_EMAIL_DOMAIN.split('.')[0]}`;
+  const cleaned = (
+    name.toLowerCase().endsWith(corporateSuffix)
+      ? name.slice(0, -corporateSuffix.length)
+      : name
+  ).replace(/[_-]+/g, ' ');
   const nameParts = cleaned
     .split(/\s+/)
     .map(normalizeNamePart)
@@ -51,7 +64,7 @@ const inferEmailCandidatesFromName = (name?: string): string[] => {
   const candidates = new Set<string>();
   const rawLocalPart = normalizeEmailLocalPart(cleaned);
   if (rawLocalPart) {
-    candidates.add(`${rawLocalPart}@juspay.in`);
+    candidates.add(`${rawLocalPart}@${CORPORATE_EMAIL_DOMAIN}`);
   }
 
   if (nameParts.length === 0) {
@@ -64,21 +77,21 @@ const inferEmailCandidatesFromName = (name?: string): string[] => {
   const firstInitial = first?.[0];
   const lastInitial = last?.[0];
 
-  candidates.add(`${nameParts.join('.')}@juspay.in`);
-  candidates.add(`${nameParts.join('')}@juspay.in`);
+  candidates.add(`${nameParts.join('.')}@${CORPORATE_EMAIL_DOMAIN}`);
+  candidates.add(`${nameParts.join('')}@${CORPORATE_EMAIL_DOMAIN}`);
 
   if (nameParts.length >= 2) {
-    candidates.add(`${first}.${last}@juspay.in`);
-    candidates.add(`${first}${last}@juspay.in`);
-    candidates.add(`${first}.${lastInitial}@juspay.in`);
-    candidates.add(`${first}${lastInitial}@juspay.in`);
-    candidates.add(`${firstInitial}.${last}@juspay.in`);
+    candidates.add(`${first}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}${last}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}.${lastInitial}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${first}${lastInitial}@${CORPORATE_EMAIL_DOMAIN}`);
+    candidates.add(`${firstInitial}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
 
     if (second) {
-      candidates.add(`${first}.${second}@juspay.in`);
-      candidates.add(`${first}${second}@juspay.in`);
-      candidates.add(`${second}.${last}@juspay.in`);
-      candidates.add(`${second}${last}@juspay.in`);
+      candidates.add(`${first}.${second}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${first}${second}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${second}.${last}@${CORPORATE_EMAIL_DOMAIN}`);
+      candidates.add(`${second}${last}@${CORPORATE_EMAIL_DOMAIN}`);
     }
   }
 

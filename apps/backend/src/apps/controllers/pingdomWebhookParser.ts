@@ -225,7 +225,7 @@ export function normalizePingdom(payload: PingdomPayload): PingdomNormalizedPayl
 }
 
 /**
- * `🚨 Pingdom Alert | pingdom test alert | api.juspay.in`, the hostname omitted
+ * `🚨 Pingdom Alert | pingdom test alert | api.example.com`, the hostname omitted
  * when the check params did not carry it. infra-switch renders the equivalent
  * line as a single hyperlink (`src/AlertProxy/Utils/Common.hs:344`), using the
  * DB alert's account where we use the checked hostname.

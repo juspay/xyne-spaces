@@ -127,7 +127,7 @@ export function buildSpacesMentionLookups(auth: SpacesMentionAuth): MentionLooku
     // /api/query — because /api/users/search is NOT workspace-scoped and returns
     // same-name accounts from OTHER workspaces (e.g. a Slack/cross-platform
     // import: "Satvik Batra <…@cross-platform.in>" alongside the real
-    // "Satvik Batra <…@juspay.in>"). Those exact-name collisions made every
+    // "Jane Doe <…@example.com>"). Those exact-name collisions made every
     // common name look ambiguous (length≥2) and never tag — the prod bug. The
     // workspace filter collapses them to the actual member. Falls back to the
     // unscoped prefix search only when there's no workspace context or no
