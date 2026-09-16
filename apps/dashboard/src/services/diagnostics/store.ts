@@ -1,4 +1,5 @@
 import { RingBuffer, percentile } from './ringBuffer';
+import type { RunWindow } from './run/window';
 import { METRIC_SPECS, verdictFor, worstVerdict } from './thresholds';
 import { METRIC_KEYS } from './types';
 import type {
@@ -144,6 +145,14 @@ export class DiagnosticsStore {
   private electron: ElectronProcessSample[] | null = null;
   private historyFrom: number | null = null;
 
+  /**
+   * Set only while a diagnostic run is in progress. Every recording path
+   * forwards its raw, timestamped event here as well, which is what lets a run
+   * report on a bounded window while the session aggregates above stay
+   * untouched. Type-only import, so this introduces no runtime cycle.
+   */
+  private runWindow: RunWindow | null = null;
+
   private listeners = new Set<() => void>();
   private cached: DiagnosticsSnapshot | null = null;
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -158,6 +167,7 @@ export class DiagnosticsStore {
       this.series.set(key, buffer);
     }
     buffer.push({ t: at, v: value });
+    this.runWindow?.push({ kind: 'metric', t: at, key, v: value });
     this.foldIntoHistory(key, value, at);
     this.latest.set(key, value);
     this.unsupported.delete(key);
@@ -215,6 +225,7 @@ export class DiagnosticsStore {
 
   recordLongTask(durationMs: number, at: number = Date.now()): void {
     this.longTasks.push({ t: at, d: durationMs });
+    this.runWindow?.push({ kind: 'longTask', t: at, durationMs });
     this.lastLongTaskEndedAt = Math.max(this.lastLongTaskEndedAt, at + durationMs);
     this.invalidate();
   }
@@ -226,6 +237,7 @@ export class DiagnosticsStore {
 
   markInteraction(at: number = Date.now()): void {
     this.lastInteractionAt = at;
+    this.runWindow?.push({ kind: 'interaction', t: at });
   }
 
   idleForMs(now: number = Date.now()): number {
@@ -277,6 +289,15 @@ export class DiagnosticsStore {
   }
 
   recordScript(entry: Omit<ScriptDrain, 'count'> & { count?: number }): void {
+    this.runWindow?.push({
+      kind: 'script',
+      t: Date.now(),
+      source: entry.source,
+      fn: entry.fn,
+      invoker: entry.invoker,
+      totalMs: entry.totalMs,
+      forcedLayoutMs: entry.forcedLayoutMs,
+    });
     const key = `${entry.source}::${entry.fn}`;
     const existing = this.scripts.get(key);
     if (existing) {
@@ -298,6 +319,7 @@ export class DiagnosticsStore {
   }
 
   recordApiCall(endpoint: string, durationMs: number, transferBytes: number): void {
+    this.runWindow?.push({ kind: 'api', t: Date.now(), endpoint, durationMs, transferBytes });
     const existing = this.api.get(endpoint);
     if (existing) {
       existing.count += 1;
@@ -324,21 +346,25 @@ export class DiagnosticsStore {
    * table that highlights which specific query is slow.
    */
   recordZeroQuery(name: string, durationMs: number): void {
+    this.pushZeroOpEvent('query', name, durationMs, false);
     this.recordZeroOp(this.zeroQueries, name, durationMs);
     this.recordLatencySample('zeroQueryP95', durationMs);
   }
 
   recordZeroQueryError(name: string): void {
+    this.pushZeroOpEvent('query', name, null, true);
     this.bumpZeroOpError(this.zeroQueries, name);
   }
 
   /** A mutation that the server has acknowledged (or rejected). */
   recordZeroMutation(name: string, durationMs: number): void {
+    this.pushZeroOpEvent('mutation', name, durationMs, false);
     this.recordZeroOp(this.zeroMutations, name, durationMs);
     this.recordLatencySample('zeroMutationP95', durationMs);
   }
 
   recordZeroMutationError(name: string): void {
+    this.pushZeroOpEvent('mutation', name, null, true);
     this.bumpZeroOpError(this.zeroMutations, name);
   }
 
@@ -394,7 +420,10 @@ export class DiagnosticsStore {
     this.connectionReason = reason;
     this.connectionStateSince = at;
 
-    if (changed) this.connectionEvents.push({ t: at, name, reason });
+    if (changed) {
+      this.connectionEvents.push({ t: at, name, reason });
+      this.runWindow?.push({ kind: 'connection', t: at, name, reason });
+    }
     this.refreshConnectionMetrics(at);
   }
 
@@ -461,6 +490,7 @@ export class DiagnosticsStore {
 
   /** Per-process detail. Aggregate CPU arrives separately via `setCpuContext`. */
   setElectronProcesses(samples: ElectronProcessSample[]): void {
+    this.runWindow?.push({ kind: 'processes', t: Date.now(), samples });
     this.electron = samples;
     this.record(
       'rssMb',
@@ -519,6 +549,36 @@ export class DiagnosticsStore {
     this.electron = null;
     this.historyFrom = null;
     this.invalidate();
+  }
+
+  // ── Run windows ──────────────────────────────────────────────────────────
+
+  /**
+   * Attaches a run window. Only one run is meaningful at a time: two overlapping
+   * windows would each measure the other's probe load, so starting a second one
+   * closes the first rather than fanning out to both.
+   */
+  beginRunWindow(window: RunWindow): void {
+    this.runWindow?.close();
+    this.runWindow = window;
+  }
+
+  endRunWindow(at: number = Date.now()): void {
+    this.runWindow?.close(at);
+    this.runWindow = null;
+  }
+
+  hasActiveRunWindow(): boolean {
+    return this.runWindow !== null;
+  }
+
+  private pushZeroOpEvent(
+    op: 'query' | 'mutation',
+    name: string,
+    durationMs: number | null,
+    error: boolean,
+  ): void {
+    this.runWindow?.push({ kind: 'zeroOp', t: Date.now(), op, name, durationMs, error });
   }
 
   // ── Reading ──────────────────────────────────────────────────────────────
