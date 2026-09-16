@@ -15,14 +15,34 @@ import { zql } from '../queries';
  */
 export const SENTINEL_USER = '__sync_acl_user__';
 export const SENTINEL_WORKSPACE = '__sync_acl_workspace__';
+export const SENTINEL_MEMBER = '__sync_acl_member__';
 
 const sentinelCtx: Context = {
   userID: SENTINEL_USER,
   workspaceId: SENTINEL_WORKSPACE,
   role: 'MEMBER',
   orgRole: 'MEMBER',
-  memberId: '__sync_acl_member__',
+  memberId: SENTINEL_MEMBER,
 };
+
+/**
+ * Every value `sentinelCtx` stamps that VARIES per subscriber — a base-row `simple` binding any of
+ * these is per-subscriber admission. Kept at the sentinel source so adding a field to `sentinelCtx`
+ * is covered here by construction (add the sentinel to this set where it's minted, one place).
+ * NOT included: `role`/`orgRole` — they resolve to the real enum `'MEMBER'`, indistinguishable from a
+ * row literal, so an ACL simple binding `ctx.role` classifies as a literal; soundness for role-bound
+ * ACLs rests on the gateway's MEMBER-only serving guard (same standing assumption as the gate plane).
+ */
+export const SUBSCRIBER_SENTINEL_VALUES: ReadonlySet<unknown> = new Set<unknown>([
+  SENTINEL_USER,
+  SENTINEL_WORKSPACE,
+  SENTINEL_MEMBER,
+]);
+
+/** Is `value` a subscriber-varying sentinel (userID/workspaceId/memberId)? See SUBSCRIBER_SENTINEL_VALUES. */
+export function isSubscriberSentinel(value: unknown): boolean {
+  return SUBSCRIBER_SENTINEL_VALUES.has(value);
+}
 
 type Row = Record<string, unknown>;
 /** Rows of a materialized grant table (its snapshot). */

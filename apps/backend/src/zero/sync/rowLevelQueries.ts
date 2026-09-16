@@ -2,7 +2,7 @@ import type { AnyQuery } from '@rocicorp/zero';
 import { schema, type BaseQueryResolver, type Context } from '@xyne/shared';
 import { zql } from '../queries';
 import { syncContext } from './serviceIdentity';
-import { SENTINEL_USER, SENTINEL_WORKSPACE, sentinelAclWhere, type Cond } from './aclGate';
+import { SENTINEL_USER, SENTINEL_WORKSPACE, isSubscriberSentinel, sentinelAclWhere, type Cond } from './aclGate';
 
 /**
  * ROW-LEVEL ROUTING PLANE — the second shared-engine mechanism (the query-level GATE is the first).
@@ -38,7 +38,15 @@ export interface RowLevelSpec {
 /** The partition column of every row-level instance — the tenant boundary forced from the socket (R2). */
 export const ROW_LEVEL_PARTITION_COLUMN = 'workspaceId';
 
-const wsOf = (args: unknown): string => String((args as { workspaceId?: unknown } | undefined)?.workspaceId ?? '');
+const wsOf = (args: unknown): string => {
+  const ws = (args as { workspaceId?: unknown } | undefined)?.workspaceId;
+  if (typeof ws !== 'string' || ws === '') {
+    // R2 forces workspaceId from the socket, so a missing value here is an internal misuse, not client
+    // input — fail loud rather than materialize a garbage `where('workspaceId','')` instance.
+    throw new Error('rowLevelQueries: workspaceId is required to build a row-level base');
+  }
+  return ws;
+};
 
 /**
  * The row-level allowlist. Each base drops the per-user owner pin (routing does it) and partitions by
@@ -94,8 +102,9 @@ export interface RowLevelEligibility {
   reason?: string;
 }
 
-/** A workspace id used only to materialize the base AST for structural inspection (value is irrelevant). */
-const PROBE_WORKSPACE = '__row_level_probe_ws__';
+/** A workspace id used only to materialize the base AST for structural inspection. Exported so the CI
+ *  guard can build synthetic bases that satisfy the partition check with the same probe value. */
+export const PROBE_WORKSPACE = '__row_level_probe_ws__';
 
 interface BaseAst {
   table?: string;
@@ -115,19 +124,28 @@ interface BaseAst {
 export function rowLevelEligibility(queryName: string): RowLevelEligibility {
   const spec = ROW_LEVEL_QUERIES.get(queryName);
   if (!spec) return { ok: false, reason: `'${queryName}' is not registered in ROW_LEVEL_QUERIES` };
+  const base = resolveRowLevelBase(queryName, syncContext(), { workspaceId: PROBE_WORKSPACE });
+  return rowLevelEligibilityForBase(base, spec.routeColumn);
+}
 
-  const base = resolveRowLevelBase(queryName, syncContext(), { workspaceId: PROBE_WORKSPACE }) as
-    | { ast?: BaseAst }
-    | undefined;
-  const ast = base?.ast;
-  if (!ast?.table) return { ok: false, reason: `'${queryName}' base resolves no root table` };
+/**
+ * Structural eligibility over an already-built workspace-partitioned base + routeColumn. Split out of
+ * `rowLevelEligibility` so the CI guard can exercise the base-shape branches (cursor / many:1 related /
+ * missing partition) with synthetic bases, without a throwaway registry entry.
+ */
+export function rowLevelEligibilityForBase(
+  base: AnyQuery | undefined,
+  routeColumn: string,
+): RowLevelEligibility {
+  const ast = (base as { ast?: BaseAst } | undefined)?.ast;
+  if (!ast?.table) return { ok: false, reason: 'base resolves no root table' };
 
   // The base MUST partition by workspaceId (the tenant boundary; forced from the socket at R2). A base
   // that forgot it would let queryMetaFor pick a wrong partition column and mix tenants.
   if (!hasTopLevelPartition(ast.where, ROW_LEVEL_PARTITION_COLUMN, PROBE_WORKSPACE)) {
     return {
       ok: false,
-      reason: `'${queryName}' base does not filter '${ROW_LEVEL_PARTITION_COLUMN}' at the top level`,
+      reason: `base does not filter '${ROW_LEVEL_PARTITION_COLUMN}' at the top level`,
     };
   }
 
@@ -136,7 +154,7 @@ export function rowLevelEligibility(queryName: string): RowLevelEligibility {
   if (ast.start !== undefined) {
     return {
       ok: false,
-      reason: `'${queryName}' base uses a cursor (.start) — per-subscriber pagination is not row-level routable`,
+      reason: 'base uses a cursor (.start) — per-subscriber pagination is not row-level routable',
     };
   }
 
@@ -150,7 +168,7 @@ export function rowLevelEligibility(queryName: string): RowLevelEligibility {
     if (parentField.length !== 1 || rootPk.length !== 1 || parentField[0] !== rootPk[0]) {
       return {
         ok: false,
-        reason: `'${queryName}' .related('${childTable}') is not 1:1-owned (parentField ${JSON.stringify(
+        reason: `.related('${childTable}') is not 1:1-owned (parentField ${JSON.stringify(
           parentField,
         )} ≠ single-column root PK ${JSON.stringify(rootPk)})`,
       };
@@ -160,7 +178,7 @@ export function rowLevelEligibility(queryName: string): RowLevelEligibility {
   // (a)/(b): classify the ACL's top-level terms. Routing-by-routeColumn reproduces the ACL IFF the ONLY
   // subscriber-dependent top-level term is `routeColumn == SENTINEL_USER`; every other term is the
   // workspace partition or a subscriber-independent literal. Any subquery / other sentinel / OR ⇒ per-row.
-  return rowLevelEligibleForTable(ast.table, spec.routeColumn);
+  return rowLevelEligibleForTable(ast.table, routeColumn);
 }
 
 /**
@@ -172,7 +190,11 @@ export function rowLevelEligibleForTable(rootTable: string, routeColumn: string)
   return classifyAclTerms(sentinelAclWhere(rootTable), routeColumn);
 }
 
-function classifyAclTerms(where: Cond | undefined, routeColumn: string): RowLevelEligibility {
+/**
+ * Classify a sentinel-resolved ACL's top-level terms for owner-only routability. Exported for the CI
+ * guard's synthetic-ACL fixtures (memberId conjunct / OR / no-ACL) that don't map to a real table.
+ */
+export function classifyAclTerms(where: Cond | undefined, routeColumn: string): RowLevelEligibility {
   if (!where) {
     // No ACL predicate = unrestricted read (every row to everyone). Routing by routeColumn would HIDE
     // rows native serves ⇒ not native-parity. Fail closed.
@@ -202,8 +224,19 @@ function classifyAclTerms(where: Cond | undefined, routeColumn: string): RowLeve
     } else if (value === SENTINEL_WORKSPACE) {
       // the workspace-partition term — the tenant scope the engine partitions by. allowed.
       continue;
+    } else if (isSubscriberSentinel(value)) {
+      // Any OTHER subscriber-varying binding (e.g. memberId == ctx.memberId, org-members-acl.ts) is
+      // per-subscriber admission the ACL-stripped base + owner-only routing does NOT reproduce — the
+      // base drops the conjunct, so the engine would OVER-deliver. Reject: this is the fail-open hole
+      // the classifier must not have (same class as the gate's compound-correlation hole).
+      return {
+        ok: false,
+        reason: `top-level '${t.left.name}' binds a subscriber value other than the owner pin (routeColumn '${routeColumn}') — per-subscriber admission is not routable`,
+      };
     }
-    // else: a subscriber-independent literal filter (e.g. isDeleted == false). allowed.
+    // else: a subscriber-independent literal filter (e.g. isDeleted == false). allowed. NOTE: an ACL
+    // simple binding ctx.role/ctx.orgRole resolves to the enum 'MEMBER' — indistinguishable from a row
+    // literal here, so it lands in this branch; soundness rests on the gateway MEMBER-only guard.
   }
   if (ownerPins !== 1) {
     return {

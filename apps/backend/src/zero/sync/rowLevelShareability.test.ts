@@ -3,11 +3,22 @@ import assert from 'node:assert/strict';
 import {
   ROW_LEVEL_QUERIES,
   ROW_LEVEL_PARTITION_COLUMN,
+  PROBE_WORKSPACE,
   rowLevelEligibility,
   rowLevelEligibleForTable,
+  rowLevelEligibilityForBase,
+  classifyAclTerms,
 } from './rowLevelQueries';
 import { SHARED_BASE_QUERIES } from './baseQueries';
 import { queryMetaFor } from './queryMeta';
+import { SENTINEL_USER, SENTINEL_MEMBER, type Cond } from './aclGate';
+import { zql } from '../queries';
+
+// Build a synthetic top-level `simple` ACL term (right value can be a sentinel or a row literal).
+const simple = (name: string, value: unknown, op = '='): Cond =>
+  ({ type: 'simple', left: { name }, op, right: { value } } as unknown as Cond);
+const and = (...conditions: Cond[]): Cond => ({ type: 'and', conditions } as unknown as Cond);
+const or = (...conditions: Cond[]): Cond => ({ type: 'or', conditions } as unknown as Cond);
 
 /**
  * ROW-LEVEL ROUTING CONTRACT enforcement (build-time guard). The row-level plane serves the ACL-stripped
@@ -64,4 +75,57 @@ test('a wrong routeColumn is REJECTED (owner pin must be the declared route colu
   const e = rowLevelEligibleForTable('bookmarks', 'entityId');
   assert.equal(e.ok, false);
   assert.match(e.reason ?? '', /routeColumn/i);
+});
+
+// A second subscriber-varying sentinel in the conjunct is the fail-OPEN class the classifier must
+// reject: the ACL-stripped base drops it, so owner-only routing would OVER-deliver (leak-shaped).
+test('a non-owner subscriber sentinel (memberId) in the conjunct is REJECTED (no fail-open)', () => {
+  const acl = and(simple('userId', SENTINEL_USER), simple('memberId', SENTINEL_MEMBER));
+  const e = classifyAclTerms(acl, 'userId');
+  assert.equal(e.ok, false);
+  assert.match(e.reason ?? '', /subscriber value|memberId/i);
+});
+
+test('a subscriber-independent literal alongside the owner pin is ALLOWED', () => {
+  const acl = and(simple('userId', SENTINEL_USER), simple('isDeleted', false));
+  assert.equal(classifyAclTerms(acl, 'userId').ok, true);
+});
+
+test('a top-level OR ACL is REJECTED (alternative admission paths are not pure routing)', () => {
+  const acl = or(simple('userId', SENTINEL_USER), simple('isPublic', true));
+  const e = classifyAclTerms(acl, 'userId');
+  assert.equal(e.ok, false);
+  assert.match(e.reason ?? '', /OR/i);
+});
+
+test('a no-predicate ACL is REJECTED (fail-closed: nothing to route by)', () => {
+  const e = classifyAclTerms(undefined, 'userId');
+  assert.equal(e.ok, false);
+});
+
+// Base-shape branches, exercised with synthetic bases so they are covered before any real onboarding.
+test('a cursor (.start) base is REJECTED', () => {
+  const base = zql.bookmarks
+    .where('workspaceId', PROBE_WORKSPACE)
+    .where('isDeleted', false)
+    .orderBy('createdAt', 'desc')
+    .start({ id: 'x', createdAt: 0 });
+  const e = rowLevelEligibilityForBase(base, 'userId');
+  assert.equal(e.ok, false);
+  assert.match(e.reason ?? '', /cursor|\.start/i);
+});
+
+test('a many:1 related base is REJECTED (child shared across owners)', () => {
+  // activities.channel is sourceField ['channelId'] (a non-PK FK) → one channel serves many owners.
+  const base = zql.activities.where('workspaceId', PROBE_WORKSPACE).related('channel');
+  const e = rowLevelEligibilityForBase(base, 'userId');
+  assert.equal(e.ok, false);
+  assert.match(e.reason ?? '', /1:1-owned|parentField/i);
+});
+
+test('a base missing the workspace partition is REJECTED (tenant boundary)', () => {
+  const base = zql.bookmarks.where('isDeleted', false);
+  const e = rowLevelEligibilityForBase(base, 'userId');
+  assert.equal(e.ok, false);
+  assert.match(e.reason ?? '', /workspaceId/i);
 });
