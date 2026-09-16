@@ -33,9 +33,23 @@ const CLEANUP_CONCURRENCY = 16
 
 const pad = (n: number) => String(n).padStart(5, '0')
 
+/**
+ * A fileId becomes a path segment in every staging key, and cleanupStage
+ * deletes everything under the prefix it builds. A separator or a `..` in the
+ * id would escape docling-staging/ — in the shared default bucket that holds
+ * every workspace's attachments, so the blast radius is not one pod's /tmp any
+ * more. Callers pass a DB id today; this keeps that true.
+ */
+const assertSafeFileId = (fileId: string): string => {
+  if (!fileId || /[/\\]/.test(fileId) || fileId.includes('..') || fileId === '.') {
+    throw new Error(`Unsafe docling fileId for a staging key: ${JSON.stringify(fileId)}`)
+  }
+  return fileId
+}
+
 /** Object key under a file's staging prefix — always relative, never absolute. */
 const stagingKey = (fileId: string, ...segments: string[]) =>
-  [STAGING_PREFIX, fileId, ...segments].join('/')
+  [STAGING_PREFIX, assertSafeFileId(fileId), ...segments].join('/')
 
 export const stagingPaths = (fileId: string) => ({
   stageDir: stagingKey(fileId),
