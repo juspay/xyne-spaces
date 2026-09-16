@@ -10,7 +10,6 @@ export interface SdlcAgentDesiredState {
   scope: string;
   color: string;
   config: {
-    requireSdlcRepository: boolean;
     tools: { subagents: string[]; direct: string[]; custom: string[] };
     toolPermissions: Record<string, "allow" | "ask">;
   };
@@ -26,7 +25,6 @@ export function sdlcAgentDesiredState(): SdlcAgentDesiredState {
     scope: "global",
     color: "#2563eb",
     config: {
-      requireSdlcRepository: true,
       tools: {
         subagents: [...profile.tools.subagents],
         direct: [...profile.tools.direct],
@@ -94,11 +92,12 @@ export function diffSdlcAgent(
     });
   }
 
-  if (config["requireSdlcRepository"] !== desired.config.requireSdlcRepository) {
+  // Retired with the automatic credential push; repositories are now chosen per tool call.
+  if (config["requireSdlcRepository"] !== undefined) {
     changes.push({
       field: "config.requireSdlcRepository",
       affectsRuns: true,
-      detail: `${String(config["requireSdlcRepository"])} -> ${String(desired.config.requireSdlcRepository)}`,
+      detail: `${String(config["requireSdlcRepository"])} -> removed`,
     });
   }
 
@@ -180,7 +179,7 @@ export async function syncSdlcAgent(
       });
     }
 
-    const existingConfig = record(agent.config);
+    const { requireSdlcRepository: _retired, ...existingConfig } = record(agent.config);
     await prisma.agent.update({
       where: { id: agent.id },
       data: {
@@ -190,7 +189,6 @@ export async function syncSdlcAgent(
         color: desired.color,
         config: {
           ...existingConfig,
-          requireSdlcRepository: desired.config.requireSdlcRepository,
           tools: { ...record(existingConfig["tools"]), ...desired.config.tools },
           toolPermissions: {
             ...record(existingConfig["toolPermissions"]),

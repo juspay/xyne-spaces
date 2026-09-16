@@ -3326,6 +3326,8 @@ model Repo {
   /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
+  /// Repository Credential (workflow.external_sources.id) this repository uses. No FK: cross-schema.
+  vcsCredentialId      String?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
@@ -3344,6 +3346,7 @@ model Repo {
   @@index([name])
   @@index([projectId])
   @@index([workspaceId, projectId])
+  @@index([vcsCredentialId])
   @@map("repos")
   @@schema("public")
 }
