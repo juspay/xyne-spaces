@@ -121,7 +121,20 @@ interface BaseAst {
  * partitioned base AST (for cursor + related shape) and the table's sentinel-resolved canSelect (for
  * the owner-pin classification). Returns the first offending term. Mirrors the gate's collapsibility.
  */
+/** Memoized per queryName — the verdict is registry + ACL determined (both fixed at deploy), but the
+ *  runtime refuse calls this on every row-level subscribe, so reconnect storms would rebuild the base +
+ *  walk the ACL each time. Same precedent as deriveAclGate's cache. */
+const eligibilityCache = new Map<string, RowLevelEligibility>();
+
 export function rowLevelEligibility(queryName: string): RowLevelEligibility {
+  const cached = eligibilityCache.get(queryName);
+  if (cached) return cached;
+  const result = computeRowLevelEligibility(queryName);
+  eligibilityCache.set(queryName, result);
+  return result;
+}
+
+function computeRowLevelEligibility(queryName: string): RowLevelEligibility {
   const spec = ROW_LEVEL_QUERIES.get(queryName);
   if (!spec) return { ok: false, reason: `'${queryName}' is not registered in ROW_LEVEL_QUERIES` };
   const base = resolveRowLevelBase(queryName, syncContext(), { workspaceId: PROBE_WORKSPACE });

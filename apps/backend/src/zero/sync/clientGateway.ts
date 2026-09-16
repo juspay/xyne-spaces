@@ -7,7 +7,7 @@ import { hashOfNameAndArgs } from './protocol';
 import { deriveAclGate } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
-import { isRowLevelQuery, routeColumnOf } from './rowLevelQueries';
+import { isRowLevelQuery, routeColumnOf, rowLevelEligibility } from './rowLevelQueries';
 import { resolveSharedBase } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
@@ -248,6 +248,17 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   function subscribeRowLevel(queryName: string, ack?: SubscribeAckFn, sinceOffset?: string): void {
     const workspaceId = socket.workspaceId;
     if (!workspaceId) return;
+    // Runtime eligibility refuse (defense in depth behind the CI guard — the spec's third enforcement
+    // arm, the row-level analog of the gate's collapsibility refuse). An allowlist edit that reached
+    // prod without a green build would otherwise be SERVED — the quiet over-delivery the R-1 predicate
+    // exists to prevent. Cheap (memoized) and BEFORE syncEngine.subscribe, so nothing to roll back.
+    const eligible = rowLevelEligibility(queryName);
+    if (!eligible.ok) {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-eligible' });
+      logger.error('[SyncGateway] row-level query failed eligibility — refusing subscribe', { queryName, reason: eligible.reason });
+      socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      return;
+    }
     const wsArgs: ReadonlyJSONValue[] = [{ workspaceId }]; // FORCED from the socket
     const dataInstanceKey = syncEngine.subscribe(queryName, wsArgs, connId);
     if (!dataInstanceKey) {
@@ -294,7 +305,9 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   function unsubscribe(queryName: string, args: ReadonlyJSONValue[]): void {
     // Row-level instances are keyed by the FORCED socket-workspace args (subscribeRowLevel), not the
     // client's — recompute with the same override or the key won't match. (Disconnect uses the stored
-    // key directly, so only this explicit-unsubscribe path needs it.)
+    // key directly, so only this explicit-unsubscribe path needs it.) If workspaceId is somehow unset
+    // the fallback to client args won't match either — intentionally left to disconnect teardown rather
+    // than special-cased, since after `ready` the workspace is always present.
     const effectiveArgs: ReadonlyJSONValue[] =
       isRowLevelQuery(queryName) && socket.workspaceId ? [{ workspaceId: socket.workspaceId }] : args;
     const dataInstanceKey = hashOfNameAndArgs(queryName, effectiveArgs);
