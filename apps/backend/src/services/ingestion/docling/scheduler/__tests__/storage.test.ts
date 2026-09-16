@@ -1,25 +1,14 @@
 /**
  * Unit tests for the docling scheduler staging storage.
  *
- * Staging lives in object storage (via the storage-service factory) under
- * DOCLING_SCHEDULER_STAGING_PREFIX; rows written by the old pod-local code
- * carry absolute filesystem paths and must still be readable from local disk
+ * Staging always lives in the default storage bucket (via the storage-service
+ * factory) under a fixed prefix; rows written by the old pod-local code carry
+ * absolute filesystem paths and must still be readable from local disk
  * (rollout compatibility for in-flight files).
  */
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-
-const mockStorageRoot = path.join(os.tmpdir(), `docling-legacy-stage-${process.pid}-${Date.now()}`)
-
-jest.mock('@/config/env', () => ({
-  config: {
-    doclingScheduler: {
-      stagingPrefix: 'docling-staging',
-      storageRoot: mockStorageRoot,
-    },
-  },
-}))
 
 jest.mock('@/utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -58,12 +47,15 @@ import {
   readBuffer,
   readJson,
   cleanupStage,
+  isMissingObjectError,
 } from '../storage'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const storageFactory = jest.requireMock('@/services/storage/storageServiceFactory') as any
 
 const fileBufferOf = (key: string): Buffer => storageFactory.__store.get(key) as Buffer
+
+const legacyRoot = path.join(os.tmpdir(), `docling-legacy-stage-${process.pid}-${Date.now()}`)
 
 describe('docling scheduler staging storage', () => {
   beforeEach(() => {
@@ -75,7 +67,7 @@ describe('docling scheduler staging storage', () => {
   })
 
   afterAll(async () => {
-    await fs.rm(mockStorageRoot, { recursive: true, force: true })
+    await fs.rm(legacyRoot, { recursive: true, force: true })
   })
 
   describe('staging key layout', () => {
@@ -136,7 +128,7 @@ describe('docling scheduler staging storage', () => {
 
   describe('legacy pod-local paths (in-flight rows)', () => {
     it('reads absolute local paths from the filesystem', async () => {
-      const legacyDir = path.join(mockStorageRoot, 'legacy-file', 'results')
+      const legacyDir = path.join(legacyRoot, 'legacy-file', 'results')
       await fs.mkdir(legacyDir, { recursive: true })
       const legacyPath = path.join(legacyDir, '00000.json')
       await fs.writeFile(legacyPath, JSON.stringify({ chunks: ['legacy'] }), 'utf-8')
@@ -147,7 +139,7 @@ describe('docling scheduler staging storage', () => {
     })
 
     it('reads raw buffers from absolute local paths', async () => {
-      const legacyDir = path.join(mockStorageRoot, 'legacy-file', 'parts')
+      const legacyDir = path.join(legacyRoot, 'legacy-file', 'parts')
       await fs.mkdir(legacyDir, { recursive: true })
       const legacyPath = path.join(legacyDir, '00000.pdf')
       const bytes = Buffer.from('%PDF-legacy')
@@ -157,26 +149,48 @@ describe('docling scheduler staging storage', () => {
     })
   })
 
+  describe('isMissingObjectError', () => {
+    it('recognises a missing object from every storage provider and from disk', () => {
+      expect(isMissingObjectError(new Error('File does not exist in GCS: docling-staging/f1/parts/00000.pdf'))).toBe(true)
+      expect(isMissingObjectError(new Error('S3 file read failed after 3 attempts: NoSuchKey: ...'))).toBe(true)
+      expect(isMissingObjectError(new Error('Azure Blob read failed after 3 attempts: BlobNotFound'))).toBe(true)
+      expect(isMissingObjectError(new Error("ENOENT: no such file or directory, open '/tmp/x'"))).toBe(true)
+    })
+
+    it('leaves other failures alone so they keep retrying', () => {
+      expect(isMissingObjectError(new Error('GCS upload failed: socket hang up'))).toBe(false)
+      expect(isMissingObjectError(new Error('403 Forbidden'))).toBe(false)
+      // A DB failure inside the splitter must not be mistaken for a missing part
+      // and fail the file terminally.
+      expect(isMissingObjectError(new Error('relation "docling_async_parts" does not exist'))).toBe(false)
+    })
+  })
+
   describe('cleanupStage', () => {
-    it('deletes every staged object under the file prefix, keeps other files, and removes the legacy local dir', async () => {
+    it("deletes every staged object under the file prefix and leaves other files' staging alone", async () => {
       await writePartBuffer(partKey('f3', 0), Buffer.from('p0'))
       await writePartBuffer(partKey('f3', 1), Buffer.from('p1'))
       await writeJson(resultKey('f3', 0), { chunks: [] })
       await writeJson(resultKey('other-file', 0), { chunks: [] })
-
-      const legacyDir = path.join(mockStorageRoot, 'f3', 'results')
-      await fs.mkdir(legacyDir, { recursive: true })
-      await fs.writeFile(path.join(legacyDir, '00000.json'), '{}', 'utf-8')
 
       await cleanupStage('f3')
 
       expect(fileBufferOf('docling-staging/f3/parts/00000.pdf')).toBeUndefined()
       expect(fileBufferOf('docling-staging/f3/parts/00001.pdf')).toBeUndefined()
       expect(fileBufferOf('docling-staging/f3/results/00000.json')).toBeUndefined()
-      // other files' staging must be untouched
       expect(fileBufferOf('docling-staging/other-file/results/00000.json')).toBeDefined()
+    })
 
-      await expect(fs.stat(path.join(mockStorageRoot, 'f3'))).rejects.toThrow()
+    it('deletes objects in batches and swallows individual delete failures', async () => {
+      for (let i = 0; i < 40; i += 1) {
+        await writePartBuffer(partKey('f4', i), Buffer.from(`p${i}`))
+      }
+      storageFactory.__service.deleteFile.mockImplementationOnce(async () => {
+        throw new Error('transient delete failure')
+      })
+
+      await expect(cleanupStage('f4')).resolves.toBeUndefined()
+      expect(storageFactory.__service.deleteFile).toHaveBeenCalledTimes(40)
     })
   })
 })
