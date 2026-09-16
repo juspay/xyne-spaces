@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { ChannelType, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -39,6 +39,9 @@ const ResearchContextSchema = z.object({
   type: z.enum(['product', 'repository']),
   id: z.string().min(1).optional(),
   name: z.string().min(1),
+  // SDLC only: the hub the chat is open in. A repository belongs to several hubs,
+  // so claw's run context cannot derive it from `id` alone.
+  channelId: z.string().min(1).optional(),
 });
 
 // Selection context schema - selected text from canvas.
@@ -377,6 +380,9 @@ export class XyneAIControllerV2 {
       // Honour the caller's pinned repository; otherwise the hub's oldest membership,
       // which is exact whenever the hub covers one.
       const sdlcChannelId = effectiveChannelIds[0];
+      if (sdlcChannelId && effectiveResearchContext?.type === 'repository') {
+        effectiveResearchContext = { ...effectiveResearchContext, channelId: sdlcChannelId };
+      }
       const pinnedRepoId =
         effectiveResearchContext?.type === 'repository' ? effectiveResearchContext.id : null;
       const sdlcRepoId = sdlcChannelId
@@ -408,10 +414,14 @@ export class XyneAIControllerV2 {
         : null;
       if (sdlcRepo) {
         if (!effectiveResearchContext) {
+          // Same hub stamp as the pinned path above: a caller that sends channelIds
+          // without pinning a repository must still run in the hub it named, not in
+          // the actor's oldest hub for the repository derived here.
           effectiveResearchContext = {
             type: 'repository',
             id: sdlcRepo.id,
             name: sdlcRepo.name,
+            ...(sdlcChannelId && { channelId: sdlcChannelId }),
           };
         }
         const contextLinks = await db.sdlcEntityLink.findMany({
@@ -475,6 +485,51 @@ export class XyneAIControllerV2 {
           linkedContext,
           ...(selectedArtifact ? { selectedArtifact } : {}),
         });
+      } else if (sdlcChannelId) {
+        const hub = await db.channel.findFirst({
+          where: { id: sdlcChannelId, type: ChannelType.SDLC },
+          select: { id: true, workspaceId: true },
+        });
+        if (hub) {
+          // Independent of each other, so they share one round trip. The hub lookup
+          // above stays separate: it gates this whole branch, and every plain chat
+          // channel reaches here too — running these for one would be wasted work.
+          const [contextLinks, selectedCanvas] = await Promise.all([
+            db.sdlcEntityLink.findMany({
+              where: { channelId: sdlcChannelId, relationType: 'CONTEXT' },
+              orderBy: { createdAt: 'desc' },
+              take: 50,
+              select: { targetType: true, targetId: true },
+            }),
+            effectiveCanvasId
+              ? db.canvas.findFirst({
+                  where: { id: effectiveCanvasId, channelId: sdlcChannelId },
+                  select: {
+                    id: true,
+                    title: true,
+                    sdlcArtifact: { select: { artifactType: true } },
+                  },
+                })
+              : Promise.resolve(undefined),
+          ]);
+          const selectedArtifact = resolveSdlcAskAiSelectedArtifact(
+            selectedCanvas
+              ? {
+                  id: selectedCanvas.id,
+                  title: selectedCanvas.title,
+                  artifactType: selectedCanvas.sdlcArtifact?.artifactType,
+                }
+              : selectedCanvas,
+          );
+          const linkedContext = hub.workspaceId
+            ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, hub.workspaceId)
+            : [];
+          sdlcDashboardContext = buildSdlcAskAiContext({
+            channelId: sdlcChannelId,
+            linkedContext,
+            ...(selectedArtifact ? { selectedArtifact } : {}),
+          });
+        }
       }
 
       // Fetch user information for agent context

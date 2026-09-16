@@ -276,14 +276,9 @@ export class SdlcHubService implements SdlcHub {
         409
       );
     }
-    // With no repositories a hub renders nothing and cannot be deleted, since
-    // membership is what blocks channel deletion.
-    const remaining = await this.prisma.sdlcEntityLink.count({
-      where: { channelId, relationType: SDLC_MEMBERSHIP_RELATION },
-    });
-    if (remaining <= 1) {
-      throw new AppError('A hub must keep at least one repository', 409);
-    }
+    // A hub may cover no repository at all — it is created that way too — so the
+    // last one detaches like any other. The artifact check above is what keeps a
+    // repository with content in this hub from leaving.
     const removed = await this.prisma.sdlcEntityLink.deleteMany({
       where: {
         channelId,

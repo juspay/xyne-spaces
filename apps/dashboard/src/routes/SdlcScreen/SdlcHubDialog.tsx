@@ -175,8 +175,8 @@ export function SdlcHubDialog({
         <h2 className='text-lg font-semibold tracking-tight'>{title}</h2>
         <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
           {editing
-            ? 'Repositories this hub covers. Keep at least one.'
-            : 'A private workspace covering one or more repositories. It never appears in Chat.'}
+            ? 'Repositories this hub covers.'
+            : 'A private workspace for a project. Repositories are optional; it never appears in Chat.'}
         </p>
 
         <div className='mt-6 space-y-5'>
@@ -276,7 +276,10 @@ export function SdlcHubDialog({
               matchTriggerWidth
             />
             {repoIds.length === 0 && (
-              <p className='mt-2 text-xs text-muted-foreground'>Pick at least one repository.</p>
+              <p className='mt-2 text-xs text-muted-foreground'>
+                Optional — add one anytime from the hub’s Repositories section. Wiki and Repo
+                Knowledge stay hidden until then.
+              </p>
             )}
           </div>
         </div>
@@ -294,7 +297,7 @@ export function SdlcHubDialog({
           <Button
             type='submit'
             loading={busy}
-            disabled={repoIds.length === 0 || (!editing && (!name.trim() || !activeProjectId))}
+            disabled={!editing && (!name.trim() || !activeProjectId)}
             data-track-category='SdlcHub'
             data-track-name={editing ? 'HubRepositoriesSaved' : 'HubCreated'}
           >

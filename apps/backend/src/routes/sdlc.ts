@@ -256,10 +256,13 @@ router.get(
     const conversationId =
       typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
     if (!conversationId) throw new AppError('conversationId is required', 400);
+    const channelId =
+      typeof req.query.channelId === 'string' ? req.query.channelId.trim() : '';
     const context = await sdlcHub.getRepositoryRunContext(
       actorFromRequest(req),
       req.params.repoId,
-      conversationId
+      conversationId,
+      channelId || undefined
     );
     res.status(200).json({ success: true, context });
   })

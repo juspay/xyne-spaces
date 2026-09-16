@@ -84,7 +84,7 @@ export interface ClawRunRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
-  researchContext?: { type: string; id?: string; name: string } | null;
+  researchContext?: { type: string; id?: string; name: string; channelId?: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
   dataSourceId?: string;

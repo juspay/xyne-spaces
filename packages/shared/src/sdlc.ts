@@ -223,7 +223,9 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
   .object({
-    repoId: z.string().min(1),
+    // Absent on a hub that covers no repository: a discussion belongs to its canvas,
+    // track or folder, all of which are placed by the hub's channel.
+    repoId: z.string().min(1).optional(),
     ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
@@ -282,8 +284,9 @@ export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
 export const createSdlcChannelSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
-  // At least one: a hub with no repositories has no screen to render.
-  repoIds: z.array(z.string().min(1)).min(1).max(100),
+  // A hub may cover no repository: Wiki and Repo Knowledge stay hidden until one
+  // is attached, and everything else is addressed by the hub itself.
+  repoIds: z.array(z.string().min(1)).max(100),
 });
 export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
 

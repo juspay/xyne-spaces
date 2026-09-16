@@ -108,6 +108,7 @@ export interface XyneAIResearchContext {
   type: 'product' | 'repository';
   id: string;
   name: string;
+  channelId?: string;
 }
 
 // Context interface for the XyneAI machine
