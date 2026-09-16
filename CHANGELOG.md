@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.3](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.2...v1.323.0-release-20260916.3) (2026-09-16)
+
+
+### Features
+
+* fix ticket count sync and fetch older tickets ([#1875](https://github.com/juspay/xyne-spaces/issues/1875)) ([#1906](https://github.com/juspay/xyne-spaces/issues/1906)) ([03034c9](https://github.com/juspay/xyne-spaces/commit/03034c936627d31f72e66eff9792b80d338c649e))
+
 ## [1.323.0-release-20260916.2](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.1...v1.323.0-release-20260916.2) (2026-09-16)
 
 
