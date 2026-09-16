@@ -125,6 +125,6 @@ export const useXyneCalendarChannelPresentations = (
   );
 };
 
-export const XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE = 25;
+export const XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE = 35;
 export const XYNE_CALENDAR_SIDEBAR_MIN_SIZE = 25;
 export const XYNE_CALENDAR_SIDEBAR_MAX_SIZE = 40;

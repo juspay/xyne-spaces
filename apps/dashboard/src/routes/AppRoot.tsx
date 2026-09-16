@@ -603,8 +603,7 @@ const AppRoot = (): ReactElement => {
   const showXyneAIPanel =
     isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isSdlcRoute;
 
-  const showCalendarPanel =
-    isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
+  const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
   // branch), so this is what decides whether that in-frame panel is showing.
   const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
@@ -632,8 +631,6 @@ const AppRoot = (): ReactElement => {
             kbCollectionId={xyneAIKbCollectionId ?? ''}
             kbChannelId={xyneAIKbChannelId ?? ''}
             kbDocId={xyneAIKbDocId ?? ''}
-            workflowInfo={xyneAIWorkflowInfo}
-            workflowDismissed={xyneAIWorkflowDismissed}
             kbDocName={xyneAIKbDocName ?? ''}
             kbFolderId={xyneAIKbFolderId ?? ''}
             kbFolderName={xyneAIKbFolderName ?? ''}
