@@ -7,7 +7,7 @@ import { hashOfNameAndArgs } from './protocol';
 import { deriveAclGate } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
-import { isRowLevelQuery } from './rowLevelQueries';
+import { isRowLevelQuery, routeColumnOf } from './rowLevelQueries';
 import { resolveSharedBase } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
@@ -120,16 +120,11 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       socket.emit('sync:error', { queryName, message: 'sync engine serves member-role principals only' });
       return;
     }
-    // Row-level queries are admitted by the instanceManager allowlist so R2's gateway branch can
-    // materialize their workspace instance — but that branch (force workspaceId from the SOCKET, route
-    // by userId, no gate) is not built yet. Refuse them HERE, before syncEngine.subscribe, so a client
-    // cannot trigger a workspace-wide materialization of another tenant's private rows through the gate
-    // path. The gate's collapsibility check would refuse them anyway (owner pin ≠ the workspace
-    // partition), but only AFTER materializing + rolling back — and it would key the instance on the
-    // CLIENT-supplied workspaceId. Fail closed until R2 replaces this with the real row-level branch.
+    // Row-level queries take a wholly separate path: the workspace partition is forced from the SOCKET
+    // (never client args — it IS the tenant boundary, there is no gate), rows route by socket.userId,
+    // no gate/grants. Reached only for MEMBER role (guarded above).
     if (isRowLevelQuery(queryName)) {
-      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-enabled' });
-      socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      subscribeRowLevel(queryName, ack, sinceOffset);
       return;
     }
     const dataInstanceKey = syncEngine.subscribe(queryName, args, connId);
@@ -245,8 +240,64 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     });
   }
 
+  /**
+   * Row-level subscribe: one user on a workspace instance, no gate/grants. The instance args are the
+   * SOCKET's workspace (forced — never the client's, since the partition is the tenant boundary), so a
+   * client cannot reach another tenant's rows; delivery routes each row to socket.userId at the fan-out.
+   */
+  function subscribeRowLevel(queryName: string, ack?: SubscribeAckFn, sinceOffset?: string): void {
+    const workspaceId = socket.workspaceId;
+    if (!workspaceId) return;
+    const wsArgs: ReadonlyJSONValue[] = [{ workspaceId }]; // FORCED from the socket
+    const dataInstanceKey = syncEngine.subscribe(queryName, wsArgs, connId);
+    if (!dataInstanceKey) {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-shareable' });
+      socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      return;
+    }
+    // Idempotent re-subscribe (optimistic send races the handler attach / re-fires on sync:ready).
+    if (subs.has(dataInstanceKey)) {
+      ack?.({ instanceKey: dataInstanceKey });
+      return;
+    }
+    const meta = queryMetaFor(queryName, wsArgs[0]);
+    const routeColumn = routeColumnOf(queryName);
+    if (!meta || !routeColumn) {
+      syncEngine.unsubscribe(dataInstanceKey, connId); // roll back — never reached subs.set
+      return;
+    }
+    // No grants for row-level; the empty grantInstanceKeys lets the shared disconnect/unsubscribe
+    // teardown release it uniformly (fanout.removeClient branches to the row-level path by instanceKey).
+    subs.set(dataInstanceKey, { grantInstanceKeys: [] });
+    ack?.({ instanceKey: dataInstanceKey });
+    obsEmit('sync-sub', {
+      action: 'subscribe-rowlevel',
+      socketId: connId,
+      userId,
+      queryName,
+      workspaceId,
+      rootTable: meta.rootTable,
+      routeColumn,
+      instanceKey: dataInstanceKey,
+    });
+    void fanout.addRowLevelClient({
+      id: connId,
+      socket: emitter,
+      userId,
+      workspaceId,
+      dataInstanceKey,
+      sinceOffset,
+      meta: { rootTable: meta.rootTable, routeColumn, childLinks: meta.childLinks },
+    });
+  }
+
   function unsubscribe(queryName: string, args: ReadonlyJSONValue[]): void {
-    const dataInstanceKey = hashOfNameAndArgs(queryName, args);
+    // Row-level instances are keyed by the FORCED socket-workspace args (subscribeRowLevel), not the
+    // client's — recompute with the same override or the key won't match. (Disconnect uses the stored
+    // key directly, so only this explicit-unsubscribe path needs it.)
+    const effectiveArgs: ReadonlyJSONValue[] =
+      isRowLevelQuery(queryName) && socket.workspaceId ? [{ workspaceId: socket.workspaceId }] : args;
+    const dataInstanceKey = hashOfNameAndArgs(queryName, effectiveArgs);
     const sub = subs.get(dataInstanceKey);
     if (!sub) return;
     syncEngine.unsubscribe(dataInstanceKey, connId);
