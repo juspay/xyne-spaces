@@ -37,6 +37,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { verifySyncServiceToken } from './sync/serviceIdentity';
 import { resolveSharedBase } from './sync/baseQueries';
 import { isGrantQuery, buildGrantBase } from './sync/grantQueries';
+import { isRowLevelQuery, resolveRowLevelBase } from './sync/rowLevelQueries';
 import { obsEmit } from './sync/obs';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
@@ -401,10 +402,17 @@ export async function handleQueries(request: Request): Promise<any> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (queryName, args): any => {
         const grant = isGrantQuery(queryName);
-        obsEmit('zero-query', { principal: 'sync', queryName, mode: grant ? 'grant' : 'base' });
+        const rowLevel = !grant && isRowLevelQuery(queryName);
+        obsEmit('zero-query', { principal: 'sync', queryName, mode: grant ? 'grant' : rowLevel ? 'row-level' : 'base' });
+        // Row-level queries serve their WORKSPACE-partitioned base (one workspace's rows) — the sync
+        // service materializes it and routes each row to its owner at fan-out (routing == the ACL). Same
+        // trust model as the gate base: the audience-isolated sync principal only ever gets ACL-stripped
+        // bases, never fused data. args carries the socket-forced { workspaceId } (see subscribeRowLevel).
         const base = grant
           ? buildGrantBase(queryName, args)
-          : resolveSharedBase(queryName, syncCtx, args);
+          : rowLevel
+            ? resolveRowLevelBase(queryName, syncCtx, args)
+            : resolveSharedBase(queryName, syncCtx, args);
         if (!base) {
           throw new Error(`Query '${queryName}' is not a shared-base query`);
         }
