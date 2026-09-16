@@ -5,7 +5,7 @@
  * Unlayered CSS always beats layered, so this holds regardless of import order.
  */
 @layer workflow-ui;
-@import '@xyne/workflow-ui/styles.css' layer(workflow-ui);
+@import "@xyne/workflow-ui/styles.css" layer(workflow-ui);
 
 /**
  * Theme bridge for @xyne/workflow-ui.

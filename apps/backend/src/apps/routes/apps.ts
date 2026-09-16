@@ -13,6 +13,7 @@ import channelRoutes from './channel';
 import userGroupRoutes from './usergroups';
 import emailRoutes from './email';
 import callRoutes from './calls';
+import workflowRoutes from './workflows';
 import prCheckCallbackRouter from './prCheckCallback';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
@@ -103,6 +104,9 @@ router.use("/email", authenticateApp, emailRoutes);
 
 // Call routes
 router.use("/calls", authenticateApp, callRoutes);
+
+// Workflow routes
+router.use("/workflows", authenticateApp, workflowRoutes);
 
 // PR check callback (called by dispatchAction when user clicks "Run PR Check" button)
 // No auth needed here - dispatchAction is already authenticated and validates the request

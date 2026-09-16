@@ -6,11 +6,10 @@
  * `RouteResponse` → Express response, in both directions, including SSE, binary and
  * redirects.
  *
- * Two routers come out, and which route lands on which is decided HERE rather than by
- * the SDK's own `authenticated` flag:
- *  - `workflowsTriggerRouter` — the app-token trigger route. Mounted BEFORE the session
- *    middleware, because an app JWT is signed with the app's secret and `authenticate`
- *    cannot verify one.
+ * Which router a route lands on is decided HERE rather than by the SDK's own
+ * `authenticated` flag:
+ *  - `workflowsAppRouter` — the app-token trigger route, mounted under `/api/apps/workflows`
+ *    behind `authenticateApp`.
  *  - `workflowsRouter` — everything else, mounted behind the session.
  *
  * Nothing is exposed anonymously. See {@link APP_AUTH_ROUTES}.
@@ -21,9 +20,6 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { uploadConfig } from '@/middleware/upload';
-import { authenticateApp } from '@/apps/middelware/authenticator';
-import { webhookLimiter } from '@/middleware/rateLimiters';
-import { requirePermission } from '@/middleware/requirePermission';
 import { ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { persistence, workflowRuntime } from './runtime';
@@ -31,22 +27,16 @@ import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
 
 /**
- * Route key → the path param naming the workflow it acts on. The only routes not behind
- * the session: anything the SDK marks `authenticated: false` and absent here is mounted
- * behind it anyway, so a new SDK public route fails closed. Re-check on an SDK bump.
+ * Route key → the path param naming the workflow it acts on. The only routes behind app
+ * auth rather than the session: anything the SDK marks `authenticated: false` and absent
+ * here is mounted behind the session anyway, so a new SDK public route fails closed.
+ * Re-check on an SDK bump.
  */
 const APP_AUTH_ROUTES = new Map<string, string>([
   ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
 ]);
 
 const routeKey = (method: string, path: string): string => `${method} ${path}`;
-
-/**
- * Both are `available_app_permissions` rows — `scripts/seed-app-permissions.ts` seeds them
- * locally, the 20260903000000 migration everywhere else, since nothing runs that on deploy.
- */
-const scopeForMethod = (method: string): string =>
-  method.toUpperCase() === 'GET' ? 'workflows:read' : 'workflows:write';
 
 /**
  * The SDK is generic over the caller's ctx and never inspects it. Ours comes from the
@@ -261,14 +251,7 @@ const mount = (router: Router, appAuth: boolean, allow?: ReadonlySet<string>): v
 
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
 
-    // Order is load-bearing: the guard runs before multer, so an unauthenticated upload
-    // is refused without buffering a byte of it.
-    const middleware = [
-      ...(appAuth
-        ? [webhookLimiter, authenticateApp, requirePermission(scopeForMethod(route.method))]
-        : []),
-      ...(route.multipart ? [uploadConfig.any()] : []),
-    ];
+    const middleware = route.multipart ? [uploadConfig.any()] : [];
 
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
@@ -301,10 +284,9 @@ const mount = (router: Router, appAuth: boolean, allow?: ReadonlySet<string>): v
   }
 };
 
-/** Mounted before the session middleware — registers only {@link APP_AUTH_ROUTES}, so
- *  every other request falls through to `workflowsRouter`. */
-export const workflowsTriggerRouter: Router = express.Router();
-mount(workflowsTriggerRouter, true);
+/** Registers only {@link APP_AUTH_ROUTES}; the caller must authenticate the app first. */
+export const workflowsAppRouter: Router = express.Router();
+mount(workflowsAppRouter, true);
 
 export const workflowsRouter: Router = express.Router();
 mount(workflowsRouter, false);

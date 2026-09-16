@@ -1073,6 +1073,7 @@ export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
   DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294

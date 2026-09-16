@@ -34,7 +34,7 @@ export const ATTACHABLE_RESOURCES: AttachableResourceConfig[] = [
   {
     resourceType: 'workflows',
     noun: 'workflows',
-    requiredPermission: 'workflows:write',
+    requiredPermission: 'workflows:start',
     async loadOptions(): Promise<AttachedResource[]> {
       const response = await apiInstance.get<{ workflows: SdkWorkflow[] }>(
         '/workflows-v2/workflows',

@@ -1266,7 +1266,7 @@ export const EditAppForm = ({
       ? [
           {
             id: 'resources' as const,
-            label: 'Resource access',
+            label: 'Workflow access',
             icon: <Boxes className='size-4' />,
           },
         ]

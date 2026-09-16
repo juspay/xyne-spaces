@@ -21,8 +21,7 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'tickets:write', description: 'Create and update tickets from apps' },
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
   { scope: 'users:read', description: 'Read user profile information from apps' },
-  { scope: 'workflows:read', description: 'Read workflows, folders and execution history from apps' },
-  { scope: 'workflows:write', description: 'Create, update and trigger workflows from apps' },
+  { scope: 'workflows:start', description: 'Start attached workflows from apps' },
 ];
 
 async function main() {
