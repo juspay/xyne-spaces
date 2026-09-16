@@ -151,7 +151,6 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
           const plaintext = decryptSpacesCbc(
             blob,
             CONFIG.spacesEncryptionKey,
-            "admin-diagnose-signing-secret",
           );
 
           db = {

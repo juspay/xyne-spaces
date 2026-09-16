@@ -1,21 +1,21 @@
 /**
  * Backward-compatible AES-256-CBC encryption service.
  *
- * Without a valid optional .env.keyring file, the original
- * encryption and decryption implementation is used.
+ * Without a valid optional ENCRYPTION_KEYS array (see
+ * encryptionKeyRingConfig.ts), the original encryption and
+ * decryption implementation is used and new writes stay in the
+ * legacy `iv:ciphertext` format.
  */
 
 import crypto from 'crypto';
 import {
-  type EncryptionRuntimeConfig,
   loadEncryptionRuntimeConfig,
-  writeEncryptionOperationDiagnostic,
+  type EncryptionRuntimeConfig,
 } from './encryptionKeyRingConfig.js';
 
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
 const VERSION_TAG = 'v2';
-const LEGACY_KEY_ID = 'legacy';
 
 class EncryptionServiceError extends Error {
   constructor(
@@ -118,10 +118,7 @@ function decryptLegacy(
 function encryptVersioned(
   plaintext: string,
   config: EncryptionRuntimeConfig
-): {
-  encryptedData: string;
-  keyId: string;
-} {
+): string {
   const keyId = config.activeKeyId;
 
   if (!keyId) {
@@ -155,26 +152,21 @@ function encryptVersioned(
 
   encrypted += cipher.final('hex');
 
-  return {
-    encryptedData:
-      `${VERSION_TAG}:${keyId}:` +
-      `${iv.toString('hex')}:${encrypted}`,
-    keyId,
-  };
+  return (
+    `${VERSION_TAG}:${keyId}:` +
+    `${iv.toString('hex')}:${encrypted}`
+  );
 }
 
 function decryptVersioned(
   encryptedData: string,
   config: EncryptionRuntimeConfig
-): {
-  plaintext: string;
-  keyId: string;
-} {
+): string {
   if (config.mode === 'legacy') {
     throw new EncryptionServiceError(
       'keyring_unavailable',
       'Versioned encrypted data requires ' +
-        'a valid .env.keyring configuration'
+        'a valid ENCRYPTION_KEYS configuration'
     );
   }
 
@@ -226,154 +218,39 @@ function decryptVersioned(
 
   plaintext += decipher.final('utf8');
 
-  return {
-    plaintext,
-    keyId,
-  };
-}
-
-function failureReason(error: unknown): string {
-  return error instanceof EncryptionServiceError
-    ? error.reasonCode
-    : 'crypto_operation_failed';
+  return plaintext;
 }
 
 /**
  * Encrypt using the original format unless a valid key ring
- * with an explicitly active key has been loaded.
+ * is configured. In key-ring mode the last ENCRYPTION_KEYS
+ * entry is the writer.
  */
 export function encrypt(plaintext: string): string {
   const config = loadEncryptionRuntimeConfig();
-  const startedAt = Date.now();
-  const useVersioned =
-    config.mode === 'keyring-write';
 
-  try {
-    if (!useVersioned) {
-      const encryptedData = encryptLegacy(plaintext);
-
-      writeEncryptionOperationDiagnostic(
-        config,
-        {
-          event: 'encrypt',
-          format: 'legacy',
-          keyId: LEGACY_KEY_ID,
-          success: true,
-          durationMs: Date.now() - startedAt,
-        }
-      );
-
-      return encryptedData;
-    }
-
-    const result = encryptVersioned(
-      plaintext,
-      config
-    );
-
-    writeEncryptionOperationDiagnostic(
-      config,
-      {
-        event: 'encrypt',
-        format: 'v2',
-        keyId: result.keyId,
-        success: true,
-        durationMs: Date.now() - startedAt,
-      }
-    );
-
-    return result.encryptedData;
-  } catch (error) {
-    writeEncryptionOperationDiagnostic(
-      config,
-      {
-        event: 'encrypt',
-        format: useVersioned
-          ? 'v2'
-          : 'legacy',
-        keyId: useVersioned
-          ? config.activeKeyId
-          : LEGACY_KEY_ID,
-        success: false,
-        durationMs: Date.now() - startedAt,
-        reasonCode: failureReason(error),
-      }
-    );
-
-    throw error;
+  if (config.mode !== 'keyring') {
+    return encryptLegacy(plaintext);
   }
+
+  return encryptVersioned(plaintext, config);
 }
 
 /**
  * Read the original format in every mode. Versioned data is
- * accepted only while a valid key-ring file is available.
+ * accepted only while a valid key ring is configured.
  */
 export function decrypt(
   encryptedData: string
 ): string {
-  const config = loadEncryptionRuntimeConfig();
-  const startedAt = Date.now();
   const isVersioned =
     encryptedData.startsWith(`${VERSION_TAG}:`);
 
-  let keyId: string | null = isVersioned
-    ? encryptedData.split(':')[1] || null
-    : LEGACY_KEY_ID;
-
-  try {
-    if (!isVersioned) {
-      const plaintext = decryptLegacy(
-        encryptedData
-      );
-
-      writeEncryptionOperationDiagnostic(
-        config,
-        {
-          event: 'decrypt',
-          format: 'legacy',
-          keyId,
-          success: true,
-          durationMs: Date.now() - startedAt,
-        }
-      );
-
-      return plaintext;
-    }
-
-    const result = decryptVersioned(
-      encryptedData,
-      config
-    );
-
-    keyId = result.keyId;
-
-    writeEncryptionOperationDiagnostic(
-      config,
-      {
-        event: 'decrypt',
-        format: 'v2',
-        keyId,
-        success: true,
-        durationMs: Date.now() - startedAt,
-      }
-    );
-
-    return result.plaintext;
-  } catch (error) {
-    writeEncryptionOperationDiagnostic(
-      config,
-      {
-        event: 'decrypt',
-        format: isVersioned
-          ? 'v2'
-          : 'legacy',
-        keyId,
-        success: false,
-        durationMs: Date.now() - startedAt,
-        reasonCode: failureReason(error),
-      }
-    );
-
-    throw error;
+  if (!isVersioned) {
+    return decryptLegacy(encryptedData);
   }
+
+  const config = loadEncryptionRuntimeConfig();
+
+  return decryptVersioned(encryptedData, config);
 }

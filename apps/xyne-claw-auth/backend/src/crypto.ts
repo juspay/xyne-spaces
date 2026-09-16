@@ -1,7 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from "node:crypto";
 import {
   loadSpacesEncryptionRuntimeConfig,
-  writeSpacesEncryptionDiagnostic,
 } from "./spaces-encryption-key-ring-config.js";
 
 const ALGORITHM = "aes-256-gcm";
@@ -70,7 +69,6 @@ export function decrypt(ciphertext: string, iv: string, authTag: string, key: Bu
 // on malformed input; callers treat a throw as "skip this row".
 const SPACES_CBC_ALGO = "aes-256-cbc";
 const SPACES_VERSION_TAG = "v2";
-const SPACES_LEGACY_KEY_ID = "legacy";
 const SPACES_CBC_IV_LENGTH = 16;
 
 class SpacesCbcDecryptionError extends Error {
@@ -104,177 +102,106 @@ function decryptSpacesCbcPayload(
   return decrypted.toString("utf8");
 }
 
-function spacesDecryptionFailureReason(
-  error: unknown,
-): string {
-  return error instanceof SpacesCbcDecryptionError
-    ? error.reasonCode
-    : "crypto_operation_failed";
-}
-
 /**
  * Decrypt a signing secret written by the Spaces backend.
  *
  * Legacy blobs continue using SPACES_ENCRYPTION_KEY from
  * Claw-auth's original .env file.
  *
- * Versioned blobs use the optional read-only key ring.
+ * Versioned blobs (`v2:keyId:iv:ciphertext`) use the optional
+ * read-only SPACES_ENCRYPTION_KEYS key ring, matched by key ID.
  */
 export function decryptSpacesCbc(
   blob: string,
   legacyKey: Buffer,
-  operation = "unspecified",
 ): string {
-  const config =
-    loadSpacesEncryptionRuntimeConfig();
-
-  const startedAt = Date.now();
   const isVersioned = blob.startsWith(
     `${SPACES_VERSION_TAG}:`,
   );
 
-  let keyId: string | null = isVersioned
-    ? blob.split(":")[1] ?? null
-    : SPACES_LEGACY_KEY_ID;
+  if (!isVersioned) {
+    const separator = blob.indexOf(":");
 
-  try {
-    if (!isVersioned) {
-      const separator = blob.indexOf(":");
-
-      if (separator < 0) {
-        throw new Error(
-          "decryptSpacesCbc: blob missing IV separator",
-        );
-      }
-
-      const ivHex = blob.slice(0, separator);
-      const ciphertextHex = blob.slice(
-        separator + 1,
-      );
-
-      if (
-        ivHex.length === 0 ||
-        ciphertextHex.length === 0
-      ) {
-        throw new Error(
-          "decryptSpacesCbc: empty IV or ciphertext",
-        );
-      }
-
-      const plaintext = decryptSpacesCbcPayload(
-        ivHex,
-        ciphertextHex,
-        legacyKey,
-      );
-
-      writeSpacesEncryptionDiagnostic(
-        config,
-        {
-          event: "decrypt",
-          operation,
-          format: "legacy",
-          keyId,
-          success: true,
-          durationMs: Date.now() - startedAt,
-        },
-      );
-
-      return plaintext;
-    }
-
-    if (config.mode === "legacy") {
-      throw new SpacesCbcDecryptionError(
-        "keyring_unavailable",
-        "Versioned Spaces data requires a valid .env.keyring",
+    if (separator < 0) {
+      throw new Error(
+        "decryptSpacesCbc: blob missing IV separator",
       );
     }
 
-    const [
-      version,
-      versionedKeyId,
-      ivHex,
-      ciphertextHex,
-    ] = blob.split(":");
+    const ivHex = blob.slice(0, separator);
+    const ciphertextHex = blob.slice(
+      separator + 1,
+    );
 
     if (
-      version !== SPACES_VERSION_TAG ||
-      !versionedKeyId ||
-      !ivHex ||
-      !ciphertextHex
+      ivHex.length === 0 ||
+      ciphertextHex.length === 0
     ) {
-      throw new SpacesCbcDecryptionError(
-        "invalid_encrypted_data_format",
-        "Invalid versioned Spaces ciphertext",
+      throw new Error(
+        "decryptSpacesCbc: empty IV or ciphertext",
       );
     }
 
-    const parts = blob.split(":");
-
-    if (parts.length !== 4) {
-      throw new SpacesCbcDecryptionError(
-        "invalid_encrypted_data_format",
-        "Invalid versioned Spaces ciphertext",
-      );
-    }
-
-    keyId = versionedKeyId;
-
-    const key = config.keys.get(
-      versionedKeyId,
-    );
-
-    if (!key) {
-      throw new SpacesCbcDecryptionError(
-        "versioned_key_not_found",
-        `No Spaces encryption key is registered for "${versionedKeyId}"`,
-      );
-    }
-
-    const iv = Buffer.from(ivHex, "hex");
-
-    if (iv.length !== SPACES_CBC_IV_LENGTH) {
-      throw new SpacesCbcDecryptionError(
-        "invalid_iv_length",
-        `Invalid IV length. Expected ${SPACES_CBC_IV_LENGTH} bytes`,
-      );
-    }
-
-    const plaintext = decryptSpacesCbcPayload(
+    return decryptSpacesCbcPayload(
       ivHex,
       ciphertextHex,
-      key,
+      legacyKey,
     );
-
-    writeSpacesEncryptionDiagnostic(
-      config,
-      {
-        event: "decrypt",
-        operation,
-        format: "v2",
-        keyId,
-        success: true,
-        durationMs: Date.now() - startedAt,
-      },
-    );
-
-    return plaintext;
-  } catch (error) {
-    writeSpacesEncryptionDiagnostic(
-      config,
-      {
-        event: "decrypt",
-        operation,
-        format: isVersioned
-          ? "v2"
-          : "legacy",
-        keyId,
-        success: false,
-        durationMs: Date.now() - startedAt,
-        reasonCode:
-          spacesDecryptionFailureReason(error),
-      },
-    );
-
-    throw error;
   }
+
+  const parts = blob.split(":");
+  const [
+    version,
+    keyId,
+    ivHex,
+    ciphertextHex,
+  ] = parts;
+
+  if (
+    parts.length !== 4 ||
+    version !== SPACES_VERSION_TAG ||
+    !keyId ||
+    !ivHex ||
+    !ciphertextHex
+  ) {
+    throw new SpacesCbcDecryptionError(
+      "invalid_encrypted_data_format",
+      "Invalid versioned Spaces ciphertext",
+    );
+  }
+
+  const config =
+    loadSpacesEncryptionRuntimeConfig();
+
+  if (config.mode === "legacy") {
+    throw new SpacesCbcDecryptionError(
+      "keyring_unavailable",
+      "Versioned Spaces data requires a valid " +
+        "SPACES_ENCRYPTION_KEYS configuration",
+    );
+  }
+
+  const key = config.keys.get(keyId);
+
+  if (!key) {
+    throw new SpacesCbcDecryptionError(
+      "versioned_key_not_found",
+      `No Spaces encryption key is registered for "${keyId}"`,
+    );
+  }
+
+  const iv = Buffer.from(ivHex, "hex");
+
+  if (iv.length !== SPACES_CBC_IV_LENGTH) {
+    throw new SpacesCbcDecryptionError(
+      "invalid_iv_length",
+      `Invalid IV length. Expected ${SPACES_CBC_IV_LENGTH} bytes`,
+    );
+  }
+
+  return decryptSpacesCbcPayload(
+    ivHex,
+    ciphertextHex,
+    key,
+  );
 }

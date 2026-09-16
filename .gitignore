@@ -20,7 +20,6 @@ Backend/target/
 # effect on files that are already tracked).
 **/.env.local
 **/.env.*.local
-**/.env.keyring
 .gradle/
 # IDE files
 .vscode/

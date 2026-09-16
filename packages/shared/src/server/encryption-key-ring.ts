@@ -2,13 +2,14 @@
  * Server-only parser for ordered encryption key rings.
  *
  * This module performs no file or environment access. Services
- * decide where configuration comes from and how fallback works.
+ * read the key-ring JSON from their own environment file and
+ * decide how fallback works. The last array entry is the active
+ * (writing) key; every entry is a valid decryption key.
  */
 
 export type EncryptionKeyRingErrorReason =
   | 'keyring_json_invalid'
-  | 'keyring_validation_failed'
-  | 'active_key_missing';
+  | 'keyring_validation_failed';
 
 export class EncryptionKeyRingConfigError
   extends Error {
@@ -24,7 +25,11 @@ export class EncryptionKeyRingConfigError
 
 export interface ParsedEncryptionKeyRing {
   keys: ReadonlyMap<string, Buffer>;
-  activeKeyId: string | null;
+  /**
+   * ID of the last array entry. Services that write use it as
+   * the active key; read-only services may ignore it.
+   */
+  activeKeyId: string;
 }
 
 function invalidJson(message: string): never {
@@ -42,8 +47,7 @@ function invalidEntry(message: string): never {
 }
 
 export function parseEncryptionKeyRing(
-  rawKeys: string,
-  rawActiveKeyId?: string
+  rawKeys: string
 ): ParsedEncryptionKeyRing {
   let parsed: unknown;
 
@@ -62,6 +66,7 @@ export function parseEncryptionKeyRing(
   }
 
   const keys = new Map<string, Buffer>();
+  let activeKeyId = '';
 
   parsed.forEach((value, index) => {
     if (
@@ -128,17 +133,9 @@ export function parseEncryptionKeyRing(
       id,
       Buffer.from(normalizedKey, 'hex')
     );
+
+    activeKeyId = id;
   });
-
-  const activeKeyId =
-    rawActiveKeyId?.trim() || null;
-
-  if (activeKeyId && !keys.has(activeKeyId)) {
-    throw new EncryptionKeyRingConfigError(
-      'active_key_missing',
-      'The active key is not present in the key ring'
-    );
-  }
 
   return {
     keys,

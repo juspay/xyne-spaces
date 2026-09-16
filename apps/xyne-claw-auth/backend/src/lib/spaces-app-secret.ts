@@ -149,9 +149,6 @@ export async function backfillSigningSecretFromSpacesDbDetailed(
     const plaintext = decryptSpacesCbc(
       blob,
       CONFIG.spacesEncryptionKey,
-      dryRun
-        ? "admin-backfill-signing-secrets-dry-run"
-        : "admin-backfill-signing-secrets-write",
     );
 
     if (!plaintext) {
