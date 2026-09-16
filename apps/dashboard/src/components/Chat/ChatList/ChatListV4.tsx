@@ -37,6 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
+import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
@@ -342,8 +343,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
     );
   }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
 
+  const ephemeralConversations = useEphemeralChannelConversations(channelId);
+  const conversationsWithEphemeral = useMemo(() => {
+    if (ephemeralConversations.length === 0) return filteredConversations;
+    return [...filteredConversations, ...ephemeralConversations];
+  }, [filteredConversations, ephemeralConversations]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    filteredConversations,
+    conversationsWithEphemeral,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );

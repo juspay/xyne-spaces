@@ -7,6 +7,7 @@ const router = Router();
 const chatController = new ChatController();
 
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postMessage);
+router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.updateMessage);
 router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
 router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);
