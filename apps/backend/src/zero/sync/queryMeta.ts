@@ -2,6 +2,7 @@ import { resolveSharedBase } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { tablesOfQuery } from './clientSchema';
 import { isGrantQuery, buildGrantBase } from './grantQueries';
+import { isRowLevelQuery, resolveRowLevelBase } from './rowLevelQueries';
 
 /**
  * Packing metadata for a query-type, derived once (in-memory, no DB) from its base
@@ -73,6 +74,8 @@ export function queryMetaFor(queryName: string, sampleArgs: unknown): QueryMeta 
 
   const base = isGrantQuery(queryName)
     ? buildGrantBase(queryName, sampleArgs)
+    : isRowLevelQuery(queryName)
+    ? resolveRowLevelBase(queryName, syncContext(), sampleArgs)
     : resolveSharedBase(queryName, syncContext(), sampleArgs);
   const ast = (base as {
     ast?: {

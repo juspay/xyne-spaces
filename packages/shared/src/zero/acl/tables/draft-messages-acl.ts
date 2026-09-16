@@ -8,6 +8,12 @@ export class DraftMessagesACL extends BaseQueryACL<'draft_messages'> {
   }
 
   canSelect<TReturn>(query: Query<'draft_messages', Schema, TReturn>): Query<'draft_messages', Schema, TReturn> {
-    return query.where('workspaceId', '=', this.ctx.workspaceId);
+    // Owner pin normalized into the ACL (was query-only in `userDrafts .where('userId', me)`).
+    // Behavior-preserving: the sole reader already filters userId, so the intersection is unchanged
+    // — it only tightens the ACL. This makes draft_messages eligible for the row-level sync plane,
+    // whose eligibility predicate reads the ACL alone (owner pin must live in canSelect, not the query).
+    return query
+      .where('workspaceId', '=', this.ctx.workspaceId)
+      .where('userId', '=', this.ctx.userID);
   }
 }

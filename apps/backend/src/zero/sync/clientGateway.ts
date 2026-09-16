@@ -7,6 +7,7 @@ import { hashOfNameAndArgs } from './protocol';
 import { deriveAclGate } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
+import { isRowLevelQuery } from './rowLevelQueries';
 import { resolveSharedBase } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
@@ -117,6 +118,18 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (socket.workspaceRole !== 'MEMBER') {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'non-member-role' });
       socket.emit('sync:error', { queryName, message: 'sync engine serves member-role principals only' });
+      return;
+    }
+    // Row-level queries are admitted by the instanceManager allowlist so R2's gateway branch can
+    // materialize their workspace instance — but that branch (force workspaceId from the SOCKET, route
+    // by userId, no gate) is not built yet. Refuse them HERE, before syncEngine.subscribe, so a client
+    // cannot trigger a workspace-wide materialization of another tenant's private rows through the gate
+    // path. The gate's collapsibility check would refuse them anyway (owner pin ≠ the workspace
+    // partition), but only AFTER materializing + rolling back — and it would key the instance on the
+    // CLIENT-supplied workspaceId. Fail closed until R2 replaces this with the real row-level branch.
+    if (isRowLevelQuery(queryName)) {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-enabled' });
+      socket.emit('sync:error', { queryName, message: 'not a shareable query' });
       return;
     }
     const dataInstanceKey = syncEngine.subscribe(queryName, args, connId);

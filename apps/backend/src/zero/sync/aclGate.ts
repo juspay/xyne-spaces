@@ -115,10 +115,21 @@ export function deriveAclGate(rootTable: string): AclGate {
   return gate;
 }
 
-function buildAclGate(rootTable: string): AclGate {
+/**
+ * The table's `canSelect` ACL resolved against the sentinel context, as a raw where-AST (or
+ * undefined when the ACL adds no predicate). Same resolution `buildAclGate` uses, exposed for the
+ * row-level plane's eligibility predicate — which classifies the ACL's top-level terms directly and
+ * does NOT want the gate's grant-source collection or fail-safe validation. Shares `sentinelCtx` so
+ * SENTINEL_USER/SENTINEL_WORKSPACE mark the subscriber holes identically to the gate.
+ */
+export function sentinelAclWhere(rootTable: string): Cond | undefined {
   const acl = QueryACLFactory.getACL(rootTable as never, sentinelCtx);
   const query = acl.canSelect((zql as unknown as Record<string, never>)[rootTable]);
-  const where = (query as { ast?: { where?: Cond } }).ast?.where;
+  return (query as { ast?: { where?: Cond } }).ast?.where;
+}
+
+function buildAclGate(rootTable: string): AclGate {
+  const where = sentinelAclWhere(rootTable);
   // Enforce the fail-safe contract at derivation (subscribe) time: an ACL that uses a
   // node/op the evaluator can't handle is NOT shareable. Without this the gap surfaces
   // only at evaluate time — per grant delta, per client — where it would fail closed but

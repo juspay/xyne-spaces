@@ -8,6 +8,7 @@ import { buildClientSchema, allPkFields } from './clientSchema';
 import { queryMetaFor, type QueryMeta } from './queryMeta';
 import { SHARED_BASE_QUERIES } from './baseQueries';
 import { isGrantQuery } from './grantQueries';
+import { isRowLevelQuery } from './rowLevelQueries';
 import { ownership, assertOwnershipSafeRedis } from './ownership';
 import { obsEmit } from './obs';
 
@@ -154,7 +155,7 @@ export class InstanceManager {
 
   /** Register interest in `query(args)`; returns its instanceKey, or null if not shareable. */
   subscribe(queryName: string, queryArgs: readonly unknown[], subscriberId: string): string | null {
-    if (!SHARED_BASE_QUERIES.has(queryName) && !isGrantQuery(queryName)) return null;
+    if (!SHARED_BASE_QUERIES.has(queryName) && !isGrantQuery(queryName) && !isRowLevelQuery(queryName)) return null;
     const meta = queryMetaFor(queryName, queryArgs[0]);
     if (!meta) return null;
     const partitionValue = String((queryArgs[0] as Record<string, unknown>)[meta.partitionColumn]);
