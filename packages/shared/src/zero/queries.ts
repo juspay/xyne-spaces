@@ -4496,7 +4496,6 @@ export const queries = defineQueries({
   // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
   // belongs to (one row per release × per-app SubTicket; callers dedupe by
   // releaseId). Keep in sync with the backend copy.
-  // ticketId may be '' (non-ticket thread): useQuery validates args before `enabled`.
   applicationReleaseTicketsByDevTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {

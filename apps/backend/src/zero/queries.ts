@@ -5103,7 +5103,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
 
   // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
   // belongs to. Keep in sync with the shared copy.
-  // ticketId may be '' (non-ticket thread): useQuery validates args before `enabled`.
   applicationReleaseTicketsByDevTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
