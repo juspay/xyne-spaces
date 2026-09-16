@@ -221,8 +221,11 @@ export function classifyAclTerms(where: Cond | undefined, routeColumn: string): 
         return { ok: false, reason: `owner pin '${routeColumn} ${t.op} …' must use '=' or 'IS'` };
       }
       ownerPins++;
-    } else if (value === SENTINEL_WORKSPACE) {
-      // the workspace-partition term — the tenant scope the engine partitions by. allowed.
+    } else if (value === SENTINEL_WORKSPACE && t.left.name === ROW_LEVEL_PARTITION_COLUMN) {
+      // the workspace-partition term — the tenant scope the engine partitions by. allowed. Pinned to
+      // the partition column (symmetric to the owner pin): a workspace sentinel bound to some OTHER
+      // column (`where('tenantId', ctx.workspaceId)`) is dropped by the base — which partitions on the
+      // literal workspaceId column — yet would look like the partition here ⇒ falls through to reject.
       continue;
     } else if (isSubscriberSentinel(value)) {
       // Any OTHER subscriber-varying binding (e.g. memberId == ctx.memberId, org-members-acl.ts) is

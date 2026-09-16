@@ -11,7 +11,7 @@ import {
 } from './rowLevelQueries';
 import { SHARED_BASE_QUERIES } from './baseQueries';
 import { queryMetaFor } from './queryMeta';
-import { SENTINEL_USER, SENTINEL_MEMBER, type Cond } from './aclGate';
+import { SENTINEL_USER, SENTINEL_MEMBER, SENTINEL_WORKSPACE, type Cond } from './aclGate';
 import { zql } from '../queries';
 
 // Build a synthetic top-level `simple` ACL term (right value can be a sentinel or a row literal).
@@ -89,6 +89,13 @@ test('a non-owner subscriber sentinel (memberId) in the conjunct is REJECTED (no
 test('a subscriber-independent literal alongside the owner pin is ALLOWED', () => {
   const acl = and(simple('userId', SENTINEL_USER), simple('isDeleted', false));
   assert.equal(classifyAclTerms(acl, 'userId').ok, true);
+});
+
+// The workspace sentinel is only the partition term on the workspaceId column; on any other column it
+// is a subscriber-varying binding the base drops → reject (symmetric to the owner-pin column check).
+test('a workspace sentinel on a non-partition column is REJECTED', () => {
+  const acl = and(simple('userId', SENTINEL_USER), simple('tenantId', SENTINEL_WORKSPACE));
+  assert.equal(classifyAclTerms(acl, 'userId').ok, false);
 });
 
 test('a top-level OR ACL is REJECTED (alternative admission paths are not pure routing)', () => {
