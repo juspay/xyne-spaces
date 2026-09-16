@@ -1204,7 +1204,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // `data-hovered` on the [data-message-id] root. Applied at the root so
         // every sub-layout (message, link/canvas previews, reply layout) is
         // covered uniformly and stays in sync with the toolbar.
-        'data-[hovered]:bg-muted/50',
+        'data-[hovered]:bg-muted/50 data-[keyboard-selected]:bg-muted/50',
       )}
       style={
         isMobile

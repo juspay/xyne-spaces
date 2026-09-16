@@ -294,6 +294,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -323,6 +324,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
+  const messageListFocusRef = useRef<HTMLButtonElement>(null);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<
     Map<Element, { timestamp: number; conversationId: string; rect: DOMRect }>
@@ -1218,6 +1220,80 @@ const ChatListV4: React.FC<ChatListProps> = ({
     when: isEventFromChannelInput,
   });
 
+  const isMessageListNavigationEvent = useCallback((event: KeyboardEvent): boolean => {
+    const focusTarget = messageListFocusRef.current;
+    if (!focusTarget || event.target !== focusTarget) return false;
+    return document.activeElement === focusTarget;
+  }, []);
+
+  const findSelectedMessageIndex = useCallback((): number => {
+    if (!keyboardSelectedMessageId) return -1;
+    return combinedMessages.findIndex(item => {
+      const message = getInitialMessageFromConversation(item.data);
+      return message?.messageId === keyboardSelectedMessageId;
+    });
+  }, [combinedMessages, keyboardSelectedMessageId]);
+
+  const selectMessageAtIndex = useCallback(
+    (index: number, direction: -1 | 1): void => {
+      for (let i = index; i >= 0 && i < combinedMessages.length; i += direction) {
+        const item = combinedMessages[i];
+        if (!item) continue;
+        const message = getInitialMessageFromConversation(item.data);
+        if (!message) continue;
+        setKeyboardSelectedMessageId(message.messageId);
+        virtualizer.scrollToIndex(i, {
+          align: i === combinedMessages.length - 1 ? 'end' : 'center',
+        });
+        return;
+      }
+    },
+    [combinedMessages, virtualizer],
+  );
+
+  const selectPreviousMessage = useCallback((): void => {
+    const selectedIndex = findSelectedMessageIndex();
+    selectMessageAtIndex(
+      selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex - 1,
+      -1,
+    );
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  const selectNextMessage = useCallback((): void => {
+    const selectedIndex = findSelectedMessageIndex();
+    if (selectedIndex === -1) return;
+    selectMessageAtIndex(selectedIndex + 1, 1);
+  }, [findSelectedMessageIndex, selectMessageAtIndex]);
+
+  useShortcutById('message.selectPrevious', selectPreviousMessage, {
+    enabled: combinedMessages.length > 0,
+    when: isMessageListNavigationEvent,
+  });
+  useShortcutById('message.selectNext', selectNextMessage, {
+    enabled: combinedMessages.length > 0,
+    when: event => keyboardSelectedMessageId !== null && isMessageListNavigationEvent(event),
+  });
+
+  useEffect(() => {
+    setKeyboardSelectedMessageId(null);
+  }, [channelId]);
+
+  const handleMessageListClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) return;
+    if (
+      event.target.closest(
+        'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+      )
+    ) {
+      return;
+    }
+    messageListFocusRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const handleMessageListBlur = useCallback((): void => {
+    setKeyboardSelectedMessageId(null);
+  }, []);
+
   // ── onScroll (replaces Virtuoso rangeChanged + atTopStateChange + atBottomStateChange) ──
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
@@ -1444,10 +1520,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       )}
 
+      <button
+        ref={messageListFocusRef}
+        type='button'
+        className='sr-only'
+        aria-label='Navigate messages with the up and down arrow keys'
+        data-track-category='CHAT_LIST'
+        data-track-name='FOCUS_MESSAGE_NAVIGATION'
+        onClick={selectPreviousMessage}
+        onBlur={handleMessageListBlur}
+      />
+
       {/* Scroll container — replaces <Virtuoso> */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onClickCapture={handleMessageListClick}
         style={{ height: '100%', overflow: 'auto', zIndex: 0, overflowAnchor: 'none' }}
         className='no-scrollbar'
         data-virtuoso-scroller='true'
@@ -1546,7 +1634,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       </div>
 
-      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+      <MessageHoverToolbar
+        containerRef={hoverToolbarContainerRef}
+        keyboardSelectedMessageId={keyboardSelectedMessageId}
+      />
 
       {/* New messages pill */}
       {newConversationBoundary !== null && newConversationBoundary.seenConvId === null && (
