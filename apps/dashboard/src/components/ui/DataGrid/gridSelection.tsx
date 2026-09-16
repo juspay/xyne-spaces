@@ -98,7 +98,7 @@ export function createGridSelectionRenderers<T>(
     if (!isSelectable(params.node)) return null;
 
     return (
-      <button
+      <div
         className='flex items-center justify-center h-full w-full'
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -128,7 +128,7 @@ export function createGridSelectionRenderers<T>(
         ) : (
           <span className='text-sm text-muted-foreground'>{rowIndex}</span>
         )}
-      </button>
+      </div>
     );
   };
 

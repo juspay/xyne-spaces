@@ -5,6 +5,8 @@ import {
   AllCommunityModule,
   ModuleRegistry,
   themeQuartz,
+  type GetRowIdParams,
+  type IRowNode,
   type IsFullWidthRowParams,
 } from 'ag-grid-community';
 import type { ReleaseStageOption } from '../ReleaseStagePicker';
@@ -52,6 +54,18 @@ interface ReleaseDevTicketsTableProps {
   releaseVersion: string | null;
   onFiltersActiveChange?: (active: boolean) => void;
 }
+
+// Stable identities: ag-grid re-processes option objects/callbacks whose identity changes.
+const ROW_SELECTION = {
+  mode: 'multiRow',
+  checkboxes: false,
+  enableClickSelection: false,
+  headerCheckbox: false,
+} as const;
+const getRowId = (params: GetRowIdParams<GridRow>): string => params.data.id;
+const isRowSelectable = (node: IRowNode<GridRow>): boolean => node.data?.kind === 'ticket';
+const isFullWidthRow = (params: IsFullWidthRowParams<GridRow>): boolean =>
+  params.rowNode.data?.kind === 'group';
 
 export const ReleaseDevTicketsTable = ({
   devTicketRows,
@@ -139,23 +153,16 @@ export const ReleaseDevTicketsTable = ({
 
       <div className='overflow-hidden rounded-lg border border-border'>
         <AgGridReact<GridRow>
-          getRowId={params => params.data.id}
+          getRowId={getRowId}
           rowData={gridRows}
           columnDefs={columnDefs}
           theme={theme}
           domLayout='autoHeight'
           rowHeight={44}
           headerHeight={44}
-          rowSelection={{
-            mode: 'multiRow',
-            checkboxes: false,
-            enableClickSelection: false,
-            headerCheckbox: false,
-          }}
-          isRowSelectable={node => node.data?.kind === 'ticket'}
-          isFullWidthRow={(params: IsFullWidthRowParams<GridRow>) =>
-            params.rowNode.data?.kind === 'group'
-          }
+          rowSelection={ROW_SELECTION}
+          isRowSelectable={isRowSelectable}
+          isFullWidthRow={isFullWidthRow}
           fullWidthCellRenderer={RepoGroupHeaderCell}
           onSelectionChanged={onSelectionChanged}
           onGridReady={onGridReady}

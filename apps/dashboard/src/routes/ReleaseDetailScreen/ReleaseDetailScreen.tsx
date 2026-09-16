@@ -27,6 +27,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
 import { useUsers } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { useCanManageRelease } from '../../hooks/usePermissions';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
@@ -307,11 +308,17 @@ const ReleaseDetailScreen = (): ReactElement => {
   const releaseBoard = releaseBoards?.[0];
 
   const persistedColumnKeys = useMemo(() => {
-    const md = releaseBoard?.metadata;
-    if (!md || typeof md !== 'object' || Array.isArray(md)) return [];
-    const value = (md as Record<string, unknown>)['devTicketColumns'];
-    return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : [];
-  }, [releaseBoard?.metadata]);
+    const read = (md: unknown): string[] | null => {
+      if (!md || typeof md !== 'object' || Array.isArray(md)) return null;
+      const value = (md as Record<string, unknown>)['devTicketColumns'];
+      return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : null;
+    };
+    // Board-level picks win; fall back to the pre-board-level location on the release ticket.
+    return read(releaseBoard?.metadata) ?? read(releaseTicket?.metadata) ?? [];
+  }, [releaseBoard?.metadata, releaseTicket?.metadata]);
+  // Column picks are saved on the release board, which board.update gates behind release-manage
+  // access — hide the control for everyone else instead of letting the save fail.
+  const canManageRelease = useCanManageRelease();
 
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>([]);
   useEffect(() => {
@@ -672,16 +679,9 @@ const ReleaseDetailScreen = (): ReactElement => {
 
     const boardId = releaseTicket?.boardId;
     if (!boardId) return;
-    const md = releaseBoard?.metadata;
-    const base =
-      md && typeof md === 'object' && !Array.isArray(md) ? (md as Record<string, unknown>) : {};
     void (async (): Promise<void> => {
       const res = await zero.mutate(
-        mutators.board.update({
-          boardId,
-          metadata: { ...base, devTicketColumns: nextKeys },
-          timestamp: Date.now(),
-        }),
+        mutators.board.update({ boardId, devTicketColumns: nextKeys, timestamp: Date.now() }),
       ).server;
       if (res.type === 'error') {
         toast.error('Failed to save columns');
@@ -809,7 +809,7 @@ const ReleaseDetailScreen = (): ReactElement => {
               {/* Dev Tickets tab */}
               <Tabs.Content value='testing' className='mt-6 outline-none'>
                 <div className='mb-3 flex flex-wrap justify-end gap-2'>
-                  {availableColumns.length > 0 && (
+                  {canManageRelease && availableColumns.length > 0 && (
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger asChild>
                         <button

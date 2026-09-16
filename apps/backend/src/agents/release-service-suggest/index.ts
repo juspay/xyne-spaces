@@ -82,7 +82,29 @@ ${paths.join('\n')}
 </paths>`;
 }
 
+const MAX_REGEX_LENGTH = 200;
+
+// A quantified group whose body is itself quantified — (a+)+, (.*)*, ((x|y){2,})+ — is the
+// classic catastrophic-backtracking shape; accepted patterns run against every changed file path.
+function hasNestedQuantifier(source: string): boolean {
+  const stack: number[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\') { i++; continue; }
+    if (c === '(') stack.push(i);
+    else if (c === ')') {
+      const open = stack.pop();
+      const next = source[i + 1];
+      if (open !== undefined && (next === '+' || next === '*' || next === '{') && /[+*{]/.test(source.slice(open + 1, i))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function isValidRegex(source: string): boolean {
+  if (source.length > MAX_REGEX_LENGTH || hasNestedQuantifier(source)) return false;
   try {
     new RegExp(source);
     return true;

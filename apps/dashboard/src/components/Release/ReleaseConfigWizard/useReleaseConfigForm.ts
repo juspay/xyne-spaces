@@ -177,22 +177,27 @@ export function useReleaseConfigForm({
     ) => {
       if (services.length === 0) return;
       setUserTouched(true);
-      const toRow = (service: (typeof services)[number]): ApplicationConfig => ({
+      const norm = (name: string): string => name.trim().toLowerCase();
+      // Keep the existing row's id/boardId for a same-named service: on save, an app missing
+      // from the payload is deleted (board, stages, approvers, mappings), so reseeding ids for
+      // a service that already exists would tear its board down and recreate it.
+      const toRow = (
+        service: (typeof services)[number],
+        existing?: ApplicationConfig,
+      ): ApplicationConfig => ({
         ...EMPTY_APP,
-        id: uuidv4(),
-        boardId: uuidv4(),
+        id: existing?.id ?? uuidv4(),
+        boardId: existing?.boardId ?? uuidv4(),
         name: service.name,
         regex: service.regex,
         envPaths: service.envPaths.join(', '),
         migrationPaths: service.migrationPaths.join(', '),
       });
       setApplications(prev => {
-        if (mode === 'replace') return services.map(toRow);
         const kept = prev.filter(app => app.name.trim());
-        const keptNames = new Set(kept.map(app => app.name.trim().toLowerCase()));
-        const additions = services
-          .filter(service => !keptNames.has(service.name.trim().toLowerCase()))
-          .map(toRow);
+        const byName = new Map(kept.map(app => [norm(app.name), app]));
+        if (mode === 'replace') return services.map(s => toRow(s, byName.get(norm(s.name))));
+        const additions = services.filter(s => !byName.has(norm(s.name))).map(s => toRow(s));
         return [...kept, ...additions];
       });
     },

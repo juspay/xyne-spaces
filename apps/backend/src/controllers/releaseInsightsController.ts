@@ -71,6 +71,7 @@ export class ReleaseInsightsController {
         insightsGenerationStartedAt: new Date().toISOString(),
       });
 
+      let completed = false;
       try {
         const report = await this.releaseReportService.gatherReleaseReport(ticketId);
         const notes = await this.releaseNotesService.gatherReleaseData(ticketId).catch(error => {
@@ -150,9 +151,11 @@ export class ReleaseInsightsController {
           isGeneratingReleaseInsights: false,
           insightsGenerationStartedAt: null,
         });
+        completed = true;
         res.json({ success: true });
       } finally {
-        await this.ticketRepository
+        // The success write above already cleared the flag; this is the failure path.
+        if (!completed) await this.ticketRepository
           .updateTicketMetadata(ticketId, {
             isGeneratingReleaseInsights: false,
             insightsGenerationStartedAt: null,

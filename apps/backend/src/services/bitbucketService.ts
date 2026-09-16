@@ -47,6 +47,12 @@ export class BitbucketService {
     if (!projectKey || !repositorySlug) {
       throw new Error('projectKey and repositorySlug are required to list files');
     }
+    // Bitbucket keys/slugs are [A-Za-z0-9_.-]; anything else (e.g. `..`, `%2F`) is a URL
+    // parse artefact, not a repo — reject rather than interpolate into the request path.
+    const SAFE_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+    if (!SAFE_SEGMENT.test(projectKey) || !SAFE_SEGMENT.test(repositorySlug)) {
+      throw new Error('Invalid Bitbucket project key or repository slug');
+    }
     const paths: string[] = [];
     const PAGE = 1000;
     const MAX = 10000;
@@ -58,7 +64,7 @@ export class BitbucketService {
         values?: string[];
         isLastPage?: boolean;
         nextPageStart?: number | null;
-      }>(`/projects/${projectKey}/repos/${repositorySlug}/files?${params.toString()}`);
+      }>(`/projects/${encodeURIComponent(projectKey)}/repos/${encodeURIComponent(repositorySlug)}/files?${params.toString()}`);
       const before = paths.length;
       for (const p of page.values ?? []) paths.push(p);
       if (page.isLastPage || page.nextPageStart == null || paths.length >= MAX || paths.length === before) {
