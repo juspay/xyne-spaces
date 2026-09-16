@@ -1,5 +1,5 @@
 import { Hash, Info, RefreshCw } from 'lucide-react';
-import { Hashtag as HashV2 } from '@xyne/icons';
+import { Hashtag as HashV2, CalendarEvent } from '@xyne/icons';
 import * as Popover from '@radix-ui/react-popover';
 import { useRef, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import Avatar from '../../components/ui/Avatar/Avatar';
@@ -17,6 +17,7 @@ import {
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import type { CalendarProvider } from '../../services/clients/calendarApi';
 import type { CalendarReauthCountdown, CalendarSyncMessage } from '../../utils/calendarSync';
+import { xyneCalendarActor } from '../../machines/xyneCalendarMachine';
 
 interface CallHistorySearchPanelBaseProps {
   callMentionSearchType: ChipType | null;
@@ -121,17 +122,34 @@ export function CallHistorySearchPanel({
             <h1 className='m-0 text-3xl font-semibold leading-none tracking-tight text-foreground'>
               Calls
             </h1>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={onOpenAskAI}
-              className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
-              data-track-category='CALLS'
-              data-track-name='open_ask_ai'
-            >
-              <XyneAIStar size={15} />
-              Ask AI
-            </Button>
+            <div className='flex items-center gap-2'>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={onOpenAskAI}
+                className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
+                data-track-category='CALLS'
+                data-track-name='open_ask_ai'
+              >
+                <XyneAIStar size={15} />
+                Ask AI
+              </Button>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => {
+                  xyneCalendarActor.send({
+                    type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
+                  });
+                }}
+                className='h-9 w-9 rounded-xl border-border p-0'
+                aria-label='Toggle calendar sidebar'
+                data-track-category='CALLS'
+                data-track-name='toggle_calendar_sidebar'
+              >
+                <CalendarEvent size={16} />
+              </Button>
+            </div>
           </>
         ) : (
           <>

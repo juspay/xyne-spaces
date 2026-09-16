@@ -6,8 +6,10 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { CallStatus, InvitationResponse, type User } from '@xyne/shared';
 import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
+import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { cn } from '../../../utils/classNames';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { dateToIso } from '../../../utils/dateUtils';
 import {
   buildParticipantSummary,
   getParticipantDisplayData,
@@ -108,6 +110,14 @@ export function UpcomingCallRowV2({
 
   const [isCopied, setIsCopied] = useState(false);
 
+  const handleOpenCallDetail = (): void => {
+    xyneCalendarActor.send({
+      type: 'OPEN',
+      ...(startedAtOrScheduled ? { date: dateToIso(new Date(startedAtOrScheduled)) } : {}),
+    });
+    xyneCalendarActor.send({ type: 'SELECT_CALL', callId: call.id });
+  };
+
   const handleCopyLink = (e: React.MouseEvent): void => {
     e.stopPropagation();
     if (!call.roomLink) {
@@ -123,7 +133,20 @@ export function UpcomingCallRowV2({
   };
 
   return (
-    <div className='flex items-center gap-4 bg-background py-3 pl-5 pr-3.5'>
+    <div
+      role='button'
+      tabIndex={0}
+      onClick={handleOpenCallDetail}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleOpenCallDetail();
+        }
+      }}
+      data-track-category='CALLS'
+      data-track-name='OPEN_UPCOMING_CALL_DETAIL'
+      className='flex cursor-pointer items-center gap-4 bg-background py-3 pl-5 pr-3.5 hover:bg-accent'
+    >
       <div className='w-16 shrink-0 whitespace-nowrap font-mono text-xs font-medium text-muted-foreground/80 tabular-nums'>
         {startTime}
       </div>
