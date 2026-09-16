@@ -1,4 +1,14 @@
-import { SDLC_BASELINE_KINDS, sdlcAgentContextSchema } from "@xyne/shared/sdlc";
+import { sdlcAgentContextSchema } from "@xyne/shared/sdlc";
+
+export const SDLC_BASELINE_KINDS = [
+  "CORE_CODE_MAP",
+  "FRONTEND_DESIGN_SYSTEM",
+  "BACKEND_DESIGN_SYSTEM",
+  "CODE_LINT_STANDARDS",
+  "COMMIT_STANDARDS",
+  "RUN_GUIDE",
+  "TEST_GUIDE",
+] as const;
 
 const BASELINE_KINDS = new Set<string>(SDLC_BASELINE_KINDS);
 

@@ -28,7 +28,7 @@ import {
   SDLC_TOOL_NAMES,
   type Citation,
 } from "xyne-claw-shared";
-import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
+import { SDLC_BASELINE_KINDS } from "../sdlc-baseline-run-context.js";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 
