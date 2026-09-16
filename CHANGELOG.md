@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.6](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.5...v1.323.0-release-20260916.6) (2026-09-16)
+
+
+### Features
+
+* desk views ([#1912](https://github.com/juspay/xyne-spaces/issues/1912)) ([31ae38c](https://github.com/juspay/xyne-spaces/commit/31ae38c8081e34855041671ae70583857f570ec6))
+
 ## [1.323.0-release-20260916.5](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.4...v1.323.0-release-20260916.5) (2026-09-16)
 
 
