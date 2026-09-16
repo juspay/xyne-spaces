@@ -33,6 +33,7 @@ import {
   buildAttachmentViewerPayload,
 } from './utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
+import { isHeicAttachment } from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { queryClient } from '../../../services/clients/queryClient';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
@@ -137,6 +138,7 @@ const Preview: React.FC<{
   const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
+  const isHeic = isHeicAttachment(mimeType, fileName);
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
 
@@ -183,7 +185,8 @@ const Preview: React.FC<{
 
     // For images: Check React Query cache first (local-first behavior)
     // This prevents "No Preview" flash while waiting for server sync
-    if (isImage) {
+    // (HEIC skipped: the cached blob would be the unrenderable original)
+    if (isImage && !isHeic) {
       const cachedBlob = queryClient.getQueryData<Blob>(['preview-blob', attachmentId]);
       if (cachedBlob) {
         const localBlobUrl = URL.createObjectURL(cachedBlob);
@@ -199,10 +202,11 @@ const Preview: React.FC<{
       setIsLoading(true);
       setError(false);
       try {
-        // For videos/documents with thumbnails, use the thumbnail endpoint
-        // For images, use download endpoint (pass ID, createPreviewUrl will resolve it)
+        // For videos/documents with thumbnails and for HEIC, use the thumbnail
+        // endpoint (HEIC thumbnails are generated server-side on demand);
+        // for images, use download endpoint (pass ID, createPreviewUrl will resolve it)
         const source =
-          (isVideo || isDocumentWithThumbnail) && thumbnailUrl
+          ((isVideo || isDocumentWithThumbnail) && thumbnailUrl) || isHeic
             ? `/attachments/${attachmentId}/thumbnail`
             : attachmentId;
 
@@ -233,6 +237,7 @@ const Preview: React.FC<{
     isImage,
     isVideo,
     isDocumentWithThumbnail,
+    isHeic,
     thumbnailUrl,
     compact,
     calculatedWidth,

@@ -52,6 +52,11 @@ import { AttachmentPreview } from '../files';
 import { useOverlayZIndex } from '../../../contexts/OverlayZIndexContext';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import {
+  convertHeicFileToPreviewBlob,
+  isHeicAttachment,
+  toWebpFilename,
+} from '../../../services/heicAttachmentService';
 import type { MentionResult } from '@xyne/shared';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
@@ -305,6 +310,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
+    const [heicPreviewId, setHeicPreviewId] = useState<string | null>(null);
+    const [heicPreviewName, setHeicPreviewName] = useState('image.heic');
 
     const alsoSendToChannelLabel = isDMThread ? 'Send as direct message' : 'Send to channel';
 
@@ -1531,7 +1538,41 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
-    const handlePreview = (file: File | UploadedFile): void => {
+    const handlePreview = (file: File | UploadedFile, attachmentId?: string): void => {
+      const isHeic = isHeicAttachment(
+        file instanceof File ? file.type : file.mimeType,
+        file instanceof File ? file.name : file.originalName,
+      );
+      if (isHeic) {
+        // Local HEIC File: convert client-side (cached from the chip's preview)
+        // and open the local-file viewer — works before the upload finishes.
+        if (file instanceof File) {
+          void convertHeicFileToPreviewBlob(file)
+            .then(blob => {
+              setSelectedFile(new File([blob], toWebpFilename(file.name), { type: 'image/webp' }));
+              setIsViewerOpen(true);
+            })
+            .catch(() => {
+              if (attachmentId) {
+                setHeicPreviewId(attachmentId);
+                setHeicPreviewName(file.name);
+                setIsViewerOpen(true);
+              } else {
+                setSelectedFile(file);
+                setIsViewerOpen(true);
+              }
+            });
+          return;
+        }
+        // UploadedFile HEIC (restored draft): server-backed viewer with its
+        // WebP rendition
+        if (attachmentId) {
+          setHeicPreviewId(attachmentId);
+          setHeicPreviewName(file.originalName);
+          setIsViewerOpen(true);
+          return;
+        }
+      }
       setSelectedFile(file);
       setIsViewerOpen(true);
     };
@@ -1539,6 +1580,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleCloseViewer = (): void => {
       setIsViewerOpen(false);
       setSelectedFile(null);
+      setHeicPreviewId(null);
     };
 
     // Convert channelItems to MentionResult format for the MentionSelector
@@ -1779,7 +1821,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           key={`file-${attachmentId}-${index}`}
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => handlePreview(file)}
+                          onPreview={() => handlePreview(file, attachmentId)}
                           isUploading={false}
                         />
                       ))}
@@ -1855,7 +1897,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     key={attachmentId}
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => handlePreview(file)}
+                    onPreview={() => handlePreview(file, attachmentId)}
                     isUploading={false}
                   />
                 ))}
@@ -1870,7 +1912,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             )}
 
             {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
-            {selectedFile && (
+            {isViewerOpen && heicPreviewId && (
+              <FilePreviewModal
+                isOpen={isViewerOpen}
+                onClose={handleCloseViewer}
+                fileName={heicPreviewName}
+                fileUrl={`/attachments/${heicPreviewId}/download`}
+                mimeType='image/heic'
+                fileSize={0}
+                attachmentId={heicPreviewId}
+              />
+            )}
+            {selectedFile && !heicPreviewId && (
               <>
                 {selectedFile instanceof File ? (
                   <MediaViewer
