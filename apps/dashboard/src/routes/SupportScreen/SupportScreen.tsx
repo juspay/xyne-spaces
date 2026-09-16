@@ -25,7 +25,6 @@ import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import {
-  GridDashboard01,
   LayoutGridTwoVertical as Columns3,
   TicketToken as TicketIcon,
   Hashtag,
@@ -73,7 +72,6 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
-  FileText,
 } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -196,10 +194,11 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
-import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
-import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
+import {
+  DeskInsightsPanel,
+  type DeskInsightsSection,
+} from '../../components/xyne-desk/DeskInsights';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
-import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
 import { valuesToFilters } from '../../utils/savedViewSerialization';
@@ -271,6 +270,22 @@ const ChannelInfoModal = ({
 };
 
 const ALL_CHANNELS_ID = 'all';
+
+/**
+ * Resolves which Insights section the URL is asking for, or null when the sheet
+ * is closed. `?insights=<section>` is the current contract; `?metrics=open`,
+ * `?topics=open` and `?report=open` are the pre-Insights params, kept working so
+ * existing links land on the matching section.
+ */
+const readInsightsSection = (params: URLSearchParams): DeskInsightsSection | null => {
+  const insights = params.get('insights');
+  if (insights === 'metrics' || insights === 'topics' || insights === 'report') return insights;
+  if (insights === 'open') return 'metrics';
+  if (params.get('metrics') === 'open') return 'metrics';
+  if (params.get('topics') === 'open') return 'topics';
+  if (params.get('report') === 'open') return 'report';
+  return null;
+};
 
 const composerOpenByConv = new Map<string, boolean>();
 
@@ -618,8 +633,10 @@ const SupportScreen = (): ReactElement => {
       // ?metrics=open / ?settings=open should not carry over to a different channel.
       const params = new URLSearchParams(searchParams);
       clearTicketFilterParams(params);
+      params.delete('insights');
       params.delete('metrics');
       params.delete('topics');
+      params.delete('report');
       params.delete('settings');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
@@ -1319,14 +1336,17 @@ const SupportScreen = (): ReactElement => {
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
-  const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  // One 'Insights' sheet hosts metrics, topics and the desk report. `?insights=<section>`
+  // is the current contract; the legacy single-panel params still resolve to a section so
+  // old links and bookmarks keep working.
+  const [insightsSection, setInsightsSection] = useState<DeskInsightsSection | null>(() =>
+    readInsightsSection(searchParams),
+  );
   // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     (isGuest || !!channelPreference?.metricsEnabled);
-  const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
-  const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
@@ -1598,13 +1618,9 @@ const SupportScreen = (): ReactElement => {
   }, [searchParams, navigate, selectedChannelId, supportBase]);
 
   useEffect(() => {
-    setIsMetricsOpen(searchParams.get('metrics') === 'open');
-    setIsTopicsOpen(searchParams.get('topics') === 'open');
+    setInsightsSection(readInsightsSection(searchParams));
   }, [searchParams]);
 
-  useEffect(() => {
-    setIsReportOpen(searchParams.get('report') === 'open');
-  }, [searchParams]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -1682,6 +1698,41 @@ const SupportScreen = (): ReactElement => {
     isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     !!channelPreference?.metricsEnabled;
+  const canViewDeskMetrics =
+    isSelectedChannelJoined &&
+    !!selectedChannelId &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    metricsEnabled &&
+    (canManageDeskInsights || isGuest);
+  const canViewDeskReport =
+    isSelectedChannelJoined &&
+    !!selectedChannelId &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    !!channelPreference?.deskReportEnabled &&
+    canManageDeskInsights;
+  // Sidebar order inside the Insights sheet: metrics, then topics, then the report.
+  const availableInsightsSections = useMemo<DeskInsightsSection[]>(
+    () => [
+      ...(canViewDeskMetrics ? (['metrics'] as const) : []),
+      ...(canExploreTopics ? (['topics'] as const) : []),
+      ...(canViewDeskReport ? (['report'] as const) : []),
+    ],
+    [canViewDeskMetrics, canExploreTopics, canViewDeskReport],
+  );
+  const isInsightsOpen = insightsSection !== null && availableInsightsSections.length > 0;
+  const openInsights = useCallback(
+    (section?: DeskInsightsSection): void => {
+      if (!selectedChannelId) return;
+      const target = section ?? availableInsightsSections[0];
+      if (!target) return;
+      void navigate(`${supportBase}/${selectedChannelId}?insights=${target}`);
+    },
+    [availableInsightsSections, navigate, selectedChannelId, supportBase],
+  );
+  const closeInsights = useCallback((): void => {
+    const base = selectedChannelId ? `${supportBase}/${selectedChannelId}` : supportBase;
+    void navigate(base, { replace: true });
+  }, [navigate, selectedChannelId, supportBase]);
 
   // Only desks the caller manages belong in the comparison picker: the
   // aggregate route skips anything else as 'forbidden', which read as silently
@@ -2956,85 +3007,25 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined &&
-                        metricsEnabled &&
-                        (canManageDeskInsights || isGuest) && (
-                          <Tooltip content='Desk metrics' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isMetricsOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?metrics=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isMetricsOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskMetrics'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <BarChart3 size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.deskReportEnabled &&
-                        canManageDeskInsights && (
-                          <Tooltip content='Desk report' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isReportOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?report=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isReportOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskReport'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <FileText size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      {canExploreTopics && (
-                        <Tooltip content='Topics explorer' side='bottom'>
+                      {availableInsightsSections.length > 0 && (
+                        <Tooltip content='Insights' side='bottom'>
                           <button
                             type='button'
                             onClick={() => {
-                              const base = `${supportBase}/${selectedChannelId}`;
-                              if (isTopicsOpen) void navigate(base, { replace: true });
-                              else void navigate(`${base}?topics=open`);
+                              if (isInsightsOpen) closeInsights();
+                              else openInsights();
                             }}
                             className={cn(
                               'p-1.5 rounded transition-colors',
-                              isTopicsOpen
+                              isInsightsOpen
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                             )}
                             data-track-category='Support'
-                            data-track-name='OpenTopicsExplorer'
+                            data-track-name='OpenDeskInsights'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
-                            <GridDashboard01 size={16} />
+                            <BarChart3 size={16} />
                           </button>
                         </Tooltip>
                       )}
@@ -3766,57 +3757,26 @@ const SupportScreen = (): ReactElement => {
                   userID={userID}
                 />
               )}
-              {isMetricsOpen &&
-                selectedChannelId &&
-                selectedChannelId !== ALL_CHANNELS_ID &&
-                (canManageDeskInsights || isGuest) && (
-                  <DeskMetricsDashboard
-                    open
-                    onClose={() => {
-                      const base = selectedChannelId
-                        ? `${supportBase}/${selectedChannelId}`
-                        : supportBase;
-                      void navigate(base, { replace: true });
-                    }}
-                    channelId={selectedChannelId}
-                    channelName={selectedChannelName ?? undefined}
-                    availableDesks={metricsSelectableDesks}
-                    customFieldDefinitions={deskDynamicFields}
-                    availableStages={availableStages}
-                    onTicketClick={ticket => {
-                      void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                        state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
-                      });
-                    }}
-                  />
-                )}
-              {isReportOpen &&
-                selectedChannelId &&
-                selectedChannelId !== ALL_CHANNELS_ID &&
-                canManageDeskInsights && (
-                  <DeskReportPanel
-                    open
-                    onClose={() => {
-                      const base = selectedChannelId
-                        ? `${supportBase}/${selectedChannelId}`
-                        : supportBase;
-                      void navigate(base, { replace: true });
-                    }}
-                    channelId={selectedChannelId}
-                    channelName={selectedChannelName ?? undefined}
-                  />
-                )}
-              {isTopicsOpen && selectedChannelId && canExploreTopics && (
-                <TopicsExplorer
+              {isInsightsOpen && selectedChannelId && insightsSection && (
+                <DeskInsightsPanel
                   open
-                  onClose={() =>
-                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
-                  }
+                  onClose={closeInsights}
+                  availableSections={availableInsightsSections}
+                  activeSection={insightsSection}
+                  onSectionChange={openInsights}
                   channelId={selectedChannelId}
                   channelName={selectedChannelName ?? undefined}
                   supportBase={supportBase}
-                  availableAiCategories={availableAiCategories}
+                  availableDesks={metricsSelectableDesks}
+                  customFieldDefinitions={deskDynamicFields}
                   availableStages={availableStages}
+                  onTicketClick={ticket => {
+                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                    });
+                  }}
+                  availableAiCategories={availableAiCategories}
+                  topicsAvailableStages={availableStages}
                 />
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>

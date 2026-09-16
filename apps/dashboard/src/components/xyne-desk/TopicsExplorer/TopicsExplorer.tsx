@@ -12,7 +12,7 @@ import { DeskMetricsDateRangePicker } from '../DeskMetrics/DeskMetricsDateRangeP
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/icons';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskPanelShell, deskPanelSurfaceClass } from '../DeskInsights/DeskPanelShell';
 import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
 // Not useCachedQuery: this rollup is throwaway, not warm-start state.
@@ -150,6 +150,8 @@ export interface TopicsExplorerProps {
    */
   availableAiCategories: string[];
   availableStages: { name: string; status?: TicketStatusV2 }[];
+  /** Rendered inside the combined Insights sheet — skip the standalone Dialog chrome. */
+  embedded?: boolean;
 }
 
 export const TopicsExplorer = ({
@@ -160,6 +162,7 @@ export const TopicsExplorer = ({
   supportBase,
   availableAiCategories,
   availableStages,
+  embedded,
 }: TopicsExplorerProps): ReactElement => {
   const navigate = useNavigate();
   // Drilling into a group unmounts the panel, so the view is saved on every
@@ -586,31 +589,22 @@ export const TopicsExplorer = ({
     'rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground';
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={next => {
-        if (!next) onClose();
-      }}
-      title='Topics Explorer'
-      className={cn(
-        'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
-      )}
-    >
+    <DeskPanelShell embedded={embedded} open={open} onClose={onClose} title='Topics Explorer'>
       <div className='relative h-full w-full'>
-        <button
-          type='button'
-          onClick={onClose}
-          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
-          aria-label='Close topics explorer'
-          data-track-category='TOPICS_EXPLORER'
-          data-track-name='CloseButton'
-        >
-          <MultipleCrossCancelDefault size={16} />
-        </button>
+        {!embedded && (
+          <button
+            type='button'
+            onClick={onClose}
+            className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+            aria-label='Close topics explorer'
+            data-track-category='TOPICS_EXPLORER'
+            data-track-name='CloseButton'
+          >
+            <MultipleCrossCancelDefault size={16} />
+          </button>
+        )}
 
-        <div className='isolate flex h-full w-full flex-col overflow-hidden rounded-l-[16px] border border-desk-border bg-popover shadow-2xl dark:border-border'>
+        <div className={deskPanelSurfaceClass(embedded)}>
           {/* pr-12 clears the absolutely-positioned close button — same
               convention as DeskMetricsDashboard's header. */}
           <div className='shrink-0 space-y-3 border-b border-desk-border px-6 pb-3 pr-12 pt-4 dark:border-border'>
@@ -909,6 +903,6 @@ export const TopicsExplorer = ({
           </div>
         </div>
       </div>
-    </Dialog>
+    </DeskPanelShell>
   );
 };
