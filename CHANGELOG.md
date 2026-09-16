@@ -1,3 +1,10 @@
+## [1.328.0](https://github.com/juspay/xyne-spaces/compare/v1.327.0...v1.328.0) (2026-09-16)
+
+
+### Features
+
+* raw sql query guard in ci ([#1903](https://github.com/juspay/xyne-spaces/issues/1903)) ([4bff953](https://github.com/juspay/xyne-spaces/commit/4bff9530448c52318f4146d2a4518b021187e1ad))
+
 ## [1.327.0](https://github.com/juspay/xyne-spaces/compare/v1.326.0...v1.327.0) (2026-09-16)
 
 
