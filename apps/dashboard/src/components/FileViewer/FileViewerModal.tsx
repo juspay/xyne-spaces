@@ -159,8 +159,8 @@ export const SlideContent: React.FC<{
 
     if (isVideo) return;
 
-    // HEIC can't render from its original bytes; fetch the server's lossless
-    // WebP rendition instead (the plain fileUrl still serves the original).
+    // HEIC can't render from its original bytes; fetch the server's lossy
+    // (q85) WebP rendition instead (the plain fileUrl still serves the original).
     if (isHeicAttachment(file.mimeType, file.fileName)) {
       fetchFile(
         heicWebpDownloadUrl(file.attachmentId || file.fileUrl),

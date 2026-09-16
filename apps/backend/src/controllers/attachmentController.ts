@@ -383,7 +383,7 @@ export class AttachmentController {
       const service = getAttachmentStorage(attachment);
 
       // Opt-in browser-renderable rendition: the original HEIC stays the
-      // canonical bytes; ?format=webp serves a lossless WebP derivative
+      // canonical bytes; ?format=webp serves a lossy (q85) WebP derivative
       // (generated + cached on first request).
       if (req.query.format === 'webp' && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
         try {
