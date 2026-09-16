@@ -78,8 +78,8 @@ services:
     volumes:
       - ./docker/livekit.yaml:/etc/livekit.yaml
     environment:
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
       interval: 5s
@@ -207,8 +207,8 @@ services:
       # Override LIVEKIT_URL to use container hostname instead of localhost
       # The python agent will use AGENT_LIVEKIT_URL from .env.local (ws://livekit:7880)
       - LIVEKIT_URL=ws://livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - BACKEND_URL=http://host.containers.internal:3001
       - REDIS_URL=redis://redis:6379
       - REDIS_HOST=redis
