@@ -1,3 +1,68 @@
+## [1.322.0](https://github.com/juspay/xyne-spaces/compare/v1.321.0...v1.322.0) (2026-09-15)
+
+
+### Features
+
+* add canvas title icon picker ([#1844](https://github.com/juspay/xyne-spaces/issues/1844)) ([cae0164](https://github.com/juspay/xyne-spaces/commit/cae0164a892ec9e8a7cc5689178d1b9de816c243))
+
+## [1.321.0](https://github.com/juspay/xyne-spaces/compare/v1.320.0...v1.321.0) (2026-09-15)
+
+
+### Features
+
+* desk metrics breakdown dropdown and guest visibility settings ([#1796](https://github.com/juspay/xyne-spaces/issues/1796)) ([7875358](https://github.com/juspay/xyne-spaces/commit/7875358355f8d93e78e3ec3c5bd7a8a94ac904cd))
+
+## [1.320.0](https://github.com/juspay/xyne-spaces/compare/v1.319.1...v1.320.0) (2026-09-15)
+
+
+### Features
+
+* added admin or owner gating for desk metrics ([#1811](https://github.com/juspay/xyne-spaces/issues/1811)) ([f1b330e](https://github.com/juspay/xyne-spaces/commit/f1b330e3c8f0753f5a19ac60e05d04ac5a0a1ffe))
+
+## [1.319.1](https://github.com/juspay/xyne-spaces/compare/v1.319.0...v1.319.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* scope SDLC reads to the hub ([#1838](https://github.com/juspay/xyne-spaces/issues/1838)) ([c02830b](https://github.com/juspay/xyne-spaces/commit/c02830bfebebbcceed340eb116e2367b96177d29))
+
+## [1.319.0](https://github.com/juspay/xyne-spaces/compare/v1.318.0...v1.319.0) (2026-09-15)
+
+
+### Features
+
+* github connector for workflows ([#1842](https://github.com/juspay/xyne-spaces/issues/1842)) ([c2f2fbb](https://github.com/juspay/xyne-spaces/commit/c2f2fbb703eda94d2d3d19ad4fe7184a7f2a3e81))
+
+## [1.318.0](https://github.com/juspay/xyne-spaces/compare/v1.317.6...v1.318.0) (2026-09-15)
+
+
+### Features
+
+* add handleOpenChange fallback in EntityMultiSelector ([#1861](https://github.com/juspay/xyne-spaces/issues/1861)) ([13cf451](https://github.com/juspay/xyne-spaces/commit/13cf4514da7b50d36c867585128a4df081612704))
+
+## [1.317.6](https://github.com/juspay/xyne-spaces/compare/v1.317.5...v1.317.6) (2026-09-15)
+
+
+### Bug Fixes
+
+* Implement chat tracking events ([#1853](https://github.com/juspay/xyne-spaces/issues/1853)) ([3b00658](https://github.com/juspay/xyne-spaces/commit/3b0065828ae02511de272b2ea0ec3142afcd5ab0))
+
+## [1.317.5](https://github.com/juspay/xyne-spaces/compare/v1.317.4...v1.317.5) (2026-09-15)
+
+
+### Bug Fixes
+
+* dedupe migration count and post hotfix canvas-sync activity line ([#1515](https://github.com/juspay/xyne-spaces/issues/1515)) ([4e98819](https://github.com/juspay/xyne-spaces/commit/4e9881960f1b67cd4aa7968639374d9f0068027a))
+* drop updatedAt attribute to activities ([#1848](https://github.com/juspay/xyne-spaces/issues/1848)) ([f2ebe00](https://github.com/juspay/xyne-spaces/commit/f2ebe0041f3d0317ade6957072bcedef58860181))
+* keep recording participants after detail REST load ([#1846](https://github.com/juspay/xyne-spaces/issues/1846)) ([cb8ef20](https://github.com/juspay/xyne-spaces/commit/cb8ef206ad11d1ecc5f2529aee6ae2274e6ab009))
+
+## [1.317.4](https://github.com/juspay/xyne-spaces/compare/v1.317.3...v1.317.4) (2026-09-15)
+
+
+### Bug Fixes
+
+* reduce channel/DM switch style-recalc cost ([#1771](https://github.com/juspay/xyne-spaces/issues/1771)) ([81b052f](https://github.com/juspay/xyne-spaces/commit/81b052fb5455ae69847136c0f7aa13678355e21b))
+
 ## [1.317.3](https://github.com/juspay/xyne-spaces/compare/v1.317.2...v1.317.3) (2026-09-14)
 
 

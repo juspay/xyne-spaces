@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import {
-  isBaselineCanvasType, PRStatus, PRStatusEvent, TicketStatusV2, type SdlcBaselineKind } from '@xyne/shared';
+  isBaselineCanvasType, PRStatus, PRStatusEvent, TicketStatusV2, type SdlcBaselineKind,
+  SDLC_AGENT_SLUG,
+} from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository';
@@ -34,7 +36,6 @@ import {
 } from './sdlcTicketLifecyclePrompt';
 import { sdlcVcs } from './vcs';
 
-const SDLC_AGENT_SLUG = 'sdlc-agent';
 
 interface ClawCallbackPayload {
   sessionId?: string;
@@ -132,6 +133,7 @@ export class SdlcClawExecutionService {
       repo.id,
       {
         operation: 'baseline',
+        channelId,
         workflowExecutionId: execution.id,
         sessionId,
         conversationId,
@@ -246,6 +248,7 @@ export class SdlcClawExecutionService {
     };
     const agentContext = await sdlcAgentContext.build(actor, repo.id, {
       operation: 'work',
+      channelId,
       workflowExecutionId: execution.id,
       sessionId,
       conversationId,

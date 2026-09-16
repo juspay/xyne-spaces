@@ -1,3 +1,4 @@
+import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import { z } from 'zod';
 
 const gitShaSchema = z.string().regex(/^[0-9a-f]{40}$/i);
@@ -99,7 +100,7 @@ export const wikiExecutionContextSchema = z
          * and write pages into the wrong hub. Optional only for older runs.
          */
     channelId: z.string().min(1).nullish(),
-    agentSlug: z.literal('sdlc-agent').nullable(),
+    agentSlug: z.literal(SDLC_AGENT_SLUG).nullable(),
     conversationId: z.string().nullable(),
     sessionId: z.string().nullable(),
     credentialSessionId: z.string().nullable(),

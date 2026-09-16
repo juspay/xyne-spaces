@@ -171,7 +171,14 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 data-testid='start-dm-btn'
                 data-track-category='ADD_DM_FORM'
                 data-track-name='Start_DM'
-                data-track-metadata={JSON.stringify({ selectedUserCount: selectedUsers })}
+                data-track-metadata={JSON.stringify({
+                  // `.length`, not the array: this previously serialised the whole
+                  // User[] — names, emails and picture URLs — into contextMetadata,
+                  // which is stored verbatim and unmasked.
+                  selectedUserCount: selectedUsers.length,
+                  isGroupDm: selectedUsers.length > 1,
+                  source: 'add_dm_form',
+                })}
               >
                 Start DM
               </Button>

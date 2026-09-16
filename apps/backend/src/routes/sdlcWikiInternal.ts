@@ -78,6 +78,7 @@ async function requireBinding(body: Record<string, unknown>) {
     repoId,
     userId: execution.createdBy,
     workspaceId: execution.workspaceId,
+    ...(context.channelId ? { channelId: context.channelId } : {}),
     context,
   };
 }

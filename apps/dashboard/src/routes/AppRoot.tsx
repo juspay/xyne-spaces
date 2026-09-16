@@ -518,9 +518,10 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
-  // must not also render one (that would double it).
-  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
+  // the host must not also render one (that would double it).
+  const isSdlcRoute =
+    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1108,6 +1109,10 @@ const SdlcRouteElement = (): ReactElement =>
 const SdlcTicketRouteElement = (): ReactElement =>
   isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
 
+/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
+const WorkflowsRouteElement = (): ReactElement =>
+  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
+
 export const router = createBrowserRouter(
   [
     {
@@ -1479,7 +1484,7 @@ export const router = createBrowserRouter(
                   path: 'workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowScreen />
+                      <WorkflowsRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
