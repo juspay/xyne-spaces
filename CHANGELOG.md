@@ -1,3 +1,11 @@
+## [1.318.0-release-20260915.3](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.2...v1.318.0-release-20260915.3) (2026-09-16)
+
+
+### Features
+
+* bitbucket connector for workflow release 15 ([#1882](https://github.com/juspay/xyne-spaces/issues/1882)) ([d941e4b](https://github.com/juspay/xyne-spaces/commit/d941e4b5e323d2fcd3ebe47ac5935c7bba151365))
+* fix ticket count sync and fetch older tickets ([#1875](https://github.com/juspay/xyne-spaces/issues/1875)) ([8f7e13a](https://github.com/juspay/xyne-spaces/commit/8f7e13ab848654e3525320d3f2c9a31fd2c3bd30))
+
 ## [1.318.0-release-20260915.2](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.1...v1.318.0-release-20260915.2) (2026-09-15)
 
 
