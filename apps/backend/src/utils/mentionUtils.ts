@@ -8,8 +8,8 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { redisService } from '@/services/redisService';
 import {logger} from '@/utils/logger';
-// A mention inside <pre>/<code> is a false positive — e.g. `@Juspay` inside the
-// email `guruprasad.bhosale@Juspay.in` in a SQL snippet — and must not notify.
+// A mention inside <pre>/<code> is a false positive — e.g. `@Example` inside the
+// email `user@example.com` in a SQL snippet — and must not notify.
 import { stripCodeRegions } from '@xyne/shared/utils';
 
 export interface ExtractedMention {
