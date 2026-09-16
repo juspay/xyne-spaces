@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { MetricTile } from './MetricTile';
+import { RunView } from './RunView';
+import { runController } from '../../services/diagnostics/run';
 import { useDiagnostics } from './useDiagnostics';
 import { METRIC_SPECS, VERDICT_STYLES } from '../../services/diagnostics/thresholds';
 import { buildReportJson, buildReportMarkdown, summarize } from '../../services/diagnostics/report';
@@ -46,39 +48,37 @@ const GROUPS: { group: MetricSpec['group']; title: string; blurb: string }[] = [
   },
 ];
 
+type Tab = 'run' | 'live';
+
 export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelProps): ReactElement {
-  const snapshot = useDiagnostics();
+  const [tab, setTab] = useState<Tab>('run');
   const [copied, setCopied] = useState<'markdown' | 'json' | null>(null);
-  const [range, setRange] = useState<'session' | 'history'>('session');
   const [helpState, setHelpState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
 
-  const summary = useMemo(() => summarize(snapshot), [snapshot]);
-  const findings = useMemo(() => analyze(snapshot), [snapshot]);
-  const overall = VERDICT_STYLES[snapshot.overall];
-
-  const copy = useCallback(
-    async (kind: 'markdown' | 'json') => {
-      const text = kind === 'markdown' ? buildReportMarkdown(snapshot) : buildReportJson(snapshot);
-      try {
-        await navigator.clipboard.writeText(text);
-        setCopied(kind);
-        setTimeout(() => setCopied(null), 2000);
-      } catch {
-        // Clipboard blocked (insecure context or denied permission) — fall back
-        // to a download so the user still has something to send to support.
-        const blob = new Blob([text], {
-          type: kind === 'markdown' ? 'text/markdown' : 'application/json',
-        });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `xyne-performance-report.${kind === 'markdown' ? 'md' : 'json'}`;
-        anchor.click();
-        URL.revokeObjectURL(url);
-      }
-    },
-    [snapshot],
-  );
+  // Read at click time rather than subscribing. The panel deliberately does not
+  // re-render on every store notification: while a run is measuring, a panel
+  // repainting four times a second is load inside the window it is measuring.
+  const copy = useCallback(async (kind: 'markdown' | 'json') => {
+    const snapshot = diagnosticsStore.getSnapshot();
+    const text = kind === 'markdown' ? buildReportMarkdown(snapshot) : buildReportJson(snapshot);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      // Clipboard blocked (insecure context or denied permission) — fall back
+      // to a download so the user still has something to send to support.
+      const blob = new Blob([text], {
+        type: kind === 'markdown' ? 'text/markdown' : 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `xyne-performance-report.${kind === 'markdown' ? 'md' : 'json'}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
+  }, []);
 
   const requestHelp = useCallback(async () => {
     if (!onRequestHelp) return;
@@ -95,6 +95,7 @@ export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelPro
 
   const resetAll = useCallback(() => {
     diagnosticsStore.reset();
+    runController.clearHistory();
     void clearHistory();
   }, []);
 
@@ -111,10 +112,10 @@ export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelPro
           <div
             className='flex overflow-hidden rounded-md border border-border'
             role='group'
-            aria-label='Trend range'
+            aria-label='View'
           >
-            <RangeButton current={range} value='session' label='Session' onSelect={setRange} />
-            <RangeButton current={range} value='history' label='24 hours' onSelect={setRange} />
+            <TabButton current={tab} value='run' label='Diagnose' onSelect={setTab} />
+            <TabButton current={tab} value='live' label='Live' onSelect={setTab} />
           </div>
           {onClose ? (
             <button
@@ -130,52 +131,8 @@ export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelPro
         </div>
       </header>
 
-      <div className='flex-1 overflow-y-auto px-5 py-4'>
-        <div className={`rounded-lg border p-4 ${overall.border} ${overall.bg}`}>
-          <div className='flex items-center gap-2'>
-            <span className={`h-2.5 w-2.5 rounded-full ${overall.dot}`} aria-hidden='true' />
-            <span className={`text-sm font-semibold ${overall.text}`}>{overall.label}</span>
-          </div>
-          <p className='mt-1.5 text-sm text-neutral-700 dark:text-neutral-300'>{summary}</p>
-          <MachineContext snapshot={snapshot} />
-        </div>
-
-        <Findings findings={findings} />
-        <ConnectionHealth snapshot={snapshot} />
-
-        {GROUPS.map(({ group, title, blurb }) => {
-          const keys = METRIC_KEYS.filter(key => METRIC_SPECS[key].group === group);
-          if (!keys.length) return null;
-          return (
-            <section key={group} className='mt-6'>
-              <h3 className='text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400'>
-                {title}
-              </h3>
-              <p className='mt-0.5 text-xs text-neutral-500 dark:text-neutral-400'>{blurb}</p>
-              <div className='mt-2.5 grid grid-cols-1 gap-2.5 xl:grid-cols-2'>
-                {keys.map(key => (
-                  <MetricTile key={key} metric={snapshot.metrics[key]} range={range} />
-                ))}
-              </div>
-            </section>
-          );
-        })}
-
-        <ZeroOpTable
-          rows={snapshot.zeroQueries}
-          title='Slowest data requests'
-          blurb='Each screen asks for data by name. A red row is the query making the app feel slow.'
-          nameHeader='Query'
-        />
-        <ZeroOpTable
-          rows={snapshot.zeroMutations}
-          title='Slowest saves'
-          blurb='Time until the server confirmed each action. Failures here mean work was lost or retried.'
-          nameHeader='Action'
-        />
-        <DrainTable snapshot={snapshot} />
-        <RequestTable snapshot={snapshot} />
-        <ProcessTable snapshot={snapshot} />
+      <div className='flex-1 overflow-y-auto'>
+        {tab === 'run' ? <RunView /> : <LiveMetricsView />}
       </div>
 
       <footer className='flex flex-wrap items-center gap-2 border-t border-border px-5 py-3'>
@@ -234,6 +191,106 @@ export function DiagnosticsPanel({ onClose, onRequestHelp }: DiagnosticsPanelPro
           Clear history
         </button>
       </footer>
+    </div>
+  );
+}
+
+interface TabButtonProps {
+  current: Tab;
+  value: Tab;
+  label: string;
+  onSelect: (value: Tab) => void;
+}
+
+function TabButton({ current, value, label, onSelect }: TabButtonProps): ReactElement {
+  const active = current === value;
+  return (
+    <button
+      type='button'
+      onClick={() => onSelect(value)}
+      aria-pressed={active}
+      data-track-category='Diagnostics'
+      data-track-name='SwitchTab'
+      className={`px-2.5 py-1 text-xs ${
+        active
+          ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+          : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * The continuous view. Kept as its own component so the live subscription — and
+ * the re-render it causes every 250ms — is mounted only while this tab is open.
+ */
+function LiveMetricsView(): ReactElement {
+  const snapshot = useDiagnostics();
+  const [range, setRange] = useState<'session' | 'history'>('session');
+
+  const summary = useMemo(() => summarize(snapshot), [snapshot]);
+  const findings = useMemo(() => analyze(snapshot), [snapshot]);
+  const overall = VERDICT_STYLES[snapshot.overall];
+
+  return (
+    <div className='px-5 py-4'>
+      <div className={`rounded-lg border p-4 ${overall.border} ${overall.bg}`}>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='flex items-center gap-2'>
+            <span className={`h-2.5 w-2.5 rounded-full ${overall.dot}`} aria-hidden='true' />
+            <span className={`text-sm font-semibold ${overall.text}`}>{overall.label}</span>
+          </div>
+          <div
+            className='flex overflow-hidden rounded-md border border-border'
+            role='group'
+            aria-label='Trend range'
+          >
+            <RangeButton current={range} value='session' label='Session' onSelect={setRange} />
+            <RangeButton current={range} value='history' label='24 hours' onSelect={setRange} />
+          </div>
+        </div>
+        <p className='mt-1.5 text-sm text-neutral-700 dark:text-neutral-300'>{summary}</p>
+        <MachineContext snapshot={snapshot} />
+      </div>
+
+      <Findings findings={findings} />
+      <ConnectionHealth snapshot={snapshot} />
+
+      {GROUPS.map(({ group, title, blurb }) => {
+        const keys = METRIC_KEYS.filter(key => METRIC_SPECS[key].group === group);
+        if (!keys.length) return null;
+        return (
+          <section key={group} className='mt-6'>
+            <h3 className='text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400'>
+              {title}
+            </h3>
+            <p className='mt-0.5 text-xs text-neutral-500 dark:text-neutral-400'>{blurb}</p>
+            <div className='mt-2.5 grid grid-cols-1 gap-2.5 xl:grid-cols-2'>
+              {keys.map(key => (
+                <MetricTile key={key} metric={snapshot.metrics[key]} range={range} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      <ZeroOpTable
+        rows={snapshot.zeroQueries}
+        title='Slowest data requests'
+        blurb='Each screen asks for data by name. A red row is the query making the app feel slow.'
+        nameHeader='Query'
+      />
+      <ZeroOpTable
+        rows={snapshot.zeroMutations}
+        title='Slowest saves'
+        blurb='Time until the server confirmed each action. Failures here mean work was lost or retried.'
+        nameHeader='Action'
+      />
+      <DrainTable snapshot={snapshot} />
+      <RequestTable snapshot={snapshot} />
+      <ProcessTable snapshot={snapshot} />
     </div>
   );
 }

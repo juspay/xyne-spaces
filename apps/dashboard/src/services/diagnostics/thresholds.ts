@@ -1,4 +1,5 @@
 import type { MetricKey, Verdict } from './types';
+import type { CheckStatus, Confidence } from './run/types';
 
 export interface MetricSpec {
   label: string;
@@ -269,4 +270,58 @@ export const VERDICT_STYLES: Record<
     dot: 'bg-neutral-400',
     label: 'No data',
   },
+};
+
+/**
+ * Styling for a run's check statuses. Deliberately separate from `VERDICT_STYLES`
+ * above: a live metric has three states, while a check has five, and the two
+ * extra ones — a check that could not run, and one that ran without reaching a
+ * conclusion — must not be coloured as if they had passed.
+ */
+export const CHECK_STATUS_STYLES: Record<
+  CheckStatus,
+  { text: string; bg: string; border: string; dot: string; label: string }
+> = {
+  pass: {
+    text: 'text-emerald-700 dark:text-emerald-400',
+    bg: 'bg-emerald-50 dark:bg-emerald-950/40',
+    border: 'border-emerald-200 dark:border-emerald-900',
+    dot: 'bg-emerald-500',
+    label: 'Passed',
+  },
+  warn: {
+    text: 'text-amber-700 dark:text-amber-400',
+    bg: 'bg-amber-50 dark:bg-amber-950/40',
+    border: 'border-amber-200 dark:border-amber-900',
+    dot: 'bg-amber-500',
+    label: 'Needs attention',
+  },
+  fail: {
+    text: 'text-red-700 dark:text-red-400',
+    bg: 'bg-red-50 dark:bg-red-950/40',
+    border: 'border-red-200 dark:border-red-900',
+    dot: 'bg-red-500',
+    label: 'Problem',
+  },
+  inconclusive: {
+    text: 'text-neutral-600 dark:text-neutral-300',
+    bg: 'bg-neutral-50 dark:bg-neutral-900/40',
+    border: 'border-neutral-200 dark:border-neutral-800',
+    dot: 'bg-neutral-400',
+    label: 'Inconclusive',
+  },
+  skipped: {
+    text: 'text-neutral-500 dark:text-neutral-400',
+    bg: 'bg-neutral-50 dark:bg-neutral-900/30',
+    border: 'border-neutral-200 dark:border-neutral-800',
+    dot: 'bg-neutral-300 dark:bg-neutral-600',
+    label: 'Not measured',
+  },
+};
+
+/** How firmly a verdict may be stated, shown next to every one of them. */
+export const CONFIDENCE_LABELS: Record<Confidence, string> = {
+  high: 'High confidence',
+  medium: 'Indicative',
+  low: 'Low confidence',
 };
