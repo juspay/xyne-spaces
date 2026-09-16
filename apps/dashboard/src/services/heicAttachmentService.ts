@@ -5,7 +5,7 @@
  * The uploaded original stays byte-exact in storage; the backend produces
  * browser-renderable WebP renditions lazily at download time:
  *
- *   GET /attachments/:id/download?format=webp — full-size lossless WebP
+ *   GET /attachments/:id/download?format=webp — full-size lossy (q85) WebP
  *   GET /attachments/:id/thumbnail            — ≤1024px WebP, generated on demand
  *
  * Detection and filename derivation live in @xyne/shared so the client and
@@ -13,9 +13,24 @@
  * URL derivation plus the local (pre-upload) draft-preview conversion.
  */
 
-import { isHeicAttachment, toWebpFilename } from '@xyne/shared';
+import { isHeicAttachment, isHeicBuffer, toWebpFilename } from '@xyne/shared';
 
 export { isHeicAttachment, toWebpFilename };
+
+/**
+ * Byte-level HEIC check for a local File: reads the 12-byte ftyp head and
+ * trusts it over the browser's reported type/extension, which mislabels
+ * renamed HEICs (e.g. a .jpg carrying HEIC bytes) and blank-types real ones.
+ * Resolves null when the head can't be read — callers fall back to
+ * isHeicAttachment metadata.
+ */
+export async function sniffHeicFile(file: File): Promise<boolean | null> {
+  try {
+    return isHeicBuffer(await file.slice(0, 12).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Download URL for the WebP rendition of an HEIC attachment. Accepts either

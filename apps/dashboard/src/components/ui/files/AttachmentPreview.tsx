@@ -17,6 +17,7 @@ import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailSe
 import {
   convertHeicFileToPreviewBlob,
   isHeicAttachment,
+  sniffHeicFile,
 } from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -68,7 +69,27 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
   // HEIC can't render from local bytes in most browsers — drafts convert it
   // client-side, uploaded HEICs use the server-generated WebP thumbnail.
-  const isHeic = isHeicAttachment(getMimeType(file), getFileName(file));
+  // Local Files are classified by their ftyp brand (async 12-byte read): the
+  // browser's type/extension is a guess that mislabels renamed HEICs as .jpg.
+  // The metadata predicate is the initial value and stays authoritative for
+  // UploadedFiles, whose bytes are server-side.
+  const metadataIsHeic = isHeicAttachment(getMimeType(file), getFileName(file));
+  const [sniffedIsHeic, setSniffedIsHeic] = useState<boolean | null>(null);
+  useEffect(() => {
+    setSniffedIsHeic(null);
+    if (!isBrowserFile(file)) return;
+    let cancelled = false;
+    void sniffHeicFile(file).then(result => {
+      // Only the disagreement with the metadata guess needs a re-render.
+      if (!cancelled && result !== null && result !== metadataIsHeic) {
+        setSniffedIsHeic(result);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [file, metadataIsHeic]);
+  const isHeic = sniffedIsHeic ?? metadataIsHeic;
   const category = isHeic
     ? 'image'
     : getFileCategory({
