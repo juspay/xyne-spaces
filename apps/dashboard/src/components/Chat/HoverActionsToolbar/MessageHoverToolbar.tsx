@@ -10,6 +10,8 @@ import { useMessageHoverShortcuts } from './useMessageHoverShortcuts';
 interface MessageHoverToolbarProps {
   /** The positioned (position: relative) list container the overlay lives in. */
   containerRef: React.RefObject<HTMLElement | null>;
+  /** Message selected through Up/Down navigation in this list. */
+  keyboardSelectedMessageId?: string | null;
 }
 
 interface ActiveRow {
@@ -34,10 +36,13 @@ interface ActiveRow {
  * open the overlay is "pinned": it ignores pointerover/pointerleave/scroll
  * until the popover closes.
  */
-export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ containerRef }) => {
+export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
+  containerRef,
+  keyboardSelectedMessageId,
+}) => {
   // Keyboard shortcuts for whichever message is hovered — registered once per
   // list here instead of once per mounted ChatBubble (~6 × ~40 effects saved).
-  useMessageHoverShortcuts();
+  useMessageHoverShortcuts(containerRef, keyboardSelectedMessageId);
 
   const [activeRow, setActiveRow] = useState<ActiveRow | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -67,6 +72,24 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     highlightedRowRef.current = row;
   }, []);
 
+  const keyboardHighlightedRowRef = useRef<HTMLElement | null>(null);
+  const setKeyboardHighlightedRow = useCallback((row: HTMLElement | null): void => {
+    const prev = keyboardHighlightedRowRef.current;
+    if (prev === row) return;
+    prev?.removeAttribute('data-keyboard-selected');
+    row?.setAttribute('data-keyboard-selected', 'true');
+    keyboardHighlightedRowRef.current = row;
+  }, []);
+
+  const findKeyboardSelectedRow = useCallback((): HTMLElement | null => {
+    if (!keyboardSelectedMessageId) return null;
+    return (
+      containerRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(keyboardSelectedMessageId)}"]`,
+      ) ?? null
+    );
+  }, [containerRef, keyboardSelectedMessageId]);
+
   // Pending delayed clear (scheduled when the pointer enters something that is
   // NOT a message row — date pills, gaps, empty list areas). ~200ms so that
   // brushing the few-px gap between rows or travelling row→toolbar never
@@ -83,8 +106,9 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     cancelPendingClear();
     hoveredMessage.current = null;
     setHighlightedRow(null);
+    setKeyboardHighlightedRow(findKeyboardSelectedRow());
     if (activeRowRef.current !== null) setActiveRow(null);
-  }, [cancelPendingClear, setHighlightedRow]);
+  }, [cancelPendingClear, findKeyboardSelectedRow, setHighlightedRow, setKeyboardHighlightedRow]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -117,6 +141,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       const hoverKey = row.getAttribute('data-hover-key');
       if (!messageId || !hoverKey) return;
 
+      setKeyboardHighlightedRow(null);
       setHighlightedRow(row);
       const actions = getMessageHoverActions(hoverKey);
       hoveredMessage.current = {
@@ -156,7 +181,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       container.removeEventListener('mouseleave', handlePointerLeave);
       container.removeEventListener('scroll', handleScroll, { capture: true });
     };
-  }, [cancelPendingClear, containerRef, hide, setHighlightedRow]);
+  }, [cancelPendingClear, containerRef, hide, setHighlightedRow, setKeyboardHighlightedRow]);
 
   const activeHoverKey = activeRow?.hoverKey ?? null;
   const getSnapshot = useCallback(
@@ -171,8 +196,46 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     if (activeHoverKey !== null && actions === undefined && !pinnedOpenRef.current) hide();
   }, [activeHoverKey, actions, hide]);
 
-  // On unmount, drop the highlight from whatever row still carries it.
-  useEffect((): (() => void) => (): void => setHighlightedRow(null), [setHighlightedRow]);
+  // Keyboard navigation takes ownership from a stationary pointer. Moving the
+  // pointer again restores normal hover precedence.
+  useEffect(() => {
+    if (!keyboardSelectedMessageId) {
+      setKeyboardHighlightedRow(null);
+      return;
+    }
+    cancelPendingClear();
+    hoveredMessage.current = null;
+    setHighlightedRow(null);
+    activeRowRef.current = null;
+    setActiveRow(null);
+    setKeyboardHighlightedRow(findKeyboardSelectedRow());
+  }, [
+    cancelPendingClear,
+    findKeyboardSelectedRow,
+    keyboardSelectedMessageId,
+    setHighlightedRow,
+    setKeyboardHighlightedRow,
+  ]);
+
+  // Keep keyboard selection attached as virtualized rows mount/unmount.
+  useEffect(() => {
+    const sync = (): void => {
+      if (activeRowRef.current === null) {
+        setKeyboardHighlightedRow(findKeyboardSelectedRow());
+      }
+    };
+    sync();
+    return subscribeMessageHoverActions(sync);
+  }, [findKeyboardSelectedRow, setKeyboardHighlightedRow]);
+
+  // On unmount, drop highlights from rows that still carry them.
+  useEffect(
+    (): (() => void) => (): void => {
+      setHighlightedRow(null);
+      setKeyboardHighlightedRow(null);
+    },
+    [setHighlightedRow, setKeyboardHighlightedRow],
+  );
 
   if (!activeRow || !actions) return null;
 
