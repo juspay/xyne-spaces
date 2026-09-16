@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -8,7 +8,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive } from 'lucide-react';
+import { TextAlignJustify, FileSpreadsheet, Archive, Copy } from 'lucide-react';
 import {
   PlusDefault as Plus,
   FilterHorizontal as Settings2,
@@ -35,6 +35,9 @@ import {
   SearchDefault as Search,
   KanbanBoard as SquareKanban,
   GridTable,
+  Hashtag,
+  LayersTo,
+  EyeOff,
 } from '@xyne/icons';
 import { CalendarView } from '../../components/Tickets/CalendarView';
 import TicketReportsScreen from '../../routes/TicketReportsScreen/TicketReportsScreen';
@@ -59,6 +62,7 @@ import {
 } from '@dnd-kit/core';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
+import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import {
   clearCreateTicketParams,
@@ -72,8 +76,10 @@ import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
+import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
 import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
+import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
   useChannel,
@@ -159,6 +165,14 @@ import {
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import {
+  buildTicketExportPayload,
+  ticketPayloadToCsv,
+  ticketPayloadToJson,
+  buildTicketExportFilename,
+  downloadTextFile,
+} from '../../components/Tickets/TicketTable/ticketTableExport';
+import { copyTextToClipboard } from '../../utils/clipboardUtils';
+import {
   getActivityDescription,
   getActivityIcon,
 } from '../../components/Tickets/TicketActivity/TicketActivity';
@@ -240,7 +254,10 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
   'createdDateEnd',
 ] as const satisfies (keyof TicketFilters)[];
 
-const DERIVED_COLUMNS = ['stage', 'board'];
+// `stage` is force-managed by the sub-status effect, so it is never persisted as
+// a user column. `board` is a normal user-controlled, persisted column (it must
+// survive in the draft / session / saved views like every other column).
+const DERIVED_COLUMNS = ['stage'];
 
 const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
 
@@ -310,16 +327,8 @@ interface BoardKanbanScreenProps {
    * URL-level precedence explicitly or a stale draft would shadow it.
    */
   hasSharedSeed?: boolean;
-  viewMode?:
-    | 'my-tickets'
-    | 'user-tickets'
-    | 'group-tickets'
-    | 'board'
-    | 'project'
-    | 'workspace-view';
+  viewMode?: 'my-tickets' | 'board' | 'project' | 'workspace-view';
   channelId?: string;
-  filterByUserId?: string;
-  filterByGroupId?: string;
   // Project Views builder (workspace-view mode):
   workspaceId?: string;
   viewId?: string;
@@ -417,13 +426,14 @@ const availableColumns = [
   { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
   { key: 'createdAt', label: 'Created At', icon: <Clock className='h-4 w-4' /> },
   { key: 'createdBy', label: 'Created By', icon: <User className='h-4 w-4' /> },
+  { key: 'board', label: 'Board', icon: <SquareKanban className='h-4 w-4' /> },
+  { key: 'channel', label: 'Channel', icon: <Hashtag className='h-4 w-4' /> },
+  { key: 'type', label: 'Type', icon: <LayersTo className='h-4 w-4' /> },
 ];
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
   channelId,
-  filterByUserId,
-  filterByGroupId,
   workspaceId,
   viewId,
   initialName,
@@ -437,6 +447,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     projectId?: string;
     boardId?: string;
   }>();
+  const outletContext = useOutletContext<unknown>();
+  const projectsScreenContext =
+    outletContext && typeof outletContext === 'object' && 'leftHeaderSlot' in outletContext
+      ? (outletContext as ProjectsScreenOutletContext)
+      : null;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -527,12 +542,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
     [viewModeProp, viewDraftKey, hasSharedSeed],
   );
-  const persistedColumnsKey =
-    viewModeProp === 'my-tickets' ||
-    viewModeProp === 'user-tickets' ||
-    viewModeProp === 'group-tickets'
-      ? viewModeProp
-      : null;
+  const persistedColumnsKey = viewModeProp === 'my-tickets' ? viewModeProp : null;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     () =>
       new Set(
@@ -649,8 +659,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const viewMode = useMemo(() => {
     if (viewModeProp === 'workspace-view') return 'workspace-view';
     if (viewModeProp === 'my-tickets') return 'my-tickets'; // Show user's tickets
-    if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
-    if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
     if (viewModeProp === 'board') return 'board';
     if (boardId) return 'board'; // Show specific board
     if (viewModeProp === 'project') return 'project';
@@ -663,7 +671,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // initialFilters are applied, preventing double queries with stale storage filters.
   const [hasSeededWorkspaceView, setHasSeededWorkspaceView] = useState(!isWorkspaceView);
   // A workspace view queries as a project view with no projectId; scope comes from filters.boards.
-  const queryViewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets' =
+  const queryViewMode: 'project' | 'board' | 'my-tickets' =
     viewMode === 'workspace-view' ? 'project' : viewMode;
 
   // Get user's channel status for selectedBoardId persistence
@@ -731,12 +739,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const toggleGroupExpansion = useCallback(
     (groupKey: string) => {
       setExpandedGroups(prev => {
-        const next = new Set(prev);
-        if (next.has(groupKey)) {
-          next.delete(groupKey);
-        } else {
-          next.add(groupKey);
-        }
+        const next = new Set<string>(prev.has(groupKey) ? [] : [groupKey]);
         try {
           const raw = sessionStorage.getItem(expandedGroupsStorageKey);
           const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
@@ -760,7 +763,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     try {
       const raw = sessionStorage.getItem(expandedGroupsStorageKey);
       const map = (raw ? JSON.parse(raw) : {}) as Record<string, string[]>;
-      setExpandedGroups(new Set(map[groupByKey] ?? []));
+      setExpandedGroups(new Set((map[groupByKey] ?? []).slice(0, 1)));
     } catch (err) {
       logger.error(Event.FRONTEND_ERROR, {
         type: 'migrated_console_error',
@@ -919,33 +922,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return next;
     });
   }, [showSubStatus]);
-
-  // Automatically show Board column when "All Boards" is selected
-  useEffect(() => {
-    const isAllBoardsSelected = !filters.boards || filters.boards.length === 0;
-
-    if (isAllBoardsSelected && channelId && viewMode === 'project') {
-      // Add "board" column when All Boards is selected
-      setVisibleColumns(prev => {
-        if (!prev.has('board')) {
-          const next = new Set(prev);
-          next.add('board');
-          return next;
-        }
-        return prev;
-      });
-    } else {
-      // Remove "board" column when a specific board is selected
-      setVisibleColumns(prev => {
-        if (prev.has('board')) {
-          const next = new Set(prev);
-          next.delete('board');
-          return next;
-        }
-        return prev;
-      });
-    }
-  }, [filters.boards, channelId, viewMode]);
 
   // Wrapper functions to send events to machine
   const setFilters = useCallback(
@@ -1116,7 +1092,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (boardsMatch) {
       setHasSeededWorkspaceView(true);
     }
-  }, [isWorkspaceView, hasSeededWorkspaceView, filters.boards, initialFilters?.boards]);
+  }, [isWorkspaceView, hasSeededWorkspaceView, filters, initialFilters?.boards]);
 
   const [isSavingWorkspaceView, setIsSavingWorkspaceView] = useState(false);
   const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
@@ -1315,9 +1291,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filteredSingleBoardId = explicitBoardId ?? soleScopeBoardId ?? null;
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
-  // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
-  const isMyTicketsView =
-    viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
+  // In my-tickets, fetch ALL boards (no project filter) since tickets can span projects
+  const isMyTicketsView = viewMode === 'my-tickets';
 
   // Fetch full board details only when a single board is selected
   const [selectedBoardDetail] = useCachedQuery(
@@ -1658,13 +1633,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     // For project and my-tickets views, use status-based columns
-    if (
-      viewMode === 'project' ||
-      viewMode === 'workspace-view' ||
-      viewMode === 'my-tickets' ||
-      viewMode === 'user-tickets' ||
-      viewMode === 'group-tickets'
-    ) {
+    if (viewMode === 'project' || viewMode === 'workspace-view' || viewMode === 'my-tickets') {
       return getStatusColumns();
     }
 
@@ -1745,12 +1714,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // restricts tickets to only that specific channel.
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
-      viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      viewMode: 'project' | 'board' | 'my-tickets';
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
-      userId?: string;
-      groupId?: string;
       formEntityValueFieldIds?: string[];
     } = { viewMode: queryViewMode };
 
@@ -1787,13 +1754,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       params.excludeFlowSteps = true;
     }
 
-    // Pass user/group filters for specific viewModes
-    if (viewMode === 'user-tickets' && filterByUserId) {
-      params.userId = filterByUserId;
-    } else if (viewMode === 'group-tickets' && filterByGroupId) {
-      params.groupId = filterByGroupId;
-    }
-
     // Pass fieldIds for which to fetch formEntityValues (when filtering/grouping by dynamic fields)
     if (fevFieldIds.length > 0) {
       params.formEntityValueFieldIds = fevFieldIds;
@@ -1806,8 +1766,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView,
     boardId,
     effectiveProjectId,
-    filterByUserId,
-    filterByGroupId,
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
@@ -1825,9 +1783,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           // kanban pagination path uses. Without this clause the table, calendar and
           // flow layouts render no rows at all in a saved view.
           (isWorkspaceView && workspaceViewReady) ||
-          viewMode === 'my-tickets' ||
-          (viewMode === 'user-tickets' && !!filterByUserId) ||
-          (viewMode === 'group-tickets' && !!filterByGroupId)),
+          viewMode === 'my-tickets'),
     },
   );
   if (shouldUseLegacyTicketsQuery && ticketsDetails.type === 'complete') {
@@ -1939,12 +1895,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return undefined;
   }, [myTicketBoardsQuery.data, viewMode]);
 
+  // Fetch board details for workspace views - used for source channels and tags
   const [workspaceSelectedBoards] = useCachedQuery(
     queries.boardsByIds({ boardIds: filters.boards ?? [] }),
     {
-      enabled: isWorkspaceView && isSourceChannelsOpen && (filters.boards?.length ?? 0) > 0,
+      enabled: isWorkspaceView && (filters.boards?.length ?? 0) > 0,
     },
   );
+
   const sourceChannelProjectIds = useMemo(() => {
     if (isMyTicketsView) {
       const selected = filters.boards ?? [];
@@ -1966,7 +1924,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     workspaceSelectedBoards,
   ]);
 
-  // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
+  // Clear invalid board filters in my-tickets views
   useEffect(() => {
     // Early return if not in my-tickets view
     if (!isMyTicketsView) return;
@@ -1994,11 +1952,130 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
 
-  const tagsProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
-  const [projectTags, projectTagsDetails] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: tagsProjectId || '' }),
-    { enabled: !!tagsProjectId },
+  // Determine project IDs for tag search
+  // For my-tickets and workspace views, we may have multiple projects
+  const tagsProjectIds = useMemo(() => {
+    if (isMyTicketsView) {
+      const selected = filters.boards ?? [];
+      const details = availableBoardDetails ?? [];
+      // No board selected -> all projects; otherwise only selected boards' projects
+      return uniqueProjectIds(
+        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
+      );
+    }
+    if (isWorkspaceView) {
+      // Use workspaceSelectedBoards which is always enabled for workspace views
+      return uniqueProjectIds(workspaceSelectedBoards ?? []);
+    }
+    // Single project view
+    const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
+    return singleProjectId ? [singleProjectId] : [];
+  }, [
+    isMyTicketsView,
+    isWorkspaceView,
+    filters.boards,
+    availableBoardDetails,
+    workspaceSelectedBoards,
+    effectiveProjectId,
+  ]);
+
+  // For my-tickets and workspace views, always use multi-project query
+  // This ensures proper tag fetching across all selected boards/projects
+  const shouldUseMultiProjectQuery = isMyTicketsView || isWorkspaceView;
+  const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
+
+  // State for tag search query (debounced value passed to Vespa)
+  const [tagsSearchQuery, setTagsSearchQuery] = useState('');
+
+  // Pagination state for Zero query tags
+  const TAGS_PAGE_SIZE = 20;
+  const [tagsCursor, setTagsCursor] = useState<{ name: string; id: string } | null>(null);
+  const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
+  const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
+
+  // Reset pagination when project IDs change or search starts
+  const tagsProjectIdsKey = tagsProjectIds.join(',');
+  useEffect(() => {
+    setTagsCursor(null);
+    setAccumulatedTags([]);
+    setHasMoreZeroTags(true);
+  }, [tagsProjectIdsKey, tagsSearchQuery]);
+
+  // Fetch tags via Zero query for single project (for initial load without search)
+  // Only used for regular board views (not my-tickets or workspace views)
+  const [singleProjectTags, singleProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectId({
+      projectId: tagsProjectIds[0] || '',
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseSingleProjectQuery && !tagsSearchQuery.trim() },
   );
+
+  // Fetch tags via Zero query for multiple projects (for initial load without search)
+  // Used for my-tickets, workspace views, and any multi-project scenarios
+  const [multiProjectTags, multiProjectTagsDetails] = useCachedQuery(
+    queries.projectTagsByProjectIds({
+      projectIds: tagsProjectIds,
+      limit: TAGS_PAGE_SIZE,
+      start: tagsCursor,
+    }),
+    { enabled: shouldUseMultiProjectQuery && tagsProjectIds.length > 0 && !tagsSearchQuery.trim() },
+  );
+
+  // Combine Zero query results
+  const currentPageTags = shouldUseSingleProjectQuery ? singleProjectTags : multiProjectTags;
+  const projectTagsDetails = shouldUseSingleProjectQuery
+    ? singleProjectTagsDetails
+    : multiProjectTagsDetails;
+
+  // Accumulate tags from pagination
+  useEffect(() => {
+    if (!currentPageTags || currentPageTags.length === 0) {
+      if (tagsCursor !== null) {
+        // No more results from this page
+        setHasMoreZeroTags(false);
+      }
+      return;
+    }
+
+    // Check if we got less than page size (no more pages)
+    if (currentPageTags.length < TAGS_PAGE_SIZE) {
+      setHasMoreZeroTags(false);
+    }
+
+    // Append new tags, avoiding duplicates
+    setAccumulatedTags(prev => {
+      const existingIds = new Set(prev.map(t => t.id));
+      const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
+      return [...prev, ...newTags];
+    });
+  }, [currentPageTags, tagsCursor]);
+
+  // Combine accumulated tags for display
+  const projectTags = accumulatedTags;
+
+  // Handle load more tags (pagination)
+  const handleLoadMoreTags = useCallback(() => {
+    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
+    const lastTag = accumulatedTags[accumulatedTags.length - 1];
+    if (lastTag) {
+      setTagsCursor({ name: lastTag.name, id: lastTag.id });
+    }
+  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
+
+  // Fetch tags via Vespa search (only when there's a search query)
+  const { tags: vespaTags } = useVespaTagSearch({
+    projectId: tagsProjectIds[0],
+    searchQuery: tagsSearchQuery,
+    enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
+    limit: 20,
+  });
+
+  // Handle tag search callback
+  const handleSearchTags = useCallback((query: string) => {
+    setTagsSearchQuery(query);
+  }, []);
 
   // Create a map of stageId -> formId for quick lookup (from stages.formId).
   // NON_LINEAR boards also include transition-level forms (toStageId -> formId).
@@ -2603,6 +2680,74 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return map;
   }, [allUsers]);
+  const userGroupNamesById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group.name])),
+    [allUserGroups],
+  );
+  // Board names for the optional Board column / export. Resolve only the boards
+  // actually present in the current table rows, and only while in table view.
+  const tableBoardIds = useMemo(
+    () =>
+      Array.from(
+        new Set((filteredTickets ?? []).map(t => t.boardId).filter((id): id is string => !!id)),
+      ),
+    [filteredTickets],
+  );
+  const [tableBoards] = useCachedQuery(queries.boardsByIds({ boardIds: tableBoardIds }), {
+    enabled: layoutView === 'table' && tableBoardIds.length > 0,
+  });
+  const boardNamesById = useMemo(
+    () => new Map((tableBoards ?? []).map(board => [board.id, board.name])),
+    [tableBoards],
+  );
+  // CSV/JSON export of the current table view. Ungated — it only serializes the
+  // already-visible, filtered tickets, so it needs no TICKET-REPORTS permission.
+  const channelNamesById = useMemo(
+    () => new Map(allChannels.map(c => [c.id, c.name])),
+    [allChannels],
+  );
+  const handleTicketExport = useCallback(
+    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
+      // Built lazily on click — serializing every filtered row is wasted work
+      // until the user actually triggers an export.
+      const payload = buildTicketExportPayload(filteredTickets ?? [], {
+        tagsByTicketId,
+        userNamesById,
+        userGroupNamesById,
+        channelNamesById,
+        boardNamesById,
+        visibleColumns: tableVisibleColumns,
+      });
+      if (payload.rows.length === 0) {
+        toast.info('No tickets to export.');
+        return;
+      }
+      const isCsv = action.endsWith('csv');
+      const content = isCsv ? ticketPayloadToCsv(payload) : ticketPayloadToJson(payload);
+      const label = isCsv ? 'CSV' : 'JSON';
+      if (action.startsWith('download')) {
+        downloadTextFile(
+          buildTicketExportFilename(isCsv ? 'csv' : 'json'),
+          content,
+          isCsv ? 'text/csv;charset=utf-8' : 'application/json',
+        );
+        toast.success(`${label} downloaded`);
+        return;
+      }
+      void copyTextToClipboard(content)
+        .then(() => toast.success(`Copied ${label} to clipboard`))
+        .catch(() => toast.error(`Failed to copy ${label}`));
+    },
+    [
+      filteredTickets,
+      tagsByTicketId,
+      userNamesById,
+      userGroupNamesById,
+      channelNamesById,
+      boardNamesById,
+      tableVisibleColumns,
+    ],
+  );
   const flowRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel) return [];
     return buildFlowRunExportRows({
@@ -3212,11 +3357,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const lastSentFilteredTicketIdsRef = useRef<string | null>(null);
 
+  // Compute availableTags: use Vespa when searching, Zero query otherwise
+  // Fallback to client-side filtering if Vespa returns no results
   const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return undefined;
-    const uniqueTags = new Set(projectTags.map(tag => tag.name));
-    return Array.from(uniqueTags).sort();
-  }, [projectTags]);
+    const zeroTags =
+      projectTags && projectTags.length > 0
+        ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
+        : [];
+
+    // If there's a search query, prefer Vespa results
+    if (tagsSearchQuery.trim()) {
+      // If Vespa has results, use them
+      if (vespaTags && vespaTags.length > 0) {
+        return vespaTags;
+      }
+      // Fallback to client-side filtering on Zero tags
+      const lower = tagsSearchQuery.toLowerCase();
+      const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
+      return filtered.length > 0 ? filtered : undefined;
+    }
+
+    // No search - return Zero query results
+    return zeroTags.length > 0 ? zeroTags : undefined;
+  }, [tagsSearchQuery, vespaTags, projectTags]);
 
   const availableStages = useMemo(() => {
     if (!stages || stages.length === 0) return undefined;
@@ -3494,8 +3657,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     if (!isKanbanLayout) return;
     if (hasSearchTerm) return;
+
+    // Don't reset lastKnownKanbanGroupsRef to null when query key changes.
+    // Keep the old groups visible until new ones load to prevent the view
+    // from disappearing when filters are applied in group-by mode.
+    // Only update the query key ref to track that we're waiting for new data.
     if (lastKnownKanbanGroupsQueryKeyRef.current !== kanbanColumnQueryKey) {
-      lastKnownKanbanGroupsRef.current = null;
       lastKnownKanbanGroupsQueryKeyRef.current = kanbanColumnQueryKey;
     }
 
@@ -3509,14 +3676,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout) return;
-
-    // On the pass where the query key changes, `localTickets` here still holds the previous
-    // query's rows: the reset above only queues setLocalTickets(null), which lands next render.
-    // Stamping the new key onto those rows would make the queryKey check below always pass, so
-    // drop the remembered rows instead and let a later pass re-record the new query's results.
     if (lastKnownKanbanTicketsQueryKeyRef.current !== kanbanColumnQueryKey) {
       lastKnownKanbanTicketsQueryKeyRef.current = kanbanColumnQueryKey;
-      lastKnownKanbanTicketsRef.current = null;
       return;
     }
 
@@ -3539,16 +3700,35 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
     const lastKnownKanbanTickets = lastKnownKanbanTicketsRef.current;
+    // Use last known tickets as fallback when localTickets is empty/null.
+    // This prevents the view from disappearing when filters are applied in group-by mode.
+    // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
     if (
-      hasSearchTerm &&
+      workspaceViewReady &&
       lastKnownKanbanTickets !== null &&
-      lastKnownKanbanTickets.queryKey === kanbanColumnQueryKey &&
       lastKnownKanbanTickets.tickets.length > 0
     ) {
-      return lastKnownKanbanTickets.tickets;
+      // Apply current filters to the fallback tickets
+      const filteredFallback = applyTicketFilters(
+        lastKnownKanbanTickets.tickets,
+        deferredFilters,
+        tagsByTicketId,
+        formValuesByTicketId,
+        formFieldsById,
+        user?.id,
+      );
+      return filteredFallback;
     }
     return localTickets ?? [];
-  }, [hasSearchTerm, kanbanColumnQueryKey, localTickets]);
+  }, [
+    workspaceViewReady,
+    localTickets,
+    deferredFilters,
+    tagsByTicketId,
+    formValuesByTicketId,
+    formFieldsById,
+    user?.id,
+  ]);
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
@@ -3584,9 +3764,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const mapped = entries.map(([groupName, groupTickets]) => {
       const serverCountGroup = isKanbanLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
-      const serverColumnCounts = shouldUseStatusColumns
-        ? (serverCountGroup?.statuses ?? {})
-        : (serverCountGroup?.stages ?? {});
+      const countsUsable =
+        shouldFetchKanbanCounts && !kanbanCounts.isLoading && !kanbanCounts.error;
+      const serverColumnCounts = !countsUsable
+        ? undefined
+        : shouldUseStatusColumns
+          ? (serverCountGroup?.statuses ?? {})
+          : (serverCountGroup?.stages ?? {});
       const ticketsByColumn = shouldUseStatusColumns
         ? groupTicketsByStatus(groupTickets, stages)
         : groupTicketsByStage(groupTickets, stages, canReorder && !hasSearchTerm);
@@ -3696,17 +3880,77 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
   const tableGroups = isTableEmpty ? [] : processedGroups;
 
+  const hasScrolledToExpandedGroup = useRef(false);
+  useEffect(() => {
+    if (hasScrolledToExpandedGroup.current) return;
+    const [expandedGroupKey] = [...expandedGroups];
+    if (!expandedGroupKey || processedGroups.length === 0) return;
+    const el = document.querySelector(`[data-group-key="${CSS.escape(expandedGroupKey)}"]`);
+    if (!el) return;
+    hasScrolledToExpandedGroup.current = true;
+    el.scrollIntoView({ block: 'start' });
+  }, [expandedGroups, processedGroups]);
+
+  const kanbanLayoutScope = `${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`;
+  const { hiddenColumnIds, hideColumn, unhideColumn, showAllColumns } = useHiddenKanbanColumns(
+    [kanbanLayoutScope, ...stages.map(stage => stage.id).sort()].join('|'),
+  );
+  const hiddenStages = useMemo(
+    () => stages.filter(stage => hiddenColumnIds.includes(stage.id)),
+    [stages, hiddenColumnIds],
+  );
+  const allColumnsHidden = stages.length > 0 && hiddenStages.length === stages.length;
+  const kanbanGroups = allColumnsHidden ? [] : processedGroups;
+
+  // Mirrors what a column header shows: server counts, unless a search has left
+  // them stale, in which case only the rows actually loaded can be counted.
+  const columnCountsAreReliable = !(canUseKanbanColumnPagination && hasSearchTerm);
+  const countStageInGroup = useCallback(
+    (group: (typeof processedGroups)[number], stage: Stage): number => {
+      const loaded = group.columnData[stage.id]?.length ?? 0;
+      if (!columnCountsAreReliable) return loaded;
+      return group.stageCounts?.[stage.id] ?? group.stageCounts?.[stage.name] ?? loaded;
+    },
+    [columnCountsAreReliable],
+  );
+  const countHiddenInGroup = useCallback(
+    (group: (typeof processedGroups)[number]): number =>
+      hiddenStages.reduce((total, stage) => total + countStageInGroup(group, stage), 0),
+    [countStageInGroup, hiddenStages],
+  );
+  const handleHideColumn = useCallback(
+    (stageId: string) => {
+      const stageName = stages.find(stage => stage.id === stageId)?.name ?? 'Column';
+      hideColumn(stageId);
+      toast.success(`${stageName} hidden — its tickets left every count.`, {
+        action: { label: 'Undo', onClick: () => unhideColumn(stageId) },
+      });
+    },
+    [hideColumn, stages, unhideColumn],
+  );
+
   const filteredAvailableColumns = useMemo(() => {
-    if (layoutView === 'table' || layoutView === 'flow') {
-      // In table mode, hide TicketCard metadata columns
+    // Columns only the AG-Grid table renders; the TicketCard-based views (kanban,
+    // calendar, flow) have no cell for them, so keep them out of those pickers so
+    // those views stay exactly as they were.
+    const tableOnly = ['board', 'channel', 'type'];
+    if (layoutView === 'table') {
+      // Table view exposes every ticket field as a toggleable column. `stage` is
+      // force-added (see `tableVisibleColumns`), so keep it out of the picker.
+      return availableColumns.filter(col => col.key !== 'stage');
+    }
+    if (layoutView === 'flow') {
+      // In flow mode, hide TicketCard metadata columns
       return availableColumns.filter(
-        col => !['stage', 'board', 'createdAt', 'createdBy'].includes(col.key),
+        col => !['stage', 'createdAt', 'createdBy', ...tableOnly].includes(col.key),
       );
     }
     if (layoutView === 'calendar') {
-      return availableColumns.filter(col => !['stage', 'board', 'createdBy'].includes(col.key));
+      return availableColumns.filter(
+        col => !['stage', 'createdBy', ...tableOnly].includes(col.key),
+      );
     }
-    return availableColumns.filter(col => col.key !== 'status');
+    return availableColumns.filter(col => !['status', ...tableOnly].includes(col.key));
   }, [layoutView]);
 
   if (showTicketReport && channelId && effectiveProjectId) {
@@ -3740,6 +3984,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
           <div className='flex-1 min-w-0'>
             <TicketFiltersDropdown
+              startSlot={projectsScreenContext?.leftHeaderSlot}
               filters={filters}
               onFiltersChange={setFilters}
               projectId={
@@ -3754,6 +3999,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               sourceChannelProjectIds={sourceChannelProjectIds}
               showBoardsFilter={!!channelId || isMyTicketsView}
               availableTags={availableTags}
+              onSearchTags={handleSearchTags}
+              onLoadMoreTags={handleLoadMoreTags}
+              hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
               availableStages={availableStages}
               hasPrReviewers={hasPrReviewers}
               hasQaAssigned={hasQaAssigned}
@@ -3828,133 +4076,202 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
         {/* Create Ticket / Save View Button - Right Side */}
         <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
-          {isWorkspaceView && (
-            <div className='flex items-center gap-2'>
-              {isViewDirty && (
-                <>
-                  <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
-                    Unsaved changes
-                  </span>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={handleResetWorkspaceView}
-                    className='rounded-[10px]'
-                    aria-label='Discard unsaved changes'
-                    data-track-category='Projects'
-                    data-track-name='ResetView'
-                  >
-                    Reset
-                  </Button>
-                </>
-              )}
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleShareWorkspaceView}
-                disabled={!workspaceViewReady}
-                className='rounded-[10px] border-border hover:bg-muted'
-                aria-label='Share view'
-                data-track-category='Projects'
-                data-track-name='ShareView'
-              >
-                <Share2 className='w-3 h-3 text-muted-foreground' />
-                <span>Share</span>
-              </Button>
-              {canSaveInPlace ? (
-                <Button
-                  size='sm'
-                  onClick={handleSaveExistingView}
-                  disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
-                  className='rounded-[10px]'
-                  data-track-category='Projects'
-                  data-track-name='SaveView'
-                >
-                  <Bookmark className='w-3 h-3' />
-                  <span>Save</span>
-                </Button>
-              ) : (
-                <Popover
-                  open={isSavePopoverOpen}
-                  onOpenChange={handleSavePopoverOpenChange}
-                  align='end'
-                  className='w-64 p-3'
-                  trigger={
+          <div className='flex flex-wrap items-center justify-end gap-2'>
+            {isWorkspaceView && (
+              <div className='flex items-center gap-2'>
+                {isViewDirty && (
+                  <>
+                    <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
+                      Unsaved changes
+                    </span>
                     <Button
+                      variant='ghost'
                       size='sm'
-                      disabled={!workspaceViewReady || isSavingWorkspaceView}
+                      onClick={handleResetWorkspaceView}
                       className='rounded-[10px]'
+                      aria-label='Discard unsaved changes'
                       data-track-category='Projects'
-                      data-track-name='SaveView'
+                      data-track-name='ResetView'
                     >
-                      <Bookmark className='w-3 h-3' />
-                      <span>{viewId ? 'Save' : 'Save view'}</span>
+                      Reset
                     </Button>
-                  }
+                  </>
+                )}
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleShareWorkspaceView}
+                  disabled={!workspaceViewReady}
+                  className='rounded-[10px] border-border hover:bg-muted'
+                  aria-label='Share view'
+                  data-track-category='Projects'
+                  data-track-name='ShareView'
                 >
-                  <div className='flex flex-col gap-2'>
-                    <span className='text-[13px] font-medium text-foreground'>Name this view</span>
-                    <input
-                      autoFocus
-                      value={workspaceViewNameDraft}
-                      onChange={e => setWorkspaceViewNameDraft(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
-                      }}
-                      placeholder='e.g. My open PRs'
-                      data-track-category='Projects'
-                      data-track-name='SaveViewNameInput'
-                      className={cn(
-                        'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
-                        'text-foreground outline-none placeholder:text-muted-foreground',
-                        'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                      )}
-                    />
-                    <div className='flex justify-end gap-2 pt-1'>
-                      <Button
-                        variant='ghost'
-                        size='sm'
-                        onClick={() => setIsSavePopoverOpen(false)}
-                        data-track-category='Tickets'
-                        data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
-                      >
-                        Cancel
-                      </Button>
+                  <Share2 className='w-3 h-3 text-muted-foreground' />
+                  <span>Share</span>
+                </Button>
+                {canSaveInPlace ? (
+                  <Button
+                    size='sm'
+                    onClick={handleSaveExistingView}
+                    disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
+                    className='rounded-[10px]'
+                    data-track-category='Projects'
+                    data-track-name='SaveView'
+                  >
+                    <Bookmark className='w-3 h-3' />
+                    <span>Save</span>
+                  </Button>
+                ) : (
+                  <Popover
+                    open={isSavePopoverOpen}
+                    onOpenChange={handleSavePopoverOpenChange}
+                    align='end'
+                    className='w-64 p-3'
+                    trigger={
                       <Button
                         size='sm'
-                        onClick={handleConfirmSaveWorkspaceView}
-                        data-track-category='Tickets'
-                        data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
-                        disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                        disabled={!workspaceViewReady || isSavingWorkspaceView}
+                        className='rounded-[10px]'
+                        data-track-category='Projects'
+                        data-track-name='SaveView'
                       >
-                        Save
+                        <Bookmark className='w-3 h-3' />
+                        <span>{viewId ? 'Save' : 'Save view'}</span>
                       </Button>
+                    }
+                  >
+                    <div className='flex flex-col gap-2'>
+                      <span className='text-[13px] font-medium text-foreground'>
+                        Name this view
+                      </span>
+                      <input
+                        autoFocus
+                        value={workspaceViewNameDraft}
+                        onChange={e => setWorkspaceViewNameDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
+                        }}
+                        placeholder='e.g. My open PRs'
+                        data-track-category='Projects'
+                        data-track-name='SaveViewNameInput'
+                        className={cn(
+                          'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
+                          'text-foreground outline-none placeholder:text-muted-foreground',
+                          'focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                        )}
+                      />
+                      <div className='flex justify-end gap-2 pt-1'>
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          onClick={() => setIsSavePopoverOpen(false)}
+                          data-track-category='Tickets'
+                          data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size='sm'
+                          onClick={handleConfirmSaveWorkspaceView}
+                          data-track-category='Tickets'
+                          data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
+                          disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
+                        >
+                          Save
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </Popover>
+                  </Popover>
+                )}
+              </div>
+            )}
+            {canCreateTicket &&
+              ((channel && !channel.isArchived) || isMyTicketsView || isWorkspaceView) && (
+                <button
+                  data-testid='kanban-create-ticket-button'
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='Tickets'
+                  data-track-name='CREATE_TICKET_KANBAN'
+                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  onClick={() => {
+                    setCreateTicketSeed(null);
+                    setIsCreateModalOpen(true);
+                  }}
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
+                >
+                  <Plus className='w-4 h-4' />
+                  <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
+                  <span className='sm:hidden'>Create</span>
+                </button>
               )}
-            </div>
-          )}
-          {canCreateTicket && ((channel && !channel.isArchived) || isMyTicketsView) && (
-            <button
-              data-testid='kanban-create-ticket-button'
-              data-track-event='BUTTON_CLICK'
-              data-track-category='Tickets'
-              data-track-name='CREATE_TICKET_KANBAN'
-              data-track-metadata={JSON.stringify({ boardId, channelId })}
-              onClick={() => {
-                setCreateTicketSeed(null);
-                setIsCreateModalOpen(true);
-              }}
-              className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
-            >
-              <Plus className='w-4 h-4' />
-              <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
-              <span className='sm:hidden'>Create</span>
-            </button>
-          )}
+          </div>
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
+            {/* CSV/JSON export — table view only, exports the filtered rows */}
+            {layoutView === 'table' && (
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='rounded-[10px] border-border'
+                    data-track-category='Tickets'
+                    data-track-name='OpenTableExportMenu'
+                  >
+                    <Download className='size-4' />
+                    <span>Export</span>
+                    <ChevronDownIcon className='h-3.5 w-3.5' />
+                  </Button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    align='end'
+                    sideOffset={6}
+                    className='z-50 min-w-48 rounded-lg border border-border bg-background p-1 shadow-xl'
+                  >
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('download-csv')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='DownloadTicketsCsv'
+                    >
+                      <FileText className='h-4 w-4 text-emerald-600' />
+                      Download CSV
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('download-json')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='DownloadTicketsJson'
+                    >
+                      <FileText className='h-4 w-4 text-blue-500' />
+                      Download JSON
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className='my-1 h-px bg-border' />
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('copy-csv')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='CopyTicketsCsv'
+                    >
+                      <Copy className='h-4 w-4 text-muted-foreground' />
+                      Copy to clipboard (CSV)
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('copy-json')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='CopyTicketsJson'
+                    >
+                      <Copy className='h-4 w-4 text-muted-foreground' />
+                      Copy to clipboard (JSON)
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
             {!isFlowBoard && (
               <div className='flex items-center rounded-xl bg-muted border'>
                 <Tooltip content='Kanban'>
@@ -5163,6 +5480,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             return (
               <div
                 key={group.key}
+                data-group-key={group.key}
                 className='flex flex-col rounded-lg border border-border overflow-hidden'
               >
                 {showGroupHeader && (
@@ -5215,6 +5533,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       availableTags={availableTags || []}
                       visibleColumns={tableVisibleColumns}
                       isComfortView={isComfortView}
+                      boardNamesById={boardNamesById}
                     />
                   </div>
                 )}
@@ -5234,14 +5553,36 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             sensors={sensors}
           >
             <div className={`h-full flex flex-col space-y-5 ${groupBy !== 'none' ? 'mb-12' : ''}`}>
-              {processedGroups.map(group => {
+              {allColumnsHidden && (
+                <div className='flex h-full flex-col items-center justify-center gap-3.5 text-center'>
+                  <div className='flex size-[52px] items-center justify-center rounded-2xl bg-muted text-muted-foreground'>
+                    <EyeOff className='size-6' />
+                  </div>
+                  <p className='text-base font-semibold text-foreground'>Every column is hidden</p>
+                  <p className='max-w-[340px] text-[13.5px] leading-[1.6] text-muted-foreground'>
+                    Hidden columns keep their tickets out of the board and out of every count.
+                    Unhide one from the panel on the right.
+                  </p>
+                  <button
+                    type='button'
+                    onClick={showAllColumns}
+                    className='flex h-[34px] items-center rounded-[9px] bg-primary px-[15px] text-[13.5px] font-medium text-primary-foreground transition-colors hover:bg-blue-700'
+                    data-track-category='Tickets'
+                    data-track-name='ShowAllKanbanColumns'
+                  >
+                    Show all columns
+                  </button>
+                </div>
+              )}
+              {kanbanGroups.map(group => {
                 const isExpanded = expandedGroups.has(group.key);
                 const showGroupHeader = groupBy !== 'none';
                 const serverCountGroup = isKanbanLayout
                   ? kanbanCounts.groupsByKey.get(group.key)
                   : undefined;
                 const stageCounts = group.stageCounts ?? serverCountGroup?.stages;
-                const groupCount = group.count;
+                const hiddenInGroup = countHiddenInGroup(group);
+                const groupCount = Math.max(0, group.count - hiddenInGroup);
                 const paginatedColumnConfig = canUseKanbanColumnPagination
                   ? {
                       columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
@@ -5261,7 +5602,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   : null;
 
                 return (
-                  <div key={group.key} className={isExpanded || !showGroupHeader ? 'h-full' : ''}>
+                  <div
+                    key={group.key}
+                    data-group-key={group.key}
+                    className={isExpanded || !showGroupHeader ? 'h-full' : ''}
+                  >
                     {showGroupHeader && (
                       <button
                         onClick={() => toggleGroupExpansion(group.key)}
@@ -5297,8 +5642,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                               {group.displayName}
                             </h3>
                           </div>
-                          <span className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'>
+                          <span
+                            className='text-xs font-medium bg-background text-muted-foreground px-2 py-0.5 rounded-lg'
+                            title={
+                              hiddenInGroup > 0
+                                ? `${groupCount} of ${group.count} shown — ${hiddenInGroup} in hidden columns`
+                                : undefined
+                            }
+                          >
                             {groupCount}
+                            {hiddenInGroup > 0 && (
+                              <span className='text-muted-foreground/60'>{` / ${group.count}`}</span>
+                            )}
                           </span>
                         </div>
                       </button>
@@ -5313,13 +5668,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       >
                         <KanbanColumns
                           stages={stages}
+                          hiddenColumnIds={hiddenColumnIds}
+                          onHideColumn={handleHideColumn}
+                          onUnhideColumn={unhideColumn}
                           ticketsByStage={group.columnData}
                           {...(stageCounts ? { stageCounts } : {})}
                           onTicketClick={handleTicketClick}
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
+                          onLoadMoreTags={handleLoadMoreTags}
+                          hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                          onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
-                          layoutScope={`${viewMode}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`}
+                          layoutScope={kanbanLayoutScope}
                           searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={group.allTickets}
@@ -5364,6 +5725,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   tags={tagsByTicketId.get(activeTicket.id) || []}
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
+                  onLoadMoreTags={handleLoadMoreTags}
+                  hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                  onSearchTags={handleSearchTags}
                   slaPolicies={kanbanSlaPolicies}
                 />
               )}
@@ -5394,8 +5758,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         />
       )}
 
-      {/* Create Ticket Modal — my-tickets view (no channel context, user picks channel + board) */}
-      {isMyTicketsView && !channel && isCreateModalOpen && (
+      {/* Create Ticket Modal — my-tickets and saved views (no channel context, user picks channel + board) */}
+      {(isMyTicketsView || isWorkspaceView) && !channel && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           onClose={() => {

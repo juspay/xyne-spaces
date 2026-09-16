@@ -36,6 +36,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../dropdown-menu';
 
@@ -91,7 +93,10 @@ import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
-import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
+import {
+  getSchedulePresets,
+  ScheduleMessageDialog,
+} from '../ScheduleMessageDialog/ScheduleMessageDialog';
 import { Checkbox } from '../Checkbox/Checkbox';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
@@ -100,6 +105,23 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+
+/**
+ * Which affordance sent the message. Every send path funnels through one
+ * function, so without this the activity row cannot distinguish Enter from the
+ * Send button from the mobile editor.
+ */
+type SendTrigger =
+  | 'keyboard_enter'
+  | 'keyboard_mod_enter'
+  | 'keyboard_shift_enter'
+  | 'send_button'
+  | 'send_menu'
+  | 'mobile_editor'
+  | 'unknown';
+import { useChannel } from '../../../hooks/useChannels';
 
 const lowlight = createLowlight(all);
 
@@ -252,6 +274,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onCreateCanvas,
       onTranscriptSelect,
       onScheduleSend,
+      showSchedulePresets = false,
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
@@ -377,6 +400,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
+    const schedulePresets = React.useMemo(
+      () => (isSendMenuOpen && showSchedulePresets ? getSchedulePresets() : []),
+      [isSendMenuOpen, showSchedulePresets],
+    );
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
     const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
@@ -827,11 +854,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               event.preventDefault();
               // Keyboard sends are invisible to autocapture (click/change/submit
               // only); emit it explicitly so keyboard vs button sends are visible.
+              // This branch serves BOTH Cmd/Ctrl+Enter and Shift+Enter, so the
+              // trigger has to mirror the keyCombo rather than assume mod.
               posthogService.capture('message_send', {
                 trigger: 'keyboard',
                 keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
               });
-              void handleSend();
+              void handleSend(event.metaKey ? 'keyboard_mod_enter' : 'keyboard_shift_enter');
               return true;
             }
             event.preventDefault();
@@ -991,7 +1020,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               trigger: 'keyboard',
               keyCombo: 'enter',
             });
-            void handleSend();
+            void handleSend('keyboard_enter');
             return true;
           }
 
@@ -1262,111 +1291,147 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
     );
 
-    const handleSend = useCallback(async () => {
-      if (!editor || isSending) return;
-      if (sendDisabled) {
-        // The button is disabled, but Enter still lands here — say why rather than
-        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
-        // tooltip carrying the same reason never opens.
-        if (sendDisabledReason) toast.warning(sendDisabledReason);
-        return;
-      }
+    const trackedChannel = useChannel(channelId ?? '');
 
-      // If a voice stream is active, finalize it for send first: this strips any
-      // unfinalized interim text and aborts the stream (discarding in-flight results)
-      // BEFORE we read the editor, so only committed text is sent and nothing leaks
-      // into the next message. No-op when no stream is active.
-      voiceInputRef.current?.abortForSend();
+    const submitScheduled = useCallback(
+      (scheduledFor: number): void => {
+        if (!onScheduleSend || !hasSendableContent) return;
+        const html = editor?.getHTML() ?? '';
+        const files = allAttachments.map(a => a.file).filter((f): f is File => f instanceof File);
+        void onScheduleSend(scheduledFor, html, files);
+        editor?.commands.clearContent(true);
+      },
+      [onScheduleSend, hasSendableContent, editor, allAttachments],
+    );
 
-      // The voice "shimmer" highlight is a transient editor-only decoration that
-      // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
-      // the orange highlight (a <span class="voice-shimmer">) into the sent message.
-      if (editor.schema.marks['voiceShimmer']) {
-        editor
-          .chain()
-          .setTextSelection({ from: 0, to: editor.state.doc.content.size })
-          .unsetMark('voiceShimmer')
-          .run();
-      }
-
-      // Flush pending debounced content update before sending so that
-      // onContentChange consumers (e.g. ComposeDmPanel form state) receive
-      // the latest content before handleSubmit reads from the form.
-      if (debouncedUpdateTimer.current) {
-        clearTimeout(debouncedUpdateTimer.current);
-        debouncedUpdateTimer.current = null;
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        lastAppliedValueRef.current = htmlContent;
-        onContentChange?.(htmlContent, editor.getText());
-      }
-
-      const plainText = editor.getText().trim();
-      const htmlContent = editor.getHTML();
-
-      if (!hasSendableContent) return;
-
-      // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
-      // If so, dispatch it to the app instead of sending it as a chat message.
-      const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
-      if (commandMatch && onCommandSelect) {
-        const cmdName = commandMatch[1] ?? '';
-        // Resolve mention spans from the HTML content so @user → <userid:xyneId>
-        // and @group → <groupid:xyneId> instead of bare display names.
-        const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
-        const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
-          editor.commands.setContent('');
-          setContent('');
-          editor.commands.focus();
-          void onCommandSelect(matchedCmd, cmdText);
+    // `trigger` says which affordance sent the message. Every path funnels through
+    // this one function, which is what makes SEND_MESSAGE complete — but it also
+    // means the event cannot tell Enter from the button unless the caller says so.
+    const handleSend = useCallback(
+      async (trigger: SendTrigger = 'unknown') => {
+        if (!editor || isSending) return;
+        if (sendDisabled) {
+          // The button is disabled, but Enter still lands here — say why rather than
+          // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+          // tooltip carrying the same reason never opens.
+          if (sendDisabledReason) toast.warning(sendDisabledReason);
           return;
         }
-      }
 
-      setIsSending(true);
-      try {
-        // Filter to only send actual File objects
-        // UploadedFile metadata-only attachments are already stored and referenced by ID
-        const filesToSend = allAttachments
-          .map(a => a.file)
-          .filter((f): f is File => f instanceof File);
+        // If a voice stream is active, finalize it for send first: this strips any
+        // unfinalized interim text and aborts the stream (discarding in-flight results)
+        // BEFORE we read the editor, so only committed text is sent and nothing leaks
+        // into the next message. No-op when no stream is active.
+        voiceInputRef.current?.abortForSend();
 
-        // Insert canvas link into editor if attached
-        if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
-          // Insert as plain link - platform will unfurl to show preview
-          editor?.commands.insertContent(` ${canvasLink}`);
+        // The voice "shimmer" highlight is a transient editor-only decoration that
+        // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
+        // the orange highlight (a <span class="voice-shimmer">) into the sent message.
+        if (editor.schema.marks['voiceShimmer']) {
+          editor
+            .chain()
+            .setTextSelection({ from: 0, to: editor.state.doc.content.size })
+            .unsetMark('voiceShimmer')
+            .run();
         }
 
-        // Get fresh content after inserting link
-        const finalHtmlContent = editor?.getHTML() || htmlContent;
-        const finalPlainText = editor?.getText().trim() || plainText;
-
-        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-
-        editor.commands.setContent('');
-        setContent('');
-        setAttachedCanvas(null);
-        if (disableDraftUpload) {
-          setAttachmentsMap(new Map());
+        // Flush pending debounced content update before sending so that
+        // onContentChange consumers (e.g. ComposeDmPanel form state) receive
+        // the latest content before handleSubmit reads from the form.
+        if (debouncedUpdateTimer.current) {
+          clearTimeout(debouncedUpdateTimer.current);
+          debouncedUpdateTimer.current = null;
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          lastAppliedValueRef.current = htmlContent;
+          onContentChange?.(htmlContent, editor.getText());
         }
-        editor.commands.focus();
-      } finally {
-        setIsSending(false);
-      }
-    }, [
-      editor,
-      allAttachments,
-      onSendMessage,
-      isSending,
-      attachedCanvas,
-      hasSendableContent,
-      sendDisabled,
-      sendDisabledReason,
-      commandItems,
-      onCommandSelect,
-      disableDraftUpload,
-    ]);
+
+        const plainText = editor.getText().trim();
+        const htmlContent = editor.getHTML();
+
+        if (!hasSendableContent) return;
+
+        // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
+        // If so, dispatch it to the app instead of sending it as a chat message.
+        const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
+        if (commandMatch && onCommandSelect) {
+          const cmdName = commandMatch[1] ?? '';
+          // Resolve mention spans from the HTML content so @user → <userid:xyneId>
+          // and @group → <groupid:xyneId> instead of bare display names.
+          const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
+          const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
+          if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
+            editor.commands.setContent('');
+            setContent('');
+            editor.commands.focus();
+            void onCommandSelect(matchedCmd, cmdText);
+            return;
+          }
+        }
+
+        setIsSending(true);
+        try {
+          // Filter to only send actual File objects
+          // UploadedFile metadata-only attachments are already stored and referenced by ID
+          const filesToSend = allAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
+
+          // Insert canvas link into editor if attached
+          if (attachedCanvas) {
+            const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
+            // Insert as plain link - platform will unfurl to show preview
+            editor?.commands.insertContent(` ${canvasLink}`);
+          }
+
+          // Get fresh content after inserting link
+          const finalHtmlContent = editor?.getHTML() || htmlContent;
+          const finalPlainText = editor?.getText().trim() || plainText;
+
+          await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
+          // Tracked here, not on the Send button: Enter, the button, the mobile
+          // editor and shortcuts all land in this function, and only a send that
+          // succeeded should count.
+          globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
+            ...channelTrackingMetadata(trackedChannel),
+            ...(conversationId !== null && { conversationId }),
+            isThreadReply: conversationId !== null,
+            hasAttachments: filesToSend.length > 0,
+            trigger,
+            attachmentCount: filesToSend.length,
+            hasCanvasAttached: attachedCanvas !== null,
+            // Length only — never the message body. contextMetadata is unmasked.
+            charLength: finalPlainText.length,
+            mentionCount: (finalHtmlContent.match(/data-mention-id=/g) ?? []).length,
+          });
+
+          editor.commands.setContent('');
+          setContent('');
+          setAttachedCanvas(null);
+          if (disableDraftUpload) {
+            setAttachmentsMap(new Map());
+          }
+          editor.commands.focus();
+        } finally {
+          setIsSending(false);
+        }
+      },
+      [
+        editor,
+        allAttachments,
+        onSendMessage,
+        isSending,
+        attachedCanvas,
+        hasSendableContent,
+        sendDisabled,
+        sendDisabledReason,
+        commandItems,
+        onCommandSelect,
+        disableDraftUpload,
+        trackedChannel,
+      ],
+    );
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1686,7 +1751,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 disabled={disabled}
                 emojiSizeClass={emojiSizeClass}
                 onAttachClick={handleAttachClick}
-                onSend={() => void handleSend()}
+                onSend={() => void handleSend('mobile_editor')}
                 placeholder={placeholder}
                 showMentions={features.mentions}
                 showFormattingToolbar={showMobileFormattingToolbar}
@@ -2060,7 +2125,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={onCancel}
                         data-track-category='CHAT_INPUT'
                         data-track-name='CANCEL_EDITING'
-                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
                         <X className='h-4 w-4' />
@@ -2084,11 +2149,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
-                                ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-primary-foreground'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
@@ -2100,20 +2165,17 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={
                                 disabled || sendDisabled || isSending || !hasSendableContent
                               }
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent && !sendDisabled
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                message: editor?.getText().trim() || '',
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2123,7 +2185,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${
+                            className={`w-px h-4 self-center ${
                               hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'
                             }`}
                           ></div>
@@ -2132,7 +2194,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <button
                                 type='button'
                                 disabled={disabled || sendDisabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                  hasSendableContent && !sendDisabled
+                                    ? 'cursor-pointer hover:bg-background/10'
+                                    : 'cursor-not-allowed'
+                                }`}
                                 data-testid='send-options-menu'
                               >
                                 <ChevronBigDown className='h-3 w-3' />
@@ -2153,6 +2219,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               )}
                               {onScheduleSend && (
                                 <DropdownMenuItem
+                                  disabled={!hasSendableContent}
                                   onClick={() => {
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
@@ -2169,11 +2236,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
-                                ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                : 'bg-primary text-white hover:bg-primary/90'
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-white'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >
@@ -2185,17 +2252,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={disabled || isSending || !hasSendableContent}
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2205,30 +2270,65 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
+                            className={`w-px h-4 self-center ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
                           ></div>
-                          <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type='button'
-                                disabled={disabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                                data-testid='send-options-menu'
-                              >
-                                <ChevronBigDown className='h-3 w-3' />
-                              </button>
-                            </DropdownMenuTrigger>
+                          <DropdownMenu
+                            open={isSendMenuOpen && hasSendableContent}
+                            onOpenChange={next => setIsSendMenuOpen(next && hasSendableContent)}
+                          >
+                            <Tooltip
+                              content='Schedule for later'
+                              side='top'
+                              delayDuration={1000}
+                              skipDelayDuration={1000}
+                              {...(!showSchedulePresets && { open: false })}
+                            >
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type='button'
+                                  disabled={disabled || isSending || !hasSendableContent}
+                                  className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                    hasSendableContent
+                                      ? 'cursor-pointer hover:bg-background/10'
+                                      : 'cursor-not-allowed'
+                                  }`}
+                                  data-testid='send-options-menu'
+                                >
+                                  <ChevronBigDown className='h-3 w-3' />
+                                </button>
+                              </DropdownMenuTrigger>
+                            </Tooltip>
                             <DropdownMenuContent side='top' align='end'>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  void handleSend();
-                                  setIsSendMenuOpen(false);
-                                }}
-                                data-track-category='CHAT_INPUT'
-                                data-track-name='SEND_FROM_MENU'
-                              >
-                                <ArrowUp className='h-4 w-4' /> Send now
-                              </DropdownMenuItem>
+                              {showSchedulePresets ? (
+                                <>
+                                  <DropdownMenuLabel>Schedule message</DropdownMenuLabel>
+                                  {schedulePresets.map(option => (
+                                    <DropdownMenuItem
+                                      key={option.key}
+                                      onClick={() => {
+                                        setIsSendMenuOpen(false);
+                                        submitScheduled(option.at.getTime());
+                                      }}
+                                      data-track-category='CHAT_INPUT'
+                                      data-track-name={`SCHEDULE_PRESET_${option.trackId}`}
+                                    >
+                                      {option.label}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void handleSend('send_menu');
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='SEND_FROM_MENU'
+                                >
+                                  <ArrowUp className='h-4 w-4' /> Send now
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setIsSendMenuOpen(false);
@@ -2237,7 +2337,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 data-track-category='CHAT_INPUT'
                                 data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
-                                <Clock className='h-4 w-4' /> Schedule message
+                                <Clock className='h-4 w-4' />{' '}
+                                {showSchedulePresets ? 'Custom time' : 'Schedule message'}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -2251,21 +2352,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         >
                           <button
                             type='button'
-                            onClick={() => void handleSend()}
+                            onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                             }`}
                             aria-label='Send message'
                             data-testid='send-message-button'
-                            data-track-category='CHAT_INPUT'
-                            data-track-name='SEND_MESSAGE'
-                            data-track-metadata={JSON.stringify({
-                              ...(conversationId !== null ? { conversationId } : { channelId }),
-                              hasAttachments: allAttachments.length > 0,
-                            })}
                           >
                             {isSending ? (
                               <Loader2 className='h-4 w-4 animate-spin' />
@@ -2315,14 +2410,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <ScheduleMessageDialog
             open={isScheduleDialogOpen}
             onOpenChange={setIsScheduleDialogOpen}
-            onConfirm={scheduledFor => {
-              const html = editor?.getHTML() ?? '';
-              const files = allAttachments
-                .map(a => a.file)
-                .filter((f): f is File => f instanceof File);
-              void onScheduleSend(scheduledFor, html, files);
-              editor?.commands.clearContent(true);
-            }}
+            onConfirm={submitScheduled}
           />
         )}
 

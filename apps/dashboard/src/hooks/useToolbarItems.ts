@@ -1,9 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import {
-  DEFAULT_TOOLBAR_PATHS,
-  REQUIRED_TOOLBAR_PATHS,
-  isRequiredToolbarPath,
-} from '../components/AppSidebar/navigationConfig';
+import { DEFAULT_TOOLBAR_PATHS } from '../components/AppSidebar/navigationConfig';
 
 export const TOOLBAR_ITEMS_KEY = 'xyne:toolbar-items';
 
@@ -37,8 +33,7 @@ const getSnapshot = (): Set<string> => {
     }
   }
 
-  // Required items are always present, regardless of stored state.
-  cachedSet = new Set([...paths, ...REQUIRED_TOOLBAR_PATHS]);
+  cachedSet = new Set(paths);
   return cachedSet;
 };
 
@@ -49,8 +44,6 @@ export const useToolbarItems = (): {
   const toolbarPaths = useSyncExternalStore(subscribe, getSnapshot);
 
   const setInToolbar = (path: string, inToolbar: boolean): void => {
-    // Required items cannot be removed from the toolbar.
-    if (!inToolbar && isRequiredToolbarPath(path)) return;
     const next = new Set(getSnapshot());
     if (inToolbar) next.add(path);
     else next.delete(path);

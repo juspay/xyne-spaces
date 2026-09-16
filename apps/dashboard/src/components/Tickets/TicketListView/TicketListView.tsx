@@ -88,7 +88,7 @@ const loadColumnWidths = (): TicketListColumnWidths => {
 };
 
 export type SupportTicketRow = NonNullable<
-  QueryResultType<typeof queries.supportTicketsPageV3>[number]
+  QueryResultType<typeof queries.supportTicketsPageV4>[number]
 >;
 
 type PageCursor = { id: string; lastEmailAt: number };
@@ -408,7 +408,7 @@ export const TicketListView = function TicketListView({
 
   const pageStart = pageCursors[pageIndex] ?? null;
   const [firstPage, firstPageDetails] = useCachedQuery(
-    queries.supportTicketsPageV3({
+    queries.supportTicketsPageV4({
       channelId,
       isMember,
       assignedTo,

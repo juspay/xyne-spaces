@@ -11,7 +11,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { readFile, readdir } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { PATHS } from "../config.js";
 import { validateS2SKey } from "../middleware/auth.js";
@@ -19,6 +19,7 @@ import { restoreSessionFromArchive } from "../session-store.js";
 import { gcsListDebugRuns, gcsDownloadDebugRun } from "../storage.js";
 import { isSafeId } from "../safe-id.js";
 import { metric } from "../metrics.js";
+import { isCaptureFileName, watchdogDir } from "../loop-watchdog.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("debug");
@@ -260,6 +261,52 @@ router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Reque
     });
   } catch (err) {
     log.error("[debug] artifacts error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.get("/debug/loop-watchdog", validateS2SKey, async (req: Request, res: Response) => {
+  try {
+    const dir = watchdogDir();
+    const requested = typeof req.query["file"] === "string" ? req.query["file"] : undefined;
+
+    if (requested !== undefined) {
+      if (!isCaptureFileName(requested)) {
+        res.status(400).json({ success: false, error: "Invalid capture file name" });
+        return;
+      }
+      const filePath = path.join(dir, requested);
+      if (!existsSync(filePath)) {
+        res.status(404).json({ success: false, error: "Capture not found" });
+        return;
+      }
+      res.type("application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="${requested}"`);
+      createReadStream(filePath).on("error", () => res.destroy()).pipe(res);
+      return;
+    }
+
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const captures = names
+      .filter(isCaptureFileName)
+      .sort()
+      .reverse()
+      .map((name) => {
+        let size: number | null = null;
+        let mtime: string | null = null;
+        try {
+          const s = statSync(path.join(dir, name));
+          size = s.size;
+          mtime = s.mtime.toISOString();
+        } catch {
+          size = null;
+        }
+        return { name, size, mtime };
+      });
+
+    res.json({ success: true, data: { dir, captures } });
+  } catch (err) {
+    log.error("[debug] loop-watchdog error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

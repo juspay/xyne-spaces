@@ -24,6 +24,8 @@ import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trig
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { activityService } from '@/services/activity/activityService';
+import { userActivityStatusService } from '@/services/userActivityStatusService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -114,12 +116,10 @@ class LiveKitWebhookController {
 
     try {
       // Global routing: NOTE_TAKER (HEADLESS / "Xyne Oats") rooms never have a
-      // channel/message/conversation, so every event type for them is handled
-      // entirely by noteTakerWebhookController instead of the channel-based
-      // handlers below. This check must run before the switch so no event type
-      // (room_finished, participant_left, track_published, egress_*, etc.) ever
-      // falls through to the channel-based DB operations, which don't apply.
-      if (await this.isNoteTakerRoom(event)) {
+      // channel/message/conversation, so their events go to noteTakerWebhookController.
+      // Egress events are shared: callRecordingService handles them by egressId.
+      const isEgressEvent = event.event === 'egress_started' || event.event === 'egress_ended';
+      if (!isEgressEvent && (await this.isNoteTakerRoom(event))) {
         await noteTakerWebhookController.handleEvent(event);
         res.status(200).json({ success: true });
         return;
@@ -279,6 +279,8 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
+
+        void userActivityStatusService.clearInCallForEndedCall(result.call.id);
 
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
@@ -564,6 +566,9 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              if (existingConversationId) {
+                await activityService.fillSdlcOwner(conversationId, channelId);
+              }
               logger.info(
                 `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
@@ -703,6 +708,8 @@ class LiveKitWebhookController {
           }
         }
       }
+      void userActivityStatusService.markInCall(participant.identity);
+
       // Notify all connected clients that participants changed
       if (roomName) {
         await callHostControlService.applyHostControlsToParticipant(
@@ -807,6 +814,8 @@ class LiveKitWebhookController {
       }
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
+
+      void userActivityStatusService.clearInCall(participant.identity);
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);

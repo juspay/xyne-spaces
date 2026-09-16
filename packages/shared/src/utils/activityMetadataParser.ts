@@ -614,6 +614,64 @@ export function serializeInitialMessageMd(
   return lines.join('\n');
 }
 
+/**
+ * Input for `buildInitialMessageMd`. Every field the message row does not yet
+ * define at creation time carries a default, so a caller about to insert the
+ * message can build the md without reading the row back.
+ */
+export interface InitialMessageMdInput {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  msgType: MessageType;
+  createdAt: number;
+  workspaceId?: string | null;
+  hasAttachment?: boolean;
+  edited?: boolean;
+  isDeleted?: boolean;
+  showInChannel?: boolean;
+  visibleTo?: string | null;
+  metadata?: unknown;
+  nudgeCount?: number | null;
+  isSent?: boolean;
+  reactions_md?: string | null;
+  link_preview_md?: string | null;
+  childConversationId?: string | null;
+}
+
+/**
+ * The single builder for `conversations.initial_message_md`.
+ *
+ * Every writer — Zero mutators, mutation-sync handlers, Prisma services,
+ * migration scripts — must go through this. Divergence is not a type error:
+ * a writer that serializes differently silently rewrites the md on every
+ * conversation it touches, and each of those writes fans out through every
+ * subscribed Zero pipeline.
+ */
+export function buildInitialMessageMd(msg: InitialMessageMdInput): string | null {
+  return serializeInitialMessageMd({
+    messageId: msg.messageId,
+    conversationId: msg.conversationId,
+    workspaceId: msg.workspaceId ?? null,
+    senderId: msg.senderId,
+    content: msg.content,
+    msgType: msg.msgType,
+    hasAttachment: msg.hasAttachment ?? false,
+    edited: msg.edited ?? false,
+    isDeleted: msg.isDeleted ?? false,
+    showInChannel: msg.showInChannel ?? false,
+    visibleTo: msg.visibleTo ?? null,
+    createdAt: msg.createdAt,
+    metadata: msg.metadata ? JSON.stringify(msg.metadata) : null,
+    nudgeCount: msg.nudgeCount ?? null,
+    isSent: msg.isSent ?? false,
+    reactions_md: msg.reactions_md ?? null,
+    link_preview_md: msg.link_preview_md ?? null,
+    childConversationId: msg.childConversationId ?? null,
+  });
+}
+
 // ==========================================================================
 // PARENT MESSAGE SNAPSHOT
 // ==========================================================================

@@ -74,7 +74,6 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
-import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -1082,8 +1081,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
       <div className='flex flex-col gap-1.5'>
         {items.map(item => {
           const Icon = item.icon;
-          const required = isRequiredToolbarPath(item.path);
-          const checked = required || toolbarPaths.has(item.path);
+          const checked = toolbarPaths.has(item.path);
           return (
             <div
               key={item.path}
@@ -1096,11 +1094,9 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
               </div>
               <div className='flex items-center gap-2.5 shrink-0'>
-                {required && <span className='text-xs text-muted-foreground'>Always on</span>}
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  disabled={required}
                   onCheckedChange={value => setInToolbar(item.path, value)}
                 />
               </div>

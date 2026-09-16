@@ -1002,6 +1002,53 @@ export class CallRepository {
   }
 
   /**
+   * Mark a call's ACCEPTED participants as LEFT. Returns the number of rows updated.
+   */
+  async markStrandedParticipantsAsLeft(callId: string, leftAt: Date): Promise<number> {
+    const { count } = await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+      },
+      data: {
+        response: InvitationResponse.LEFT,
+        leftAt,
+      },
+    });
+
+    if (count > 0) {
+      queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryMarkParticipantAsLeft });
+    }
+
+    return count;
+  }
+
+  /**
+   * Find calls that are no longer live but still have ACCEPTED participants.
+   */
+  async findCallsWithStrandedParticipants(
+    take: number,
+  ): Promise<Array<{ id: string; endedAt: Date | null }>> {
+    const stranded = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        response: InvitationResponse.ACCEPTED,
+        call: { status: { notIn: [CallStatus.ACTIVE, CallStatus.IN_PROGRESS] } },
+      },
+      select: { callId: true },
+      distinct: ['callId'],
+      take,
+    });
+
+    if (stranded.length === 0) return [];
+
+    return await DatabaseClient.getInstance().call.findMany({
+      where: { id: { in: stranded.map((p) => p.callId) } },
+      select: { id: true, endedAt: true },
+      orderBy: { endedAt: 'asc' },
+    });
+  }
+
+  /**
    * Update participant response and joinedAt timestamp
    * Requires a transaction client for atomic operations
    */

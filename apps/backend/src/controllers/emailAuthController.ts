@@ -439,7 +439,7 @@ export class EmailAuthController {
       if (workspaceUsers.length === 1) {
         const refreshToken = crypto.randomUUID();
         const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
         const session = await this.userSessionService.createSession({
           userId: workspaceUser.id,
@@ -468,11 +468,11 @@ export class EmailAuthController {
         });
         res.cookie('user_session_id', session.id, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);

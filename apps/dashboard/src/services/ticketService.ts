@@ -15,7 +15,7 @@ export interface CreateTicketRequest {
   boardId?: string;
   sourceConversationId?: string;
   sourceMessageId?: string;
-  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string };
+  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string };
 }
 
 export interface CreateTicketResponse {
@@ -29,12 +29,7 @@ export const createTicket = async (payload: CreateTicketRequest): Promise<Create
   return response.data;
 };
 
-export type KanbanCountsViewMode =
-  | 'project'
-  | 'board'
-  | 'my-tickets'
-  | 'user-tickets'
-  | 'group-tickets';
+export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanCountsGroupBy =
   | 'none'
@@ -74,8 +69,6 @@ export interface KanbanCountsRequest extends FlowStepVisibilityOptions {
   projectId?: string;
   boardId?: string;
   boardIds?: string[];
-  userId?: string;
-  groupId?: string;
   filters?: KanbanCountsFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;

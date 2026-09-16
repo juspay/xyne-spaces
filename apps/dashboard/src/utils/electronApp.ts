@@ -217,7 +217,10 @@ export interface CreateTicketPopoutDraft {
   tab?: string | null | undefined;
   sourceConversationId?: string | null | undefined;
   sourceMessageId?: string | null | undefined;
-  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string } | null | undefined;
+  entityLinkContext?:
+    | { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string }
+    | null
+    | undefined;
   initialMessageId?: string | null | undefined;
   parentTicketId?: string | null | undefined;
   isFromSubTicket?: boolean | undefined;

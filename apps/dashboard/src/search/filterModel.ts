@@ -22,6 +22,7 @@ export const CHIP_PREFIXES = [
   'assignee:',
   'priority:',
   'board:',
+  'entity:',
   // Date chips are value filters like priority — a window, not an entity.
   'on:',
   'after:',
@@ -53,6 +54,8 @@ export interface SearchResultsFilters {
   statuses: string[];
   boardIds: string[];
   tags: string[];
+  /** Entity names annotated on messages/tickets. AND-ed by the backend, not OR-ed. */
+  entities: string[];
   // Date range: either a keyword (`range:last 7 days`) or explicit bounds (YYYY-MM-DD).
   dateRange: string;
   after: string;
@@ -79,6 +82,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   statuses: [],
   boardIds: [],
   tags: [],
+  entities: [],
   dateRange: '',
   after: '',
   before: '',
@@ -202,6 +206,7 @@ export interface StructuredSearchFilters {
   status?: string;
   board?: string;
   tags?: string;
+  entity?: string;
   before?: string;
   after?: string;
   range?: string;

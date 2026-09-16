@@ -8,6 +8,7 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  WorkspaceRole,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -133,7 +134,7 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -237,7 +238,7 @@ import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDesk
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
 
 const ChannelInfoModal = ({
   channelId,
@@ -574,6 +575,7 @@ const SupportScreen = (): ReactElement => {
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const { isMobile } = usePlatform();
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -1246,10 +1248,11 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    !!channelPreference?.metricsEnabled;
+    (isGuest || !!channelPreference?.metricsEnabled);
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
@@ -1585,18 +1588,37 @@ const SupportScreen = (): ReactElement => {
   // Mailbox folders are email-only, so other desk types get no folder filter on their list.
   const selectedChannelHasMailboxFolders =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
+  // Desk insight panels (metrics, report, topics) are restricted to the desk owner
+  // and channel admins, matching canManage in useDeskSettingsForm.
+  // myChannelParticipations only returns this user's ADMIN participations.
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === preferenceChannelId,
+  );
+  const isDeskOwner = !!userID && channelPreference?.ownerUserId === userID;
+  const canManageDeskInsights = isDeskOwner || isChannelAdmin;
+  const myAdminChannelIds = useMemo(
+    () => new Set((myAdminParticipations ?? []).map(p => p.channelId)),
+    [myAdminParticipations],
+  );
   // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
   const canExploreTopics =
+    canManageDeskInsights &&
     isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     !!channelPreference?.metricsEnabled;
 
+  // Only desks the caller manages belong in the comparison picker: the
+  // aggregate route skips anything else as 'forbidden', which read as silently
+  // missing data. Ownership of OTHER desks isn't readable client-side (the ACL
+  // has no all-preferences query), but desk creators are enrolled as channel
+  // ADMIN participants, so the admin set covers the owner case in practice.
   const metricsSelectableDesks = useMemo(
     () =>
       sortedEmailChannels
-        .filter(c => joinedChannelIds.has(c.id))
+        .filter(c => joinedChannelIds.has(c.id) && myAdminChannelIds.has(c.id))
         .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
-    [sortedEmailChannels, joinedChannelIds],
+    [sortedEmailChannels, joinedChannelIds, myAdminChannelIds],
   );
   // A selected channelId that doesn't appear in useEmailChannels() means the
   // channel either doesn't exist or is a private channel the user isn't in —
@@ -2859,36 +2881,39 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined && metricsEnabled && (
-                        <Tooltip content='Desk metrics' side='bottom'>
-                          <button
-                            onClick={() => {
-                              const base = selectedChannelId
-                                ? `${supportBase}/${selectedChannelId}`
-                                : supportBase;
-                              if (isMetricsOpen) {
-                                void navigate(base, { replace: true });
-                              } else {
-                                void navigate(`${base}?metrics=open`);
-                              }
-                            }}
-                            className={cn(
-                              'p-1.5 rounded transition-colors',
-                              isMetricsOpen
-                                ? 'bg-muted text-foreground'
-                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                            )}
-                            data-track-category='Support'
-                            data-track-name='OpenDeskMetrics'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          >
-                            <BarChart3 size={16} />
-                          </button>
-                        </Tooltip>
-                      )}
+                      {isSelectedChannelJoined &&
+                        metricsEnabled &&
+                        (canManageDeskInsights || isGuest) && (
+                          <Tooltip content='Desk metrics' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isMetricsOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?metrics=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isMetricsOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskMetrics'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.deskReportEnabled && (
+                        channelPreference?.deskReportEnabled &&
+                        canManageDeskInsights && (
                           <Tooltip content='Desk report' side='bottom'>
                             <button
                               onClick={() => {
@@ -3638,40 +3663,46 @@ const SupportScreen = (): ReactElement => {
                   userID={userID}
                 />
               )}
-              {isMetricsOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskMetricsDashboard
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                  availableDesks={metricsSelectableDesks}
-                  customFieldDefinitions={deskDynamicFields}
-                  availableStages={availableStages}
-                  onTicketClick={ticket => {
-                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
-                    });
-                  }}
-                />
-              )}
-              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskReportPanel
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                />
-              )}
+              {isMetricsOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                (canManageDeskInsights || isGuest) && (
+                  <DeskMetricsDashboard
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                    availableDesks={metricsSelectableDesks}
+                    customFieldDefinitions={deskDynamicFields}
+                    availableStages={availableStages}
+                    onTicketClick={ticket => {
+                      void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                        state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                      });
+                    }}
+                  />
+                )}
+              {isReportOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                canManageDeskInsights && (
+                  <DeskReportPanel
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                  />
+                )}
               {isTopicsOpen && selectedChannelId && canExploreTopics && (
                 <TopicsExplorer
                   open
@@ -4517,7 +4548,7 @@ export const SupportTicketDetail = ({
       if (!channelId) return [];
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       return (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4568,7 +4599,7 @@ export const SupportTicketDetail = ({
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,

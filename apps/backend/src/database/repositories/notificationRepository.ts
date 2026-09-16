@@ -8,8 +8,6 @@ type NotificationCreateInput = {
   workspaceId: string;
   userId: string;
   type: NotificationType;
-  title: string;
-  message: string;
   status?: NotificationStatus;
   deliveryMethods?: NotificationDeliveryMethod[];
   metadata?: any;

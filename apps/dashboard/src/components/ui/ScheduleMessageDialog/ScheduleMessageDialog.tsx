@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { format } from 'date-fns';
 import { X } from 'lucide-react';
 import { Dialog } from '../Dialog';
@@ -6,7 +6,15 @@ import { cn } from '../../../utils/classNames';
 
 const MAX_SCHEDULE_DAYS = 100;
 
-type SchedulePreset = 'tomorrow' | 'nextMonday' | 'custom';
+const SCHEDULE_HOUR = 9;
+const WEEKEND_DAYS = [0, 6];
+
+export interface SchedulePresetOption {
+  key: string;
+  trackId: string;
+  label: string;
+  at: Date;
+}
 
 export interface ScheduleMessageDialogProps {
   open: boolean;
@@ -22,21 +30,35 @@ const padDatetimePart = (n: number): string => String(n).padStart(2, '0');
 const toDatetimeLocalValue = (d: Date): string =>
   `${d.getFullYear()}-${padDatetimePart(d.getMonth() + 1)}-${padDatetimePart(d.getDate())}T${padDatetimePart(d.getHours())}:${padDatetimePart(d.getMinutes())}`;
 
-const getTomorrowAtNine = (): Date => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  d.setSeconds(0, 0);
+const atScheduleHour = (from: Date, dayOffset: number): Date => {
+  const d = new Date(from);
+  d.setDate(d.getDate() + dayOffset);
+  d.setHours(SCHEDULE_HOUR, 0, 0, 0);
   return d;
 };
 
-const getNextMondayAtNine = (): Date => {
-  const d = new Date();
-  const daysUntilMonday = (1 - d.getDay() + 7) % 7 || 7;
-  d.setDate(d.getDate() + daysUntilMonday);
-  d.setHours(9, 0, 0, 0);
-  d.setSeconds(0, 0);
-  return d;
+export const getSchedulePresets = (now: Date = new Date()): SchedulePresetOption[] => {
+  const tomorrow = atScheduleHour(now, 1);
+  const nextMonday = atScheduleHour(now, (1 - now.getDay() + 7) % 7 || 7);
+
+  const presets: SchedulePresetOption[] = [];
+  if (!WEEKEND_DAYS.includes(tomorrow.getDay())) {
+    presets.push({
+      key: 'tomorrow',
+      trackId: 'TOMORROW',
+      label: `Tomorrow at ${format(tomorrow, 'h:mm a')}`,
+      at: tomorrow,
+    });
+  }
+  if (!presets.some(p => p.at.getTime() === nextMonday.getTime())) {
+    presets.push({
+      key: 'next-monday',
+      trackId: 'NEXT_MONDAY',
+      label: `${format(nextMonday, 'EEEE')} at ${format(nextMonday, 'h:mm a')}`,
+      at: nextMonday,
+    });
+  }
+  return presets;
 };
 
 export const ScheduleMessageDialog = ({
@@ -48,13 +70,13 @@ export const ScheduleMessageDialog = ({
   trackCategory = 'CHAT_INPUT',
 }: ScheduleMessageDialogProps): React.ReactElement => {
   const [step, setStep] = useState<'pick' | 'confirm'>('pick');
-  const [preset, setPreset] = useState<SchedulePreset | null>(null);
+  const [preset, setPreset] = useState<string | null>(null);
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [scheduleDateValue, setScheduleDateValue] = useState('');
   const [pendingScheduleFor, setPendingScheduleFor] = useState<number | null>(null);
 
-  const tomorrowAtNine = useMemo(() => getTomorrowAtNine(), []);
-  const nextMondayAtNine = useMemo(() => getNextMondayAtNine(), []);
+  const presets = open ? getSchedulePresets() : [];
+  const defaultPreset = presets[0];
 
   const resetDialog = (): void => {
     setStep('pick');
@@ -75,22 +97,18 @@ export const ScheduleMessageDialog = ({
     onOpenChange(nextOpen);
   };
 
-  const handlePresetSelect = (nextPreset: SchedulePreset): void => {
-    if (nextPreset === 'tomorrow') {
-      setPreset('tomorrow');
-      setShowCustomPicker(false);
-      setScheduleDateValue(toDatetimeLocalValue(tomorrowAtNine));
+  const handlePresetSelect = (nextPreset: SchedulePresetOption | 'custom'): void => {
+    if (nextPreset === 'custom') {
+      setPreset('custom');
+      setShowCustomPicker(true);
+      if (!scheduleDateValue && defaultPreset) {
+        setScheduleDateValue(toDatetimeLocalValue(defaultPreset.at));
+      }
       return;
     }
-    if (nextPreset === 'nextMonday') {
-      setPreset('nextMonday');
-      setShowCustomPicker(false);
-      setScheduleDateValue(toDatetimeLocalValue(nextMondayAtNine));
-      return;
-    }
-    setPreset('custom');
-    setShowCustomPicker(true);
-    if (!scheduleDateValue) setScheduleDateValue(toDatetimeLocalValue(tomorrowAtNine));
+    setPreset(nextPreset.key);
+    setShowCustomPicker(false);
+    setScheduleDateValue(toDatetimeLocalValue(nextPreset.at));
   };
 
   const scheduledForMs = scheduleDateValue ? new Date(scheduleDateValue).getTime() : NaN;
@@ -140,40 +158,26 @@ export const ScheduleMessageDialog = ({
             </p>
           </div>
           <div className='px-6 py-4 space-y-2.5'>
-            <button
-              type='button'
-              onClick={() => handlePresetSelect('tomorrow')}
-              className={cn(
-                'w-full flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
-                preset === 'tomorrow'
-                  ? 'border-2 border-primary bg-primary/5'
-                  : 'border border-border hover:bg-accent/50',
-              )}
-              data-track-category={trackCategory}
-              data-track-name='schedule-preset-tomorrow'
-            >
-              <span className='font-medium text-foreground'>Tomorrow 9:00 AM</span>
-              <span className='text-muted-foreground tabular-nums shrink-0'>
-                {format(tomorrowAtNine, 'MMM d')}
-              </span>
-            </button>
-            <button
-              type='button'
-              onClick={() => handlePresetSelect('nextMonday')}
-              className={cn(
-                'w-full flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
-                preset === 'nextMonday'
-                  ? 'border-2 border-primary bg-primary/5'
-                  : 'border border-border hover:bg-accent/50',
-              )}
-              data-track-category={trackCategory}
-              data-track-name='schedule-preset-next-monday'
-            >
-              <span className='font-medium text-foreground'>Next Monday 9:00 AM</span>
-              <span className='text-muted-foreground tabular-nums shrink-0'>
-                {format(nextMondayAtNine, 'MMM d')}
-              </span>
-            </button>
+            {presets.map(option => (
+              <button
+                key={option.key}
+                type='button'
+                onClick={() => handlePresetSelect(option)}
+                className={cn(
+                  'w-full flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
+                  preset === option.key
+                    ? 'border-2 border-primary bg-primary/5'
+                    : 'border border-border hover:bg-accent/50',
+                )}
+                data-track-category={trackCategory}
+                data-track-name={`schedule-preset-${option.key}`}
+              >
+                <span className='font-medium text-foreground'>{option.label}</span>
+                <span className='text-muted-foreground tabular-nums shrink-0'>
+                  {format(option.at, 'MMM d')}
+                </span>
+              </button>
+            ))}
             <button
               type='button'
               onClick={() => handlePresetSelect('custom')}
