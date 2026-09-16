@@ -1,9 +1,15 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
+import { AttachmentEntityType } from '../../types';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
-import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
+import {
+  SCALAR,
+  channelAccessArgs,
+  channelAccessWhere,
+  scalarChannelBody,
+} from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
@@ -11,15 +17,26 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
     super(ctx, 'message_attachments');
   }
 
-  canSelect<TReturn>(query: Query<'message_attachments', Schema, TReturn>, args?: SelectArgs): Query<'message_attachments', Schema, TReturn> {
+  canSelect<TReturn>(
+    query: Query<'message_attachments', Schema, TReturn>,
+    args?: SelectArgs,
+  ): Query<'message_attachments', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query
         .where('workspaceId', '=', this.ctx.workspaceId)
-        .where(({ or, cmp, exists }) =>
+        .where(({ or, and, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
-            exists('conversation', (c) =>
-              c.whereExists('channel', (ch) =>
+            exists('conversation', c =>
+              c.whereExists('channel', ch =>
+                ch
+                  .where('workspaceId', '=', this.ctx.workspaceId)
+                  .where(guestChannelAccessWhere(this.ctx)),
+              ),
+            ),
+            and(
+              cmp('entityType', '=', AttachmentEntityType.SDLC_HUB),
+              exists('hubChannel', ch =>
                 ch
                   .where('workspaceId', '=', this.ctx.workspaceId)
                   .where(guestChannelAccessWhere(this.ctx)),
@@ -33,13 +50,18 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
     if (channelId) {
       return query
         .where('workspaceId', '=', this.ctx.workspaceId)
-        .where(({ or, cmp, exists }) =>
+        .where(({ or, and, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
-            exists('conversation', (c) =>
+            exists('conversation', c =>
               c
                 .where('channelId', channelId)
                 .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR),
+            ),
+            and(
+              cmp('entityType', '=', AttachmentEntityType.SDLC_HUB),
+              cmp('entityId', '=', channelId),
+              exists('hubChannel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR),
             ),
           ),
         );
@@ -51,7 +73,7 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
     // draft/in-flight attachment that is not yet linked to a conversation is not hidden.
     return query
       .where('workspaceId', '=', this.ctx.workspaceId)
-      .where(({ or, cmp, exists }) =>
+      .where(({ or, and, cmp, exists }) =>
         or(
           cmp('createdBy', '=', this.ctx.userID),
           exists('conversation', (c) =>
@@ -68,6 +90,19 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
                   ),
                 ),
               { flip: false },
+            ),
+          ),
+          and(
+            cmp('entityType', '=', AttachmentEntityType.SDLC_HUB),
+            exists('hubChannel', (ch) =>
+              ch
+                .where('workspaceId', '=', this.ctx.workspaceId)
+                .where(({ or: or3, cmp: cmp3, exists: exists3 }) =>
+                  or3(
+                    cmp3('visibility', '=', ChannelVisibility.PUBLIC),
+                    exists3('participants', (p) => p.where('userId', this.ctx.userID)),
+                  ),
+                ),
             ),
           ),
         ),
