@@ -18,15 +18,7 @@ import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import type { CalendarProvider } from '../../services/clients/calendarApi';
 import type { CalendarReauthCountdown, CalendarSyncMessage } from '../../utils/calendarSync';
 
-interface CallHistorySearchPanelProps {
-  /** 'v2' swaps header, icon set and drops the calendar-sync/channel-toggle row for the Ask AI button. */
-  variant?: 'v1' | 'v2';
-  calendarProvider?: CalendarProvider | null;
-  isSyncing?: boolean;
-  syncMessage?: CalendarSyncMessage | null;
-  reauthCountdown?: CalendarReauthCountdown | null;
-  onCalendarSync?: () => void;
-  onOpenAskAI?: () => void;
+interface CallHistorySearchPanelBaseProps {
   callMentionSearchType: ChipType | null;
   callMentionSearchQuery: string;
   callSearchSelectedMentions: Array<{
@@ -52,11 +44,35 @@ interface CallHistorySearchPanelProps {
   ) => void;
   handleCallUserSearch: (query: string | null) => void;
   handleCallChannelSearch: (query: string | null) => void;
-  showChannelCalls?: boolean;
-  setShowChannelCalls?: (checked: boolean) => void;
   isMobile: boolean;
   currentUserId?: string;
 }
+
+interface CallHistorySearchPanelV1Props extends CallHistorySearchPanelBaseProps {
+  variant?: 'v1';
+  calendarProvider: CalendarProvider | null;
+  isSyncing: boolean;
+  syncMessage: CalendarSyncMessage | null;
+  reauthCountdown: CalendarReauthCountdown | null;
+  onCalendarSync: () => void;
+  showChannelCalls: boolean;
+  setShowChannelCalls: (checked: boolean) => void;
+  onOpenAskAI?: never;
+}
+
+interface CallHistorySearchPanelV2Props extends CallHistorySearchPanelBaseProps {
+  variant: 'v2';
+  onOpenAskAI: () => void;
+  calendarProvider?: never;
+  isSyncing?: never;
+  syncMessage?: never;
+  reauthCountdown?: never;
+  onCalendarSync?: never;
+  showChannelCalls?: never;
+  setShowChannelCalls?: never;
+}
+
+type CallHistorySearchPanelProps = CallHistorySearchPanelV1Props | CallHistorySearchPanelV2Props;
 
 export function CallHistorySearchPanel({
   variant = 'v1',
@@ -103,7 +119,7 @@ export function CallHistorySearchPanel({
         {isV2 ? (
           <>
             <h1 className='m-0 text-3xl font-semibold leading-none tracking-tight text-foreground'>
-              Calls V2
+              Calls
             </h1>
             <Button
               type='button'

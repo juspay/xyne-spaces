@@ -7,13 +7,13 @@ import {
   PhoneCancel,
 } from '@xyne/icons';
 import { format } from 'date-fns';
-import Avatar from '../../components/ui/Avatar/Avatar';
-import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
-import Button from '../../components/ui/Button';
-import { formatDuration } from '../../utils/dateUtils';
-import { isDMChannel } from '../../components/Chat/ChatDirectory/ChatDirectory.utils';
-import { normalizeRecordingTags } from '../../utils/recordingUtils';
-import { LabelChip } from '../../components/Labels/LabelPicker';
+import Avatar from '../../../components/ui/Avatar/Avatar';
+import { AvatarStackItem } from '../../../components/ui/Avatar/AvatarGroup';
+import Button from '../../../components/ui/Button';
+import { formatDuration } from '../../../utils/dateUtils';
+import { isDMChannel } from '../../../components/Chat/ChatDirectory/ChatDirectory.utils';
+import { normalizeRecordingTags } from '../../../utils/recordingUtils';
+import { LabelChip } from '../../../components/Labels/LabelPicker';
 import {
   Call,
   buildParticipantSummary,
@@ -25,25 +25,24 @@ import {
   hasAnyoneJoined,
   hasPreviewParticipantJoined,
   canJoinCall,
-} from '../CallHistoryScreen/callHistoryItem.utils';
-import { cn } from '../../utils/classNames';
-import { useUsers } from '../../hooks/useUsers';
+} from '../../CallHistoryScreen/callHistoryItem.utils';
+import { cn } from '../../../utils/classNames';
+import { useUsers } from '../../../hooks/useUsers';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
-import { useAllChannels, useAllVisibleChannels } from '../../hooks/useChannels';
-import { usePlatform } from '../../hooks/usePlatform';
-import Tooltip from '../../components/ui/Tooltip/Tooltip';
+} from '../../../components/ui/dropdown-menu';
+import { useAllChannels, useAllVisibleChannels } from '../../../hooks/useChannels';
+import { usePlatform } from '../../../hooks/usePlatform';
+import Tooltip from '../../../components/ui/Tooltip/Tooltip';
 import { useSelector } from '@xstate/react';
-import { roomActor } from '../../machines/roomMachine';
+import { roomActor } from '../../../machines/roomMachine';
 
 interface CallHistoryItemProps {
   call: Call;
   currentUserId: string | undefined;
-  isLastItem?: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;

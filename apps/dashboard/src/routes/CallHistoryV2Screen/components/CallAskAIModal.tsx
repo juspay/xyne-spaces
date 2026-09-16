@@ -8,7 +8,7 @@ import { Checkbox } from '../../../components/ui/Checkbox/Checkbox';
 import { Dialog } from '../../../components/ui/Dialog';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import {
-  buildParticipantSummary,
+  formatParticipantNames,
   getPreviewParticipantUsers,
   type Call,
 } from '../../CallHistoryScreen/callHistoryItem.utils';
@@ -37,15 +37,6 @@ interface SearchableCall {
 const MAX_SELECTED_CALLS = 25;
 
 const LIMIT_NOTICE_MS = 3200;
-
-/** Mirrors the list rows: two names, then a count for whoever is left. */
-function formatParticipants(participants: User[]): string {
-  if (participants.length === 0) return 'Just you';
-  return buildParticipantSummary(
-    participants.map(participant => getUserDisplayName(participant)),
-    participants.length,
-  );
-}
 
 const CallAskAIModal = ({
   open,
@@ -371,19 +362,22 @@ const CallOption = ({
   blocked,
   onToggle,
 }: CallOptionProps): ReactElement => {
-  const title = call.title || formatParticipants(participants);
+  const title =
+    call.title ||
+    formatParticipantNames(participants.map(participant => getUserDisplayName(participant)));
   const durationMs = call.endedAt ? Math.max(0, call.endedAt - call.startedAt) : undefined;
   const startedAt = call.startsAt || call.startedAt;
 
   return (
     <li
       role='option'
+      tabIndex={0}
       aria-selected={checked}
       aria-disabled={blocked}
       data-theme-tokens
       onClick={() => onToggle(call.id)}
       onKeyDown={event => {
-        if (event.key !== 'Enter') return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         onToggle(call.id);
       }}
@@ -406,7 +400,8 @@ const CallOption = ({
       <span className='min-w-0 flex-1'>
         <span className='block truncate text-sm font-medium text-foreground'>{title}</span>
         <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
-          {formatParticipants(participants)} · {format(new Date(startedAt), 'h:mm a')}
+          {formatParticipantNames(participants.map(participant => getUserDisplayName(participant)))}{' '}
+          · {format(new Date(startedAt), 'h:mm a')}
         </span>
       </span>
 

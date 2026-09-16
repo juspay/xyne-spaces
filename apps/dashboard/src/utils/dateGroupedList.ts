@@ -1,4 +1,5 @@
 import {
+  addDays,
   format,
   isSameDay,
   startOfDay,
@@ -51,6 +52,7 @@ export function groupItemsByDate<T extends DateGroupable>(
   now = new Date(),
 ): DateGroup<T>[] {
   const todayStart = startOfDay(now);
+  const tomorrowStart = addDays(todayStart, 1).getTime();
   const yesterday = subDays(todayStart, 1);
   const thisWeekStart = startOfWeek(todayStart, { weekStartsOn: 1 }).getTime();
   const lastWeekStart = subWeeks(thisWeekStart, 1).getTime();
@@ -65,16 +67,19 @@ export function groupItemsByDate<T extends DateGroupable>(
     const startedAt = new Date(item.startedAt);
     let fixedGroupId: FixedDateGroupId | null = null;
 
-    if (isSameDay(startedAt, todayStart)) {
-      fixedGroupId = 'today';
-    } else if (isSameDay(startedAt, yesterday)) {
-      fixedGroupId = 'yesterday';
-    } else if (item.startedAt >= thisWeekStart) {
-      fixedGroupId = 'this-week';
-    } else if (item.startedAt >= lastWeekStart) {
-      fixedGroupId = 'last-week';
-    } else if (item.startedAt >= thisMonthStart) {
-      fixedGroupId = 'this-month';
+    // Future items skip the fixed buckets and fall through to month grouping.
+    if (item.startedAt < tomorrowStart) {
+      if (isSameDay(startedAt, todayStart)) {
+        fixedGroupId = 'today';
+      } else if (isSameDay(startedAt, yesterday)) {
+        fixedGroupId = 'yesterday';
+      } else if (item.startedAt >= thisWeekStart) {
+        fixedGroupId = 'this-week';
+      } else if (item.startedAt >= lastWeekStart) {
+        fixedGroupId = 'last-week';
+      } else if (item.startedAt >= thisMonthStart) {
+        fixedGroupId = 'this-month';
+      }
     }
 
     if (fixedGroupId) {
@@ -133,6 +138,7 @@ export function buildDateGroupRows<T extends DateGroupable>(
   ]);
 }
 
+/** Groups items by date and interleaves them into rows. */
 export function buildDateGroupedRowsFromItems<T extends DateGroupable>(
   items: T[],
   now = new Date(),

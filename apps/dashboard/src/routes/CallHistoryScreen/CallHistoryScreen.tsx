@@ -21,16 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  CallVisibility,
-  ChannelScopeType,
-  InvitationResponse,
-  MeetingStatus,
-  TagMethod,
-} from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -52,9 +43,12 @@ import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
-  Call,
+  hasExternalChatAccess,
+  isDmScope,
   isMissedCallForUser,
   isExternalCalendarEvent,
+  isVisibleInCallList,
+  mapVespaCallResultToCall,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -73,7 +67,6 @@ import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
@@ -552,20 +545,7 @@ const CallHistoryScreen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  // Show a loader for at least 10 seconds (or until calls load) so the screen
-  // doesn't flash the empty state while the Zero query is still warming up.
-  const [showMinLoader, setShowMinLoader] = useState(true);
-  useEffect(() => {
-    if (!isLoading) {
-      setShowMinLoader(false);
-      return;
-    }
-    setShowMinLoader(true);
-    const timer = setTimeout(() => setShowMinLoader(false), 10000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
-
-  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
+  const showRecentCallsLoader = isLoading;
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -1376,12 +1356,11 @@ const CallHistoryScreen = (): ReactElement => {
                       }
                     }}
                     computeItemKey={(_, call) => call.id}
-                    itemContent={(i, call) => (
+                    itemContent={(_, call) => (
                       <div className='pb-3'>
                         <CallCard
                           call={call}
                           currentUserId={user?.id}
-                          isLastItem={i === displayRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}
