@@ -10,6 +10,7 @@ import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
+import { defaultBitbucketBaseUrl } from "../mcp/adapters/defaults.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
@@ -2119,7 +2120,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // through callBitbucketThrottled, not the local switch above, so they carry
     // no citation by default. Same pattern as the Grafana block above.
     if (serverType === "bitbucket") {
-      const bbBaseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(
+      const bbBaseUrl = ((credentials["baseUrl"] as string) || defaultBitbucketBaseUrl()).replace(
         /\/+$/,
         "",
       );

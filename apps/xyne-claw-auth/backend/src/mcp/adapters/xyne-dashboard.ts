@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import type { StdioMcpAdapter } from "../types.js";
+import { defaultSpacesUrl } from "./defaults.js";
 
 const SERVER_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,7 +29,7 @@ export const xyneDashboardAdapter: StdioMcpAdapter = {
   // live in the editor and every plan is server-validated before persisting.
   writeTools: [],
   credentialFields: [
-    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
+    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: defaultSpacesUrl() },
     { name: "token", label: "Session token", type: "password", placeholder: "" },
   ],
   buildCommand(credentials) {
