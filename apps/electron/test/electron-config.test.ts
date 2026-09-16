@@ -1,8 +1,8 @@
 /**
  * Open-source readiness regression tests for the Electron shell.
  *
- * The Electron app previously hardcoded the internal deployment suffix
- * (`xyne.juspay.net`) in three security gates (preload isTrustedOrigin,
+ * The Electron app previously hardcoded its internal deployment suffix
+ * in three security gates (preload isTrustedOrigin,
  * request-interceptor isFirstPartyUrl, handlers cookie-sync) and the CSP,
  * and its prod/sandbox configs carried internal URLs with no env override.
  * These tests pin the scrubbed contract:
