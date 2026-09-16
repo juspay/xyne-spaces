@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
+import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
 import { UserSessionService } from '@/services/userSessionService';
@@ -466,6 +467,19 @@ export class TestAuthController {
 
     try {
       logger.info(`[${requestId}] Test logout initiated`);
+
+      // Mirror the real logout: revoke the global session + its encryption key and clear the
+      // cookie, otherwise the browser keeps a valid user_session_id and re-login sees stale data.
+      const sessionId = req.cookies?.user_session_id;
+      if (sessionId) {
+        await this.userSessionService.revokeSession(sessionId).catch((err: unknown) =>
+          logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+        );
+        await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
+          logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+        );
+      }
+      res.clearCookie('user_session_id', { path: '/' });
 
       // Clear all workspace-scoped token cookies
       for (const cookieName of Object.keys(req.cookies || {})) {
