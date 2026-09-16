@@ -1,3 +1,15 @@
+## [1.323.0-release-20260916.5](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.4...v1.323.0-release-20260916.5) (2026-09-16)
+
+
+### Features
+
+* Hub Knowledge and Wiki as SDLC hub workflows (non-claw) ([#1781](https://github.com/juspay/xyne-spaces/issues/1781)) ([#1897](https://github.com/juspay/xyne-spaces/issues/1897)) ([651ba86](https://github.com/juspay/xyne-spaces/commit/651ba862b1cc305dbb7624f1487ece19824cad53)), closes [#1838](https://github.com/juspay/xyne-spaces/issues/1838) [#1533](https://github.com/juspay/xyne-spaces/issues/1533)
+
+
+### Bug Fixes
+
+* stop radar's filter drawing the whole workspace ([#1905](https://github.com/juspay/xyne-spaces/issues/1905)) ([5cdd535](https://github.com/juspay/xyne-spaces/commit/5cdd535f13abca4f22b1b76ac01d77d0520f279b))
+
 ## [1.323.0-release-20260916.4](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.3...v1.323.0-release-20260916.4) (2026-09-16)
 
 

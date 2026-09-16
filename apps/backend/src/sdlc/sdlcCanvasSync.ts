@@ -1,16 +1,16 @@
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 
-export interface CommittedBaselineCanvas<T> {
+export interface CommittedCanvas<T> {
   artifact: T;
   canvasId: string;
   content: BlockNoteBlock[];
 }
 
-export type BaselineCanvasSync = (canvasId: string, content: BlockNoteBlock[], userId: string) => Promise<boolean>;
+export type CanvasSync = (canvasId: string, content: BlockNoteBlock[], userId: string) => Promise<boolean>;
 
 export async function commitAndSyncCanvasArtifact<T>(
-  commit: () => Promise<CommittedBaselineCanvas<T>>,
-  sync: BaselineCanvasSync,
+  commit: () => Promise<CommittedCanvas<T>>,
+  sync: CanvasSync,
   userId: string
 ): Promise<T> {
   const committed = await commit();
