@@ -85,6 +85,7 @@ import { IncomingCallDevHarness } from '../components/Call/IncomingCall/Incoming
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { EphemeralFlowHost } from '../components/flowUI/EphemeralFlowHost';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
 import {
   ElectronUpdateNudge,
@@ -950,6 +951,7 @@ const AppRoot = (): ReactElement => {
                           <ScreenPickerHost />
                           <GlobalUploadProgress />
                           <NotificationHandler />
+                          <EphemeralFlowHost />
                           <ElectronBadgeSync />
                           {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
