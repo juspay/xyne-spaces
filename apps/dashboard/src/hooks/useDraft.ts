@@ -11,6 +11,7 @@ import {
   generateDocumentThumbnail,
   isPreviewableDocument,
 } from '../services/documentThumbnailService';
+import { isHeicAttachment } from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
 
@@ -209,8 +210,11 @@ export function useDraftAttachments() {
           );
         }
         // For images, cache the full file blob so it displays instantly after send
-        // Images don't have a separate thumbnail - they use the full file directly
-        if (file.type.startsWith('image/')) {
+        // Images don't have a separate thumbnail - they use the full file directly.
+        // HEIC is excluded: the original blob can't render in most browsers, and
+        // the chip fetches the server-side WebP thumbnail instead (see
+        // heicAttachmentService).
+        if (file.type.startsWith('image/') && !isHeicAttachment(file.type, file.name)) {
           queryClient.setQueryData(['preview-blob', attachmentId], file);
         }
       });
