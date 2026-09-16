@@ -1,3 +1,11 @@
+## [1.327.0](https://github.com/juspay/xyne-spaces/compare/v1.326.0...v1.327.0) (2026-09-16)
+
+
+### Features
+
+* add canvas title icon picker ([#1890](https://github.com/juspay/xyne-spaces/issues/1890)) ([5f07736](https://github.com/juspay/xyne-spaces/commit/5f07736d0e18f8bb5bd955a5a99eb2ef3009cac4))
+* fix ticket count sync and fetch older tickets ([#1874](https://github.com/juspay/xyne-spaces/issues/1874)) ([663f471](https://github.com/juspay/xyne-spaces/commit/663f4714d10962dbc893d6447f360323754dffb6))
+
 ## [1.326.0](https://github.com/juspay/xyne-spaces/compare/v1.325.0...v1.326.0) (2026-09-16)
 
 
