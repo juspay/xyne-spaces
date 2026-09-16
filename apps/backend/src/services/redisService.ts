@@ -51,6 +51,38 @@ export interface PresenceEvent {
   status: 'ONLINE' | 'AWAY' | 'OFFLINE';
 }
 
+/** The denormalized ticket fields the kanban count rooms are derived from. */
+export interface TicketCountsSnapshot {
+  id: string;
+  workspaceId: string;
+  boardId: string | null;
+
+  channelId: string | null;
+  projectId: string | null;
+  stageName: string | null;
+  statusV2: string | null;
+  priority: string | null;
+  assignedTo: string | null;
+  createdBy: string | null;
+  userGroupId: string | null;
+  ticketType: string | null;
+  isStageOverdue?: boolean;
+  eta: number | null;
+  createdAt: number;
+  tags?: string[];
+  prReviewers?: string[];
+  qaAssigned?: string[];
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
+  formFieldValues?: Record<string, unknown>;
+}
+
+export interface TicketCountsEvent {
+  operation: 'insert' | 'update';
+  ticket: TicketCountsSnapshot;
+  previousTicket?: TicketCountsSnapshot | null;
+  timestamp: string;
+}
+
 class RedisService {
   private redis: Redis | null = null;
   private publisher: Redis | null = null;
@@ -533,6 +565,69 @@ class RedisService {
   
   // Global presence channel - all connected clients subscribe to this
   private readonly PRESENCE_CHANNEL = 'global:presence';
+
+  private readonly TICKET_COUNTS_CHANNEL = 'global:ticket-counts';
+
+  /**
+   * Publish a live kanban-count change to every pod.
+   *
+   * Room membership for `ticket-counts:*` lives in each pod's in-memory Socket.IO
+   * adapter, so `io.to(room).emit(...)` reaches only that pod's sockets. Fanning the
+   * event out here — exactly as presence does — is what makes it cross pods.
+   */
+  async broadcastTicketCountsEvent(event: TicketCountsEvent): Promise<void> {
+    if (!this.publisher) {
+      logger.warn('[REDIS-TICKET-COUNTS] Redis publisher not initialized for ticket counts event');
+      return;
+    }
+
+    try {
+      const subscriberCount = await this.publisher.publish(
+        this.TICKET_COUNTS_CHANNEL,
+        JSON.stringify(event),
+      );
+
+      // Zero subscribers means no pod anywhere has setupTicketCountsSubscription running,
+      // so this event — and every other one — reaches nobody. That is a deployment-level
+      // failure, not a quiet no-op, so it is a warn rather than a debug.
+      if (subscriberCount === 0) {
+        logger.warn(
+          `[REDIS-TICKET-COUNTS] Published ${event.operation} for ticket ${event.ticket.id} but NO pod is subscribed to ${this.TICKET_COUNTS_CHANNEL} — live counts are dead cluster-wide`,
+        );
+        return;
+      }
+
+      logger.debug(
+        `[REDIS-TICKET-COUNTS] Published ${event.operation} for ticket ${event.ticket.id} (received by ${subscriberCount} subscribers)`,
+      );
+    } catch (error) {
+      logger.error(
+        `[REDIS-TICKET-COUNTS] Failed to publish ${event.operation} for ticket ${event.ticket.id}:`,
+        error,
+      );
+    }
+  }
+
+  async subscribeToTicketCountsEvents(
+    callback: (event: TicketCountsEvent) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = this.TICKET_COUNTS_CHANNEL;
+
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info(`[REDIS-TICKET-COUNTS] Subscribing to global ticket counts channel: ${channel}`);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
 
   /**
    * Broadcast a presence event to all subscribers
