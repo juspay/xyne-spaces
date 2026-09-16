@@ -799,6 +799,7 @@ export const queries = defineQueries({
   ),
 
 
+
   // If channel Id is available use this instead of getConversationById to leverage ACL optimizations for channel conversations
   getConversationByIdWithChannel: defineQuery(
     z.object({
@@ -4780,6 +4781,31 @@ export const queries = defineQueries({
           .where('entityType', RecapEntityType.CHANNEL)
           .where(helpers => helpers.or(...channelIds.map(id => helpers.cmp('entityId', id))))
           // Fetch both base recaps (userId IS NULL) and this user's custom recaps
+          .where(helpers =>
+            helpers.or(helpers.cmp('userId', 'IS', null), helpers.cmp('userId', '=', ctx.userID)),
+          )
+      );
+    },
+  ),
+
+  channelRecapsRange: defineQuery(
+    z.object({
+      channelIds: z.array(z.string()),
+      startDate: z.number(),
+      endDate: z.number(),
+    }),
+    ({ ctx, args: { channelIds, startDate, endDate } }) => {
+      if (channelIds.length === 0) {
+        return zql.recaps.limit(0);
+      }
+
+      return (
+        zql.recaps
+          .where('entityType', RecapEntityType.CHANNEL)
+          .where('recapDate', '>=', startDate)
+          .where('recapDate', '<=', endDate)
+          .where('entityId', 'IN', channelIds)
+          // Base recaps (userId IS NULL) plus this user's custom ones
           .where(helpers =>
             helpers.or(helpers.cmp('userId', 'IS', null), helpers.cmp('userId', '=', ctx.userID)),
           )
