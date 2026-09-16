@@ -11,6 +11,8 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
+import { logger } from '@/utils/logger';
+import { readFromYSweetStrict, YSweetHttpError } from '@/utils/ysweetUtils';
 import { isWikiArchiveFolder, normalizeWikiRelativePath } from './wiki/wikiPaths';
 import {
   parseWikiExecutionContext,
@@ -190,14 +192,27 @@ export class SdlcArtifactVersionStore {
     }
   ) {
     const artifact = await this.resolveArtifact(input);
-    const canvas = await this.prisma.canvas.findUnique({
-      where: { id: artifact.canvasId },
-      select: { content: true },
-    });
-    if (!canvas) throw new AppError('SDLC artifact not found', 404);
-    const blocks = Array.isArray(canvas.content)
-      ? canvas.content as unknown as BlockNoteBlock[]
-      : [];
+    // Y-Sweet holds the document people see, empty included. The stored column
+    // is only the creation snapshot (accepts and editor edits never write it),
+    // so it stands in only when Y-Sweet has no document at all — the creation
+    // sync never landed. Any other failure is a 503, never a stale copy.
+    let blocks: BlockNoteBlock[];
+    try {
+      blocks = await readFromYSweetStrict(artifact.canvasId, input.userId);
+    } catch (error) {
+      if (!(error instanceof YSweetHttpError && error.status === 404)) {
+        logger.error(`[SDLC] Y-Sweet read failed for artifact ${artifact.canvasId}`, error);
+        throw new AppError('Could not read the artifact right now. Try again shortly.', 503);
+      }
+      const canvas = await this.prisma.canvas.findUnique({
+        where: { id: artifact.canvasId },
+        select: { content: true },
+      });
+      if (!canvas) throw new AppError('SDLC artifact not found', 404);
+      blocks = Array.isArray(canvas.content)
+        ? canvas.content as unknown as BlockNoteBlock[]
+        : [];
+    }
     const markdown = await convertBlockNoteToMarkdown(blocks);
     return {
       artifact: this.publicArtifact(artifact),

@@ -78,6 +78,13 @@ export async function applyOps<TBlock extends { id?: string }>(
   const findIdx = (id: string | null): number =>
     id === null ? -1 : working.findIndex(b => b.id === id);
 
+  // A row can be applied twice — a retry after the document was written but
+  // the status commit failed. Its follower ids are deterministic, so blocks
+  // that already landed would come back as duplicate ids, which corrupts the
+  // Yjs/BlockNote document. Keep only the ones that are not there yet.
+  const freshOnly = (blocks: TBlock[]): TBlock[] =>
+    blocks.filter(b => !b.id || findIdx(b.id) < 0);
+
   const markdownOf = (row: SuggestionRowLike): string | null => {
     const c = row.afterContent as { markdown?: string } | null;
     return c?.markdown ?? null;
@@ -112,7 +119,7 @@ export async function applyOps<TBlock extends { id?: string }>(
     // Replaced block keeps its id; extra blocks follow it under the row's id.
     const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
     working[idx] = { ...(first as object), id: row.blockId } as TBlock;
-    working.splice(idx + 1, 0, ...rest);
+    working.splice(idx + 1, 0, ...freshOnly(rest));
     applied.push(row.id);
   }
 
@@ -179,7 +186,7 @@ export async function applyOps<TBlock extends { id?: string }>(
         const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
         const moved = { ...(first as object), id: (block as TBlock).id } as TBlock;
         placeAfter(moved, anchor.anchorId, row.orderIndex);
-        working.splice(findIdx(moved.id ?? null) + 1, 0, ...rest);
+        working.splice(findIdx(moved.id ?? null) + 1, 0, ...freshOnly(rest));
       } else {
         placeAfter(block as TBlock, anchor.anchorId, row.orderIndex);
       }
@@ -205,7 +212,7 @@ export async function applyOps<TBlock extends { id?: string }>(
       }
       const [first, ...rest] = withIds(parsed, row.id, row.orderIndex);
       placeAfter(first as TBlock, anchor.anchorId, row.orderIndex);
-      working.splice(findIdx(row.id) + 1, 0, ...rest);
+      working.splice(findIdx(row.id) + 1, 0, ...freshOnly(rest));
       applied.push(row.id);
     }
   }
