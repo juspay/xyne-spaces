@@ -31,9 +31,6 @@ import {
   buildSdlcAskAiContext,
   resolveSdlcAskAiSelectedArtifact,
 } from '@/sdlc/sdlcAskAiContext';
-import { sdlcVcs } from '@/sdlc/vcs';
-import { computeWikiFreshness } from '@/sdlc/wiki/wikiFreshness';
-import { parseWikiExecutionContext } from '@/sdlc/wiki/wikiRunState';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -442,46 +439,9 @@ export class XyneAIControllerV2 {
               }
             : selectedCanvas,
         );
-        // Baseline knowledge-document injection is disabled until the standalone
-        // baseline approval flow returns; READY baselines gate artifact creation instead.
-        const approvedBaseline: Array<{ title: string; content: string }> = [];
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
-        const [baseBranchHeadSha, wikiRunLinks] = await Promise.all([
-          sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
-          db.sdlcEntityLink.findMany({
-            where: {
-              sourceType: 'REPOSITORY',
-              sourceId: sdlcRepo.id,
-              targetType: 'WORKFLOW_EXECUTION',
-              relationType: 'WIKI_RUN',
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: { targetId: true },
-          }),
-        ]);
-        const latestSuccessfulWiki = wikiRunLinks.length
-          ? await db.workflowExecution.findFirst({
-              where: {
-                id: { in: wikiRunLinks.map((link) => link.targetId) },
-                workflowType: 'SDLC_WIKI',
-                status: 'SUCCESS',
-              },
-              orderBy: { createdAt: 'desc' },
-              select: { context: true },
-            })
-          : null;
-        let wikiCommitSha: string | null = null;
-        if (latestSuccessfulWiki?.context) {
-          try {
-            const wikiContext = parseWikiExecutionContext(latestSuccessfulWiki.context);
-            wikiCommitSha = wikiContext.targetHeadSha ?? wikiContext.cursorSha;
-          } catch {
-            wikiCommitSha = null;
-          }
-        }
         // Membership points at the repository through the polymorphic targetId, so
         // no relation covers it: read the edges, then the repositories they name.
         const siblingLinks = await db.sdlcEntityLink.findMany({
@@ -512,10 +472,8 @@ export class XyneAIControllerV2 {
             url: sibling.canonicalUrl || sibling.url,
           })),
           channelId: effectiveChannelIds[0],
-          baselineDocuments: approvedBaseline,
           linkedContext,
           ...(selectedArtifact ? { selectedArtifact } : {}),
-          wikiFreshness: computeWikiFreshness({ wikiCommitSha, baseBranchHeadSha }),
         });
       }
 

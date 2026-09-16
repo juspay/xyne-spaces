@@ -74,7 +74,12 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole, isBaselineCanvasType } from '@xyne/shared';
+import {
+  MessageType,
+  CanvasVisibility,
+  CanvasRole,
+  isHubKnowledgeArtifactType,
+} from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -105,6 +110,7 @@ import {
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 import { CanvasEditorHeader } from '../CanvasEditorHeader';
+import { CanvasLabelManager } from '../CanvasLabelManager';
 import { useScope } from '../../../shortcuts';
 
 interface LocationState {
@@ -122,6 +128,8 @@ interface CanvasScreenProps {
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
   showAskAiAction?: boolean;
+  /** Off where the document opens with its own title, as SDLC pages do. */
+  showPageTitle?: boolean;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -160,6 +168,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   isFullscreen = false,
   onToggleFullscreen,
   showAskAiAction = true,
+  showPageTitle = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -404,11 +413,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const userParticipant = resolvedCanvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
-      const isAdminEditableSdlcBaseline =
-        isBaselineCanvasType(canvasData.sdlcArtifact?.artifactType) &&
+      const isAdminEditableHubKnowledge =
+        isHubKnowledgeArtifactType(canvasData.sdlcArtifact?.artifactType) &&
         Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
 
-      if (isAdminEditableSdlcBaseline) accessLevel = CanvasRole.EDITOR;
+      if (isAdminEditableHubKnowledge) accessLevel = CanvasRole.EDITOR;
 
       if (!accessLevel) {
         const inheritedRoles = [
@@ -1275,6 +1284,30 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return rows;
   }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
 
+  const canvasTitleHeader = !selectedCanvas?.id ? null : showPageTitle ? (
+    <div className='canvas-editor-title-column pb-8 pt-2 md:pt-4'>
+      <CanvasEditorHeader
+        canvas={selectedCanvas}
+        workspaceId={user?.workspaceId}
+        canEdit={canEdit && !previewVersion}
+        title={currentTitle}
+        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
+        onTitleChange={handleCanvasTitleChange}
+        onTitleSave={handleTitleSave}
+        onTitleAutoFocused={handleTitleAutoFocused}
+      />
+    </div>
+  ) : (
+    <div className='canvas-block-row group/canvas-editor-title'>
+      <CanvasLabelManager
+        canvas={selectedCanvas}
+        workspaceId={user?.workspaceId}
+        canEdit={canEdit && !previewVersion}
+        revealTriggerOnParentHover
+      />
+    </div>
+  );
+
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
     'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -1731,21 +1764,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               ref={canvasContentRef}
               className='flex flex-1 flex-col overflow-hidden bg-background'
             >
-              {selectedCanvas?.id && (
-                <div className='canvas-editor-title-column shrink-0 pt-10 md:pt-12'>
-                  <CanvasEditorHeader
-                    canvas={selectedCanvas}
-                    workspaceId={user?.workspaceId}
-                    canEdit={canEdit && !previewVersion}
-                    title={currentTitle}
-                    focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-                    onTitleChange={handleCanvasTitleChange}
-                    onTitleSave={handleTitleSave}
-                    onTitleAutoFocused={handleTitleAutoFocused}
-                  />
-                </div>
-              )}
-
               <div className='min-h-0 flex-1 overflow-hidden'>
                 {isCreating && !selectedCanvas ? (
                   <div className='flex items-center justify-center h-full'>
@@ -1770,6 +1788,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
+                    header={canvasTitleHeader}
                   />
                 ) : selectedCanvas?.id &&
                   selectedCanvas.isCollaborative &&
@@ -1796,6 +1815,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
+                    header={canvasTitleHeader}
                   />
                 ) : (
                   <CanvasEditor
@@ -1818,6 +1838,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
+                    header={canvasTitleHeader}
                   />
                 )}
               </div>

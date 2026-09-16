@@ -15,6 +15,9 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { ClawAgentProvider } from './agents/claw-provider';
+import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
+import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
+import { SdlcWikiPlanStep } from '@/sdlc/wiki/wikiPlanStep';
 import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
@@ -75,9 +78,37 @@ class ClawConnector extends BaseConnector {
   ];
 }
 
+/** SDLC hub steps. The agent steps dispatch to claw's sdlc-agent, so they share its gate. */
+class SdlcConnector extends BaseConnector {
+  readonly id = 'sdlc';
+  readonly version = '1.0.0';
+  readonly name = 'SDLC';
+  readonly description = 'Steps that work on an SDLC hub';
+  readonly icon = 'git-branch';
+  readonly credentials = [];
+  readonly triggers = [];
+  readonly steps: readonly AnyStep[] = [
+    new HostAgentStep(new SdlcArtifactAgentProvider(), {
+      type: 'CREATE_SDLC_ARTIFACT',
+      name: 'Create SDLC artifact',
+      description: "Generate or refresh one document in an SDLC hub's artifact type",
+      category: 'ai',
+    }),
+    new HostAgentStep(new SdlcAgentProvider(), {
+      type: SDLC_AGENT_STEP_TYPE,
+      name: 'SDLC Agent',
+      description: 'Run the SDLC agent in a hub, optionally pinned to one repository',
+      category: 'ai',
+    }),
+    new SdlcWikiPlanStep(),
+  ];
+}
+
 if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
   connectors.register(new ClawConnector());
   logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
+  connectors.register(new SdlcConnector());
+  logger.info('[workflows] CREATE_SDLC_ARTIFACT, SDLC_AGENT and SDLC_WIKI_PLAN registered');
 } else {
   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }

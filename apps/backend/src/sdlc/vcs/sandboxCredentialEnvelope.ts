@@ -1,3 +1,4 @@
+import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import {
   createCipheriv,
   createPublicKey,
@@ -9,13 +10,11 @@ import {
 } from 'crypto';
 
 export interface SandboxCredentialBinding {
-  agentSlug: 'sdlc-agent';
+  agentSlug: typeof SDLC_AGENT_SLUG;
   workspaceId: string;
   repoId: string;
   operation: string;
-  executionId?: string;
-  sessionId?: string;
-  conversationId?: string;
+  conversationId: string;
   sandboxId: string;
   credentialRevision: number;
   expiresAt: string;
