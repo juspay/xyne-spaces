@@ -57,7 +57,18 @@ export const CanvasEditorHeader = ({
   }, [canEdit, canvas.id, focusTitleOnMount, onTitleAutoFocused]);
 
   return (
-    <div className='group/canvas-editor-title relative min-w-0 bg-transparent'>
+    // .canvas-surface blocks the context menu, which the title input needs.
+    <div
+      className='group/canvas-editor-title relative min-w-0 bg-transparent'
+      onContextMenu={event => event.stopPropagation()}
+    >
+      <CanvasLabelManager
+        canvas={canvas}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        revealTriggerOnParentHover
+      />
+
       <h1 className='m-0 min-w-0' data-testid='canvas-page-title-heading'>
         <Input
           ref={titleInputRef}
@@ -80,13 +91,6 @@ export const CanvasEditorHeader = ({
           )}
         />
       </h1>
-
-      <CanvasLabelManager
-        canvas={canvas}
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        revealTriggerOnParentHover
-      />
     </div>
   );
 };
