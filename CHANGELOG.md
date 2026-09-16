@@ -1,3 +1,12 @@
+## [1.324.0](https://github.com/juspay/xyne-spaces/compare/v1.323.0...v1.324.0) (2026-09-16)
+
+
+### Features
+
+* ephemeral msg support for slack/xyne ([#1856](https://github.com/juspay/xyne-spaces/issues/1856)) ([0e6e70f](https://github.com/juspay/xyne-spaces/commit/0e6e70fc3af70c612e23a99d05e53afe1db8fc26))
+* massive perf improvement for screen share and video streams ([#1893](https://github.com/juspay/xyne-spaces/issues/1893)) ([6836034](https://github.com/juspay/xyne-spaces/commit/6836034ff45077d4e8f4679758461992d54b9ed3))
+* user in call status ([#1892](https://github.com/juspay/xyne-spaces/issues/1892)) ([ca65c47](https://github.com/juspay/xyne-spaces/commit/ca65c478eefcfcb230681d4a019dd06c057279ae))
+
 ## [1.323.0](https://github.com/juspay/xyne-spaces/compare/v1.322.0...v1.323.0) (2026-09-16)
 
 
